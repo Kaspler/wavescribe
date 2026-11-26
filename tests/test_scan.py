@@ -4,7 +4,6 @@ import stat
 import sys
 import threading
 import time
-import types
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +38,22 @@ def spectrum(start: float, stop: float, step: float, sigs: list[tuple[float, flo
     for c, w, level in sigs:
         db = np.maximum(db, -40 + level * np.exp(-0.5 * ((f - c) / max(w / 2.355, step / 2)) ** 2))
     return S.Sweep(int(start), int(stop), step, f, db, 1.0)
+
+
+class FakeClock:
+    """Time that passes only when the test says: however often the scanner looks at it, a sweep
+    takes as long as the test makes it take."""
+
+    def __init__(self) -> None:
+        self.now = 1_800_000_000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    perf_counter = time = monotonic
+
+    def sleep(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
 
 
 def test_fm_stations_are_found_snapped_and_classified() -> None:
@@ -97,11 +112,14 @@ def test_a_clock_line_marked_in_any_sweep_of_a_watch_stays_marked(
     # 60 ppm off: one harmonic alone doesn't count, two agreeing do.
     a, b = (n * 2.4e6 * (1 + 60e-6) for n in (51, 52))
     calls = iter([[(a, 300, 15)], [(a, 300, 15), (b, 300, 15)]])
-    monkeypatch.setattr(S, "sweep", lambda *_, **__: spectrum(121e6, 126e6, 2_500, next(calls)))
-    clock = iter([0.0, 10.0, 20.0, 30.0])
-    monkeypatch.setattr(
-        S, "time", types.SimpleNamespace(monotonic=lambda: next(clock), time=time.time)
-    )
+    clock = FakeClock()
+
+    def sweep(*_args: object, **_kw: object) -> S.Sweep:
+        clock.sleep(10.0)  # each sweep takes 10 s
+        return spectrum(121e6, 126e6, 2_500, next(calls))
+
+    monkeypatch.setattr(S, "sweep", sweep)
+    monkeypatch.setattr(S, "time", clock)
     _, found = S.scan("000001", 121e6, 126e6, "cept", rds=False, watch_s=15)
     assert [(s.seen, s.spur) for s in found] == [(2, True), (1, True)]
 
@@ -355,14 +373,15 @@ def test_a_range_partly_outside_the_tuner_scans_the_part_it_reaches(
 def test_watching_counts_how_often_each_channel_was_busy(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = iter([[(446.00625e6, 8e3, 20)], [(446.00625e6, 8e3, 20), (446.10625e6, 8e3, 20)],
                   [(446.00625e6, 8e3, 20)]])  # fmt: skip
-    monkeypatch.setattr(
-        S, "sweep", lambda *a, **k: spectrum(445.99e6, 446.21e6, 2_500, next(calls))
-    )
-    clock = iter([0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
-    # Only the scanner's clock: patching time.monotonic itself would feed other tests' threads.
-    monkeypatch.setattr(
-        S, "time", types.SimpleNamespace(monotonic=lambda: next(clock), time=time.time)
-    )
+    clock = FakeClock()
+
+    def sweep(*_args: object, **_kw: object) -> S.Sweep:
+        clock.sleep(10.0)  # each sweep takes 10 s
+        return spectrum(445.99e6, 446.21e6, 2_500, next(calls))
+
+    monkeypatch.setattr(S, "sweep", sweep)
+    # Only the scanner's clock: patching time.monotonic itself would reach other tests' threads.
+    monkeypatch.setattr(S, "time", clock)
     _, found = S.scan("000001", 445.99e6, 446.21e6, "cept", rds=False, watch_s=25)
     assert [(s.freq_hz, s.seen, s.passes) for s in found] == [(446_006_250, 3, 3),
                                                               (446_106_250, 1, 3)]  # fmt: skip

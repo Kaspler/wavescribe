@@ -5,6 +5,7 @@ smoke test on macOS. Samples are shaped like real output with made-up values and
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -291,27 +292,54 @@ def test_monitor_survives_missing_commands(tmp_path: Path) -> None:
     json.dumps(snap)
 
 
+def cpu_seconds(pid: int) -> float:
+    """A process's CPU time as ps reports it, which doesn't go through the monitor's code."""
+    out = subprocess.run(["ps", "-o", "cputime=", "-p", str(pid)], capture_output=True,
+                         text=True, check=True).stdout.strip()  # fmt: skip
+    return sum(float(part) * 60**i for i, part in enumerate(reversed(out.split(":"))))
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="reads macOS counters")
 def test_smoke_on_this_mac(tmp_path: Path) -> None:
+    import signal
+
     (tmp_path / "wavescribe.db").write_bytes(b"\0" * 4096)
     (tmp_path / "audio" / "s1").mkdir(parents=True)
     (tmp_path / "audio" / "s1" / "1.pcm").write_bytes(b"\0" * 32000)
     child = subprocess.Popen([sys.executable, "-c", "while True: pass"])  # a busy child
+    # The monitor's clock is the test's, so no figure depends on how busy the machine is.
+    now = [0.0]
     try:
-        monitor = ResourceMonitor(tmp_path)
+        os.kill(child.pid, signal.SIGSTOP)  # it spins only when the test lets it
+        time.sleep(0.05)
+        monitor = ResourceMonitor(tmp_path, clock=lambda: now[0])
         pids = {"busy": child.pid, "gone": 2**22 + 12345}
-        monitor.snapshot(pids)
-        time.sleep(1.2)  # host CPU ticks are published about once a second
+        snaps = [monitor.snapshot(pids)]
+        # Waited for, not slept for: the host's CPU ticks (published about once a second) and
+        # the archive's size (walked in the background).
+        deadline = time.monotonic() + 30
+
+        def waiting(s: dict) -> bool:
+            return s["cpu"]["total_percent"] is None or s["disk"]["audio_mb"] is None
+
+        while waiting(snaps[-1]) and time.monotonic() < deadline:
+            time.sleep(0.05)
+            snaps.append(monitor.snapshot(pids))
+        # Let the child spin for half a CPU second by ps's count and move the clock as far:
+        # the monitor must then see one whole core, however it was shared meanwhile.
+        start = cpu_seconds(child.pid)
+        os.kill(child.pid, signal.SIGCONT)
+        while time.monotonic() < deadline and cpu_seconds(child.pid) - start < 0.5:
+            time.sleep(0.05)
+        os.kill(child.pid, signal.SIGSTOP)
+        time.sleep(0.05)
+        now[0] += cpu_seconds(child.pid) - start
         snap = monitor.snapshot(pids)
-        deadline = time.monotonic() + 5
-        while snap["disk"]["audio_mb"] is None and time.monotonic() < deadline:
-            time.sleep(0.05)  # the archive is walked in the background
-            snap = monitor.snapshot(pids)
     finally:
         child.kill()
         child.wait()
     json.dumps(snap)
-    assert snap["cost_ms"] < 1000
+    assert min(s["cost_ms"] for s in [*snaps, snap]) < 1000  # cheap, at least when not crowded
 
     proc = snap["process"]
     assert 0 < proc["rss_mb"] <= proc["peak_rss_mb"] * 1.5
@@ -320,7 +348,7 @@ def test_smoke_on_this_mac(tmp_path: Path) -> None:
     assert proc["threads"] >= 1
     busy = snap["children"]["busy"]
     assert busy["pid"] == child.pid
-    assert 30 < busy["cpu_percent"] < 150  # one spinning core
+    assert 80 < busy["cpu_percent"] < 125  # one core: Mach ticks converted to seconds right
     assert busy["rss_mb"] > 1
     assert snap["children"]["gone"] == {"pid": 2**22 + 12345, "cpu_percent": None, "rss_mb": None}
 

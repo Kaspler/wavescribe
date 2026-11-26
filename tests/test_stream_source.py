@@ -68,11 +68,22 @@ def test_stall_is_detected(tmp_path: Path) -> None:
 def test_close_from_another_thread_stops_iteration(tmp_path: Path) -> None:
     tone = make_tone(tmp_path / "tone.wav", 30.0)
     src = StreamSource("t", str(tone), realtime=True, backoff_initial=0)
-    threading.Timer(0.8, src.close).start()
-    start = time.monotonic()
-    chunks = list(src)
-    assert time.monotonic() - start < 5
-    assert 0 < len(chunks) < 10
+    heard = threading.Event()
+    closed_at: list[float] = []
+
+    def close_once_heard() -> None:
+        heard.wait(30)  # the first chunk, however long ffmpeg takes to start
+        closed_at.append(time.monotonic())
+        src.close()
+
+    threading.Thread(target=close_once_heard, daemon=True).start()
+    chunks = []
+    for chunk in src:  # played at its own pace, the file would last 30 s
+        chunks.append(chunk)
+        heard.set()
+    assert chunks and closed_at
+    assert time.monotonic() - closed_at[0] < 5
+    assert len(chunks) < 10
 
 
 def test_backoff_stays_finite_after_a_day_of_failures() -> None:

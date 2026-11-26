@@ -126,12 +126,21 @@ def test_missing_dongle_backs_off_and_closes_promptly(
     monkeypatch.setenv("FAKE_RTL_MISSING", "1")
     dev = device(tmp_path)
     source = SdrChannelSource("a", tuning(dev, 300_000), device=dev)
-    it = iter(source)
-    threading.Timer(0.5, source.close).start()
-    t0 = time.monotonic()
-    assert list(it) == []
-    assert time.monotonic() - t0 < 2.0
-    assert dev.reconnects >= 2 and not source.health.connected
+    chunks: list = []
+    ended = threading.Event()
+
+    def read() -> None:
+        chunks.extend(source)
+        ended.set()
+
+    threading.Thread(target=read, daemon=True).start()
+    # Waits on what it tests, however slowly a loaded machine starts the fake: two retries.
+    _wait(lambda: dev.reconnects >= 2, timeout=30)
+    assert not source.health.connected
+    source.close()  # from another thread, while the device waits out its backoff
+    assert ended.wait(5) and chunks == []  # at once, not after the next retry
+    dev._thread.join(5)
+    assert not dev._thread.is_alive()  # the backoff wait ends with the last channel
 
 
 def test_a_channel_whose_demodulator_raises_fails_loudly_and_can_start_again(
