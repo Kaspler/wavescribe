@@ -50,6 +50,6 @@ def test_spurs_are_kept_per_receiver(tmp_path: Path) -> None:
     assert cat.spurs("000001") == []
     cat.save_spurs("000001", [28_300_000, 26_400_000], 24e6, 1766e6, now=5.0)
     assert cat.spurs("000001") == [26_400_000, 28_300_000] and cat.spurs("000002") == []
-    assert cat.spur_info() == {"000001": {"t": 5.0, "count": 2}}
+    assert cat.spur_info() == {"000001": {"t": 5.0, "count": 2, "bin_hz": 6_000}}
     cat.forget_spurs("000001")
     assert cat.spurs("000001") == []

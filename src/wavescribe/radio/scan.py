@@ -55,6 +55,12 @@ DC_HZ = 3_000  # the dongle's DC offset spreads this far either side of a hop's 
 # the hops a quarter of a hop away fills each centre in. rtl_power's shortest interval is 1 s.
 FINE_BIN_HZ = 5_000
 FILL_INTEGRATE_S = 1.0
+# Spurs are learnt at bins of at most 6 kHz: 512-bin FFTs over a whole-range hop (5.47 kHz
+# bins), where the 86.8 kHz bins a whole-range sweep gets by default buried a narrow line under
+# 12 dB more noise. rtl_power reads the same 16 384 bytes per hop either way, so this costs no
+# time, and that is still 16 FFTs averaged per bin in one pass: finer, with fewer, noise makes
+# lines (at 2048 bins, 4 FFTs, thousands of them over the whole range).
+SPUR_BIN_HZ = 6_000
 # librtlsdr's tuner drivers when the tuner can't tune: "[R82XX] PLL not locked!" (no frequency),
 # "[R82XX] No valid PLL values for 1770570000 Hz!" (its LO: the hop's centre plus an IF of
 # 1-4.57 MHz), "[E4K] PLL not locked for 1150000000 Hz!" (zero IF: the hop's centre itself).
@@ -829,8 +835,9 @@ def learn_spurs(
     cancel: threading.Event | None = None,
 ) -> tuple[Sweep, list[int]]:
     """The receiver's own signals: sweep with the antenna disconnected, so whatever shows up
-    comes from the dongle and the computer (clock harmonics, USB noise). Two passes, and only
-    lines in both count."""
+    comes from the dongle and the computer (clock harmonics, USB noise). Two passes at
+    ``SPUR_BIN_HZ``, and only lines in both count. (The hops' centres aren't filled in: they
+    are 0.5% of the range, and a scan's hops fall elsewhere.)"""
     start_hz, stop_hz, cut = fit_range(start_hz, stop_hz)
     prog = Progress(note=cut)
     seen: list[list[int]] = []
@@ -843,7 +850,7 @@ def learn_spurs(
                 on_progress(prog)
 
         sw = sweep(serial, start_hz, stop_hz, gain_db=gain_db, ppm=ppm, cancel=cancel,
-                   on_progress=hops)  # fmt: skip
+                   bin_hz=SPUR_BIN_HZ, fill_centres=False, on_progress=hops)  # fmt: skip
         seen.append([round(f) for f in _lines(sw, min_snr_db)])
     assert sw is not None
     tol = spur_tolerance(sw.bin_hz)

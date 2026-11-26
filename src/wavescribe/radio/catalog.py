@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from wavescribe.radio.scan import Signal, Sweep
+from wavescribe.radio.scan import SPUR_BIN_HZ, Signal, Sweep
 
 DEFAULT_DIR = Path("data/radio")
 KEEP_SCANS = 20
@@ -138,7 +138,9 @@ class Catalog:
             data = json.loads((self.root / "spurs.json").read_text("utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-        return {k: {"t": v.get("t"), "count": len(v.get("freqs_hz", []))} for k, v in data.items()}
+        # No bin_hz: learnt by an earlier version, at about 87 kHz, blind to narrow lines.
+        return {k: {"t": v.get("t"), "count": len(v.get("freqs_hz", [])),
+                    "bin_hz": v.get("bin_hz")} for k, v in data.items()}  # fmt: skip
 
     def save_spurs(self, serial: str, freqs_hz: list[int], start_hz: float, stop_hz: float,
                    now: float | None = None) -> None:  # fmt: skip
@@ -149,6 +151,7 @@ class Catalog:
             except (FileNotFoundError, json.JSONDecodeError):
                 data = {}
             data[serial] = {"t": now or time.time(), "start_hz": start_hz, "stop_hz": stop_hz,
+                            "bin_hz": SPUR_BIN_HZ,  # what learn_spurs sweeps at
                             "freqs_hz": sorted(int(f) for f in freqs_hz)}  # fmt: skip
             self.root.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp")

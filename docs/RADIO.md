@@ -66,9 +66,12 @@ message once at start-up, before the sweep, is the tuner calibrating itself and 
 **A receiver's own signals.** Every dongle picks up a few signals of its own: harmonics of its
 crystal (28.8 MHz on the RTL-SDR Blog V3/V4), and noise from the computer's USB. Disconnect the
 antenna, then run `uv run wavescribe radio spurs a --learn` (or *Learn* under
-*Each receiver's own signals* on the Receivers page). Lines seen in
+*Each receiver's own signals* on the Receivers page). It sweeps in steps of about 5 kHz, fine
+enough to see narrow lines, in about a minute for the whole range. Lines seen in
 both of two sweeps are kept for that receiver's serial (`data/radio/spurs.json`), and later
-scans mark them and leave them out. A signal that disappears when only the antenna is
+scans mark them and leave them out. Spurs learnt with versions up to 0.1.0a1 were learnt in
+steps of about 87 kHz, which hide narrow lines (their entries in `spurs.json` have no
+`bin_hz`): learn them again. A signal that disappears when only the antenna is
 disconnected comes in through the antenna: it is either real or interference near it. Narrow
 lines that sit on multiples of 2.4 MHz are another receiver's clock; the scan marks them and
 keeps them under Show more.

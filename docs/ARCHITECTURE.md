@@ -448,7 +448,12 @@ at both edges, which puts its stations at most 2.12 MHz apart (`clusters()`), an
 a group is demodulated at once from that recording, until each has a stable name or 12 s pass.
 A **watch** repeats the sweep, keeps the maximum per bin and counts the sweeps each channel was
 busy in. **Spurs** are learnt per serial with the antenna disconnected: lines in both of two
-sweeps.
+sweeps at bins of at most 6 kHz (`SPUR_BIN_HZ`: 512-bin FFTs, 5.47 kHz over a whole-range hop).
+The default 86.8 kHz bins of a whole-range sweep buried narrow lines under 12 dB more noise.
+rtl_power reads 16 384 bytes per hop whatever the bin, so the finer sweep takes no longer, and
+still averages 16 FFTs per bin; at 2048 bins it would average 4, and on synthetic noise a 6 dB
+margin then finds thousands of lines over the whole range. Each entry in `spurs.json` records its
+`bin_hz`; entries without one are from earlier versions and should be learnt again.
 
 **Band plans and privacy** (`radio/bands.toml`, `radio/bandplan.py`). Each band has edges,
 regions (`cept`, ITU 1-3, `jp`), a mode, a raster or channel list and a class: `broadcast`,

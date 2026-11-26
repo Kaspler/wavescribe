@@ -373,3 +373,36 @@ def test_learning_spurs_keeps_lines_seen_twice(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(S, "sweep", lambda *a, **k: spectrum(24e6, 30e6, 2_500, next(passes)))
     _, spurs = S.learn_spurs("000001", 24e6, 30e6)
     assert len(spurs) == 1 and abs(spurs[0] - 26.3e6) <= 2_500
+
+
+def test_spurs_are_learnt_fine_enough_to_see_narrow_lines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A narrow line 6 dB over the noise in a 5.5 kHz bin is lost in 87 kHz bins, which hold 16
+    times the noise and the same line. Old entries, learnt that coarsely, say so."""
+    from wavescribe.radio.catalog import Catalog
+
+    line = 25.6e6
+    asked = []
+
+    def sweep(serial: str, start: float, stop: float, *, bin_hz=None, **_: object) -> S.Sweep:
+        b = bin_hz or S.bin_for(start, stop)
+        asked.append(b)
+        b = {6_000: 5_467, 100_000: 86_806}.get(b, b)  # what rtl_power makes of it
+        f = np.arange(start, stop, b)
+        noise = np.random.default_rng(len(asked)).gamma(16, b / 16, len(f))  # power in a bin
+        noise[np.argmin(np.abs(f - line))] += 3 * 5_467  # 6 dB over a 5.5 kHz bin's noise
+        return S.Sweep(int(start), int(stop), b, f, 10 * np.log10(noise), 1.0)
+
+    assert S._lines(sweep("000001", 24e6, 30e6, bin_hz=100_000), 6.0) == []  # as it was
+    asked.clear()
+    monkeypatch.setattr(S, "sweep", sweep)
+    _, spurs = S.learn_spurs("000001", 24e6, 30e6)
+    assert asked == [6_000, 6_000] and len(spurs) == 1 and abs(spurs[0] - line) <= 5_467
+    cat = Catalog(tmp_path)
+    cat.save_spurs("000001", spurs, 24e6, 30e6, now=5.0)
+    assert cat.spur_info()["000001"]["bin_hz"] == S.SPUR_BIN_HZ
+    (tmp_path / "spurs.json").write_text(  # as an earlier version kept it
+        '{"000002": {"t": 1.0, "start_hz": 24e6, "stop_hz": 1766e6, "freqs_hz": [26400000]}}'
+    )
+    assert cat.spurs("000002") == [26_400_000] and cat.spur_info()["000002"]["bin_hz"] is None
