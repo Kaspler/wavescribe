@@ -260,7 +260,8 @@ def _build(
             # made in: it stays listed, switched off, with what to do about it.
             where, confirmed = f"station {sid!r}", raw.get("acknowledge", False)
             try:
-                radio_policy(fallback.sdr.freq_hz, fallback.sdr.mode, region, confirmed, where)
+                hz, width = fallback.sdr.policed(region)  # a watch: its strictest channel
+                radio_policy(hz, fallback.sdr.mode, region, confirmed, where, width)
             except ConfigError as unconfirmed:
                 errors[sid] = str(unconfirmed)
                 return replace(fallback, disabled=True)

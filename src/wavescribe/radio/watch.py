@@ -54,11 +54,13 @@ class Watch:
     def middle_hz(self) -> int:
         return round((self.lo_hz + self.hi_hz) / 2)
 
-    @property
-    def strictest_hz(self) -> int:
-        """The channel whose privacy class is the strictest: the class of the whole watch, so
-        nothing caught anywhere in the window is kept or shared beyond what its band allows."""
-        return max(self.channels, key=lambda c: STRICTNESS.index(privacy_of(c, self.region)))
+    def strictest_in(self, region: str | None, width_hz: float | None = None) -> int:
+        """The channel whose privacy class is the strictest under ``region``'s band plan: the
+        class of the whole watch, so nothing caught anywhere in the window is kept or shared
+        beyond what its band allows. Each channel's class is the strictest its edges reach,
+        ``width_hz`` wide (by default, as wide as its band's channels)."""
+        region = region or AUTO
+        return max(self.channels, key=lambda c: STRICTNESS.index(privacy_of(c, region, width_hz)))
 
 
 def plan_window(

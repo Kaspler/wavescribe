@@ -88,6 +88,14 @@ class SdrTuning:
     # the window's middle, which is what lists of a receiver's stations show.
     watch: Watch | None = None
 
+    def policed(self, region: str | None) -> tuple[int, float | None]:
+        """Where the station's privacy class comes from under ``region``, for ``radio_policy``:
+        its own frequency, or a watch's strictest channel at the width its channels are heard
+        in, since a watch's middle may be in a looser band than its edge."""
+        if self.watch is None:
+            return self.freq_hz, None
+        return self.watch.strictest_in(region, self.channel_hz), self.channel_hz
+
 
 @dataclass(frozen=True)
 class Station:
@@ -554,7 +562,7 @@ def build_station(
 
         width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else watch_width
         # A watch takes the strictest class of any channel in its window.
-        policed = watch.strictest_hz if watch else freq
+        policed = watch.strictest_in(region, width) if watch else freq
 
         acknowledge, floor = d.get("acknowledge", False), d.get("privacy_floor")
         _check_acknowledge(acknowledge, where)

@@ -95,6 +95,17 @@ def test_a_watch_takes_the_strictest_class_and_the_acknowledgement() -> None:
     )
 
 
+def test_each_channel_of_a_watch_takes_the_class_its_own_edges_reach() -> None:
+    # Digital services start at 380 MHz: a 12.5 kHz channel at 379.9875 MHz stays clear of
+    # them, a 30 kHz one reaches in, whatever the region.
+    near = SdrDevice("c", "00001234", 379_600_000, 30.0, RATE)
+    d = {"id": "w", "language": "en", "device": "c", "watch": [379.9, 379.99], "acknowledge": True}
+    assert build_station(d, "test", {"c": near}, "cept").privacy == "private"
+    wide = build_station({**d, "channel_khz": 30}, "test", {"c": near}, "cept")
+    assert wide.privacy == "digital" and wide.sdr is not None
+    assert wide.sdr.policed("2") == (379_987_500, 30_000)
+
+
 def test_a_watch_its_device_cant_hear_all_of_is_refused_with_a_centre_that_works() -> None:
     far = SdrDevice("a", "00001234", 445_000_000, 30.0, RATE)
     with pytest.raises(ConfigError, match=r"center_mhz = 445\.75625"):
@@ -104,6 +115,72 @@ def test_a_watch_its_device_cant_hear_all_of_is_refused_with_a_centre_that_works
             {"a": far},
             "cept",
         )
+
+
+EDGE = """
+[radio]
+region = "2"
+
+[[device]]
+id = "a"
+serial = "00001234"
+center_mhz = 433.00625
+gain_db = 30
+
+[[station]]
+id = "edge"
+device = "a"
+watch = [432.0, 434.0]
+language = "en"
+"""
+
+
+def test_a_region_the_page_chooses_checks_a_file_watch_on_its_strictest_channel(
+    tmp_path: Path,
+) -> None:
+    from wavescribe.config import load_stations
+    from wavescribe.settings import effective_config
+
+    path = tmp_path / "stations.toml"
+    path.write_text(EDGE)
+    base = load_stations(path)
+    assert base.get("edge").privacy == "amateur"  # all of 432-434 MHz is amateur in region 2
+    # In Europe the top of the window is the 433 MHz devices band, though its middle isn't:
+    # unconfirmed, the watch can't go on as amateur radio.
+    config, errors = effective_config(base, {"radio": {"region": "cept"}})
+    edge = config.get("edge")
+    assert edge.disabled and "433 MHz short-range devices" in errors["edge"]
+
+
+def test_a_change_of_region_keeps_a_watchs_class_by_its_strictest_channel(
+    tmp_path: Path,
+) -> None:
+    from tests.test_app import Running, make_app
+    from wavescribe.radio import service
+    from wavescribe.radio.catalog import Catalog
+
+    r = Running(make_app(tmp_path))
+    try:
+        r.app._radio = service.RadioService(r.app, Catalog(tmp_path / "radio"))
+        r.app.settings.update(lambda d: d.setdefault("radio", {}).update(region="cept"))
+        dongle = {"id": "w", "serial": "00001234", "center_mhz": 433.00625, "gain_db": 30}
+        assert r.call("POST", "/api/manage/receivers", dongle)[0] == 200
+        body = {"id": "edge", "name": "Edge", "device": "w", "watch": [432.0, 434.0],
+                "language": "en", "acknowledge": True}  # fmt: skip
+        status, st = r.call("POST", "/api/manage/stations", body)
+        assert status == 200 and st["privacy"] == "private"
+        # ITU Region 1 has the 433 MHz devices band too: nothing to keep stricter than it is.
+        assert r.call("POST", "/api/manage/radio/region", {"region": "1"})[0] == 200
+        edge = r.app.config.get("edge")
+        assert (edge.privacy, edge.privacy_region) == ("private", None)
+        entry = next(e for e in r.app.settings.get("station") if e["id"] == "edge")
+        assert "privacy_floor" not in entry  # which would outlive a narrower window
+        # In region 2 it is all amateur: the watch stays private until that is confirmed.
+        assert r.call("POST", "/api/manage/radio/region", {"region": "2"})[0] == 200
+        edge = r.app.config.get("edge")
+        assert (edge.privacy, edge.privacy_region) == ("private", "amateur")
+    finally:
+        r.close()
 
 
 def test_language_auto_is_for_watches_and_round_trips() -> None:

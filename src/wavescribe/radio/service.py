@@ -203,7 +203,8 @@ class RadioService:
             if s.sdr is None:
                 continue
             try:
-                new, _ = radio_policy(s.sdr.freq_hz, s.sdr.mode, region, True, s.id)
+                hz, width = s.sdr.policed(region)  # a watch: its strictest channel
+                new, _ = radio_policy(hz, s.sdr.mode, region, True, s.id, width)
             except ConfigError:
                 continue
             if stricter(s.privacy, new):
