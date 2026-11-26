@@ -257,6 +257,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
         # The store runs first: it assigns the segment id that alert mentions point to.
         on_transcript=fan_out(store and store.add_transcript, alerter and alerter.on_transcript),
         on_filtered=alerter and alerter.on_filtered,
+        on_rechecked=fan_out(store and store.update_transcript, alerter and alerter.on_transcript),
         source_factory=factory,
     )
     if alerter is not None:

@@ -16,6 +16,7 @@ radio:    rtl_sdr IQ (one pipe per dongle) ─► per station: WFM (+ RDS), NFM 
                      gate: speech or music, per utterance (songs stop here)
                                        ▼
                 ┌──── ASR worker (GPU, priority queue) → hallucination filter
+                │       (a line in another language: Whisper listens again, after live work)
                 ▼
      transcript (source language) ──► rules ──► alert ──► actions (notify, speak, log, webhooks)
                 │                                 ▲
@@ -37,7 +38,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Gate` | Whether a finished utterance is speech worth transcribing or music | `YamnetGate` (YAMNet on LiteRT, CPU) |
 | `Segmenter` | Turns speech into utterances of about 2–20 s | `VadSegmenter` driven by `SileroVad` (Silero's ONNX model on onnxruntime; no torch) |
 | `Transcriber` | utterance → text + language + confidence | `ParakeetMlx` (default for European languages), `MlxAudioTranscriber` (Whisper, Qwen3-ASR, Voxtral, Nemotron through mlx-audio) |
-| Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it; and a line that is nothing but what models write over silence and music, subtitle credits and video sign-offs ("Thanks for watching!", "Untertitel im Auftrag des ZDF", "字幕由Amara.org社区提供"), from `asr/junk.toml`, which lists them for many languages and applies every one to every station (ignoring case, accents and punctuation; anything else said keeps the line). A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
+| Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it; and a line that is nothing but what models write over silence and music, subtitle credits and video sign-offs ("Thanks for watching!", "Untertitel im Auftrag des ZDF", "字幕由Amara.org社区提供"), from `asr/junk.toml`, which lists them for many languages and applies every one to every station (ignoring case, accents and punctuation; anything else said keeps the line). A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **Re-check** (`asr/recheck.py`): when a Whisper model that covers the station's language is installed and the station isn't transcribed by Whisper already, Whisper's language identification listens to a flagged line's audio again. If it hears the station's language, Whisper transcribes the line in that language and, if its text passes these checks, it replaces the flagged text (model: the Whisper's id, flags: `rechecked`); if it hears another language, the line stays as it was, with `rechecked` added. Re-checks run on the ASR thread behind every live utterance; at most 3 per station and 8 in all wait, one that waited over 60 s is skipped, and a line that finds no room stays flagged (`recheck_skipped` in the log). With no such Whisper installed nothing changes, and one log line at start names the model that would do it. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
 | `Translator` | text → text in a target language | `LlmTranslator` (Qwen3.5 through mlx-lm, the default; TranslateGemma opt-in), `MadladTranslator` (MADLAD-400 through CTranslate2, CPU, the fallback) |
 | Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule` and `TrafficRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
 | `Actions` | Deliver an alert (`alerts/actions.py`) | `MacActions`: `notify` (a macOS notification through `osascript`), `speak:<lang>` (macOS `say`, one voice per language), `log`; `LogOnlyActions` elsewhere. Webhooks go through `Outputs` |
@@ -51,7 +52,7 @@ Each interface is a Python protocol with one or more implementations:
 
 One process with threads. Each station has a source thread (an ffmpeg subprocess, or a channel
 of a dongle's shared `rtl_sdr` pipe, plus the VAD), one ASR thread owns the MLX speech model and
-works through a priority queue (station priority, then arrival), and one translation thread
+works through a priority queue (station priority, then arrival; Whisper's re-checks of lines heard in another language after all of them), and one translation thread
 owns the translator and the LLM jobs (alert translations first, then LLM rules, then questions,
 then the continuous backlog). Each thread loads its model itself, because MLX arrays are bound
 to the thread that created them. The translation thread waits until the ASR models are loaded:
@@ -65,7 +66,9 @@ its language) and the translator, but nothing loads until a running station need
 starting stations' ASR models load before their audio is queued, a station started later loads
 its model ahead of its first utterance, and the translator loads on the first utterance that
 needs translating, the first alert translation, question or LLM rule. One lock serialises every
-load, across both threads. An ASR model no running station uses is unloaded after five idle
+load, across both threads. The Whisper that re-checks a station's lines heard in another
+language loads with the station, before its audio is read, and counts as in use while the
+station runs. An ASR model no running station uses is unloaded after five idle
 minutes (Whisper alone is ~1.6 GB). Stations can be added, changed and deleted while the
 pipeline runs: name, language, priority and translation languages change in place for the next
 utterance; a new URL, device or frequency restarts the station's source.
@@ -123,8 +126,8 @@ listing each time a dongle is opened (`device_arg()`).
 
 **Web page (`wavescribe serve`).** The same pipeline plus a local page, with no
 new dependencies: `http.server.ThreadingHTTPServer`, Server-Sent Events for live updates (source
-text as soon as ASR finishes, the translation a few seconds later, and a status snapshot every
-second), and a page with no CDNs or web fonts, so it works offline. The page is built from
+text as soon as ASR finishes, the translation a few seconds later, a re-checked line's new
+text under the same key, and a status snapshot every second), and a page with no CDNs or web fonts, so it works offline. The page is built from
 `frontend/` (React + TypeScript + Vite) into `web/dist/`, which ships in the package; the server
 serves `index.html`, the hashed files under `/assets/` (cached for a year, since their names
 change with their content), the icon and the bundle's licence notices, and nothing else.
@@ -544,7 +547,12 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   when a place from the pack is named in the same utterance. Text the ASR checks flagged as
   another language never rises above `low` (Parakeet answering in English turned cured ham into
   "nuclear sabotage", and Snowball stems *sabotage* like *sabotagem*). The `repetition` flag
-  doesn't cap severity.
+  doesn't cap severity. A flagged line Whisper is about to re-check (`Result.rechecking`) is
+  read by the keyword and LLM rules once, when the verdict is in (`Pipeline(on_rechecked=…)`):
+  replaced by Whisper's text in the station's language, it can raise an alert at full
+  severity; kept, it stays capped at `low`. Rules never read both versions, so a re-checked
+  line can't raise two alerts or count twice towards `min_mentions`, and nothing is lost by
+  waiting: until then it could only have raised a `low` alert, which is never announced.
 - **Regular expressions:** a keyword rule can have `regex = [...]` beside its topics and terms,
   matched on the source text ignoring case and nothing else (no folding, no stemming), in any
   language; `stations` narrows them down. A match is marked and highlighted like a term, and the
@@ -633,7 +641,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 
 - `stations(id, name, language)`
 - `segments(id, station_id, t_start, t_end, kind DEFAULT 'speech', audio_path NULL, audio_bytes)`
-- `transcripts(segment_id, lang, text, model, confidence, latency_ms, flags)`; `flags` holds the ASR checks' verdicts, e.g. `lang:es` (schema 2; schema 1 is migrated on open)
+- `transcripts(segment_id, lang, text, model, confidence, latency_ms, flags)`; `flags` holds the ASR checks' verdicts, e.g. `lang:es`, and `rechecked` once Whisper listened again (schema 2; schema 1 is migrated on open). A re-check that replaced the text updates the row in place (`Store.update_transcript`: text, model, flags), and the FTS triggers follow
 - `translations(id, segment_id, lang, text, model, latency_ms)`, unique per (segment, language)
 - `transcripts_fts`, `translations_fts`: FTS5 external-content indexes kept in step by triggers
 

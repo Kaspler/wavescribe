@@ -26,6 +26,7 @@ import numpy as np
 
 from wavescribe.asr import Transcriber, Transcript, load_transcriber
 from wavescribe.asr.checks import check_transcript
+from wavescribe.asr.recheck import Rechecker
 from wavescribe.audio import AudioChunk
 from wavescribe.config import Station
 from wavescribe.gate import Gate, Verdict
@@ -91,6 +92,8 @@ class Result:
     translations_model: str | None = None
     segment_id: int | None = None  # set by the store when it keeps the utterance
     flags: tuple[str, ...] = ()  # from the ASR checks, e.g. ("lang:es",)
+    # Whisper is to listen again (asr/recheck.py): what judges the words waits for on_rechecked.
+    rechecking: bool = False
 
 
 def fan_out(*callbacks: Callable[..., object] | None) -> Callable[..., None]:
@@ -140,6 +143,7 @@ class Plan:
     gate: tuple[ModelEntry, Path] | None = None  # speech/music; None transcribes songs too
     # Stations that chose their own translator on the page: station id -> (entry, path).
     mt_station: dict[str, tuple[ModelEntry, Path]] = field(default_factory=dict)
+    recheck: Rechecker | None = None  # Whisper's second opinion on lines in another language
 
     def translator_for(self, station: Station) -> tuple[ModelEntry, Path] | None:
         return self.mt_station.get(station.id) or self.mt
@@ -212,7 +216,9 @@ def plan_available(
             gate = registry.resolve("gate")
         except ModelError as e:
             log.warning("no speech/music gate, so songs will be transcribed too: %s", e)
-    return Plan(vad=vad, asr=asr, mt=mt, gate=gate, mt_station=mt_station), unavailable
+    recheck = Rechecker.plan(registry, stations, asr)
+    plan = Plan(vad=vad, asr=asr, mt=mt, gate=gate, mt_station=mt_station, recheck=recheck)
+    return plan, unavailable
 
 
 MT_IDLE_UNLOAD_S = 900.0  # a station's own translator is dropped after 15 min unused
@@ -282,6 +288,7 @@ class Pipeline:
         *,
         on_transcript: Callable[[Result], None] | None = None,
         on_filtered: Callable[[Result, str], None] | None = None,
+        on_rechecked: Callable[[Result], None] | None = None,
         on_audio: Callable[[str, AudioChunk], None] | None = None,
         source_factory: Callable[[Station], AudioSource] | None = None,
         vad_factory: Callable[[Path], FrameVad] = SileroVad,
@@ -298,6 +305,9 @@ class Pipeline:
             on_filtered: called with an utterance the ASR checks dropped and the reason
                 (``Check.drop``). It reaches neither of the above: this is for the alert rules,
                 which must not lose a warning to a mistake of the filter.
+            on_rechecked: called with a line that reached ``on_transcript`` with ``rechecking``
+                set, once Whisper has listened again (asr/recheck.py): its text may be new.
+                Then it goes on to translation and ``on_result``.
             on_audio: called with every audio chunk, from the station's source thread.
         """
         self._stations = stations
@@ -305,6 +315,7 @@ class Pipeline:
         self._on_result = on_result
         self._on_transcript = on_transcript
         self._on_filtered = on_filtered
+        self._on_rechecked = on_rechecked
         self._on_audio = on_audio
         self._source_factory = source_factory or open_source
         self._vad_factory = vad_factory
@@ -371,8 +382,10 @@ class Pipeline:
             live = _Live(station, self._source_factory(station))
             self._live[station.id] = live
             self._threads = [t for t in self._threads if t.is_alive()]
-        if planned and self._asr_ready.is_set() and planned[0].id not in self._asr_models:
-            self._control(self._asr_q, _LoadAsr(*planned))
+        if planned and self._asr_ready.is_set():
+            for model in self._models_for(station):
+                if model[0].id not in self._asr_models:
+                    self._control(self._asr_q, _LoadAsr(*model))
         if station.translation_targets and self._plan.translator_for(station) is not None:
             self._start_mt()
         self._spawn(f"source-{station.id}", self._source_worker, live)
@@ -405,9 +418,10 @@ class Pipeline:
             self.add_station(station)
             return
         live.station = station  # transcribe/translate switches apply from the next chunk
-        planned = self._plan.asr.get(station.id) if station.transcribe else None
-        if planned and planned[0].id not in self._asr_models and self._asr_ready.is_set():
-            self._control(self._asr_q, _LoadAsr(*planned))
+        if station.transcribe and self._asr_ready.is_set():
+            for model in self._models_for(station):
+                if model[0].id not in self._asr_models:
+                    self._control(self._asr_q, _LoadAsr(*model))
         if station.translation_targets and self._plan.translator_for(station) is not None:
             self._start_mt()
 
@@ -441,12 +455,17 @@ class Pipeline:
                 self._dropped["mt"] += 1
         self._finish(result)
 
-    def request_asr(self, run: Callable[[Callable[[ModelEntry, Path], Transcriber]], None]) -> bool:
-        """Run ``run(get)`` on the ASR thread, ahead of utterances; ``get(entry, path)`` gives
-        a loaded transcriber (loading it if needed). For one-off work such as detecting the
-        language of a stream someone is adding."""
+    def request_asr(
+        self,
+        run: Callable[[Callable[[ModelEntry, Path], Transcriber]], None],
+        priority: float = _CONTROL,
+    ) -> bool:
+        """Run ``run(get)`` on the ASR thread, ahead of utterances (or at ``priority``, which
+        sorts with station priorities); ``get(entry, path)`` gives a loaded transcriber
+        (loading it if needed). For one-off work such as detecting the language of a stream
+        someone is adding."""
         try:
-            self._asr_q.put_nowait((_CONTROL, next(self._tiebreak), _AsrJob(run)))
+            self._asr_q.put_nowait((priority, next(self._tiebreak), _AsrJob(run)))
         except queue.Full:
             return False
         return True
@@ -543,6 +562,7 @@ class Pipeline:
             "asr_queue": self._asr_q.qsize(),
             "mt_queue": self._mt_q.qsize(),
             "dropped": dict(self._dropped),
+            "rechecks": self._plan.recheck.status() if self._plan.recheck else None,
             "music_skipped_s": round(self._music_s),
             "asr_busy": round(self._busy_fraction("asr", now), 3),
             "mt_busy": round(self._busy_fraction("mt", now), 3),
@@ -803,6 +823,16 @@ class Pipeline:
             self._dropped["asr"] += 1
             event(log, "drop", level=logging.WARNING, stage="asr", station=station.id)
 
+    def _models_for(self, station: Station) -> list[tuple[ModelEntry, Path]]:
+        """The speech models a station needs loaded: its own, and the Whisper that re-checks
+        its lines heard in another language (asr/recheck.py), if one is installed."""
+        planned = self._plan.asr.get(station.id)
+        if planned is None:
+            return []
+        recheck = self._plan.recheck if self._on_rechecked is not None else None
+        second = recheck.model_for(station, planned[0]) if recheck is not None else None
+        return [planned] if second is None else [planned, second]
+
     def _load_asr(self, loaded: dict[str, Transcriber], entry: ModelEntry, path: Path) -> None:
         if entry.id in loaded:
             self._asr_models[entry.id] = time.time()  # in use again: not idle
@@ -821,7 +851,8 @@ class Pipeline:
     def _unload_idle(self, loaded: dict[str, Transcriber]) -> None:
         """Free ASR models no running station uses (Whisper alone holds ~1.6 GB)."""
         with self._lock:
-            wanted = {self._plan.asr[s][0].id for s in self._live if s in self._plan.asr}
+            running = [live.station for live in self._live.values()]
+        wanted = {entry.id for s in running for entry, _ in self._models_for(s)}
         now = time.time()
         idle = [m for m in loaded if m not in wanted
                 and now - self._asr_models.get(m, 0) > ASR_IDLE_UNLOAD_S]  # fmt: skip
@@ -842,6 +873,9 @@ class Pipeline:
         for station in self._stations:
             if station.id in self._plan.asr:
                 self._load_asr(loaded, *self._plan.asr[station.id])
+        if self._plan.recheck is not None and self._on_rechecked is not None:
+            self._plan.recheck.preload(self._stations, self._plan.asr,
+                                       lambda e, p: self._load_asr(loaded, e, p))  # fmt: skip
         self._asr_ready.set()
         last_sweep = time.monotonic()
 
@@ -909,20 +943,37 @@ class Pipeline:
             )
             result.asr_done_at = time.time()
             self._busy["asr"].append((result.asr_done_at, asr_ms / 1000))
+            if check.flags and self._plan.recheck and self._on_rechecked:
+                result.rechecking = self._plan.recheck.offer(
+                    result, planned[0], self.request_asr, self._rechecked
+                )
             if transcript.text:
                 self._notify(self._on_transcript, result)
-            translate = station.translation_targets and self._plan.translator_for(station)
-            if translate and transcript.text:
-                self._start_mt()
-                try:
-                    self._mt_q.put_nowait((station.priority, next(self._tiebreak), result))
-                except queue.Full:
-                    self._dropped["mt"] += 1
-                    event(log, "drop", level=logging.WARNING, stage="mt", station=station.id)
-                    self._finish(result)
-            else:
-                self._finish(result)
+            if not result.rechecking:
+                self._translate_or_finish(result)
         self._put_sentinel(self._mt_q)
+
+    def _rechecked(self, result: Result) -> None:
+        """Whisper has listened to a flagged line again (asr/recheck.py), on the ASR thread:
+        its text is final, so it is judged and translated now."""
+        result.rechecking = False
+        self._busy["asr"].append((time.time(), result.timings.get("recheck_ms", 0.0) / 1000))
+        self._notify(self._on_rechecked, result)
+        self._translate_or_finish(result)
+
+    def _translate_or_finish(self, result: Result) -> None:
+        station = result.station
+        translate = station.translation_targets and self._plan.translator_for(station)
+        if translate and result.transcript.text:
+            self._start_mt()
+            try:
+                self._mt_q.put_nowait((station.priority, next(self._tiebreak), result))
+            except queue.Full:
+                self._dropped["mt"] += 1
+                event(log, "drop", level=logging.WARNING, stage="mt", station=station.id)
+                self._finish(result)
+        else:
+            self._finish(result)
 
     def _load_mt(self, mt: tuple[ModelEntry, Path] | None = None) -> Translator | None:
         mt = mt or self._plan.mt

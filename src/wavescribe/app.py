@@ -226,6 +226,14 @@ class App:
                 self.hub.on_transcript,
             ),
             on_filtered=self.alerter and self.alerter.on_filtered,
+            # A flagged line Whisper heard again (asr/recheck.py): the store and page take its
+            # final text, and the rules read it now (they skipped it while it was rechecking).
+            on_rechecked=fan_out(
+                store and store.update_transcript,
+                self.alerter and self.alerter.on_transcript,
+                self._llm_rules_transcript,
+                self.hub.on_transcript,
+            ),
             on_audio=self.hub.on_audio,
             **(pipeline_kwargs or {}),
         )

@@ -32,7 +32,16 @@ Parakeet doesn't cover (Hebrew in the world stations).
 The order for other languages should be decided by their own bake-offs, recorded here.
 
 **Language identification:** Whisper's built-in language ID identifies a new stream's language
-when a station is added (its **Check**).
+when a station is added (its **Check**). It also gives a second opinion on lines the ASR checks
+flagged as another language than the station's (`asr/recheck.py`): Parakeet can't be told the
+language and sometimes renders the station's speech in English. Whisper's language ID (one
+encoder pass and one decoder step, `MlxAudioTranscriber.identify_language`) listens to the
+line again; if it hears the station's language, Whisper transcribes it with that language
+given and its text replaces the flagged one when it passes the checks. Any installed Whisper
+that covers the station's language does it, the ASR chain's first (large-v3-turbo by default);
+none is downloaded for it, and without one a log line at start names the model to fetch. The
+Whisper stays loaded while the stations it serves run (about 1.6 GB). Cost: see
+[MEASUREMENTS.md](MEASUREMENTS.md) (to be measured).
 
 ## Translation
 

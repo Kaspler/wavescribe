@@ -363,7 +363,10 @@ class Alerter:
 
     def on_transcript(self, result: Any) -> None:  # wavescribe.pipeline.Result
         text = result.transcript.text
-        if not text:
+        # A line heard in another language that Whisper is about to hear again: the rules read
+        # it once, when it comes back through on_rechecked (asr/recheck.py). Until then it
+        # could raise only a low alert, which is never announced.
+        if not text or getattr(result, "rechecking", False):
             return
         rules = self.config.rules
         hits = rules.evaluate(text, result.station.language, result.flags, result.station.id)

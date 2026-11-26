@@ -639,6 +639,20 @@ class Store:
             if rel:
                 (root / rel).unlink(missing_ok=True)
 
+    def update_transcript(self, result: Result) -> None:
+        """Pipeline observer for a line Whisper listened to again (``on_rechecked``,
+        asr/recheck.py): its text, model and flags as the second opinion left them."""
+        if result.segment_id is None:
+            return
+        t = result.transcript
+        with self._tx() as db:
+            db.execute(
+                "UPDATE transcripts SET lang = ?, text = ?, model = ?, confidence = ?, flags = ? "
+                "WHERE segment_id = ?",
+                (t.language, t.text, t.model, t.confidence, ",".join(result.flags),
+                 result.segment_id),
+            )  # fmt: skip
+
     def add_translations(self, result: Result) -> None:
         """Pipeline observer for finished results: store whatever translations they carry."""
         if result.segment_id is None or not result.translations:

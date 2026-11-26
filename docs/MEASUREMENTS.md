@@ -5,6 +5,15 @@ Dated results behind the decisions in [ARCHITECTURE.md](ARCHITECTURE.md) and the
 M1 Max and 64 GB of memory. Logs come from `data/logs/wavescribe.jsonl`. Reception on air is in
 [HARDWARE.md](HARDWARE.md#what-a-first-scan-finds).
 
+**TODO (to be measured), Whisper re-check of lines heard in another language**
+(`asr/recheck.py`): on this Mac with Parakeet-TDT-0.6B-v3 and Whisper large-v3-turbo, on
+synthetic `say` speech in several languages (never recorded broadcast audio): the time per
+re-check when Whisper hears another language (language ID only) and when it hears the
+station's language (language ID plus a transcription), the time to load Whisper at start, its
+memory, and its share of the GPU at the rate lines are flagged (12 of 101 transcripts on talk
+radio, lyrics included) as `asr_busy` with and without re-checks. Not measured yet: the GPU was
+busy with a long end-to-end run when this was built.
+
 **2026-11-26, Ask on the real store** (Qwen3.5-9B 4-bit, M1 Max; ~20k utterances): the plan
 takes 4–6 s (≈1,100 prompt tokens at ~380 tokens/s, ≈90 output tokens at ~60 tokens/s), the
 search under 0.1 s, the answer 1–6 s depending on the excerpts (≈2,000 prompt tokens for 40
@@ -62,7 +71,7 @@ live VAD settings. All models on MLX on the M1 Max.
 | Voxtral Mini 4B Realtime (fp16) | **0.9× (slower than real time)** | auto | — | — | — | stopped after 50 utterances |
 
 - **No WER yet.** That needs reference transcripts corrected by a Portuguese speaker (`*.ref-template.txt` from the bake-off). Agreement between models is not accuracy.
-- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet stays the default for speed and power (GPU 5% busy for two stations) until WER says otherwise. The ASR checks now flag text that isn't in the station's language, and flagged text never raises an alert above `low`; re-running it through Whisper large-v3-turbo, which accepts a hint and drifted least, isn't built yet.
+- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet stays the default for speed and power (GPU 5% busy for two stations) until WER says otherwise. The ASR checks now flag text that isn't in the station's language, and flagged text never raises an alert above `low`. Since 2026-11-26 a flagged line is re-checked by Whisper large-v3-turbo, which accepts a hint and drifted least, when it is installed (`asr/recheck.py`; its cost is below).
 - **LLM-style ASR decoders can loop.** Qwen3-ASR repeated "há há há…" for 78 s on one utterance. Any such model needs an output cap tied to the audio length, plus the repeated-n-gram filter.
 - **Nemotron is conservative.** Its 14 empty outputs are mostly jingles and fragments that the others turned into junk ("Yeah.", "Wolf."), plus a few short real phrases.
 - **Voxtral is out on speed** through mlx-audio at fp16.
