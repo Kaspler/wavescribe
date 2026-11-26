@@ -50,6 +50,11 @@ HOP_S = 0.05  # a hop, with room to spare
 START_S = 10.0  # opening the dongle and setting up the tuner, with room to spare
 STALL_SWEEPS = 3  # silent for this many sweeps' worth of time: rtl_power has stalled
 POLL_S = 0.1  # how often a running sweep looks at its cancel flag
+DC_HZ = 3_000  # the dongle's DC offset spreads this far either side of a hop's centre
+# At this resolution or finer a narrow carrier fits in the bridged centre, so a second run with
+# the hops a quarter of a hop away fills each centre in. rtl_power's shortest interval is 1 s.
+FINE_BIN_HZ = 5_000
+FILL_INTEGRATE_S = 1.0
 # librtlsdr's tuner drivers when the tuner can't tune: "[R82XX] PLL not locked!" (no frequency),
 # "[R82XX] No valid PLL values for 1770570000 Hz!" (its LO: the hop's centre plus an IF of
 # 1-4.57 MHz), "[E4K] PLL not locked for 1150000000 Hz!" (zero IF: the hop's centre itself).
@@ -201,11 +206,17 @@ def sweep(
     on_progress: Callable[[int, int], None] | None = None,
     cancel: threading.Event | None = None,
     stall_s: float | None = None,
+    fill_centres: bool | None = None,
 ) -> Sweep:
     """One pass of ``rtl_power`` over the part of the range the tuner reaches (``fit_range``).
     ``on_progress(hops_done, hops_total)``. ``cancel`` stops it at once. A run silent for
     ``stall_s`` (by default a few sweeps' worth of time) has stalled: it is killed and the
-    sweep fails."""
+    sweep fails.
+
+    Each hop's centre holds the dongle's DC offset, bridged over ``DC_HZ`` either side, and a
+    carrier there would be lost. ``fill_centres`` (by default at ``FINE_BIN_HZ`` or finer,
+    where a narrow carrier fits in that bridge) runs ``rtl_power`` a second time, for a second,
+    with the hops a quarter of a hop away, and fills each centre in from it."""
     start_hz, stop_hz, _ = fit_range(start_hz, stop_hz)
     if shutil.which(command) is None:
         raise ScanError("rtl_power isn't installed (brew install librtlsdr)")
@@ -213,26 +224,96 @@ def sweep(
     total = hop_count(start_hz, stop_hz)
     if integrate_s is None:  # enough averaging for a steady spectrum, quick for wide sweeps
         integrate_s = 1.0 if total > 50 else max(2.0, 0.3 * total)
-    if stall_s is None:
-        stall_s = START_S + STALL_SWEEPS * max(integrate_s, total * HOP_S)
-    # -c crops the edges of each hop, where the dongle's filter rolls off; -1 is a single pass.
-    cmd = [command, "-d", device_arg(serial), "-f", f"{int(start_hz)}:{int(stop_hz)}:{int(bin_hz)}",
-           "-g", f"{gain_db:g}", *ppm_args(ppm), "-c", f"{CROP:.0%}", "-i", f"{integrate_s:g}",
-           "-1", "-"]  # fmt: skip
+    fill = bin_hz <= FINE_BIN_HZ if fill_centres is None else fill_centres
+    runs = 2 if fill else 1
+
+    def run(lo: float, hi: float, k: int, integrate: float) -> tuple[list[Row], list[str]]:
+        # -c crops each hop's edges, where the dongle's filter rolls off; -1 is a single pass.
+        cmd = [command, "-d", device_arg(serial), "-f", f"{int(lo)}:{int(hi)}:{int(bin_hz)}",
+               "-g", f"{gain_db:g}", *ppm_args(ppm), "-c", f"{CROP:.0%}", "-i", f"{integrate:g}",
+               "-1", "-"]  # fmt: skip
+        stall = stall_s or START_S + STALL_SWEEPS * max(integrate, total * HOP_S)
+
+        def hops(d: int, t: int) -> None:
+            if on_progress is not None:
+                on_progress(k * total + min(d, total), runs * total)
+
+        return _run(cmd, serial, total, stall, hops, cancel)
+
     t0 = time.time()
     event(log, "scan_sweep", serial=serial, start_mhz=start_hz / 1e6, stop_mhz=stop_hz / 1e6,
-          bin_hz=bin_hz, hops=total)  # fmt: skip
-    rows, err = _run(cmd, serial, total, stall_s, on_progress, cancel)
+          bin_hz=bin_hz, hops=total, runs=runs)  # fmt: skip
+    rows, err = run(start_hz, stop_hz, 0, integrate_s)
     text = "".join(err)
     if not rows:
         if _busy(text):
             raise ScanError(f"dongle {serial} is busy: another program has it open")
         raise ScanError(f"rtl_power found nothing to report: {text.strip()[-300:] or 'no output'}")
-    sw = _assemble(rows, start_hz, stop_hz, bin_hz, time.time() - t0)
+    sw = _assemble(rows, start_hz, stop_hz, bin_hz, 0.0)
     _unlocked(sw, err, rows)
+    if fill:
+        shift = (stop_hz - start_hz) // total / 4  # the same hops, a quarter of one higher
+        lo, hi = SWEEP_LIMITS_HZ
+        lo2, hi2 = start_hz + shift, stop_hz + shift
+        if hi2 > hi:
+            lo2, hi2 = start_hz - shift, stop_hz - shift
+        if lo2 >= lo:
+            rows2, err2 = run(lo2, hi2, 1, FILL_INTEGRATE_S)
+            if rows2:
+                second = _assemble(rows2, lo2, hi2, bin_hz, 0.0)
+                _unlocked(second, err2, rows2)
+                filled = _fill(sw, rows, second, rows2)
+                sw.warnings += [w for w in second.warnings if w not in sw.warnings]
+                event(log, "scan_centres", serial=serial, hops=len(rows), filled=filled)
+    sw.seconds = time.time() - t0
     for w in sw.warnings:
         log.warning("dongle %s: %s", serial, w)
     return sw
+
+
+def _dc_bins(n: int, step: float) -> tuple[int, int]:
+    """The bins ``[a, b)`` of a hop of ``n`` bins that the dongle's DC offset covers, about its
+    centre bin n / 2 (``_assemble``); they are bridged when the hop has bins either side."""
+    c, w = n // 2, round(DC_HZ / step)
+    return c - w, c + w + 1
+
+
+def _nearest(freqs: np.ndarray, hz: np.ndarray) -> np.ndarray:
+    i = np.clip(np.searchsorted(freqs, hz), 1, len(freqs) - 1)
+    return np.where(np.abs(freqs[i] - hz) < np.abs(freqs[i - 1] - hz), i, i - 1)
+
+
+def _fill(sw: Sweep, rows: list[Row], second: Sweep, rows2: list[Row]) -> int:
+    """Fill each hop's bridged centre in from a second sweep whose hops sit elsewhere, matched
+    in level to the readings either side. How many centres were filled."""
+    if len(second.freqs) < 2:
+        return 0
+    centres2 = np.array([(lo + hi) / 2 for lo, hi, _, _ in rows2])
+    filled = 0
+    for lo, hi, step, vals in rows:
+        n = len(vals) // 2 * 2  # the repeated last bin dropped, as _assemble does
+        a, b = _dc_bins(n, step)
+        if a <= 0 or b >= n:
+            continue  # not bridged
+        centre = (lo + hi) / 2
+        f_lo, f_hi = centre + (a - n // 2) * step, centre + (b - 1 - n // 2) * step
+        if np.min(np.abs(centres2 - centre)) <= (b - a + 4) * step:
+            continue  # the second run's own centre is here too
+        if sw.in_gap(centre) or second.in_gap(f_lo) or second.in_gap(f_hi):
+            continue
+        i0 = int(np.searchsorted(sw.freqs, f_lo - step / 2))
+        i1 = int(np.searchsorted(sw.freqs, f_hi + step / 2))
+        if i1 <= i0:
+            continue
+        j = _nearest(second.freqs, sw.freqs[i0:i1])
+        if np.max(np.abs(second.freqs[j] - sw.freqs[i0:i1])) > step:
+            continue  # the second run doesn't reach it
+        side = np.r_[max(0, i0 - 4) : i0, i1 : min(len(sw.db), i1 + 4)]
+        offset = (float(np.median(sw.db[side] - second.db[_nearest(second.freqs, sw.freqs[side])]))
+                  if len(side) else 0.0)  # fmt: skip
+        sw.db[i0:i1] = second.db[j] + offset
+        filled += 1
+    return filled
 
 
 def _unlocked(sw: Sweep, err: list[str], rows: list[Row]) -> None:
@@ -373,10 +454,8 @@ def _assemble(rows: list[Row], start_hz: float, stop_hz: float, bin_hz: float,
         f = (lo + hi) / 2 + step * (np.arange(n) - n // 2)
         # rtl_power copies a neighbour into the centre bin, but the dongle's DC offset can
         # spread a few kHz around it at fine resolution: bridge those bins from either side.
-        # A carrier right on a hop's centre goes with them; a single pass measures each
-        # frequency once, and a second pass offset by half a hop would double the sweep time.
-        c, w = n // 2, round(3_000 / step)
-        a, b = c - w, c + w + 1
+        # A carrier right on a hop's centre goes with them, unless `sweep` fills it in.
+        a, b = _dc_bins(n, step)
         if a > 0 and b < n:
             v[a:b] = np.linspace(v[a - 1], v[b], b - a + 2)[1:-1]
         new = f > top  # neighbouring hops can overlap by a bin

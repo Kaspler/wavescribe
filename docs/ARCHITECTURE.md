@@ -431,7 +431,13 @@ it can be **gaps** (`Sweep.gaps`): bridged, and no signal or spur is taken there
 in the spectrum the page and `data/radio/scans/` get) that its whole range may be wrong. Messages
 before the gain is set are the tuner's filter calibration at start-up and don't count. The
 dongle's DC offset at each hop's centre is
-bridged over about 3 kHz from either side. The noise floor is a 20th-percentile filter over about
+bridged over about 3 kHz from either side, where a narrow carrier would be lost (always the same
+channels, since the hops fall in the same places). At 5 kHz bins or finer a second run, with the
+hops a quarter of a hop away and rtl_power's shortest interval (1 s), fills each centre in,
+matched in level to the readings either side. `rtl_power -c` can't make hops overlap instead: it
+only discards each hop's edges, and the hops still tile the range. With the fake's timing (0.5 s
+to open the dongle, 40 ms a hop) the second run adds about 2 s to a narrowband sweep (PMR446 2.7
+to 4.4 s, the airband 4.0 to 5.8 s); FM, at 10 kHz bins, has one run. The noise floor is a 20th-percentile filter over about
 2 MHz, taken within each hop, so a crowded band doesn't lift it and a hop that reads louder than
 its neighbours doesn't turn into a row of signals. Peaks 8 dB above it are signals. Each signal's
 centre is measured on a spectrum smoothed to a tenth of its band's channel, then snapped to the

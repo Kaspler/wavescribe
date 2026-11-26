@@ -211,10 +211,39 @@ def test_a_sweep_passes_the_dongles_frequency_correction(
     fake_power: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKE_POWER_STARTS", str(tmp_path / "starts.txt"))
-    S.sweep("000001", 446e6, 446.2e6, command=fake_power)
-    S.sweep("000001", 446e6, 446.2e6, command=fake_power, ppm=52)
-    plain, corrected = (tmp_path / "starts.txt").read_text().splitlines()
-    assert "-p" not in plain.split() and "-g 30 -p 52 -c 20%" in corrected
+    S.sweep("000001", 446e6, 446.2e6, command=fake_power, fill_centres=False)
+    S.sweep("000001", 446e6, 446.2e6, command=fake_power, ppm=52)  # 2.5 kHz bins: two runs
+    plain, *corrected = (tmp_path / "starts.txt").read_text().splitlines()
+    assert "-p" not in plain.split() and len(corrected) == 2
+    assert all("-g 30 -p 52 -c 20%" in line for line in corrected)
+
+
+def test_a_carrier_on_a_hops_centre_is_found(
+    fake_power: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The DC spike at a hop's centre is bridged over 3 kHz either side: a second run with the
+    hops a quarter of a hop away fills the centre in."""
+    monkeypatch.setenv("FAKE_POWER_SIGNALS", "446.09375:4:20")  # PMR446 channel 8
+    monkeypatch.setenv("FAKE_POWER_STARTS", str(tmp_path / "starts.txt"))
+    lo, hi = 445.99375e6, 446.19375e6  # one hop, centred on channel 8
+    single = S.sweep("000001", lo, hi, bin_hz=2_500, command=fake_power, fill_centres=False)
+    assert S.find_signals(single, "cept") == []  # lost in the bridge
+    sw = S.sweep("000001", lo, hi, bin_hz=2_500, command=fake_power)
+    [s] = S.find_signals(sw, "cept")
+    assert s.freq_hz == 446_093_750 and s.label == "PMR446 walkie-talkies, channel 8"
+    # Its own level, give or take the half bin by which the two runs' bins can differ.
+    assert abs(s.level_db + 20) < 3 and len(sw.db) == len(single.db)
+    starts = (tmp_path / "starts.txt").read_text().splitlines()
+    assert len(starts) == 3 and "-f 446043750:446243750:2500" in starts[2]
+    assert "-i 1 " in starts[2]  # the second run is short: it only fills the centres in
+    S.sweep("000001", 87.4e6, 108.1e6, bin_hz=10_000, command=fake_power)
+    assert len((tmp_path / "starts.txt").read_text().splitlines()) == 4  # FM: one run is enough
+    # Nine hops: an aircraft on the second one's centre, and nothing made up at the others.
+    monkeypatch.setenv("FAKE_POWER_SIGNALS", "121.163888:3:15")
+    air = S.sweep("000001", *AIRBAND, bin_hz=1_000, command=fake_power)
+    assert [s.freq_hz for s in S.find_signals(air, "cept")] == [121_166_667]  # its channel
+    monkeypatch.setenv("FAKE_POWER_SIGNALS", "")
+    assert S.find_signals(S.sweep("000001", *AIRBAND, command=fake_power), "cept") == []
 
 
 def test_a_busy_dongle_says_so(fake_power: str, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,9 +12,13 @@ Environment:
                         doesn't lock while it calibrates at start-up, on an unnamed hop, or for
                         that LO (an R820T's IF is 3.57 MHz): that hop shows a carrier that isn't
                         there
+    FAKE_POWER_TIMING   "open_s,hop_s": take as long as rtl_power would. It opens the dongle,
+                        then sweeps every hop again and again until the interval (-i, a whole
+                        number of seconds, at least 1) has passed, and prints when a pass ends
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -115,11 +119,16 @@ def main() -> int:
     if os.environ.get("FAKE_POWER_HANG"):
         time.sleep(3600)
     lo, hi, step = (int(x) for x in a.f.split(":"))
+    crop = float(a.c.rstrip("%")) / 100 if a.c else 0.0
+    if timing := os.environ.get("FAKE_POWER_TIMING"):
+        open_s, hop_s = (float(x) for x in timing.split(","))
+        hops = layout(lo, hi, step, crop)[0]
+        interval = max(1, round(float(a.i or 1)))
+        time.sleep(open_s + max(1, math.ceil(interval / (hops * hop_s))) * hops * hop_s)
     sigs = []
     for item in filter(None, os.environ.get("FAKE_POWER_SIGNALS", "").split(",")):
         mhz, khz, db = (float(x) for x in item.split(":"))
         sigs.append((mhz * 1e6, khz * 1e3, db))
-    crop = float(a.c.rstrip("%")) / 100 if a.c else 0.0
     los = tuple(int(x) for x in pll if x.isdigit())
     print("\n".join(rows(lo, hi, step, sigs, crop=crop, unlocked=los)))
     return 0

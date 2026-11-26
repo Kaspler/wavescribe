@@ -38,7 +38,10 @@ uv run wavescribe radio rds a 98.6            # live RDS from one FM station
 A scan works like this:
 
 1. `rtl_power` sweeps the range and gives one power spectrum. The resolution follows the band:
-   about a twentieth of an FM channel and a fifth of a narrow channel.
+   about a twentieth of an FM channel and a fifth of a narrow channel. The dongle sees a spike
+   at the centre of each 2 MHz it tunes, which hides whatever is right there; for narrow
+   channels a second, shorter sweep with the dongle tuned elsewhere fills those spots in (about
+   2 s more).
 2. Signals are the peaks a margin (8 dB by default) above the local noise floor. Each is snapped
    to its band's channel raster (100 kHz for FM, 8.33 kHz in the airband, the PMR446 channel
    list), and the band plan says what it is.
