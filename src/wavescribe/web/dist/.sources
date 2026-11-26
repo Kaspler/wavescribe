@@ -36,7 +36,7 @@ c9f892108fee7f3b53cb52fae758453950d601b8 frontend/src/manage/ListenPage.tsx
 a4e9673a1620658b6ca9ce00041d53b00aafc64b frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 e6e463d0748de8eed571e13d2fc63215ce52408b frontend/src/manage/Outputs.tsx
-7e3f54643b41a203a47294fecea2de9edc239289 frontend/src/manage/Radio.tsx
+3f2e82728842573dfd49385d5c7bd191de727fec frontend/src/manage/Radio.tsx
 3368043c8c0cccd281a01017c28aaa5b230bf8f5 frontend/src/manage/Receivers.tsx
 ba04af6b281a4ea93caf75b4dd36222fabefe25c frontend/src/manage/Scope.tsx
 3ecf640a8828d5ee0c624551616da2cb58046284 frontend/src/manage/Stations.tsx
@@ -44,7 +44,7 @@ ba04af6b281a4ea93caf75b4dd36222fabefe25c frontend/src/manage/Scope.tsx
 cbc4e89d76719e871cdba3a3fb83783e375c9c46 frontend/src/manage/api.ts
 446ddfdacffe9922dbe21c5273d810d186095ab9 frontend/src/manage/bands.ts
 7b2f5caa73f379769499bd801e8904fff96ec720 frontend/src/manage/dial.ts
-f6184b94f5dd2e20cf579e0a298feebd07c703eb frontend/src/manage/manage.css
+f159cc06b04ab5f7e059fef15c95b358cd232f77 frontend/src/manage/manage.css
 1a3aaaa1377e7ff3ccb5edc73d1e7958b527cb3a frontend/src/manage/tuner.tsx
 e9f857d188b5859ee3101d2a195f4ff47a23ea9a frontend/src/reading/Alerts.tsx
 c274c6f0ccc7ae37b8c61550332782590c28b15c frontend/src/reading/Ask.tsx

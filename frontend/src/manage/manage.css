@@ -405,3 +405,6 @@ tr.is-off td { color: var(--ink-3); }
 .dl-rx.is-dragging .dl-rx-win { border-color: var(--accent); background: var(--accent-tint); }
 .dl-rx.is-dragging .dl-rx-stem { background: var(--accent); }
 .dl-rx-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The first step, while nothing has been found: one sentence and one button above the dial. */
+.dl-first { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); margin-bottom: var(--s6); }
+.dl-first-line { max-width: 60ch; font-size: var(--t-md); color: var(--ink); text-wrap: pretty; }

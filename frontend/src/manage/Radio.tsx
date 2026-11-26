@@ -91,6 +91,9 @@ export function useRadio() {
 export type RadioState = ReturnType<typeof useRadio>;
 
 /** What a first scan sweeps: broadcast FM, whose band differs by region (fm, fm-americas…). */
+/** After a first band, the next worth a try, in order; a region's plan has some of them. */
+const NEXT_BANDS = ["airband", "airband-25", "marine", "weather-us", "pmr446", "frs", "2m", "2m-wide", "70cm", "70cm-wide", "cb"];
+
 const fmBand = (v: Any): Any | undefined => v.bands.find((b: Any) => b.mode === "wfm" && b.privacy === "broadcast" && b.tunable);
 
 /** The receiver a scan starts on: the one that scanned last (most likely the one with an antenna;
@@ -206,9 +209,11 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   ];
   const pause = !!rx?.busy.length;
   const scanWhat = chosen && kindOf(chosen) === "text" ? "Find stations here" : chosen ? `Scan ${bandWords(chosen).name}` : band === "all" ? "Scan everything" : "Scan this range";
-  const start = async (on = device) => {
-    const body: Any = { device: on, rds, watch_min: +watch, pause: !!v.receivers.find((r: Any) => r.id === on)?.busy.length };
-    if (band === "custom") Object.assign(body, { start_mhz: +lo, stop_mhz: +hi });
+  /** Scans on receiver `on`: the band chosen, or `only` in one sweep. */
+  const start = async (on = device, only?: string) => {
+    const body: Any = { device: on, rds, watch_min: only ? 0 : +watch, pause: !!v.receivers.find((r: Any) => r.id === on)?.busy.length };
+    if (only) body.band = only;
+    else if (band === "custom") Object.assign(body, { start_mhz: +lo, stop_mhz: +hi });
     else body.band = band;
     const { scan } = await post("/radio/scan", body);
     onJob(scan);
@@ -258,6 +263,13 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
     const onIt = (r: RxStatus) => bandOfWindow(v.bands, r.lo, r.hi)?.id === id;
     if (me && !onIt(me)) { const there = rxs.find(onIt); if (there) setDevice(there.id); }
   };
+  // With nothing found yet, one way in: FM, the easiest to hear, on a free receiver.
+  const fresh = v.receivers.length > 0 && !!fm && !v.heard.length && !scanJob;
+  const firstRx = v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0];
+  // Once a band has finds, the next one worth a try in this region, quietly.
+  const next = chosen && heardIn(v.heard, chosen).length > 0
+    ? NEXT_BANDS.map((id) => v.bands.find((b: Any) => b.id === id) as Band | undefined).find((b) => b && b.tunable && b.id !== chosen.id && !heardIn(v.heard, b).length)
+    : undefined;
   const inBand: Signal[] = onTheDial && chosen ? (sweeping ? sweeping.signals || [] : heardIn(v.heard, chosen)).slice().sort((a: Any, b: Any) => b.snr_db - a.snr_db) : [];
   const actions = !v.receivers.length ? (
     <>
@@ -273,7 +285,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
         {running && !job.learn_spurs ? (
           <ActButton icon="stop" run={async () => onJob((await del("/radio/scan")).scan)}>Stop scanning</ActButton>
         ) : (chosen ? kindOf(chosen) === "text" : true) && (
-          <ActButton variant="primary" icon="search" disabled={!rx || running || !v.tools.rtl_power || (band === "custom" && !(+lo < +hi))}
+          <ActButton variant={fresh ? "secondary" : "primary"} icon="search" disabled={!rx || running || !v.tools.rtl_power || (band === "custom" && !(+lo < +hi))}
                      run={() => start()}>
             {pause ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
           </ActButton>
@@ -292,6 +304,11 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
           <span className="m-hint rd-inline">Receiver {rxName(rx.id)} is running {rx.busy.join(", ")}. The scan pauses {rx.busy.length === 1 ? "it" : "them"} and starts {rx.busy.length === 1 ? "it" : "them"} again when it ends.</span>
         )}
       </div>
+      {next && !running && (
+        <p className="m-hint">
+          Next, try <button type="button" className="rd-link" onClick={() => pick(next.id)}>{bandWords(next).name}</button>: {bandWords(next).what.replace(/[:.].*$/, "").replace(/^\w/, (c) => c.toLowerCase())}.
+        </p>
+      )}
       {moving && (
         <div className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q">
           <p id="dl-move-q" className="m-line">
@@ -317,6 +334,17 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   return (
     <Section id="rd-find" title="The dial"
              description="Everything a receiver can tune, from 24 to 1766 MHz. Choose a band to see what it is and find what's on the air there; what's found is kept under Heard here.">
+      {fresh && (
+        <div className="dl-first">
+          <p className="dl-first-line">
+            {v.receivers.length === 1 ? "One receiver" : `${v.receivers.length} receivers`}, nothing found yet. Start with FM radio: it is the easiest to hear.
+          </p>
+          <ActButton variant="primary" icon="search" disabled={!v.tools.rtl_power}
+                     run={async () => { pick(fm.id); setDevice(firstRx.id); await start(firstRx.id, fm.id); }}>
+            Find FM stations with Receiver {rxName(firstRx.id)}
+          </ActButton>
+        </div>
+      )}
       <DialBar bands={v.bands} heard={v.heard} chosen={onTheDial ? band : null} onChoose={pick}
                says={(b) => rxs.filter((r) => bandOfWindow(v.bands, r.lo, r.hi)?.id === b.id).map((r) => `Receiver ${rxName(r.id)} is here`).join(", ")}
                overlay={(width, scale) => v.receivers.length > 0 && (
