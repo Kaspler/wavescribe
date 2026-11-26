@@ -85,7 +85,14 @@ translation thread loads it on its first job and unloads it after 15 idle minute
 shared translator serves everything else. A station that should be transcribed but
 whose models aren't downloaded plays without text meanwhile (`App.listen_only`, with the reason;
 the pipeline gets a copy with `transcribe` off); `App.models_changed()`, called when a page
-download finishes, re-plans those and switches a running one to transcribing. A station whose
+download finishes, re-plans those and switches a running one to transcribing. The page can also
+start a station listen-only for one run, without changing its saved mode:
+`POST /api/manage/stations/<id>/start` with `{"listen_only": true}` (`App.listen_only_run`, a
+copy with `transcribe` off again). It holds through edits, retunes and scans that pause the
+station; stopping the station, starting it again without the flag (also while it runs: it
+switches back in place), or the next `serve` returns it to its saved mode. The station's
+`listen_only_run` in `/api/state` and `/api/manage/stations` says so; `transcribe` stays the
+saved mode. A remote station refuses it (it has no audio). A station whose
 translator lacks one of its translation languages (MADLAD has a fixed list) runs all the same:
 it is written down, alerts on its own words and is translated into the rest, while
 `App.untranslated` names what is missing (`App._check_translations()`, after every change of a

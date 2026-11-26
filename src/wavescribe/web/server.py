@@ -279,6 +279,8 @@ class WebHub:
                         list(s.translation_targets) if self.plan.translator_for(s) else []
                     ),
                     "transcribe": s.transcribe or bool(s.remote),
+                    # Started listen-only for this run; ``transcribe`` is its saved mode.
+                    "listen_only_run": s.id in getattr(self.app, "listen_only_run", ()),
                     "priority": s.priority,
                     "available": s.id not in self.unavailable,
                     "reason": self.unavailable.get(s.id),

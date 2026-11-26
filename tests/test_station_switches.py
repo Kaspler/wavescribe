@@ -210,6 +210,62 @@ def test_the_page_switches_a_running_station_to_listen_only(tmp_path: Path) -> N
         node.close()
 
 
+def test_a_station_started_listen_only_keeps_its_saved_mode(tmp_path: Path) -> None:
+    """The page can start a station just to hear it: nothing is written down this run, its
+    saved mode stays, and a normal start (or the next serve) goes back to that mode."""
+
+    class StoppableSource(SlowNowSource):  # keeps running until it is stopped
+        closed = False
+
+        def __iter__(self):
+            for chunk in super().__iter__():
+                if self.closed:
+                    return
+                yield chunk
+
+        def close(self) -> None:
+            self.closed = True
+
+    audio = np.concatenate([silence(0.5), tone(2), silence(1)] * 30)
+    app = make_app(tmp_path, audio=audio)
+    app.pipeline._source_factory = lambda st: StoppableSource(st.id, audio)
+    node = Running(app)
+
+    def view() -> dict:
+        return next(v for v in app.stations_view() if v["id"] == "a")
+
+    try:
+        assert node.call("POST", "/api/manage/stations/a/start", {"listen_only": True}) == (
+            200, {"ok": True})  # fmt: skip
+        assert app.pipeline._live["a"].station.transcribe is False
+        assert view()["transcribe"] and view()["listen_only_run"] and view()["running"]
+        assert app.config.get("a").transcribe and not app.settings.get("overrides")
+        state = node.call("GET", "/api/state")[1]
+        a = next(s for s in state["stations"] if s["id"] == "a")
+        assert a["transcribe"] and a["listen_only_run"]
+        app.update_station("a", {"name": "Rádio A2"})  # an edit doesn't end it
+        assert app.pipeline._live["a"].station.transcribe is False
+
+        # Started again without it, while it runs: back to its saved mode, same audio.
+        assert node.call("POST", "/api/manage/stations/a/start")[0] == 200
+        assert app.pipeline._live["a"].station.transcribe is True
+        assert not view()["listen_only_run"]
+
+        # Stopped, then started normally: the listen-only start is forgotten.
+        node.call("POST", "/api/manage/stations/a/start", {"listen_only": True})
+        node.call("POST", "/api/manage/stations/a/stop")
+        assert not view()["listen_only_run"]
+        wait_for(lambda: "a" not in app.pipeline._live)
+        node.call("POST", "/api/manage/stations/a/start", {})
+        assert app.pipeline._live["a"].station.transcribe is True
+        assert (app.settings.get("run") or {}).get("stations") == ["a"]
+
+        status, body = node.call("POST", "/api/manage/stations/a/start", {"listen_only": "yes"})
+        assert status == 400 and "true or false" in body["error"]
+    finally:
+        node.close()
+
+
 def test_without_models_stations_play_and_get_text_once_downloaded(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     audio = np.concatenate([silence(0.5), tone(2), silence(1)] * 30)

@@ -285,8 +285,8 @@ class RadioService:
         here = {s.id for s in self.app.config.stations}
         running = set(self.app.running())
         for sid in paused["stations"]:
-            if sid in here and sid not in running:
-                self.app.pipeline.add_station(self.app.config.get(sid))
+            if sid in here and sid not in running:  # as they ran: listen-only stays so
+                self.app.pipeline.add_station(self.app._runtime(self.app.config.get(sid)))
         if paused["monitor"]:
             with contextlib.suppress(AdminError):
                 monitor(self.app, paused["device"], True)

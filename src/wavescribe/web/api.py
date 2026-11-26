@@ -117,7 +117,13 @@ def _delete_station(app: App, m, q, b) -> Any:
 
 @route("POST", "/stations/(?P<id>[a-z0-9_-]+)/(?P<action>start|stop)")
 def _start_stop(app: App, m, q, b) -> Any:
-    (app.start_station if m["action"] == "start" else app.stop_station)(m["id"])
+    if m["action"] == "stop":
+        app.stop_station(m["id"])
+        return {"ok": True}
+    listen_only = b.get("listen_only", False) if isinstance(b, dict) else False
+    if not isinstance(listen_only, bool):
+        raise ChangeError("listen_only must be true or false")
+    app.start_station(m["id"], listen_only=listen_only)  # only for this run; the mode stays
     return {"ok": True}
 
 

@@ -178,6 +178,9 @@ class App:
         # Stations to be written down whose models aren't downloaded yet: they play without
         # text meanwhile, and the reason says what to download. A new install starts so.
         self.listen_only: dict[str, str] = {sid: _plays_meanwhile(r) for sid, r in missing.items()}
+        # Stations started listen-only for this run (the page's start with listen_only): the
+        # saved mode is untouched, and the next start, or the next serve, goes back to it.
+        self.listen_only_run: set[str] = set()
         # Translation languages a station's translator lacks (MADLAD has a fixed list): it
         # still runs and alerts, translated into the rest, and its reason names them.
         self.untranslated: dict[str, list[str]] = {}
@@ -333,8 +336,10 @@ class App:
         return not s.disabled and sid not in self.unavailable
 
     def _runtime(self, s: Station) -> Station:
-        """The station as the pipeline runs it: without text while its models are missing."""
-        return replace(s, transcribe=False) if s.id in self.listen_only else s
+        """The station as the pipeline runs it: without text while its models are missing, or
+        while it was started listen-only for this run."""
+        off = s.id in self.listen_only or s.id in self.listen_only_run
+        return replace(s, transcribe=False) if off else s
 
     def _mark_unavailable(self) -> None:
         page = {s.get("id"): s for s in self.settings.get("station") or []}
@@ -397,6 +402,7 @@ class App:
                     _untranslated(self._translator_id(s), self.untranslated[s.id])
                     if s.id in self.untranslated else None),
                 "listen_only": s.id in self.listen_only,
+                "listen_only_run": s.id in self.listen_only_run,
                 # Translation languages its translator lacks; it runs and translates the rest.
                 "translate_to_missing": self.untranslated.get(s.id, []),
                 "privacy": s.privacy,
@@ -530,7 +536,9 @@ class App:
         self.pipeline.forget_station(sid)
         self._reload()
 
-    def start_station(self, sid: str) -> None:
+    def start_station(self, sid: str, *, listen_only: bool = False) -> None:
+        """Start a station in its saved mode, or with ``listen_only`` just for this run: it
+        plays and isn't written down until it is stopped or started again without it."""
         station = self.config.get(sid)
         if sid in self.unavailable:
             raise ChangeError(self.unavailable[sid])
@@ -539,12 +547,19 @@ class App:
         if held:
             raise ChangeError(held)
         if station.remote:
+            if listen_only:
+                raise ChangeError(f"{station.name} is text from another Wavescribe: no audio")
             self._start_follower(station)
         else:
-            self.pipeline.add_station(self._runtime(station))
+            (self.listen_only_run.add if listen_only else self.listen_only_run.discard)(sid)
+            if sid in self.running():  # on already: switch it to the mode asked for
+                self.pipeline.update_station(self._runtime(station))
+            else:
+                self.pipeline.add_station(self._runtime(station))
         self._remember_running(sid, True)
 
     def stop_station(self, sid: str) -> None:
+        self.listen_only_run.discard(sid)
         follower = self.followers.pop(sid, None)
         if follower is not None:
             follower.close()
@@ -675,7 +690,8 @@ class App:
                 self.plan.asr.pop(s.id, None)  # plan it afresh
                 planned = self._replan(s, None)
                 if waiting and planned is not None and s.id in self.running():
-                    self.pipeline.update_station(s, planned)  # it plays already: now with text
+                    # It plays already: now with text (unless it was started listen-only).
+                    self.pipeline.update_station(self._runtime(s), planned)
             self._check_translations()
             self._mark_unavailable()
         event(log, "models_changed", model=model_id, waiting=len(self.listen_only))
@@ -927,7 +943,7 @@ class App:
                 self.listen_only.pop(s.id, None)
                 if self.plan.asr.get(s.id, (None,))[0] != planned[0]:
                     self.plan.asr[s.id] = planned
-                    self.pipeline.update_station(s, planned)
+                    self.pipeline.update_station(self._runtime(s), planned)
             self._mark_unavailable()
         elif capability == "translate" and self.translate and not self.mt_model:
             try:
