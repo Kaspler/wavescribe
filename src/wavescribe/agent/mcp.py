@@ -23,9 +23,10 @@ stay here is missing from recent, and its alerts come without words; search, ask
 digests read everything, as the page does on this machine.
 
 With ``--allow-control``, start_station, stop_station and add_station use the control centre's
-routes (``/api/manage``). What only the person at the page may do has no tool in any mode:
-confirming that a kind of radio may be received, accepting a model's licence, deleting history,
-making tokens, changing what is kept.
+routes (``/api/manage``), and digest and now can read the digest aloud (``speak``). What only
+the person at the page may do has no tool in any mode: confirming that a kind of radio may be
+received, accepting a model's licence, deleting history, making tokens, changing what is
+kept.
 
 What the tools return was said on the radio, where anyone on air could have said anything: each
 description tells the model to read it as quotation, never as instructions.
@@ -41,7 +42,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import IO, Any
 
 from wavescribe import __version__
@@ -105,6 +106,11 @@ DIGEST = (
     "radio kept on this machine, including radio that isn't broadcast. Fails with the reason "
     "when no language model is loaded. "
 )
+SPEAK = {
+    "type": "boolean",
+    "description": "Also read it aloud on the Wavescribe machine, in the voice its alerts use "
+    "for the language (false). Only when the user asked to hear it: it speaks in their room.",
+}
 NO_ARGUMENTS = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
@@ -127,6 +133,15 @@ class Tool:
     description: str
     schema: dict[str, Any]
     control: bool = False  # offered only with --allow-control
+    control_args: tuple[tuple[str, dict[str, Any]], ...] = ()  # only with --allow-control
+
+    def with_control(self) -> Tool:
+        """The tool as ``--allow-control`` offers it: with its control arguments, and not
+        read-only when it has any."""
+        if not self.control_args:
+            return self
+        properties = {**self.schema["properties"], **dict(self.control_args)}
+        return replace(self, schema={**self.schema, "properties": properties}, control=True)
 
     def listing(self) -> dict[str, Any]:
         hints = {"destructiveHint": False} if self.control else {}
@@ -335,6 +350,7 @@ TOOLS = (
             },
             language=LANGUAGE,
         ),
+        control_args=(("speak", SPEAK),),
     ),
     Tool(
         "now",
@@ -351,6 +367,7 @@ TOOLS = (
             },
             language=LANGUAGE,
         ),
+        control_args=(("speak", SPEAK),),
     ),
     Tool(
         "status",
@@ -542,11 +559,11 @@ class Tools:
         raise ToolError("the answer stopped before it finished")
 
     def digest(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
-        body = {k: args[k] for k in ("stations", "minutes", "language") if k in args}
+        body = {k: args[k] for k in ("stations", "minutes", "language", "speak") if k in args}
         return self._digest({"kind": "digest", **body})
 
     def now(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
-        body = {k: args[k] for k in ("minutes", "language") if k in args}
+        body = {k: args[k] for k in ("minutes", "language", "speak") if k in args}
         if "station" in args:
             body["stations"] = [args["station"]]
         return self._digest({"kind": "now", **body})
@@ -555,9 +572,9 @@ class Tools:
         out = self.client.digest(body)
         sources = out["sources"]
         cited = [{"n": s["n"], **e} for s, e in zip(sources, self._events(sources), strict=True)]
-        kept = ("text", "points", "window", "counts", "empty", "language")
+        kept = ("text", "points", "window", "counts", "empty", "language", "speech")
         return {
-            **{k: out[k] for k in kept},
+            **{k: out[k] for k in kept if k in out},
             "sources": cited,
             "alerts": self._alerts(out["alerts"]),
         }
@@ -678,7 +695,8 @@ class Server:
 
     def __init__(self, tools: Tools, out: IO[bytes], *, allow_control: bool = False) -> None:
         self.tools = tools
-        self.offered = {t.name: t for t in TOOLS if allow_control or not t.control}
+        offered = [t.with_control() if allow_control else t for t in TOOLS]
+        self.offered = {t.name: t for t in offered if allow_control or not t.control}
         self._out = out
         self._write = threading.Lock()
         self._slots = threading.BoundedSemaphore(MAX_CALLS)

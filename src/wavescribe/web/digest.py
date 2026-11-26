@@ -9,6 +9,10 @@ It reads only, so other machines (``serve --lan``) may ask too, and get a digest
 may leave this machine; like asking, it needs the ``X-Wavescribe`` header, so that another
 website can't spend the model. The answer comes once the model is done, which can take a
 few minutes while live translation goes first.
+
+``"speak": true`` also reads it aloud here, in the alerts' voice for its language; the answer
+then carries ``speech``: ``{"started": true}``, or ``{"started": false, "error": why}``. Only
+this machine may ask for that: the speakers are in the room of whoever runs Wavescribe.
 """
 
 from __future__ import annotations
@@ -54,6 +58,16 @@ def handle(h: Handler) -> None:
         )
         return
     exports = h._exports()
+    speak = body.get("speak", False)
+    if not isinstance(speak, bool):
+        h._json({"error": "speak is true or false"}, HTTPStatus.BAD_REQUEST)
+        return
+    if speak and exports is not None:
+        h._json(
+            {"error": "only the Wavescribe machine itself can have a digest read aloud"},
+            HTTPStatus.FORBIDDEN,
+        )
+        return
     try:
         request = hub.digester.request(body, exports)
         digest = hub.digester.run(request, exports)
@@ -66,4 +80,11 @@ def handle(h: Handler) -> None:
     except Failed as e:
         h._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
-        h._json(digest.payload())
+        out = digest.payload()
+        if speak:
+            out["speech"] = (
+                hub.speaker.start(digest)
+                if hub.speaker is not None
+                else {"started": False, "error": "reading aloud isn't set up in this run"}
+            )
+        h._json(out)

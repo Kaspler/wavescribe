@@ -146,7 +146,7 @@ def parse_alerts(
     disabled: tuple[str, ...] = (),
 ) -> AlertConfig:
     where = str(path or "alerts")
-    unknown = set(raw) - {"delivery", "speak", "rule", "actions"}
+    unknown = set(raw) - {"delivery", "speak", "rule", "actions", "digest"}  # digest/schedule.py
     if unknown:
         raise ConfigError(f"{where}: unknown top-level keys {sorted(unknown)}")
     rule = raw.get("rule", [])

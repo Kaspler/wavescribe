@@ -42,6 +42,8 @@ def body(args: argparse.Namespace) -> dict[str, Any]:
         out["minutes"] = args.minutes
     if args.language:
         out["language"] = args.language
+    if args.speak:
+        out["speak"] = True
     return out
 
 

@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from wavescribe.app import App
     from wavescribe.ask import Asker
     from wavescribe.digest import Digester
+    from wavescribe.digest.speech import Speaker
     from wavescribe.radio.bandplan import Exports
     from wavescribe.store import Store
 
@@ -134,6 +135,7 @@ class WebHub:
         self.app: App | None = None  # set by App: page changes, outputs, feed tokens
         self.asker: Asker | None = None
         self.digester: Digester | None = None
+        self.speaker: Speaker | None = None  # reads digests aloud
         self.final_hooks: list[Any] = []  # called with each finished utterance's payload
         self.counts: dict[str, int] = {}  # finished utterances per station since start
         self.asks = threading.BoundedSemaphore(MAX_ASKS)

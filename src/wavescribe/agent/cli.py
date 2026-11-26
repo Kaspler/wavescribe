@@ -46,6 +46,10 @@ def cmd_digest(args: argparse.Namespace) -> int:
         print(f"wavescribe: {e}", file=sys.stderr)
         return 1
     print(to_json(out) if args.json else render(out))
+    speech = out.get("speech") or {"started": True}
+    if not speech["started"]:
+        print(f"wavescribe: not read aloud: {speech['error']}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -133,6 +137,11 @@ def add_parser(sub: Any) -> None:
         action="store_true",
         help="what one station is on about now: the one --stations names, else the station "
         "heard last",
+    )
+    p.add_argument(
+        "--speak",
+        action="store_true",
+        help="also read it aloud on the Wavescribe machine, in the alerts' voice for the language",
     )
     p.add_argument("--json", action="store_true", help="the server's answer, as one line of JSON")
     p.set_defaults(func=cmd_digest)

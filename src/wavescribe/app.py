@@ -230,6 +230,10 @@ class App:
         )
         self.hub.final_hooks.append(self.outputs.on_utterance)
 
+        from wavescribe.alerts.actions import platform_actions
+        from wavescribe.digest.speech import Speech
+
+        self.speech = Speech(platform_actions())  # alerts and digests take turns to speak
         self.alerter: Alerter | None = None
         if alerts_enabled:
             self.alerter = self._make_alerter()
@@ -282,6 +286,7 @@ class App:
         if store is not None:
             from wavescribe.ask import Asker
             from wavescribe.digest import DIGEST_PRIORITY, Digester
+            from wavescribe.digest.speech import Speaker
 
             self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
             self.hub.asker = self.asker
@@ -289,6 +294,8 @@ class App:
                 self.pipeline.request_llm, name="digest", priority=DIGEST_PRIORITY
             )
             self.hub.digester = Digester(store, lambda: self.config.stations, llm)
+            self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
+        self.digests = self._digest_schedule()
         from wavescribe.downloads import Downloads
 
         self.downloads = Downloads(registry, on_done=self.models_changed)
@@ -311,6 +318,8 @@ class App:
         """Run until Ctrl-C (the pipeline's loop)."""
         for sid in self._starting_remote:
             self._start_follower(self.config.get(sid))
+        if self.digests is not None:
+            self.digests.start()
         try:
             self.pipeline.run(until_idle=False)
         finally:
@@ -1104,8 +1113,29 @@ class App:
         from wavescribe.alerts import Alerter
 
         config = self._alert_config()
-        return Alerter(config, store=self.store,
+        return Alerter(config, store=self.store, actions=self.speech,
                        station_names={s.id: s.name for s in self.config.stations})  # fmt: skip
+
+    def _alert_voices(self) -> dict[str, Any]:
+        return dict(self.alerter.config.voices) if self.alerter is not None else {}
+
+    def _digest_schedule(self):  # -> Scheduler | None
+        """``[digest]`` in alerts.toml: digests on a schedule, spoken in the alerts' voices."""
+        from wavescribe.digest.schedule import scheduler
+
+        if self.alerter is None or self.hub.digester is None or self.hub.speaker is None:
+            return None
+        raw, path = self._alert_raw()
+        return scheduler(
+            raw.get("digest"),
+            str(path),
+            digester=self.hub.digester,
+            speaker=self.hub.speaker,
+            voices=self.alerter.config.voices,
+            language=self.alerter.config.notify_language,
+            exports=self.hub.exports,
+            closed=self.hub._closed,
+        )
 
     def _llm_rule_list(self) -> list[LlmRule]:
         return list(self.alerter.config.rules.llm_rules) if self.alerter else []

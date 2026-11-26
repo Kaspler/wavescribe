@@ -111,7 +111,7 @@ _POINT = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")  # "- ", also "
 _CITATION = re.compile(r"\[\s*(\d+(?:\s*[,;]\s*\d+)*)\s*\]")
 _NONE = re.compile(r"^\W*NONE\W*:\s*(.+\S)\s*$", re.M)
 _GROUP = re.compile(r"\d+(?:\s*\+\s*\d+)*")  # "3+9" in "3+9, 7, 1"
-_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")  # BCP-47, loosely
+LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")  # BCP-47, loosely
 
 
 class RequestError(ValueError):
@@ -334,7 +334,7 @@ class Digester:
                 raise RequestError(f"minutes must be a number from 1 to {longest:g}")
             since = now - minutes * 60
         language = body.get("language") or self.language()
-        if not isinstance(language, str) or not _TAG.fullmatch(language):
+        if not isinstance(language, str) or not LANGUAGE_TAG.fullmatch(language):
             raise RequestError("language must be a BCP-47 tag, e.g. en or pt-PT")
         return Request(kind, tuple(stations), float(since), now, language)
 
