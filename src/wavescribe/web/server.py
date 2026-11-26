@@ -455,6 +455,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _admit(self) -> bool:
         """Whether to serve this request at all; the reason was sent if not."""
+        if not self._is_local():  # e.g. forwarded by a proxy on this machine: counted from now
+            self.server.count_remote(self.request)
         if self.server.over_limit(self.request):
             self._busy("too many connections from other machines; try again in a moment")
             return False
@@ -990,6 +992,13 @@ class WebServer(ThreadingHTTPServer):
         with self._remote_lock:
             self._remote.pop(request, None)
         super().shutdown_request(request)
+
+    def count_remote(self, request: socket.socket) -> None:
+        """Count a connection from this machine's address as another machine's, once a request
+        on it shows it is (a proxy here forwarded it): past the limit, it is told to come back."""
+        with self._remote_lock:
+            if request not in self._remote:
+                self._remote[request] = len(self._remote) >= MAX_REMOTE_CONNECTIONS
 
     def over_limit(self, request: socket.socket) -> bool:
         """Whether this connection is one of those past the limit for other machines."""

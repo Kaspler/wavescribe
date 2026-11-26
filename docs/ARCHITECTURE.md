@@ -160,7 +160,8 @@ Other machines get at most 64 connections at once. Every request has 30 s to arr
 slowly its bytes come (a body gets more by its size), and a read or write that stalls for 30 s
 ends the connection, so a stuck or hostile device can't hold the server's threads.
 A request that a proxy forwarded (`Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `Via`), or any
-request under `serve --behind-proxy`, counts as another machine's. Every response carries a
+request under `serve --behind-proxy`, counts as another machine's, for those limits too (a
+proxy on this machine connects from its address). Every response carries a
 Content-Security-Policy (`default-src 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`
 and `Referrer-Policy: no-referrer`.
 Before loading models, `serve` checks that no other program holds the port on 127.0.0.1 (macOS

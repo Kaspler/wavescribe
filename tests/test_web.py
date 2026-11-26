@@ -341,6 +341,25 @@ def test_other_machines_get_only_so_many_connections(monkeypatch) -> None:
             s.shutdown()
 
 
+def test_requests_a_proxy_here_forwards_count_against_the_cap(monkeypatch) -> None:
+    from wavescribe.web import server as web
+
+    monkeypatch.setattr(web, "MAX_REMOTE_CONNECTIONS", 1)
+    server, hub = idle_server()  # no --behind-proxy: the proxy's address is this machine's
+    forwarded = {"X-Forwarded-For": "203.0.113.9"}
+    try:
+        conn = http.client.HTTPConnection(*server.server_address, timeout=10)
+        conn.request("GET", "/api/events", headers=forwarded)  # holds its connection
+        assert conn.getresponse().status == 200
+        status, body = request(server, "GET", "/api/state", forwarded)
+        assert status == 503 and b"too many connections" in body
+        assert request(server, "GET", "/api/state")[0] == 200  # this machine is never counted
+        conn.close()
+    finally:
+        hub.close()
+        server.shutdown()
+
+
 def test_other_machines_get_only_so_many_live_streams(monkeypatch) -> None:
     from wavescribe.web import server as web
 
