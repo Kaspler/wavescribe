@@ -305,20 +305,40 @@ doesn't keep the Mac awake: start it with `caffeinate -i uv run wavescribe serve
 - Settings → **Health** shows memory, processor and graphics load, battery, disk, and how far
   behind each station is. If the Mac struggles, translate fewer stations: translation is the
   heaviest part.
+- **Check everything** with `uv run wavescribe doctor` ([Troubleshooting](#troubleshooting)).
 - **Update:** stop Wavescribe, then `git pull` (or download the ZIP again) and `uv sync`. With
   the service, run `uv run wavescribe service install` again afterwards to restart it on the
   new version.
 
 ## Troubleshooting
 
+**Start with the self-check:**
+
+```sh
+uv run wavescribe doctor
+```
+
+It checks what Wavescribe needs on this Mac: ffmpeg and the radio tools, Python and its
+libraries, the models your stations and languages need, the receivers plugged in, free disk
+against what Wavescribe may keep, your settings files, whether the page's port is free, the
+voices for spoken alerts, and the background service. Each line says **ok**, **warn** (works,
+but worth knowing), **FAIL** (won't work) or **skip** (doesn't apply), and each problem comes
+with what to do next. It works offline, changes nothing and never opens a receiver, so it's
+safe to run while Wavescribe is running.
+
+- With the background service installed, it checks the service's options. Give it serve's
+  options to check others: `uv run wavescribe doctor --config config/stations.world.example.toml`.
+- `--json` prints one JSON object per line (each check, then a summary) for scripts and other
+  programs. The exit code is 1 when something is broken, 0 otherwise.
+
 | Problem | What to do |
 |---|---|
-| The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. If the port is taken, start it with another, e.g. `--port 8780`. |
-| The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that, then `uv run wavescribe service install` again. |
+| The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. `uv run wavescribe doctor` says whether another program holds the port; if so, start it with another, e.g. `--port 8780`. |
+| The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that (`uv run wavescribe doctor` helps), then `uv run wavescribe service install` again. |
 | A station plays without text and says it's waiting for a model | Download it under Settings → **Languages and models**; the text starts when it finishes. |
 | No sound | Press **▶** beside the station, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
 | Nonsense text, or the wrong language | Check the station's language under Settings → **Stations**. Some songs still get through the music filter; heavy accents, phone-ins and weak signals transcribe worse. |
-| The dongle isn't found | Allow it in System Settings → Privacy & Security → *Allow accessories to connect*, then unplug it and plug it in again. `rtl_test` in the Terminal should list it. |
+| The dongle isn't found | Allow it in System Settings → Privacy & Security → *Allow accessories to connect*, then unplug it and plug it in again. `uv run wavescribe doctor` lists the dongles macOS sees, with their serials, and says whether each receiver in your settings is plugged in. |
 | The dongle is found but busy | Only one program can use a dongle at a time. Close other radio programs (GQRX, SDR++), and stop any `rtl_fm` or `rtl_power` left running. |
 | A scan finds few stations | Extend the antenna to about 75 cm, stand it upright near a window and away from the Mac. |
 | A scan finds stations everywhere, or they sound distorted | The gain is too high: lower it under Settings → **Receivers**. |

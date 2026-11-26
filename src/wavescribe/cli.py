@@ -815,10 +815,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_radio_parser(sub, add_store_args, add_alert_args)
 
-    # Takes serve's options, so it comes after it.
+    # Both take serve's options, so they come after it.
+    from wavescribe.doctor import add_parser as add_doctor_parser
     from wavescribe.service import add_parser as add_service_parser
 
     add_service_parser(sub)
+    add_doctor_parser(sub)
 
     p = sub.add_parser("search", help="search everything heard so far, in any language")
     p.add_argument("query", nargs="+", help="words to find (accents and case don't matter)")

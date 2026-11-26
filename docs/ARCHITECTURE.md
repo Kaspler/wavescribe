@@ -358,6 +358,28 @@ folder, at login and at install:
 - Every launchctl call (`print`, `enable`, `bootstrap`, `bootout` in `gui/<uid>`) goes through
   the `Launchd` interface; the tests use a fake and a temporary home.
 
+**Self-check** (`doctor.py`, `wavescribe doctor`). Read-only and offline; each finding is ok,
+warn, fail (exit code 1) or skip, with a next step for each problem, as text or JSON lines:
+
+- tools: ffmpeg runs `-version`; rtl_sdr and rtl_power are only checked on disk (their
+  Homebrew version from the Cellar path), since running one opens a dongle;
+- Python, the environment and the libraries Wavescribe requires (package metadata, no imports);
+- the stations, page settings and alerts through the loaders serve uses, so the errors are
+  serve's;
+- the models each configured station and language needs, resolved like the pipeline's plan
+  against the registry and the local caches, with the command that downloads or accepts each;
+- receivers: RTL2832U dongles from macOS's USB registry (`ioreg -p IOUSB`, never opened) against
+  each `[[device]]` serial; duplicate serials are flagged;
+- free disk against the retention limits (speech audio cap, text at about 7.75 MB a day per
+  station from the soak, models still to download), and whether `data/` is writable;
+- the port: its listener from `lsof` and `ps` (this machine's service, another Wavescribe, or
+  another program), then serve's own probe bind;
+- the voices of spoken alerts from `say -v ?`;
+- the background service (`launchctl print`) and sleep (`pmset -g`).
+
+Commands go through a `Host` interface whose real implementation refuses the rtl tools. With
+no options given, doctor checks the installed service's.
+
 ### Radio: scanning, narrowband channels and RDS
 
 [RADIO.md](RADIO.md) is the user's guide; this is how it works.
@@ -606,4 +628,5 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Privacy classes from the band plan, enforced in the store, feed, outputs and alerts; the user sets what is kept** | Laws on radio that isn't broadcast differ by country, and Wavescribe can't know which apply. The defaults are cautious (private channels live only; airband, marine and amateur text kept a few days; no audio, no words exported); any frequency can be tuned once the user confirms they may receive it, and what is kept is theirs to set and their responsibility (README, RADIO.md). There is no digital decoder and no decryption | A default turns out wrong for most users |
 | **The station list comes from your own scans**, not a downloaded register | National registers and community lists mostly forbid redistribution or derived works (LICENSING.md, *Radio data*); a scan describes what this antenna actually receives | An openly licensed register worth importing |
 | **The background service is a per-user LaunchAgent running serve through `caffeinate -i`** | An agent runs in the user's session, so notifications, `say` and the user's model cache work, and it needs no root; a LaunchDaemon has neither. `caffeinate` with serve as its child holds the idle-sleep assertion exactly as long as serve runs, passes SIGTERM on and returns serve's exit code. The project environment's Python runs directly, not `uv run`, so a restart never syncs or reaches the network | A Mac app (it would register itself as a login item) |
+| **Doctor never opens a receiver and never uses the network** | Opening a dongle disturbs the Wavescribe using it, and the self-check must be safe to run at any time, offline. Dongles are read from the USB registry; models from the caches | — |
 | Build the glue, reuse components | No existing project covers the use case | A project appears that does |
