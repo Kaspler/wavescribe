@@ -789,7 +789,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_alert_args(p)
     p.set_defaults(func=cmd_serve)
 
-    alerts = sub.add_parser("alerts", help="recent alerts, CAP export, rule and voice checks")
+    alerts = sub.add_parser(
+        "alerts",
+        help="recent alerts, CAP export, rule and voice checks",
+        description="Recent alerts, CAP export, rule and voice checks. Alerts can be missed, "
+        "late or wrong: they are a help, never the only warning where safety is at stake.",
+    )
     alerts.set_defaults(func=cmd_alerts, alerts_command="list", limit=20, alerts=None)
     add_json_arg(alerts)
     alerts_sub = alerts.add_subparsers(dest="alerts_command", metavar="ACTION")
