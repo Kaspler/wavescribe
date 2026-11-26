@@ -112,6 +112,7 @@ class WebHub:
         self.counts: dict[str, int] = {}  # finished utterances per station since start
         self.asks = threading.BoundedSemaphore(MAX_ASKS)
         self.decodes = threading.BoundedSemaphore(MAX_REMOTE_DECODES)
+        self.tickets = feed.Tickets()  # one-time ?ticket= for clients that can't send headers
         self._lock = threading.Lock()
         self._recent: dict[str, OrderedDict[str, dict[str, Any]]] = {}
         self._clients: set[queue.Queue[tuple[str, str] | None]] = set()

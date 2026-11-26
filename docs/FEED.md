@@ -115,8 +115,20 @@ and isn't gets a 400.
 - **From other machines:** only when Wavescribe was started with `serve --lan`, which binds to
   the network. Until the first feed token is made, the LAN reads the feed as it reads the page.
   Once one exists, every feed request from another machine needs a token, sent as
-  `Authorization: Bearer <token>` or `?token=<token>` (browsers' EventSource can't set
-  headers). Prefer the header: a token in a URL ends up in logs, here and on any proxy.
+  `Authorization: Bearer <token>`.
+- **Where a header can't be set** (a browser's EventSource), trade a `read` token for a stream
+  ticket and put that in the URL: `POST /feed/v1/ticket` with the token in the
+  `Authorization` header (never in the URL) returns `{"ticket": "wsk_…", "expires_in": 60}`,
+  then `GET /feed/v1/events?ticket=wsk_…` opens the stream. A ticket works once, within 60 s,
+  and only for reading, so one found in a log is spent. An EventSource reconnects with the URL
+  it was given, which no longer works: close it, get a new ticket and open a new one with
+  `?since_id=<last id seen>`. `?token=<token>` still works but is logged as a warning (at most
+  once an hour): a token in a URL ends up in logs, here, in browsers and on any proxy.
+
+  ```sh
+  T=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" http://kitchen-mac.local:8765/feed/v1/ticket | jq -r .ticket)
+  curl -N "http://kitchen-mac.local:8765/feed/v1/events?ticket=$T"
+  ```
 - **Tokens** are made on the page (*Settings → Connections → For other programs → Feed
   tokens*) with a scope:
   - `read`: the feed;

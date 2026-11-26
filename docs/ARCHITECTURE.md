@@ -292,7 +292,10 @@ per event (`events.py`, version 1: `utterance`, `alert`, `batch`) serves all thr
   machine's pushes to `/feed/v1/ingest`.
 
 Feed tokens (scopes `read`, `push`) guard other machines once the first one exists; the machine
-itself needs none to read, and a push always needs one.
+itself needs none to read, and a push always needs one. They go in the `Authorization` header;
+a client that can't set one trades a read token for a one-time, 60-second stream ticket
+(`POST /feed/v1/ticket`, `feed.Tickets`, kept in memory only) for `?ticket=`. `?token=` still
+works and is logged as a warning.
 
 Remote text is checked field by field (`remote.read_utterance`) and then goes through
 `Pipeline.ingest` with the privacy class its events carry (never looser than a `privacy` the

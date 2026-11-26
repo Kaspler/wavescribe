@@ -57,6 +57,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TOKEN_SCOPES = ("read", "push")
+TOKEN_NOTE = ("Send it as Authorization: Bearer <token>. Where a header can't be set (a browser's "
+              "EventSource), get a one-time ticket from POST /feed/v1/ticket and use ?ticket=: "
+              "a token in a URL (?token=) works, but ends up in logs (docs/FEED.md).")  # fmt: skip
 # A place runs a handful of stations and a household collects a few places. Past these, a push
 # token is filling ui.toml and the page with stations, by mistake or on purpose.
 MAX_PUSH_STATIONS_PER_NODE = 25
@@ -1032,7 +1035,8 @@ class App:
         entry = {"id": secrets.token_hex(4), "label": label.strip()[:60] or "token",
                  "scopes": scopes, "created": round(time.time()), "hash": _hash(token)}  # fmt: skip
         self.settings.update(lambda d: d.setdefault("feed_token", []).append(entry))
-        return {**{k: v for k, v in entry.items() if k != "hash"}, "token": token}
+        return {**{k: v for k, v in entry.items() if k != "hash"}, "token": token,
+                "note": TOKEN_NOTE}  # fmt: skip
 
     def delete_token(self, token_id: str) -> None:
         def mutate(d: dict[str, Any]) -> None:

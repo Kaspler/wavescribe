@@ -11,21 +11,27 @@
     GET  /feed/v1/stations    stations, whether they run, lag
     GET  /feed/v1/node        this machine: name, URL, version, languages
     POST /feed/v1/ingest      another Wavescribe pushes its events here (a "push" token)
+    POST /feed/v1/ticket      a one-time stream ticket for a read token in the header
     GET  /healthz             ok / not ready (no token needed)
     GET  /metrics             Prometheus text
 
 From this machine, no token is needed. From elsewhere (``serve --lan``), the feed is open
 until the first feed token is made on the page; from then on every request from another
-machine needs one, as ``Authorization: Bearer <token>`` or ``?token=`` (EventSource can't set
-headers). docs/FEED.md is the reference.
+machine needs one, as ``Authorization: Bearer <token>``. A client that can't set headers (a
+browser's EventSource) trades it for a ticket and sends ``?ticket=``. ``?token=`` still works,
+but is logged as a warning: a URL ends up in logs. docs/FEED.md is the reference.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
+import logging
 import queue
+import secrets
+import threading
 import time
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
@@ -36,9 +42,48 @@ from wavescribe.events import FEED_VERSION, alert_event, to_json, utterance_even
 if TYPE_CHECKING:
     from wavescribe.web.server import Handler
 
+log = logging.getLogger(__name__)
+
 REPLAY_MAX = 1000  # utterances replayed on (re)connect
 MAX_INGEST = 2 * 1024 * 1024
 KEEPALIVE_S = 15.0  # a comment line on a live stream after this long without a write
+TICKET_TTL_S = 60.0  # a ticket is for the request it was got for, made straight away
+MAX_TICKETS = 256  # unused at once; past it, the oldest goes
+URL_TOKEN_WARN_S = 3600.0  # a token sent in a URL is logged at most this often
+_url_token_warned = [-URL_TOKEN_WARN_S]
+
+
+class Tickets:
+    """Short-lived, single-use stream tickets. A client that can't set headers, such as a
+    browser's EventSource, trades its read token, sent in the Authorization header, for a ticket
+    and puts that in the URL (``?ticket=``) instead of the token. URLs end up in logs, here, in
+    browsers and on any proxy; a ticket found there is spent or expired."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._open: dict[str, float] = {}  # a ticket's SHA-256 -> when it expires
+
+    def issue(self) -> str:
+        ticket = "wsk_" + secrets.token_urlsafe(24)
+        now = time.monotonic()
+        with self._lock:
+            self._open = {k: t for k, t in self._open.items() if t > now}
+            while len(self._open) >= MAX_TICKETS:
+                del self._open[next(iter(self._open))]
+            self._open[_digest(ticket)] = now + TICKET_TTL_S
+        return ticket
+
+    def take(self, ticket: str | None) -> bool:
+        """Whether ``ticket`` was issued and is neither used nor expired; it is used up."""
+        if not ticket:
+            return False
+        with self._lock:
+            expires = self._open.pop(_digest(ticket), None)
+        return expires is not None and expires > time.monotonic()
+
+
+def _digest(ticket: str) -> str:
+    return hashlib.sha256(ticket.encode()).hexdigest()
 
 
 def _list(value: str | None) -> list[str]:
@@ -75,7 +120,13 @@ def token_of(h: Handler, query: dict[str, str]) -> str | None:
     auth = h.headers.get("Authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-    return query.get("token")
+    token = query.get("token")
+    if token and time.monotonic() - _url_token_warned[0] >= URL_TOKEN_WARN_S:
+        _url_token_warned[0] = time.monotonic()
+        log.warning("a feed token came in a URL (?token=), which logs keep, here and on the way: "
+                    "send it as Authorization: Bearer, or get a one-time ticket from "
+                    "POST /feed/v1/ticket for ?ticket= (docs/FEED.md)")  # fmt: skip
+    return token
 
 
 def authorised(h: Handler, query: dict[str, str], scope: str) -> bool:
@@ -88,7 +139,9 @@ def authorised(h: Handler, query: dict[str, str], scope: str) -> bool:
     if app is None:
         return scope == "read" and not proxied
     if scope == "push" or proxied or app.tokens_required():
-        return app.check_token(token_of(h, query), scope)
+        if app.check_token(token_of(h, query), scope):
+            return True
+        return scope == "read" and h.server.hub.tickets.take(query.get("ticket"))
     return True  # serve --lan with no tokens made: the LAN reads, as it reads the page
 
 
@@ -124,6 +177,9 @@ def handle_get(h: Handler, path: str, query: dict[str, str]) -> bool:
 
 
 def handle_post(h: Handler, path: str, query: dict[str, str]) -> bool:
+    if path == "/feed/v1/ticket":
+        ticket(h)
+        return True
     if path != "/feed/v1/ingest":
         return False
     app = h.server.hub.app
@@ -165,6 +221,18 @@ def handle_post(h: Handler, path: str, query: dict[str, str]) -> bool:
 
 
 # -- endpoints ----------------------------------------------------------------------------------
+
+
+def ticket(h: Handler) -> None:
+    """A one-time ticket for ``?ticket=``, had only for a read token in the Authorization header:
+    never one in the URL, which is what tickets keep out of logs, and never without a token, even
+    from this machine (which reads without one: it has no need of a ticket)."""
+    app = h.server.hub.app
+    if app is None or not app.check_token(token_of(h, {}), "read"):
+        h._json({"error": "a ticket is had for a read token, sent as Authorization: Bearer …"},
+                HTTPStatus.UNAUTHORIZED)  # fmt: skip
+        return
+    h._json({"ticket": h.server.hub.tickets.issue(), "expires_in": TICKET_TTL_S})
 
 
 def _context(h: Handler) -> tuple[dict[str, Any], dict[str, Any]]:

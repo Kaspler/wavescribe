@@ -3,6 +3,7 @@
 
 import http.client
 import json
+import logging
 import threading
 import time
 import tomllib
@@ -324,6 +325,39 @@ def test_feed_tokens_guard_other_machines(node: Running, monkeypatch) -> None:
     assert node.call("POST", f"/feed/v1/ingest?token={tok['token']}", push)[0] == 401  # read only
     assert node.call("GET", "/healthz")[0] == 200
     assert node.call("GET", "/api/manage/stations")[0] == 403
+
+
+def test_a_stream_ticket_stands_in_for_a_token_once(node: Running, monkeypatch, caplog) -> None:
+    from wavescribe.web import feed
+    from wavescribe.web.server import Handler
+
+    status, tok = node.call("POST", "/api/manage/tokens", {"label": "browser", "scopes": ["read"]})
+    assert "/feed/v1/ticket" in tok["note"]  # shown where the token is
+    pusher = node.call("POST", "/api/manage/tokens", {"label": "p", "scopes": ["push"]})[1]
+    bearer = {"Authorization": f"Bearer {tok['token']}"}
+    assert node.call("POST", "/feed/v1/ticket")[0] == 401  # not even here, without a token
+    monkeypatch.setattr(Handler, "_is_local", lambda self: False)  # as if from the LAN
+    assert node.call("POST", f"/feed/v1/ticket?token={tok['token']}")[0] == 401  # header only
+    headers = {"Authorization": f"Bearer {pusher['token']}"}
+    assert node.call("POST", "/feed/v1/ticket", headers=headers)[0] == 401  # reading only
+    status, got = node.call("POST", "/feed/v1/ticket", headers=bearer)
+    assert status == 200 and got["ticket"].startswith("wsk_") and got["expires_in"] == 60
+    assert got["ticket"] not in node.app.settings.path.read_text()  # kept in memory only
+    assert node.call("GET", f"/feed/v1/node?ticket={got['ticket']}")[0] == 200
+    assert node.call("GET", f"/feed/v1/node?ticket={got['ticket']}")[0] == 401  # used up
+    again = node.call("POST", "/feed/v1/ticket", headers=bearer)[1]["ticket"]
+    push = {"type": "utterance", "station": {"id": "x"}, "text": "hi"}
+    assert node.call("POST", f"/feed/v1/ingest?ticket={again}", push)[0] == 401
+    monkeypatch.setattr(feed, "TICKET_TTL_S", 0.0)
+    late = node.call("POST", "/feed/v1/ticket", headers=bearer)[1]["ticket"]
+    assert node.call("GET", f"/feed/v1/node?ticket={late}")[0] == 401  # expired
+    # ?token= still works, and says why it shouldn't be used, once in a while.
+    monkeypatch.setattr(feed, "_url_token_warned", [-feed.URL_TOKEN_WARN_S])
+    with caplog.at_level(logging.WARNING, logger="wavescribe.web.feed"):
+        for _ in range(2):
+            assert node.call("GET", f"/feed/v1/node?token={tok['token']}")[0] == 200
+    warned = [r for r in caplog.records if "?token=" in r.getMessage()]
+    assert len(warned) == 1 and tok["token"] not in warned[0].getMessage()
 
 
 def test_web_pages_on_this_machine_cant_push_or_rebind(node: Running) -> None:
