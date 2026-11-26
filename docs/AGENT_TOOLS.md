@@ -121,6 +121,7 @@ non-zero:
 | `wavescribe alerts --json` (or `alerts list --json`) | an alert, oldest first |
 | `wavescribe models list --json` | a model: id, capability, licence, tier, size, languages, accepted, installed |
 | `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json` |
+| `wavescribe service status --json` | one line: the background service, installed, loaded, running, pid, last exit, options and logs; exits 3 when it isn't running |
 | `wavescribe follow` | a live utterance or alert, until you stop it |
 
 `search` and `alerts` print utterances and alerts in the shapes of [FEED.md](FEED.md), without

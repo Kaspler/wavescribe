@@ -270,20 +270,51 @@ Wavescribe and delete the `data` folder. Models live in the `models` folder and 
 
 ## 11. Keep it running
 
-- Wavescribe runs while its Terminal window is open, but it doesn't stop the Mac from sleeping.
-  Start it with `caffeinate -i uv run wavescribe serve --open` to keep the Mac awake while it
-  runs. **A closed lid still puts a MacBook to sleep.** Keep the lid open, or, for a machine
-  that stays on all the time, run `sudo pmset -a disablesleep 1` (and `0` to undo it).
+**In the background.** To run Wavescribe without a Terminal window, start it when you log in
+and restart it by itself after a crash, install it as a background service. In the Wavescribe
+folder:
+
+```sh
+uv run wavescribe service install --lan    # takes the same options as serve
+uv run wavescribe service status           # is it running? where are its logs?
+uv run wavescribe service uninstall        # stop it and remove it
+```
+
+- It runs `serve` in this folder with this folder's Python, so starting needs neither the
+  Terminal nor the internet. It keeps the Mac from going to sleep while it runs, and after a
+  crash it starts again within 30 seconds.
+- Before installing, it checks your settings and that the port is free, so a mistake shows
+  straight away rather than as a service that keeps stopping. `--dry-run` shows what it would
+  install.
+- **To change its options,** run `service install` again with the new ones; it replaces the
+  running one. Do the same after changing `config/stations.toml` or `config/alerts.toml` by
+  hand, so it reads them again (changes made on the page apply at once).
+- **Logs:** start-up messages and errors are in `data/logs/service.log`, everything in
+  `data/logs/wavescribe.jsonl`.
+- macOS may tell you a background item was added. It's listed under System Settings → General
+  → Login Items & Extensions; leave it switched on there.
+- The service runs while you're logged in. For a Mac that should carry on by itself after a
+  restart, turn on automatic login (System Settings → Users & Groups; not available while
+  FileVault is on).
+
+**A closed lid still puts a MacBook to sleep,** with or without the service. Keep the lid open,
+or, for a machine that stays on all the time, run `sudo pmset -a disablesleep 1` (and `0` to
+undo it). Without the service, Wavescribe runs only while its Terminal window is open and
+doesn't keep the Mac awake: start it with `caffeinate -i uv run wavescribe serve --open`.
+
 - Settings → **Health** shows memory, processor and graphics load, battery, disk, and how far
   behind each station is. If the Mac struggles, translate fewer stations: translation is the
   heaviest part.
-- **Update:** stop Wavescribe, then `git pull` (or download the ZIP again) and `uv sync`.
+- **Update:** stop Wavescribe, then `git pull` (or download the ZIP again) and `uv sync`. With
+  the service, run `uv run wavescribe service install` again afterwards to restart it on the
+  new version.
 
 ## Troubleshooting
 
 | Problem | What to do |
 |---|---|
 | The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. If the port is taken, start it with another, e.g. `--port 8780`. |
+| The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that, then `uv run wavescribe service install` again. |
 | A station plays without text and says it's waiting for a model | Download it under Settings → **Languages and models**; the text starts when it finishes. |
 | No sound | Press **▶** beside the station, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
 | Nonsense text, or the wrong language | Check the station's language under Settings → **Stations**. Some songs still get through the music filter; heavy accents, phone-ins and weak signals transcribe worse. |
