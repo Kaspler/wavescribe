@@ -77,6 +77,21 @@ def test_cb_is_fm_in_the_cept_countries_and_am_elsewhere(monkeypatch) -> None:
     assert bandplan.find("cb").mode == "am"  # the plan's own entry is unchanged
 
 
+def test_the_gap_in_marine_vhf_is_land_mobile_radio(monkeypatch) -> None:
+    from wavescribe.radio import bandplan
+    from wavescribe.radio.scan import band_range, scanned_band
+
+    for region in ("cept", "1", "2", "3"):
+        assert lookup(158_000_000, region).id == "land-mobile-vhf"
+        assert privacy_of(158_000_000, region) == "private"
+        assert lookup(156_800_000, region).privacy == "utility"  # channel 16
+        assert lookup(157_425_000, region).id == "marine"  # channel 88, the ships' last
+        assert lookup(160_625_000, region).id == "marine"  # channel 60, the coast's first
+    monkeypatch.setattr(bandplan, "default_region", lambda: "2")
+    assert privacy_of(159_000_000, bandplan.AUTO) == "private"
+    assert scanned_band(*band_range("marine", "cept"), "cept").id == "marine"
+
+
 def test_frequencies_are_written_to_the_hertz() -> None:
     assert mhz_text(446.00625) == "446.00625" and mhz_text(98.6) == "98.6"
     assert mhz_text(462_562_500 / 1e6) == "462.5625" and mhz_text(100.0) == "100"

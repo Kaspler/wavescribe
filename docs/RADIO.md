@@ -175,7 +175,7 @@ defaults:
 | broadcast | FM, medium wave, weather radio | no | like any station | yes | yes | yes |
 | amateur | 2 m, 70 cm | no | 7 days | no | no | yes |
 | utility | airband, marine VHF | yes | 3 days | no | no | yes |
-| private | PMR446, FRS, CB, 433 MHz, anything no plan lists | yes | never (shown live only) | no | no | no |
+| private | PMR446, FRS, CB, 433 MHz, VHF land mobile (157.45-160.6 MHz, between the marine channels), anything no plan lists | yes | never (shown live only) | no | no | no |
 | digital | DAB, DVB-T, digital emergency networks, mobile networks, ADS-B, satellite navigation | yes | never (shown live only) | no | no | no |
 
 - **Asks you first**: before a station on such a frequency is created, you confirm that you may
