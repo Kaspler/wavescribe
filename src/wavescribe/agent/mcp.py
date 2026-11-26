@@ -15,11 +15,12 @@ for refusing it.
     alerts           GET  /feed/v1/alerts
     wait_for_alert   GET  /feed/v1/events?events=alert
     ask              POST /api/ask
+    digest, now      POST /api/digest
     status           GET  /feed/v1/node and /api/state
 
 The feed carries only what may leave this machine (``WebHub.exports``), so radio whose words
-stay here is missing from recent, and its alerts come without words; search and ask read
-everything, as the page does on this machine.
+stay here is missing from recent, and its alerts come without words; search, ask and the
+digests read everything, as the page does on this machine.
 
 With ``--allow-control``, start_station, stop_station and add_station use the control centre's
 routes (``/api/manage``). What only the person at the page may do has no tool in any mode:
@@ -45,7 +46,7 @@ from typing import IO, Any
 
 from wavescribe import __version__
 from wavescribe.agent.client import STREAM_TIMEOUT_S, Client, Refused, Unreachable, live
-from wavescribe.events import utterance_event
+from wavescribe.events import alert_event, utterance_event
 from wavescribe.remote import feed_lines, sse_events
 
 log = logging.getLogger(__name__)
@@ -87,6 +88,23 @@ STATIONS = {
     "description": "Station ids, as the stations tool gives them. Leave out for all stations.",
 }
 STATION_ID = {"type": "string", "pattern": "^[a-z0-9_-]+$", "description": "A station id."}
+LANGUAGE = {
+    "type": "string",
+    "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+    "maxLength": 35,
+    "description": "The language to write in, as BCP-47, e.g. en (default: the language most "
+    "stations are translated into).",
+}
+DIGEST = (
+    "Returns {text, points, sources, alerts, window, counts, empty}: text is the digest as "
+    "plain lines; points are {text, stations, sources}, sources being numbers among the "
+    "returned sources, the utterances cited, each with its n; alerts are those announced in "
+    "the window, as the alerts tool gives them, apart from the points; empty is true when "
+    "nothing of substance was said, and text then says so. The points come from a small model "
+    "reading speech recognition: check the sources before relying on them. It covers all "
+    "radio kept on this machine, including radio that isn't broadcast. Fails with the reason "
+    "when no language model is loaded. "
+)
 NO_ARGUMENTS = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
@@ -301,6 +319,40 @@ TOOLS = (
         ),
     ),
     Tool(
+        "digest",
+        "What mattered on the radio while the user wasn't listening: a few points on the last "
+        "`minutes` (default 60, at most a day), the most important first, each naming the "
+        "station that said it. Wavescribe's local language model writes it from the "
+        "transcripts, behind live translation, so it takes from half a minute to a few "
+        "minutes. " + DIGEST + UNTRUSTED,
+        _arguments(
+            stations=STATIONS,
+            minutes={
+                "type": "number",
+                "minimum": 1,
+                "maximum": 1440,
+                "description": "How many minutes back to look (60).",
+            },
+            language=LANGUAGE,
+        ),
+    ),
+    Tool(
+        "now",
+        "What one station is on about right now: one or two sentences on its last few minutes, "
+        "by Wavescribe's local language model, in a few seconds to a minute. Without station, "
+        "the station heard last. " + DIGEST + UNTRUSTED,
+        _arguments(
+            station={**STATION_ID, "description": "The station (default: the one heard last)."},
+            minutes={
+                "type": "number",
+                "minimum": 1,
+                "maximum": 60,
+                "description": "How many minutes back to look (5).",
+            },
+            language=LANGUAGE,
+        ),
+    ),
+    Tool(
         "status",
         "What Wavescribe is doing: whether its models are loaded (status.ready), which ones "
         "(status.models, mt_model), each running station's connection and lag, queue depths, "
@@ -489,6 +541,27 @@ class Tools:
                     return {"answer": "".join(parts).strip(), "sources": cited, "plan": plan}
         raise ToolError("the answer stopped before it finished")
 
+    def digest(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
+        body = {k: args[k] for k in ("stations", "minutes", "language") if k in args}
+        return self._digest({"kind": "digest", **body})
+
+    def now(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
+        body = {k: args[k] for k in ("minutes", "language") if k in args}
+        if "station" in args:
+            body["stations"] = [args["station"]]
+        return self._digest({"kind": "now", **body})
+
+    def _digest(self, body: dict[str, Any]) -> Any:
+        out = self.client.digest(body)
+        sources = out["sources"]
+        cited = [{"n": s["n"], **e} for s, e in zip(sources, self._events(sources), strict=True)]
+        kept = ("text", "points", "window", "counts", "empty", "language")
+        return {
+            **{k: out[k] for k in kept},
+            "sources": cited,
+            "alerts": self._alerts(out["alerts"]),
+        }
+
     def status(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
         state = self.client.get("/api/state")
         kept = ("stations", "status", "ask", "mt_model", "noncommercial", "store")
@@ -510,6 +583,19 @@ class Tools:
             "start": args.get("start", False),
         }
         return self.client.post("/api/manage/stations", body)
+
+    def _alerts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Stored alerts (a digest's) in the feed's shape, as the alerts tool gives them."""
+        if not rows:
+            return []
+        node = self.client.get("/feed/v1/node")
+        refs = {
+            s["id"]: _Station(
+                s["id"], s.get("name") or s["id"], s.get("language"), s.get("privacy")
+            )
+            for s in self.client.get("/feed/v1/stations")
+        }
+        return [alert_event(a, refs, node) for a in rows]
 
     def _events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Utterances as the page's routes give them (search hits, ask's sources) in the feed's

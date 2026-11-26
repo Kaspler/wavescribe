@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``wavescribe follow`` and ``wavescribe mcp`` (experimental; docs/AGENT_TOOLS.md)."""
+"""``wavescribe follow``, ``wavescribe digest`` and ``wavescribe mcp`` (experimental;
+docs/AGENT_TOOLS.md)."""
 
 from __future__ import annotations
 
@@ -32,6 +33,20 @@ def cmd_follow(args: argparse.Namespace) -> int:
         # to flush stdout once more on the way out and complain, so it goes to /dev/null.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
+
+
+def cmd_digest(args: argparse.Namespace) -> int:
+    from wavescribe.agent.client import Refused, Unreachable
+    from wavescribe.digest.cli import body, render
+    from wavescribe.events import to_json
+
+    try:
+        out = _client(args).digest(body(args))
+    except (Unreachable, Refused) as e:
+        print(f"wavescribe: {e}", file=sys.stderr)
+        return 1
+    print(to_json(out) if args.json else render(out))
+    return 0
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
@@ -86,6 +101,41 @@ def add_parser(sub: Any) -> None:
         help="first, the utterances heard since this time, in seconds since 1970 (up to 1,000)",
     )
     p.set_defaults(func=cmd_follow)
+
+    from wavescribe.digest.cli import since
+
+    p = sub.add_parser(
+        "digest",
+        help="what was said while you weren't listening, from a running Wavescribe",
+        description="A few points on what mattered on some stations over the last hour (or "
+        "--minutes, or --since), each with the moments it rests on, written by the running "
+        "Wavescribe's language model in your language; --now: what one station is on about. "
+        "It waits behind live translation, so it can take a few minutes. See "
+        "docs/GETTING_STARTED.md.",
+    )
+    server(p)
+    p.add_argument("--stations", metavar="IDS", help="only these stations, comma-separated")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--minutes", type=float, help="how far back to look (60; with --now, 5)")
+    window.add_argument(
+        "--since",
+        type=since,
+        metavar="TIME",
+        help="from this time on: a time of day like 21:30, or seconds since 1970",
+    )
+    p.add_argument(
+        "--language",
+        metavar="LANG",
+        help="write it in this language, as BCP-47 (default: the stations' translations)",
+    )
+    p.add_argument(
+        "--now",
+        action="store_true",
+        help="what one station is on about now: the one --stations names, else the station "
+        "heard last",
+    )
+    p.add_argument("--json", action="store_true", help="the server's answer, as one line of JSON")
+    p.set_defaults(func=cmd_digest)
 
     p = sub.add_parser(
         "mcp",

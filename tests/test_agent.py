@@ -378,7 +378,7 @@ def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) 
 # -- the MCP adapter --------------------------------------------------------------------------
 
 READ_TOOLS = ["stations", "recent", "search", "alerts", "wait_for_alert", "catches", "ask",
-              "status"]  # fmt: skip
+              "digest", "now", "status"]  # fmt: skip
 CONTROL_TOOLS = ["start_station", "stop_station", "add_station"]
 ALERT_TOOLS = ("alerts", "wait_for_alert")
 

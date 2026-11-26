@@ -21,6 +21,7 @@ from typing import IO, Any
 
 from wavescribe import __version__, httpclient
 from wavescribe.agent import DEFAULT_URL
+from wavescribe.digest import TIMEOUT_S as DIGEST_WAIT_S
 from wavescribe.events import Seen, resume_point, to_json
 from wavescribe.remote import feed_lines, sse_events
 from wavescribe.web.server import CONTROL_HEADER
@@ -28,6 +29,7 @@ from wavescribe.web.server import CONTROL_HEADER
 REQUEST_TIMEOUT_S = 30.0  # also between two pieces of a streamed answer: the server sends
 # a comment every 10 s while the model works
 STREAM_TIMEOUT_S = 45.0  # silence this long on a live stream means it is gone
+DIGEST_TIMEOUT_S = DIGEST_WAIT_S + 30  # the server gives up first, and says why
 MAX_BACKOFF_S = 30.0
 
 
@@ -108,6 +110,13 @@ class Client:
     def post(self, path: str, body: Any) -> Any:
         """A change through the control centre (``/api/manage``), as the page makes it."""
         with self.open("POST", path, body=body, control=True) as resp:
+            return json.loads(resp.read())
+
+    def digest(self, body: dict[str, Any]) -> Any:
+        """A digest (``POST /api/digest``), once the server's model has made it."""
+        with self.open(
+            "POST", "/api/digest", body=body, control=True, timeout=DIGEST_TIMEOUT_S
+        ) as resp:
             return json.loads(resp.read())
 
 

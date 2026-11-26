@@ -222,6 +222,7 @@ class Digest:
             "kind": r.kind,
             "language": r.language,
             "stations": list(r.stations),
+            "names": {sid: self.names.get(sid, sid) for sid in r.stations},
             "window": {
                 "since": round(r.since),
                 "until": round(r.until),
