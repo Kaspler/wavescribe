@@ -455,7 +455,10 @@ def _radio_note(app: App, m, q, b) -> Any:
     tags = b.get("tags")
     if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
         raise ChangeError("'tags' is a list of words")
-    return app.radio.catalog.note(int(m["freq"]), name=b.get("name"), note=b.get("note"), tags=tags)
+    from wavescribe.radio.watch import on_raster
+
+    hz = on_raster(int(m["freq"]), app.radio.region()[0])
+    return app.radio.catalog.note(hz, name=b.get("name"), note=b.get("note"), tags=tags)
 
 
 @route("DELETE", "/radio/heard(?:/(?P<freq>[0-9]+))?")

@@ -801,15 +801,20 @@ class Handler(BaseHTTPRequestHandler):
     def _catches(self, query: dict[str, str]) -> None:
         """What watches caught and kept (radio/watch.py), newest first, with their words. For
         another machine only what may leave this one, and none of the user's notes."""
+        from wavescribe.radio.bandplan import TUNER_RANGE_HZ
+
         hub = self.server.hub
+        lo, hi = (f / 1e6 for f in TUNER_RANGE_HZ)
         try:
             mhz = float(query["mhz"]) if query.get("mhz") else None
             width_khz, hours = float(query.get("width_khz") or 0), float(query.get("hours") or 24)
             limit = int(query.get("limit") or 100)
-            if not all(math.isfinite(x) for x in (mhz or 0, width_khz, hours)):
+            if not all(math.isfinite(x) for x in (width_khz, hours)):
+                raise ValueError
+            if mhz is not None and not lo <= mhz <= hi:
                 raise ValueError
         except ValueError:
-            msg = "mhz, width_khz and hours are numbers, limit a whole one"
+            msg = f"mhz is {lo:g} to {hi:g}, width_khz and hours are numbers, limit a whole one"
             self._json({"error": msg}, HTTPStatus.BAD_REQUEST)
             return
         if hub.store is None:

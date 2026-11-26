@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
-from wavescribe.radio.watch import Catch, with_notes
+from wavescribe.radio.watch import Catch, on_raster, with_notes
 
 
 def _window(spec: str) -> str | tuple[float, float]:
@@ -176,10 +176,8 @@ def cmd_note(args: argparse.Namespace) -> int:
     from wavescribe.radio.cli import _config, _region
 
     region = _region(args, _config(args))
-    hz = round(args.mhz * 1e6)
+    hz = on_raster(args.mhz * 1e6, region)
     band = lookup(hz, region)
-    if band is not None and band.step_hz:
-        hz = band.snap(hz)  # as catches have it: on the band's raster
     catalog = Catalog()
     tags = [] if args.clear else args.tag
     if args.clear:

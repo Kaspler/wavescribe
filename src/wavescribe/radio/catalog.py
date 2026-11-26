@@ -21,6 +21,7 @@ from wavescribe.radio.scan import SPUR_BIN_HZ, Signal, Sweep
 DEFAULT_DIR = Path("data/radio")
 KEEP_SCANS = 20
 MAX_NAME, MAX_NOTE, MAX_TAGS = 80, 2000, 20
+MAX_NOTES = 5_000  # frequencies with a note: the file is read whole, so it stays small
 
 
 def _set(d: dict[str, Any], key: str, value: object) -> None:
@@ -105,6 +106,8 @@ class Catalog:
 
     def name(self, freq_hz: int, name: str | None) -> None:
         """A name the user gives a frequency (overrides RDS)."""
+        if name and len(name) > MAX_NAME:
+            raise ValueError(f"a name is at most {MAX_NAME} characters")
         with self._lock:
             data = self._read()
             e = data["entries"].get(str(freq_hz))
@@ -142,6 +145,8 @@ class Catalog:
         with self._lock:
             data = self._read()
             notes = data.setdefault("notes", {})
+            if str(freq_hz) not in notes and len(notes) >= MAX_NOTES:
+                raise ValueError(f"at most {MAX_NOTES} frequencies can have a note: clear some")
             n = notes.setdefault(str(freq_hz), {"freq_hz": freq_hz})
             for key, value in (("name", name), ("note", note), ("tags", tags)):
                 if value is not None:

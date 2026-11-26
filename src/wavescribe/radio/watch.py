@@ -211,6 +211,13 @@ class Catch:
         return self.audio_from + len(self.audio) / SAMPLE_RATE
 
 
+def on_raster(freq_hz: float, region: str) -> int:
+    """A frequency as a watch's catches have it: on its band's raster, where it has one, so a
+    note made at 446.006 MHz is found on what is caught at 446.00625."""
+    band = lookup(freq_hz, region)
+    return band.snap(freq_hz) if band is not None and band.step_hz else round(freq_hz)
+
+
 def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
     """Catches as the store gives them, with what the user noted about each one's frequency
     (``Catalog.notes``): its name, note and tags. For this machine only: notes are the user's

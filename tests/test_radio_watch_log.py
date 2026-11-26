@@ -173,6 +173,20 @@ def test_a_note_names_a_frequency_wherever_it_is_shown(tmp_path: Path) -> None:
     assert PMR[1] not in catalog.notes()  # nothing left to say: gone
     with pytest.raises(ValueError, match="at most 80"):
         catalog.note(PMR[2], name="x" * 81)
+    with pytest.raises(ValueError, match="at most 80"):
+        catalog.name(PMR[0], "x" * 81)  # the heard list's own name route too
+
+
+def test_notes_are_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from wavescribe.radio import catalog as catalogue
+
+    monkeypatch.setattr(catalogue, "MAX_NOTES", 2)
+    catalog = Catalog(tmp_path)
+    catalog.note(PMR[0], name="a")
+    catalog.note(PMR[1], name="b")
+    with pytest.raises(ValueError, match="at most 2 frequencies"):
+        catalog.note(PMR[2], name="c")
+    catalog.note(PMR[1], tags=["still", "changeable"])  # one already noted can change
 
 
 # -- the command line --------------------------------------------------------------------------
@@ -274,6 +288,8 @@ def test_catches_route_gives_other_machines_only_what_may_leave(
         body = request(server, "GET", f"/api/catches?mhz={near}&width_khz=12.5")[1]
         assert [c["freq_hz"] for c in json.loads(body)["catches"]] == [TWO_M]
         assert request(server, "GET", "/api/catches?hours=nan")[0] == 400
+        assert request(server, "GET", "/api/catches?mhz=1e303")[0] == 400  # past any tuner
+        assert request(server, "GET", "/api/catches?mhz=5")[0] == 400
         monkeypatch.setattr(Handler, "_is_local", lambda _self: False)
         status, body = request(server, "GET", "/api/catches")
         [shared] = json.loads(body)["catches"]
@@ -291,7 +307,8 @@ def test_notes_are_set_through_the_control_centre(tmp_path: Path) -> None:
 
     from wavescribe.web import api
 
-    app = SimpleNamespace(radio=SimpleNamespace(catalog=Catalog(tmp_path)))
+    radio = SimpleNamespace(catalog=Catalog(tmp_path), region=lambda: ("cept", "page"))
+    app = SimpleNamespace(radio=radio)
     path = f"/api/manage/radio/notes/{PMR[0]}"
     status, noted = api.dispatch(app, "POST", path, {}, {"name": "family", "tags": ["home"]})
     assert status == 200 and noted["name"] == "family" and noted["tags"] == ["home"]
@@ -301,3 +318,8 @@ def test_notes_are_set_through_the_control_centre(tmp_path: Path) -> None:
     assert status == 400
     status, listed = api.dispatch(app, "GET", "/api/manage/radio/notes", {}, None)
     assert [n["freq_hz"] for n in listed["notes"]] == [PMR[0]]
+    # As the command line does, on the band's raster: where its catches are.
+    status, noted = api.dispatch(
+        app, "POST", "/api/manage/radio/notes/446031000", {}, {"name": "ch 3"}
+    )
+    assert status == 200 and noted["freq_hz"] == PMR[2]
