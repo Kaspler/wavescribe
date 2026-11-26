@@ -83,11 +83,11 @@ def _parse_range(spec: str, region: str) -> tuple[int, int, str]:
 
     if spec in ("all", "everything"):
         return SWEEP_LIMITS_HZ[0], SWEEP_LIMITS_HZ[1], "the whole tuner range"
-    if ":" in spec:
-        lo, _, hi = spec.partition(":")
-        return round(float(lo) * 1e6), round(float(hi) * 1e6), f"{lo}-{hi} MHz"
+    if ":" in spec:  # labelled as the page labels it, since the page shows saved scans too
+        lo, hi = (float(x) for x in spec.split(":", 1))
+        return round(lo * 1e6), round(hi * 1e6), f"{lo:g} to {hi:g} MHz"
     lo_hz, hi_hz = band_range(spec, region)
-    return lo_hz, hi_hz, spec
+    return lo_hz, hi_hz, next((b.name for b in region_bands(region) if b.id == spec), spec)
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -124,7 +124,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
                        on_progress=progress)  # fmt: skip
     if sys.stderr.isatty():
         sys.stderr.write("\r" + " " * 40 + "\r")
-    catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw)
+    device = next((d.id for d in config.devices if d.serial == serial), None) if config else None
+    catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw,
+                   device=device, what=what)  # fmt: skip
     _warn(sw)
     print(f"# {len(signals)} signals in {time.time() - t0:.0f} s; kept in data/radio/heard.json",
           file=sys.stderr)  # fmt: skip

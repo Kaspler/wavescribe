@@ -504,7 +504,12 @@ change at once. The policies are enforced where text goes:
 
 **Catalogue** (`radio/catalog.py`). `data/radio/heard.json`, keyed by frequency: band, class,
 level, first and last heard, how often, RDS for broadcast only, a name the user gave. Spurs and
-digital signals are not kept. The last 20 scans' spectra are in `data/radio/scans/`.
+digital signals are not kept. The last 20 scans' spectra are in `data/radio/scans/`, each with
+its time, the receiver that made it (`device` id and `serial`), `what` it was asked to scan (the
+band's name, "the whole tuner range", or "88 to 108 MHz"; `wavescribe radio scan` labels its
+scans the same way), its length and the signals found. The page gets the latest as
+`last_scan` in `GET /api/manage/radio`; one saved before scans recorded `device` and `what` has
+them as null, and its `device` is filled in from its serial while a receiver has that serial.
 
 **The page** (`radio/service.py`, `/api/manage/radio…`): one background scan at a time. A
 receiver with running stations or a spectrum monitor is refused with what holds it, unless the

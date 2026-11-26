@@ -37,6 +37,25 @@ def test_scans_build_up_what_was_heard(tmp_path: Path) -> None:
     assert cat.entries() == []
 
 
+def test_a_saved_scan_names_its_receiver_and_what_was_scanned(tmp_path: Path) -> None:
+    import json
+
+    cat = Catalog(tmp_path)
+    sw = Sweep(88_000_000, 108_000_000, 10_000, np.linspace(88e6, 108e6, 50), np.zeros(50), 3.0)
+    last = cat.record([sig(89.1)], serial="00001234", start_hz=88e6, stop_hz=108e6, sweep=sw,
+                      now=1000.0, device="a", what="FM broadcast")  # fmt: skip
+    assert (last["device"], last["what"], last["serial"]) == ("a", "FM broadcast", "00001234")
+    scan = cat.last_scan()
+    assert (scan["device"], scan["what"], scan["serial"]) == ("a", "FM broadcast", "00001234")
+
+    # Saved by an earlier version: still loads, with nothing to say about either.
+    old = tmp_path / "scans" / "29991231-235959-00001234.json"
+    old.write_text(json.dumps({"t": 2000.0, "serial": "00001234", "seconds": 3.0,
+                               "spectrum": [], "signals": []}), "utf-8")  # fmt: skip
+    scan = cat.last_scan()
+    assert scan["t"] == 2000.0 and scan["device"] is None and scan["what"] is None
+
+
 def test_private_radio_keeps_no_rds_or_words(tmp_path: Path) -> None:
     cat = Catalog(tmp_path)
     cat.record([sig(446.00625, "private", rds={"ps": "X"})], serial="000001", start_hz=446e6,

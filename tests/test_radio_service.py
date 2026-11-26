@@ -45,6 +45,8 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
     view = radio.call("GET", "/api/manage/radio")[1]
     assert [e["mhz"] for e in view["heard"]] == [446.00625]
     assert view["last_scan"]["signals"][0]["label"] == "PMR446 walkie-talkies, channel 1"
+    assert view["last_scan"]["device"] == "x" and view["last_scan"]["serial"] == "SN0042"
+    assert view["last_scan"]["what"] == "PMR446 walkie-talkies"
 
     body = {"device": "x", "mhz": 446.00625, "language": "es-ES"}
     status, err = radio.call("POST", "/api/manage/radio/tune", body)
@@ -70,6 +72,23 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
     assert status == 200 and ham["privacy"] == "amateur"
     assert radio.app.config.devices[0].center_hz == 145_250_000
     assert st["id"] in radio.app.config_errors  # the walkie-talkie channel is out of reach now
+
+
+def test_a_scan_saved_before_scans_named_their_receiver_is_named_by_its_serial(
+    radio: Running, tmp_path: Path
+) -> None:
+    import json
+
+    scans = tmp_path / "radio" / "scans"
+    scans.mkdir(parents=True)
+    old = {"t": 1000.0, "serial": "SN0042", "seconds": 3.0, "spectrum": [], "signals": []}
+    (scans / "20260101-120000-SN0042.json").write_text(json.dumps(old), "utf-8")
+    last = radio.call("GET", "/api/manage/radio")[1]["last_scan"]
+    assert (last["device"], last["what"], last["t"]) == ("x", None, 1000.0)
+    old["serial"] = "SN9999"  # a receiver no longer configured
+    (scans / "20260101-130000-SN9999.json").write_text(json.dumps(old), "utf-8")
+    last = radio.call("GET", "/api/manage/radio")[1]["last_scan"]
+    assert last["device"] is None and last["serial"] == "SN9999"
 
 
 def test_a_channel_on_the_receivers_centre_moves_the_receiver(radio: Running) -> None:

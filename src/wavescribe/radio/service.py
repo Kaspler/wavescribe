@@ -106,7 +106,7 @@ class RadioService:
             "spurs": self.catalog.spur_info(),
             "heard": heard,
             "scan": self.scan_status(),
-            "last_scan": self.catalog.last_scan(),
+            "last_scan": self.last_scan(),
             "policies": {k: {**vars(v), "default": vars(DEFAULT_POLICIES[k]),
                              "changed": sorted(self._policy_changes().get(k, {}))}
                          for k, v in POLICIES.items()},
@@ -115,6 +115,16 @@ class RadioService:
             "tools": {"rtl_power": _which("rtl_power"), "rtl_sdr": _which("rtl_sdr")},
             **({"dongles": self.new_dongles()} if dongles or not self.app.config.devices else {}),
         }  # fmt: skip
+
+    def last_scan(self) -> dict[str, Any] | None:
+        """The last saved scan. One saved before scans named their receiver gets the id of the
+        receiver with its serial, if there still is one."""
+        scan = self.catalog.last_scan()
+        if scan is not None and not scan.get("device"):
+            serial = scan.get("serial")
+            scan["device"] = next((d.id for d in self.app.config.devices if d.serial == serial),
+                                  None)  # fmt: skip
+        return scan
 
     def new_dongles(self) -> list[dict[str, str]]:
         """Dongles on USB that no receiver uses yet (listing them opens none)."""
@@ -313,7 +323,8 @@ class RadioService:
             sw, signals = scanner.scan(serial, start, stop, region, gain_db=gain, ppm=ppm, rds=rds,
                                        watch_s=watch_s, spurs=self.catalog.spurs(serial),
                                        on_progress=progress, cancel=cancel)  # fmt: skip
-            self.catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw)
+            self.catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw,
+                                device=job["device"], what=job["what"])  # fmt: skip
             job.update(phase="done", signals=[s.to_dict() for s in signals],
                        spectrum=sw.downsampled(),
                        seconds=round(time.time() - job["started"]))  # fmt: skip

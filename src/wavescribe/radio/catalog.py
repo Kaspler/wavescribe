@@ -56,9 +56,12 @@ class Catalog:
         stop_hz: float,
         sweep: Sweep | None = None,
         now: float | None = None,
+        device: str | None = None,
+        what: str | None = None,
     ) -> dict[str, Any]:
         """Merge a scan's findings. Entries inside the scanned range that weren't heard this time
-        are kept, marked with when they were last heard."""
+        are kept, marked with when they were last heard. ``device`` is the receiver's id and
+        ``what`` the band or range the scan was asked for, kept with the scan."""
         now = now or time.time()
         with self._lock:
             data = self._read()
@@ -84,11 +87,12 @@ class Catalog:
             for key, e in entries.items():
                 if start_hz <= e["freq_hz"] <= stop_hz:
                     e["missing"] = key not in heard
-            data["last_scan"] = {"t": now, "serial": serial, "start_hz": start_hz,
-                                 "stop_hz": stop_hz, "found": len(signals)}  # fmt: skip
+            data["last_scan"] = {"t": now, "serial": serial, "device": device, "what": what,
+                                 "start_hz": start_hz, "stop_hz": stop_hz,
+                                 "found": len(signals)}  # fmt: skip
             self._write(data)
         if sweep is not None:
-            self._save_scan(now, serial, sweep, signals)
+            self._save_scan(now, serial, sweep, signals, device, what)
         return data["last_scan"]
 
     def name(self, freq_hz: int, name: str | None) -> None:
@@ -113,12 +117,14 @@ class Catalog:
                 data["entries"].pop(str(freq_hz), None)
             self._write(data)
 
-    def _save_scan(self, now: float, serial: str, sweep: Sweep, signals: list[Signal]) -> None:
+    def _save_scan(self, now: float, serial: str, sweep: Sweep, signals: list[Signal],
+                   device: str | None, what: str | None) -> None:  # fmt: skip
         d = self.root / "scans"
         d.mkdir(parents=True, exist_ok=True)
         name = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{serial}.json"
         (d / name).write_text(json.dumps({
-            "t": now, "serial": serial, "seconds": round(sweep.seconds, 1),
+            "t": now, "serial": serial, "device": device, "what": what,
+            "seconds": round(sweep.seconds, 1),
             "spectrum": sweep.downsampled(), "signals": [s.to_dict() for s in signals],
         }, ensure_ascii=False), "utf-8")  # fmt: skip
         for old in sorted(d.glob("*.json"))[:-KEEP_SCANS]:
@@ -174,6 +180,11 @@ class Catalog:
         if not files:
             return None
         try:
-            return json.loads(files[-1].read_text("utf-8"))
+            scan = json.loads(files[-1].read_text("utf-8"))
         except json.JSONDecodeError:
             return None
+        if not isinstance(scan, dict):
+            return None
+        for key in ("device", "what"):  # scans saved before they named these have None
+            scan.setdefault(key, None)
+        return scan

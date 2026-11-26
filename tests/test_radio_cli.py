@@ -40,6 +40,32 @@ def test_a_scan_says_which_part_of_the_range_it_left_out(
     assert "below 24 MHz isn't supported" in err
 
 
+def test_a_scan_from_the_command_line_is_saved_with_its_receiver_and_what_was_scanned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "stations.toml").write_text(
+        '[[device]]\nid = "a"\nserial = "00001234"\ncenter_mhz = 98.0\ngain_db = 30\n'
+        '[[station]]\nid = "s"\nlanguage = "es"\nstream = "http://example.test/s"\n'
+    )
+
+    def no_dongles():
+        raise AssertionError("the receiver comes from the config: no dongle is listed")
+
+    monkeypatch.setattr("wavescribe.sources.sdr.list_dongles", no_dongles)
+    monkeypatch.setattr("wavescribe.radio.scan.scan", lambda *_a, **_k: (None, []))
+    saved = []
+    monkeypatch.setattr("wavescribe.radio.catalog.Catalog.record",
+                        lambda _self, _signals, **kw: saved.append(kw))  # fmt: skip
+    assert main(["radio", "scan", "a", "144:146", "--config", "stations.toml"]) == 0
+    assert main(["radio", "scan", "00001234", "fm", "--region", "cept",
+                 "--config", "stations.toml"]) == 0  # fmt: skip
+    assert [(kw["serial"], kw["device"], kw["what"]) for kw in saved] == [
+        ("00001234", "a", "144 to 146 MHz"),
+        ("00001234", "a", "FM broadcast"),
+    ]
+
+
 def test_a_scan_shows_the_sweeps_warnings_and_flags_old_spurs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
