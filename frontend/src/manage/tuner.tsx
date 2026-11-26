@@ -2,11 +2,23 @@
 // first), polling what it hears, and playing its sound. Nothing heard this way is written down,
 // stored or checked for alerts (radio/live.py).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActButton, Button, Check, act, toast } from "../components/ui";
+import { ActButton, Button, Check, Lamp, Segmented, Select, act, toast } from "../components/ui";
 import { A, stopAudio } from "../lib/audio";
 import { S } from "../lib/live";
 import { useTopics } from "../lib/store";
-import { ApiError, type Any, del, get, post, useLoad } from "./api";
+import { ApiError, type Any, del, get, post, useEvery, useLoad } from "./api";
+import { bandLine, fmtMhz } from "./bands";
+import { snap } from "./Scope";
+
+/** The gains an RTL-SDR's tuner offers, in dB. */
+export const GAINS = [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
+/** Tuning steps for each demodulation, the usual one first, in kHz. */
+export const STEPS: Record<string, number[]> = { wfm: [100, 200, 50], nfm: [12.5, 6.25, 25, 5], am: [25, 8.33, 9, 5] };
+export const MODES = [
+  { value: "wfm", label: "WFM", name: "WFM, broadcast FM" },
+  { value: "nfm", label: "NFM", name: "NFM: walkie-talkies, marine, amateur" },
+  { value: "am", label: "AM", name: "AM: aircraft, medium wave" },
+] as const;
 
 /** A choice this browser remembers (the receiver and frequency used last), when it may. */
 export const remember = (k: string, v?: string) => {
@@ -201,6 +213,159 @@ export function useTuner(first: () => Any | null = () => null) {
     playing, blocked, startPlayer, stopPlayer, gen };
 }
 export type Tuner = ReturnType<typeof useTuner>;
+
+// -- tuning a receiver that is open ----------------------------------------------------------
+
+/** Polls the receiver tuned by hand a few times a second for its spectrum, signal and RDS. An
+ * answer to a poll that started before a retune is older than it, and dropped. `view`: a zoomed
+ * part of what it hears, in MHz. */
+export function useLivePoll(t: Tuner, view: [number, number] | null) {
+  const polling = useRef(false);
+  useEvery(250, async () => {
+    if (polling.current) return; // one poll at a time on a slow link
+    polling.current = true;
+    const g = t.gen.current;
+    try {
+      const q = view ? `?lo=${view[0].toFixed(5)}&hi=${view[1].toFixed(5)}` : "";
+      const s = await get(`/live/${t.dev}${q}`);
+      if (g === t.gen.current) t.setSt(s);
+    } catch {
+      /* the next poll tries again */
+    } finally {
+      polling.current = false;
+    }
+  });
+}
+
+/** Moving the tuning of an open receiver: to a frequency, by steps of the band's raster, and to
+ * the next signal either way (`seek`), which moves the dongle along at the edge of what it hears. */
+export function useSteps(t: Tuner, view: [number, number] | null) {
+  const st = t.st;
+  const band = st.band;
+  const usual = () => (band?.step_khz && band.mode === st.mode ? band.step_khz : STEPS[st.mode][0]);
+  const [stepKhz, setStepKhz] = useState<number>(usual);
+  useEffect(() => { setStepKhz(usual()); }, [st.mode, band?.id]);
+  const lo = st.center_mhz - st.span_mhz / 2, hi = st.center_mhz + st.span_mhz / 2;
+  const keep = (m: Any) => ({ mode: st.mode, squelch_db: st.squelch_db, ...m });
+  const to = (mhz: number) => t.tune(keep({ mhz: +mhz.toFixed(5) }));
+  const step = (n: number) => to(snap(st.mhz + (n * stepKhz) / 1000, stepKhz, band));
+  const seek = (dir: 1 | -1) => {
+    const s = st.spectrum;
+    if (!s) return;
+    const n = s.db.length, f0 = s.start_hz / 1e6, df = (s.stop_hz - s.start_hz) / 1e6 / n;
+    const level = s.noise_db + (st.mode === "wfm" ? 15 : 10);
+    const groups: number[] = [];
+    let start = -1;
+    for (let i = 0; i <= n; i++) {
+      const on = i < n && s.db[i] >= level;
+      if (on && start < 0) start = i;
+      if (!on && start >= 0) { groups.push(f0 + ((start + i - 1) / 2 + 0.5) * df); start = -1; }
+    }
+    const min = (stepKhz / 1000) * 0.6;
+    const ahead = groups.filter((g) => (g - st.mhz) * dir > min).sort((a, b) => (a - b) * dir);
+    if (ahead.length) return to(snap(ahead[0], stepKhz, band));
+    if (view) return toast("Nothing stronger that way in this view: zoom out to seek further.");
+    // Nothing more in the band the dongle hears: move it along and look again.
+    const edge = dir > 0 ? hi : lo;
+    return to(snap(edge + dir * (st.mode === "wfm" ? 0.3 : 0.1), stepKhz, band));
+  };
+
+  const steps = [...new Set([...(band?.step_khz && band.mode === st.mode ? [band.step_khz] : []), ...STEPS[st.mode]])];
+  return { stepKhz, setStepKhz, steps, keep, to, step, seek, lo, hi };
+}
+export type Steps = ReturnType<typeof useSteps>;
+
+/** The tuning in large type, editable (Enter tunes, the arrow keys step), what is there (RDS,
+ * the band and its channel) and the signal meter. */
+export function TunedHead({ t, steps }: { t: Tuner; steps: Steps }) {
+  const st = t.st;
+  const band = st.band;
+  const [entry, setEntry] = useState(fmtMhz(st.mhz, st.mode));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setEntry(fmtMhz(st.mhz, st.mode)); }, [st.mhz, st.mode, editing]);
+  const enter = () => {
+    const f = +entry;
+    setEditing(false);
+    if (f > 0 && Math.abs(f - st.mhz) > 1e-6) t.tune({ mhz: f });
+  };
+  const step = steps.step;
+  const sig = st.signal_db;
+  const isNarrow = st.mode !== "wfm";
+  return (
+    <div className="lv-head">
+      <label className="lv-freq">
+        <span className="sr-only">Frequency in MHz</span>
+        <input value={entry} inputMode="decimal" className="lv-freq-input" aria-describedby="lv-freq-unit"
+               style={{ width: `${Math.max(5, entry.length) + 0.4}ch` }}
+               onFocus={() => setEditing(true)} onBlur={enter} onChange={(e) => setEntry(e.target.value)}
+               onKeyDown={(e) => {
+                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                 if (e.key === "Escape") { setEditing(false); setEntry(fmtMhz(st.mhz, st.mode)); (e.target as HTMLInputElement).blur(); }
+                 if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); step(e.key === "ArrowUp" ? 1 : -1); }
+               }} />
+        <span id="lv-freq-unit" className="lv-unit">MHz</span>
+      </label>
+      <div className="lv-what">
+        {st.rds?.ps ? <strong className="lv-ps" dir="auto">{st.rds.ps.trim()}</strong> : <strong>{band ? band.name : "No band plan lists this frequency"}</strong>}
+        {st.rds?.rt && <span className="lv-rt" dir="auto">{st.rds.rt}</span>}
+        {!st.rds?.ps && bandLine(band?.id) && <span className="lv-rt">{bandLine(band?.id)}</span>}
+        {!st.rds?.ps && band?.channels_mhz?.length > 0 && (() => {
+          const i = band.channels_mhz.findIndex((c: number) => Math.abs(c - st.mhz) < 0.002);
+          return i >= 0 ? <span className="lv-rt">Channel {i + 1}</span> : null;
+        })()}
+      </div>
+      <div className="lv-meter-wrap" aria-live="off">
+        {isNarrow && <Lamp state={st.squelch_open ? "speech" : "dim"} label={st.squelch_open ? "Signal: squelch open" : "Squelch closed"} />}
+        <span className="lv-meter" role="meter" aria-label="Signal level" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={sig ?? -100}>
+          <span className="lv-meter-fill" style={{ width: `${Math.max(0, Math.min(100, ((sig ?? -100) + 90) / 0.8))}%` }} />
+        </span>
+        <span className="lv-meter-num mono">{sig != null ? `${sig.toFixed(0)} dBFS` : "–"}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Step and seek, demodulation, squelch, gain, and the sound. */
+export function TuneControls({ t, steps, play }: { t: Tuner; steps: Steps; play: () => void }) {
+  const st = t.st;
+  const { stepKhz, setStepKhz, keep, step, seek } = steps;
+  const tune = t.tune;
+  const isNarrow = st.mode !== "wfm";
+  return (
+    <div className="lv-controls">
+      <div className="lv-group" role="group" aria-label="Tuning">
+        <Button size="sm" variant="secondary" icon="left" aria-label="Seek down" title="Seek down: the next signal below" onClick={() => seek(-1)} />
+        <Button size="sm" variant="secondary" icon="minus" aria-label={`Down ${stepKhz} kHz`} onClick={() => step(-1)} />
+        <Select aria-label="Step" value={String(stepKhz)} onChange={(e) => setStepKhz(+e.target.value)}
+                options={steps.steps.map((k) => [String(k), `${k} kHz`])} />
+        <Button size="sm" variant="secondary" icon="plus" aria-label={`Up ${stepKhz} kHz`} onClick={() => step(1)} />
+        <Button size="sm" variant="secondary" icon="right" aria-label="Seek up" title="Seek up: the next signal above" onClick={() => seek(1)} />
+      </div>
+      <Segmented label="Demodulation" value={st.mode} onChange={(m) => tune({ mhz: st.mhz, mode: m })} options={[...MODES]} />
+      {isNarrow && (
+        <label className="lv-slider">
+          <span>Squelch</span>
+          <input type="range" min={-100} max={-20} step={1} value={st.squelch_db ?? -100}
+                 aria-valuetext={st.squelch_db == null ? "automatic" : `${st.squelch_db} dBFS`}
+                 onChange={(e) => tune(keep({ mhz: st.mhz, squelch_db: +e.target.value <= -100 ? null : +e.target.value }))} />
+          <span className="mono lv-slider-v">{st.squelch_db == null ? "auto" : st.squelch_db}</span>
+        </label>
+      )}
+      <label className="lv-slider">
+        <span>Gain</span>
+        <Select aria-label="Receiver gain" value={String(st.gain_db)} onChange={(e) => tune(keep({ mhz: st.mhz, gain_db: +e.target.value }))}
+                options={[...new Set([st.gain_db, ...GAINS])].sort((a, b) => a - b).map((g) => [String(g), `${g} dB`])} />
+      </label>
+      <div className="lv-group lv-audio">
+        {t.playing ? (
+          <Button size="sm" variant="secondary" icon="mute" onClick={t.stopPlayer}>Mute</Button>
+        ) : (
+          <Button size="sm" variant="primary" icon="speaker" onClick={play}>Play</Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** A refusal the user can answer: confirm they may receive this class of radio, or pause the
  * stations that hold the dongle. */

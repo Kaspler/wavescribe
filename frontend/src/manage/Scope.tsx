@@ -14,10 +14,14 @@ export interface Spectrum {
   clipped?: number;
 }
 
-/** A name printed at the top of the scope above its frequency, such as a station on the receiver. */
+/** A name printed at the top of the scope above its frequency, such as a station on the receiver.
+ * `kind` says what it is in words as well as in the drawing: a station (the default), a signal on
+ * all the time that isn't one ("steady"), the receiver's own line ("own"), or a line of another
+ * receiver's clock ("clock"). */
 export interface Marker {
   mhz: number;
   name: string;
+  kind?: "station" | "steady" | "own" | "clock";
 }
 
 export interface ScopeProps {
@@ -136,11 +140,30 @@ function drawSpectrum(canvas: HTMLCanvasElement, s: Spectrum, tunedMhz: number, 
     const label = f.toFixed(tick < 0.01 ? 4 : tick < 0.1 ? 3 : tick < 1 ? 2 : 1);
     ctx.fillText(label, Math.min(W - ctx.measureText(label).width - 4, Math.max(2, px - ctx.measureText(label).width / 2)), H - 4);
   }
-  for (const m of markers) {
-    if (m.mhz < f0 || m.mhz > f1) continue;
+  // Lines that aren't transmissions run dotted down the scope; stations get a tick. Names are
+  // placed stations first, and one that would overlap a name already placed is left out.
+  const taken: [number, number][] = [];
+  const order = markers.filter((m) => m.mhz >= f0 && m.mhz <= f1).sort((a, b) => +!!(a.kind && a.kind !== "station") - +!!(b.kind && b.kind !== "station"));
+  for (const m of order) {
+    const px = x(m.mhz);
+    const line = m.kind === "own" || m.kind === "clock";
     ctx.fillStyle = tok("--band-ink-2");
-    ctx.fillRect(x(m.mhz) - 0.5, 0, 1, 10);
-    ctx.fillText(m.name, Math.min(W - 160, x(m.mhz) + 4), 16);
+    if (line) {
+      ctx.save();
+      ctx.strokeStyle = tok("--band-ink-2");
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath(); ctx.moveTo(px, 22); ctx.lineTo(px, H - AX); ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.fillRect(px - 0.5, 0, 1, 10);
+    }
+    const label = m.kind === "steady" ? (m.name ? `${m.name} · steady` : "steady") : m.kind === "own" ? "own line" : m.kind === "clock" ? "clock" : m.name;
+    if (!label) continue;
+    const w = ctx.measureText(label).width;
+    const at = Math.min(W - w - 2, px + 4);
+    if (taken.some(([a, b]) => at < b + 8 && at + w > a - 8)) continue;
+    taken.push([at, at + w]);
+    ctx.fillText(label, at, 16);
   }
   // the tuning: its channel shaded, its centre a line, in the pointer's orange
   const half = channelKhz / 2000;

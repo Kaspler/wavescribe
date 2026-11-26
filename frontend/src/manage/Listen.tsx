@@ -1,18 +1,16 @@
 // Listen's radio: what the receivers found here, each a press from playing, and a receiver tuned by
 // hand, like a radio or an SDR program. Nothing heard here is written down, stored or checked for
 // alerts; "Keep as a station" makes it one (radio/live.py).
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
 import { langName } from "../lib/lang";
-import { ApiError, type Any, HANDOFF, del, get, post, refreshPage, useEvery } from "./api";
-import { bandLine, fmtMhz } from "./bands";
+import { ApiError, type Any, HANDOFF, del, post, refreshPage } from "./api";
+import { fmtMhz } from "./bands";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
 import { Scope, snap } from "./Scope";
-import { Ask, remember, useTuner } from "./tuner";
+import { Ask, TuneControls, TunedHead, type Tuner, remember, useLivePoll, useSteps, useTuner } from "./tuner";
 
-const GAINS = [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
-const STEPS: Record<string, number[]> = { wfm: [100, 200, 50], nfm: [12.5, 6.25, 25, 5], am: [25, 8.33, 9, 5] };
 const ZOOMS = [
   { value: "full", label: "Whole band" },
   { value: "400", label: "400 kHz" },
@@ -20,11 +18,6 @@ const ZOOMS = [
   { value: "25", label: "25 kHz" },
 ] as const;
 type Zoom = (typeof ZOOMS)[number]["value"];
-const MODES = [
-  { value: "wfm", label: "WFM", name: "WFM, broadcast FM" },
-  { value: "nfm", label: "NFM", name: "NFM: walkie-talkies, marine, amateur" },
-  { value: "am", label: "AM", name: "AM: aircraft, medium wave" },
-] as const;
 
 // -- frequencies -----------------------------------------------------------------------------
 
@@ -55,8 +48,9 @@ function handedOver(): Any | null {
 export function Listen() {
   const radioState = useRadio();
   const radio = radioState.v;
+  const t = useTuner(handedOver);
   const { receivers, error, reload, dev, st, setSt, ask, setAsk, resend, tune, close, moveTo, asked: setAsked,
-    playing, blocked, startPlayer, stopPlayer, gen, loaded } = useTuner(handedOver);
+    playing, startPlayer, stopPlayer, loaded } = t;
   const open = st?.open && st.device === dev;
   const air = (
     <OnAirHere radio={radioState} playingMhz={open && playing ? st.mhz : null} onPlay={setAsked} onStop={close} onReceiver={reload} />
@@ -71,9 +65,9 @@ export function Listen() {
       <Responsibility />
       {ask && <Ask ask={ask} onYes={resend} onNo={() => setAsk(null)} />}
       {open ? (
-        <Tuned st={st} radio={radio} dev={dev} ids={ids} onRx={(id) => moveTo(id, { mhz: st.mhz, mode: st.mode })} tune={tune} close={close}
-               playing={playing} blocked={blocked} play={() => { stopPlayer(); startPlayer(st.audio); }} stop={stopPlayer}
-               gen={gen} onPoll={setSt} onKept={async () => { stopPlayer(); setSt(null); await reload(); await refreshPage(); }} />
+        <Tuned t={t} radio={radio} ids={ids} onRx={(id) => moveTo(id, { mhz: st.mhz, mode: st.mode })}
+               play={() => { stopPlayer(); startPlayer(st.audio); }}
+               onKept={async () => { stopPlayer(); setSt(null); await reload(); await refreshPage(); }} />
       ) : (
         <Start receivers={receivers} radio={radio} dev={dev} onRx={(id) => moveTo(id, null)} tune={(b) => tune(b, true)} />
       )}
@@ -108,6 +102,7 @@ function Start({ receivers, radio, dev, onRx, tune }: { receivers: Any[]; radio:
         </div>
         <div className="m-actions">
           <ActButton variant="primary" icon="speaker" disabled={!(f > 0)} run={() => go(f, mode)}>Start listening</ActButton>
+          <span className="m-hint rd-inline">Every band at once, and where each receiver is: <a className="rd-link" href="#/add/air">the dial</a> under Find.</span>
         </div>
       </Section>
       {bands.length > 0 && (
@@ -128,24 +123,16 @@ function Start({ receivers, radio, dev, onRx, tune }: { receivers: Any[]; radio:
 // -- listening -------------------------------------------------------------------------------
 
 interface TunedProps {
-  st: Any; radio: Any; dev: string; ids: string[]; onRx: (id: string) => void;
-  tune: (b: Any, play?: boolean) => Promise<Any>; close: () => Promise<void>;
-  playing: boolean; blocked: boolean; play: () => void; stop: () => void;
-  gen: { current: number }; onPoll: (s: Any) => void; onKept: () => Promise<void>;
+  t: Tuner; radio: Any; ids: string[]; onRx: (id: string) => void; play: () => void; onKept: () => Promise<void>;
 }
 
-function Tuned({ st, radio, dev, ids, onRx, tune, close, playing, blocked, play, stop, gen, onPoll, onKept }: TunedProps) {
-  const polling = useRef(false);
+function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
+  const { st, dev, close, blocked, setSt: onPoll } = t;
   const band = st.band;
-  const [stepKhz, setStepKhz] = useState<number>(() => band?.step_khz && band.mode === st.mode ? band.step_khz : STEPS[st.mode][0]);
-  useEffect(() => { setStepKhz(band?.step_khz && band.mode === st.mode ? band.step_khz : STEPS[st.mode][0]); }, [st.mode, band?.id]);
   const [zoom, setZoom] = useState<Zoom>(() => (st.mode === "wfm" ? "full" : "400"));
   const wide = st.mode === "wfm";
   useEffect(() => { setZoom(wide ? "full" : "400"); }, [wide]); // a narrow channel is lost in the whole band
   const [view, setView] = useState<[number, number] | null>(null);
-  const [entry, setEntry] = useState(fmtMhz(st.mhz, st.mode));
-  const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!editing) setEntry(fmtMhz(st.mhz, st.mode)); }, [st.mhz, st.mode, editing]);
 
   const lo = st.center_mhz - st.span_mhz / 2, hi = st.center_mhz + st.span_mhz / 2;
   // A zoomed view stays put while the tuning moves inside it, and follows when it leaves.
@@ -159,121 +146,18 @@ function Tuned({ st, radio, dev, ids, onRx, tune, close, playing, blocked, play,
     });
   }, [zoom, st.mhz, lo, hi]);
 
-  useEvery(250, async () => {
-    if (polling.current) return; // one poll at a time on a slow link
-    polling.current = true;
-    const g = gen.current;
-    try {
-      const q = view ? `?lo=${view[0].toFixed(5)}&hi=${view[1].toFixed(5)}` : "";
-      const s = await get(`/live/${dev}${q}`);
-      if (g === gen.current) onPoll(s); // a retune happened meanwhile: this answer is older than it
-    } catch {
-      /* the next poll tries again */
-    } finally {
-      polling.current = false;
-    }
-  });
+  useLivePoll(t, view);
 
-  const keep = (m: Any) => ({ mode: st.mode, squelch_db: st.squelch_db, ...m });
-  const to = (mhz: number) => tune(keep({ mhz: +mhz.toFixed(5) }));
-  const step = (n: number) => to(snap(st.mhz + (n * stepKhz) / 1000, stepKhz, band));
-  const seek = (dir: 1 | -1) => {
-    const s = st.spectrum;
-    if (!s) return;
-    const n = s.db.length, f0 = s.start_hz / 1e6, df = (s.stop_hz - s.start_hz) / 1e6 / n;
-    const level = s.noise_db + (st.mode === "wfm" ? 15 : 10);
-    const groups: number[] = [];
-    let start = -1;
-    for (let i = 0; i <= n; i++) {
-      const on = i < n && s.db[i] >= level;
-      if (on && start < 0) start = i;
-      if (!on && start >= 0) { groups.push(f0 + ((start + i - 1) / 2 + 0.5) * df); start = -1; }
-    }
-    const min = (stepKhz / 1000) * 0.6;
-    const ahead = groups.filter((g) => (g - st.mhz) * dir > min).sort((a, b) => (a - b) * dir);
-    if (ahead.length) return to(snap(ahead[0], stepKhz, band));
-    if (view) return toast("Nothing stronger that way in this view: zoom out to seek further.");
-    // Nothing more in the band the dongle hears: move it along and look again.
-    const edge = dir > 0 ? hi : lo;
-    return to(snap(edge + dir * (st.mode === "wfm" ? 0.3 : 0.1), stepKhz, band));
-  };
-  const enter = () => {
-    const f = +entry;
-    setEditing(false);
-    if (f > 0 && Math.abs(f - st.mhz) > 1e-6) tune({ mhz: f });
-  };
-
+  const steps = useSteps(t, view);
   const markers: Any[] = (radio?.receivers || []).find((r: Any) => r.id === dev)?.stations || [];
-  const sig = st.signal_db;
   const isNarrow = st.mode !== "wfm";
   return (
     <>
       <Section id="lv-tuned" title="Tune by hand" actions={<Button icon="stop" onClick={close}>Stop listening</Button>}>
         <RxSwitch ids={ids} value={dev} onChange={onRx}
                   note={st.holders?.length ? `Shared with ${st.holders.join(", ")}: a frequency outside its band, or another gain, needs it to itself.` : null} />
-        <div className="lv-head">
-          <label className="lv-freq">
-            <span className="sr-only">Frequency in MHz</span>
-            <input value={entry} inputMode="decimal" className="lv-freq-input" aria-describedby="lv-freq-unit"
-                   style={{ width: `${Math.max(5, entry.length) + 0.4}ch` }}
-                   onFocus={() => setEditing(true)} onBlur={enter} onChange={(e) => setEntry(e.target.value)}
-                   onKeyDown={(e) => {
-                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                     if (e.key === "Escape") { setEditing(false); setEntry(fmtMhz(st.mhz, st.mode)); (e.target as HTMLInputElement).blur(); }
-                     if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); step(e.key === "ArrowUp" ? 1 : -1); }
-                   }} />
-            <span id="lv-freq-unit" className="lv-unit">MHz</span>
-          </label>
-          <div className="lv-what">
-            {st.rds?.ps ? <strong className="lv-ps" dir="auto">{st.rds.ps.trim()}</strong> : <strong>{band ? band.name : "No band plan lists this frequency"}</strong>}
-            {st.rds?.rt && <span className="lv-rt" dir="auto">{st.rds.rt}</span>}
-            {!st.rds?.ps && bandLine(band?.id) && <span className="lv-rt">{bandLine(band?.id)}</span>}
-            {!st.rds?.ps && band?.channels_mhz?.length > 0 && (() => {
-              const i = band.channels_mhz.findIndex((c: number) => Math.abs(c - st.mhz) < 0.002);
-              return i >= 0 ? <span className="lv-rt">Channel {i + 1}</span> : null;
-            })()}
-          </div>
-          <div className="lv-meter-wrap" aria-live="off">
-            {isNarrow && <Lamp state={st.squelch_open ? "speech" : "dim"} label={st.squelch_open ? "Signal: squelch open" : "Squelch closed"} />}
-            <span className="lv-meter" role="meter" aria-label="Signal level" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={sig ?? -100}>
-              <span className="lv-meter-fill" style={{ width: `${Math.max(0, Math.min(100, ((sig ?? -100) + 90) / 0.8))}%` }} />
-            </span>
-            <span className="lv-meter-num mono">{sig != null ? `${sig.toFixed(0)} dBFS` : "–"}</span>
-          </div>
-        </div>
-
-        <div className="lv-controls">
-          <div className="lv-group" role="group" aria-label="Tuning">
-            <Button size="sm" variant="secondary" icon="left" aria-label="Seek down" title="Seek down: the next signal below" onClick={() => seek(-1)} />
-            <Button size="sm" variant="secondary" icon="minus" aria-label={`Down ${stepKhz} kHz`} onClick={() => step(-1)} />
-            <Select aria-label="Step" value={String(stepKhz)} onChange={(e) => setStepKhz(+e.target.value)}
-                    options={[...new Set([...(band?.step_khz && band.mode === st.mode ? [band.step_khz] : []), ...STEPS[st.mode]])].map((k) => [String(k), `${k} kHz`])} />
-            <Button size="sm" variant="secondary" icon="plus" aria-label={`Up ${stepKhz} kHz`} onClick={() => step(1)} />
-            <Button size="sm" variant="secondary" icon="right" aria-label="Seek up" title="Seek up: the next signal above" onClick={() => seek(1)} />
-          </div>
-          <Segmented label="Demodulation" value={st.mode} onChange={(m) => tune({ mhz: st.mhz, mode: m })} options={[...MODES]} />
-          {isNarrow && (
-            <label className="lv-slider">
-              <span>Squelch</span>
-              <input type="range" min={-100} max={-20} step={1} value={st.squelch_db ?? -100}
-                     aria-valuetext={st.squelch_db == null ? "automatic" : `${st.squelch_db} dBFS`}
-                     onChange={(e) => tune(keep({ mhz: st.mhz, squelch_db: +e.target.value <= -100 ? null : +e.target.value }))} />
-              <span className="mono lv-slider-v">{st.squelch_db == null ? "auto" : st.squelch_db}</span>
-            </label>
-          )}
-          <label className="lv-slider">
-            <span>Gain</span>
-            <Select aria-label="Receiver gain" value={String(st.gain_db)} onChange={(e) => tune(keep({ mhz: st.mhz, gain_db: +e.target.value }))}
-                    options={[...new Set([st.gain_db, ...GAINS])].sort((a, b) => a - b).map((g) => [String(g), `${g} dB`])} />
-          </label>
-          <div className="lv-group lv-audio">
-            {playing ? (
-              <Button size="sm" variant="secondary" icon="mute" onClick={stop}>Mute</Button>
-            ) : (
-              <Button size="sm" variant="primary" icon="speaker" onClick={play}>Play</Button>
-            )}
-          </div>
-        </div>
+        <TunedHead t={t} steps={steps} />
+        <TuneControls t={t} steps={steps} play={play} />
         {blocked && <p className="m-trouble">The browser held the sound back: press Play.</p>}
         {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain.</p>}
         {!st.connected && (st.error || st.reconnects > 0) && (
@@ -281,14 +165,14 @@ function Tuned({ st, radio, dev, ids, onRx, tune, close, playing, blocked, play,
         )}
 
         <Scope spectrum={st.spectrum || null} centerMhz={st.center_mhz} spanMhz={st.span_mhz} view={view} tunedMhz={st.mhz} mode={st.mode}
-               channelKhz={st.channel_khz} stepKhz={stepKhz} band={band} markers={markers} onTune={to} onStep={step} />
+               channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={band} markers={markers} onTune={steps.to} onStep={steps.step} />
         <div className="lv-under">
           <Segmented label="Zoom" value={zoom} onChange={setZoom} options={[...ZOOMS]} />
           <span className="m-hint">Click to tune, scroll or use the arrow keys to step. Receiver {rxName(dev)} hears {lo.toFixed(2)} to {hi.toFixed(2)} MHz.</span>
         </div>
         {st.paused?.length > 0 && <p className="m-hint">Paused while you listen: {st.paused.join(", ")}. They start again when you stop listening.</p>}
       </Section>
-      {isNarrow && <ScanPanel st={st} radio={radio} dev={dev} view={view} stepKhz={stepKhz} onPoll={onPoll} />}
+      {isNarrow && <ScanPanel st={st} radio={radio} dev={dev} view={view} stepKhz={steps.stepKhz} onPoll={onPoll} />}
       <Keep st={st} radio={radio} dev={dev} onKept={onKept} />
     </>
   );

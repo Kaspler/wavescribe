@@ -8,7 +8,7 @@ import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, 
 import { langName } from "../lib/lang";
 import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
-import { BandCard, DialBar, DialLegend, ReceiverMarks, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
+import { BandCard, DialBar, DialLegend, LiveView, ReceiverMarks, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
@@ -218,23 +218,47 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   const minutes = +watch;
   const rxs: RxStatus[] = v.receivers.map((r: Any) => rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob));
   const me = rxs.find((r) => r.id === device);
-  const [moving, setMoving] = useState<{ id: string; centre: number; mode: string | null } | null>(null);
-  /** Sends a receiver to look around `centre` (no sound until something is chosen to listen
-   * to). A receiver following stations asks first, and a free one is offered instead. */
-  const look = (id: string, centre: number, mode: string | null, pause = false) => {
+  const [moving, setMoving] = useState<{ id: string; mhz: number; mode: string | null; play: boolean } | null>(null);
+  /** Tunes receiver `id` to `mhz`, with sound when `play`. One following stations asks first if
+   * that moves it, saying which stations wait, and a free receiver is offered instead. */
+  const send = (id: string, mhz: number, mode: string | null, play: boolean, pause = false) => {
     const r = rxs.find((x) => x.id === id);
-    if (!r) return;
-    const mhz = lookTune(centre, mode);
+    if (!r) return listenTo(mhz, mode);
     const inside = mhz > r.lo + 0.12 && mhz < r.hi - 0.12;
-    if (r.holders.length && !inside && !pause) { setMoving({ id, centre, mode }); return; }
+    if (r.holders.length && !inside && !pause) { setMoving({ id, mhz, mode, play }); return; }
     setMoving(null);
     setDevice(id);
-    tuner.moveTo(id, { mhz, mode: mode || undefined, ...(pause ? { pause: true } : {}) }, false);
+    tuner.moveTo(id, { mhz, mode: mode || undefined, ...(pause ? { pause: true } : {}) }, play);
   };
-  const lookHere = (b: Band) => look(device, bestCentre(b, heardIn(v.heard, b).map((e: Any) => e.mhz), me ? me.hi - me.lo : 2.4), b.mode);
+  /** Looks around `centre` with a receiver, without sound until something is chosen. */
+  const look = (id: string, centre: number, mode: string | null) => send(id, lookTune(centre, mode), mode, false);
+  const listen = (mhz: number, mode: string | null) => send(device, mhz, mode, true);
+  /** Where most of what was heard in the band is; a receiver already there following stations
+   * looks where it is, which pauses nothing. */
+  const lookHere = (b: Band) => {
+    const there = me && me.holders.length > 0 && bandOfWindow(v.bands, me.lo, me.hi)?.id === b.id;
+    look(device, there ? (me.lo + me.hi) / 2 : bestCentre(b, heardIn(v.heard, b).map((e: Any) => e.mhz), me ? me.hi - me.lo : 2.4), b.mode);
+  };
   // A free receiver to offer instead: one already on the band first.
   const free = rxs.filter((r) => r.id !== moving?.id && r.state === "idle")
     .sort((a, b) => +(bandOfWindow(v.bands, b.lo, b.hi)?.id === band) - +(bandOfWindow(v.bands, a.lo, a.hi)?.id === band))[0];
+  // What the receiver in view sees: live while it is tuned by hand on this band; else a still
+  // picture of the band from the newest scan that covered it, or the scan sweeping it now.
+  const liveHere = !!me && me.state === "hand" && tuner.dev === device && !!tuner.st?.open && onTheDial && bandOfWindow(v.bands, me.lo, me.hi)?.id === band;
+  const stretch: [number, number] | null = liveHere && me ? [me.lo, me.hi] : onTheDial && chosen ? [chosen.start_mhz, chosen.stop_mhz] : null;
+  const { data: still } = useLoad<Any | null>(
+    () => (stretch ? get(`/radio/scans?lo=${stretch[0].toFixed(3)}&hi=${stretch[1].toFixed(3)}`).then((x) => x.scan) : Promise.resolve(null)),
+    [stretch?.[0].toFixed(1), stretch?.[1].toFixed(1), v.last_scan?.t],
+  );
+  const sweeping = scanJob && chosen && scanJob.band === chosen.id ? scanJob : null;
+  // Found in the band, strongest first: the scan sweeping it now, else everything heard there.
+  /** Chooses a band, bringing a receiver already there into view. */
+  const pick = (id: string) => {
+    choose(id);
+    const onIt = (r: RxStatus) => bandOfWindow(v.bands, r.lo, r.hi)?.id === id;
+    if (me && !onIt(me)) { const there = rxs.find(onIt); if (there) setDevice(there.id); }
+  };
+  const inBand: Signal[] = onTheDial && chosen ? (sweeping ? sweeping.signals || [] : heardIn(v.heard, chosen)).slice().sort((a: Any, b: Any) => b.snr_db - a.snr_db) : [];
   const actions = !v.receivers.length ? (
     <>
       <UseDongle dongles={v.dongles || []} tools={!!v.tools.rtl_sdr} what={scanWhat} look={reload} then={tryOn} />
@@ -254,13 +278,10 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
             {pause ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
           </ActButton>
         )}
-        {chosen && me && me.state !== "scanning" && !(bandOfWindow(v.bands, me.lo, me.hi)?.id === chosen.id && me.state === "hand") && (
+        {chosen && onTheDial && me && me.state !== "scanning" && !liveHere && (
           <Button variant={kindOf(chosen) === "text" ? "secondary" : "primary"} icon="eye" onClick={() => lookHere(chosen)}>
             Look here with Receiver {rxName(device)}
           </Button>
-        )}
-        {me?.state === "hand" && tuner.dev === device && (
-          <ActButton variant="ghost" icon="stop" run={tuner.close}>Let Receiver {rxName(device)} go</ActButton>
         )}
         {!running && !pause && chosen && kindOf(chosen) === "text" && (
           <span className="m-hint rd-inline">
@@ -274,12 +295,18 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
       {moving && (
         <div className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q">
           <p id="dl-move-q" className="m-line">
-            Receiver {rxName(moving.id)} is following {and(rxs.find((r) => r.id === moving.id)?.holders || [])}. Looking
-            at {mhzText(moving.centre)} pauses {rxs.find((r) => r.id === moving.id)?.holders.length === 1 ? "it" : "them"} until you let the receiver go.
+            Receiver {rxName(moving.id)} is following {and(rxs.find((r) => r.id === moving.id)?.holders || [])}. {moving.play ? "Listening to" : "Looking at"}{" "}
+            {mhzText(moving.mhz, moving.mode)} pauses {rxs.find((r) => r.id === moving.id)?.holders.length === 1 ? "it" : "them"} until you let the receiver go.
           </p>
           <div className="m-actions">
-            {free && <Button variant="primary" icon="eye" onClick={() => look(free.id, moving.centre, moving.mode)}>Look with Receiver {rxName(free.id)}, which is free</Button>}
-            <Button variant={free ? "secondary" : "primary"} onClick={() => look(moving.id, moving.centre, moving.mode, true)}>Pause and look with Receiver {rxName(moving.id)}</Button>
+            {free && (
+              <Button variant="primary" icon={moving.play ? "speaker" : "eye"} onClick={() => send(free.id, moving.mhz, moving.mode, moving.play)}>
+                {moving.play ? "Listen" : "Look"} with Receiver {rxName(free.id)}, which is free
+              </Button>
+            )}
+            <Button variant={free ? "secondary" : "primary"} onClick={() => send(moving.id, moving.mhz, moving.mode, moving.play, true)}>
+              Pause and {moving.play ? "listen" : "look"} with Receiver {rxName(moving.id)}
+            </Button>
             <Button variant="ghost" onClick={() => setMoving(null)}>Cancel</Button>
           </div>
         </div>
@@ -290,12 +317,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   return (
     <Section id="rd-find" title="The dial"
              description="Everything a receiver can tune, from 24 to 1766 MHz. Choose a band to see what it is and find what's on the air there; what's found is kept under Heard here.">
-      <DialBar bands={v.bands} heard={v.heard} chosen={onTheDial ? band : null}
-               onChoose={(id) => {
-                 choose(id);
-                 const onIt = (r: RxStatus) => bandOfWindow(v.bands, r.lo, r.hi)?.id === id;
-                 if (me && !onIt(me)) { const there = rxs.find(onIt); if (there) setDevice(there.id); }
-               }}
+      <DialBar bands={v.bands} heard={v.heard} chosen={onTheDial ? band : null} onChoose={pick}
                says={(b) => rxs.filter((r) => bandOfWindow(v.bands, r.lo, r.hi)?.id === b.id).map((r) => `Receiver ${rxName(r.id)} is here`).join(", ")}
                overlay={(width, scale) => v.receivers.length > 0 && (
                  <ReceiverMarks width={width} scale={scale} rxs={rxs} chosen={device} bands={v.bands}
@@ -353,6 +375,11 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
             )}
           </Advanced>
           {scanJob && !failed && !(scanJob.phase === "done" && !found.length) && <ScanProgress job={scanJob} />}
+          {onTheDial && chosen ? (
+            <BandView v={v} band={chosen} me={me} live={liveHere} tuner={tuner} still={still} sweeping={sweeping} rows={inBand}
+                      onAdd={onAdd} onListen={listen} onTry={tryOn} stationAt={stationAt} />
+          ) : (
+            <>
           {result?.spectrum && <ScanSpectrum spectrum={result.spectrum} signals={shown} bands={v.bands} />}
           {(failed || (result && !running && !found.length)) && <NothingHeard v={v} result={failed ? scanJob : result} onTry={tryOn} />}
           {result && (
@@ -373,9 +400,59 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
               {result === v.last_scan && v.last_scan?.t && <p className="m-hint">From the last scan, {new Date(v.last_scan.t * 1000).toLocaleString()}.</p>}
             </>
           )}
+            </>
+          )}
         </>
       )}
     </Section>
+  );
+}
+
+/** Under a band chosen on the dial: what the receiver in view sees there, live or as a still
+ * picture with its age, then everything found in the band, strongest first (the text
+ * alternative to the pictures). */
+function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onListen, onTry, stationAt }: {
+  v: Any; band: Band; me: RxStatus | undefined; live: boolean; tuner: Tuner; still: Any | null; sweeping: Any | null; rows: Signal[];
+  onAdd: (t: Any) => void; onListen: (mhz: number, mode: string | null) => void; onTry: (device: string) => Promise<void>; stationAt: (s: Any) => string | null;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const name = bandWords(band).name;
+  const who = me ? `Receiver ${rxName(me.id)}` : "a receiver";
+  const hidden = rows.filter((s) => !real(s));
+  const shown = showAll ? rows : rows.filter(real);
+  const common = shown.length > 1 && shown.every((s) => s.label === shown[0].label) ? shown[0].label : null;
+  const failed = sweeping?.phase === "error" && sweeping.error !== "cancelled";
+  const picture = sweeping?.spectrum ? sweeping : still?.spectrum ? still : null;
+  const scanner = picture && v.receivers.find((r: Any) => r.serial === picture.serial);
+  const running = !!sweeping && !["done", "error"].includes(sweeping.phase);
+  const heading = live ? `What Receiver ${rxName(tuner.dev)} hears, live`
+    : picture === sweeping && running ? `${scanner ? `Receiver ${rxName(scanner.id)}` : "A receiver"} is sweeping ${name}`
+    : picture ? `${name} at the last scan, ${ago(picture.t)}` : null;
+  return (
+    <>
+      {heading && <h4 className="m-sub-h">{heading}</h4>}
+      {live ? (
+        <LiveView t={tuner} heard={v.heard} signals={still?.signals || []} onAdd={onAdd} />
+      ) : picture ? (
+        <ScanSpectrum spectrum={picture.spectrum} signals={picture === sweeping ? shown : (picture.signals || []).filter(real)} bands={v.bands} onPick={onListen}
+                      caption={picture === sweeping && running
+                        ? `The line fills in as it sweeps. Click a peak, or anywhere, to listen there with ${who}.`
+                        : `A still picture: the strongest each frequency reached in ${scanner ? `Receiver ${rxName(scanner.id)}'s` : "that"} scan. Click a peak, or anywhere, to listen there with ${who}; Look here shows it live.`} />
+      ) : null}
+      {(failed || (sweeping?.phase === "done" && !rows.some(real))) && <NothingHeard v={v} result={sweeping} onTry={onTry} />}
+      {(shown.length > 0 || running) && <h4 className="m-sub-h">Found in {name}, strongest first</h4>}
+      {(shown.length > 0 || running) && (
+        <Table caption={`Found in ${name}, strongest first${sweeping ? "" : ", from every scan so far"}`} empty="Nothing yet…"
+               cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise", num: true }, { label: "", width: "1%" }]}>
+          {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} onListen={onListen} />)}
+        </Table>
+      )}
+      {hidden.length > 0 && (
+        <p className="m-hint">
+          <button type="button" className="rd-link" onClick={() => setShowAll(!showAll)}>{showAll ? "Hide" : "Show"} {hidden.length} more</button>: {foldedKinds(hidden)}.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -483,7 +560,9 @@ function foldedKinds(hidden: Signal[]): string {
   return kinds.length > 1 ? `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}` : kinds[0] || "";
 }
 
-function SignalRow({ s, station, onAdd, common }: { s: Signal; station?: string | null; onAdd: (t: Any) => void; common?: string | null }) {
+function SignalRow({ s, station, onAdd, common, onListen = listenTo }: {
+  s: Signal; station?: string | null; onAdd: (t: Any) => void; common?: string | null; onListen?: (mhz: number, mode: string | null) => void;
+}) {
   const rds = s.rds || {};
   const name = s.user_name || rds.ps || "";
   const what = [s.label !== common && (s.label || "Unlisted"), rds.pty && rds.pty_name].filter(Boolean).join(" · ");
@@ -508,11 +587,11 @@ function SignalRow({ s, station, onAdd, common }: { s: Signal; station?: string 
       <td className="rd-act">
         {!listenable(s) ? <span className="m-muted">receiver's own</span>
           : station ? <a href="#/" className="rd-link">On the page</a>
-          : clock ? <Button size="sm" variant="ghost" icon="speaker" onClick={() => listenTo(s.mhz, s.mode)}>Listen</Button>
+          : clock ? <Button size="sm" variant="ghost" icon="speaker" onClick={() => onListen(s.mhz, s.mode)}>Listen</Button>
           : s.privacy === "digital" ? <Button size="sm" variant="ghost" onClick={() => onAdd({ mhz: s.mhz, mode: null, name, privacy: s.privacy, t: Date.now() })}>Try anyway</Button>
           : (
             <>
-              <Button size="sm" variant="ghost" icon="speaker" onClick={() => listenTo(s.mhz, s.mode)}>Listen</Button>
+              <Button size="sm" variant="ghost" icon="speaker" onClick={() => onListen(s.mhz, s.mode)}>Listen</Button>
               <Button size="sm" icon="plus" onClick={() => onAdd({ mhz: s.mhz, mode: s.mode, name, privacy: s.privacy, t: Date.now() })}>Add as a station</Button>
             </>
           )}
@@ -521,8 +600,11 @@ function SignalRow({ s, station, onAdd, common }: { s: Signal; station?: string 
   );
 }
 
-/** The scan's spectrum on the instrument's dark band; signals ticked, FM names printed, hover reads out. */
-function ScanSpectrum({ spectrum, signals, bands }: { spectrum: Any; signals: Any[]; bands: Any[] }) {
+/** The scan's spectrum on the instrument's dark band; signals ticked, FM names printed, hover reads
+ * out. A click listens under Listen, or calls `onPick` (the dial listens in place). */
+function ScanSpectrum({ spectrum, signals, bands, onPick = listenTo, caption }: {
+  spectrum: Any; signals: Any[]; bands: Any[]; onPick?: (mhz: number, mode: string | null) => void; caption?: string;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<{ x: number; mhz: number; db: number; sig: Any | null } | null>(null);
   const { start_mhz: a, stop_mhz: b, db } = spectrum;
@@ -601,10 +683,10 @@ function ScanSpectrum({ spectrum, signals, bands }: { spectrum: Any; signals: An
               onMouseMove={move} onMouseLeave={() => setHover(null)}
               onClick={() => {
                 if (sig) {
-                  if (listenable(sig)) listenTo(sig.mhz, sig.mode);
+                  if (listenable(sig)) onPick(sig.mhz, sig.mode);
                 } else if (hover) {
                   // anywhere else: the nearest channel of the band there, to listen for what comes and goes
-                  listenTo(snapToBand(bands, hover.mhz), bandAt(bands, hover.mhz)?.mode || null);
+                  onPick(snapToBand(bands, hover.mhz), bandAt(bands, hover.mhz)?.mode || null);
                 }
               }}
               style={{ cursor: "pointer" }} />
@@ -613,7 +695,7 @@ function ScanSpectrum({ spectrum, signals, bands }: { spectrum: Any; signals: An
           {sig ? `${fmtMhz(sig.mhz, sig.mode)} MHz${sig.rds?.ps ? ` · ${sig.rds.ps}` : ""} · ${sig.snr_db.toFixed(0)} dB above noise` : `${fmtMhz(snapToBand(bands, hover.mhz), bandAt(bands, hover.mhz)?.mode)} MHz · click to listen`}
         </span>
       )}
-      <figcaption className="m-hint">Peaks are signals: click one, or anywhere, to listen there under Listen. The line is the strongest each frequency reached during the scan.</figcaption>
+      <figcaption className="m-hint">{caption || "Peaks are signals: click one, or anywhere, to listen there under Listen. The line is the strongest each frequency reached during the scan."}</figcaption>
     </figure>
   );
 }
@@ -633,7 +715,7 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
   const [mode, setMode] = useState<string>(pre.mode && band && pre.mode !== band.mode ? pre.mode : "");
   const pickRx = () =>
     (v.receivers.find((r: Any) => fits(r, f) && !r.scanning) || v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0])?.id || "";
-  const [device, setDevice] = useState<string>(pickRx);
+  const [device, setDevice] = useState<string>(() => pre.device || pickRx());
   const [name, setName] = useState(pre.name || "");
   const [does, setDoes] = useState("translate");
   const [lang, setLang] = useState<string>(v.defaults.language || "");

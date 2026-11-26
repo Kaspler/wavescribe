@@ -1,13 +1,16 @@
 // The dial: one bar for everything a receiver tunes, printed on the instrument's dark band like
 // the scale of a radio. Bands are its segments, named in everyday words; what was heard here is a
-// fine tick under them. A band chosen on it is explained underneath (BandCard). The geometry lives
-// in dial.ts.
+// fine tick under them. A band chosen on it is explained underneath (BandCard), receivers stand
+// on it (ReceiverMarks), and one tuned by hand shows what it sees live (LiveView). The geometry
+// lives in dial.ts.
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Lamp, cx } from "../components/ui";
+import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import type { Any } from "./api";
 import { type Band, bandWords } from "./bands";
 import { type Segment, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks } from "./dial";
 import { rxName } from "./Receivers";
+import { type Marker, Scope } from "./Scope";
+import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps } from "./tuner";
 
 const NAME_FONT = 12; // px, as --t-sm
 const MIN_INNER_PX = 14; // a band inside another stays this wide
@@ -296,6 +299,63 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// -- what a receiver sees ----------------------------------------------------------------------
+
+/** What to mark on a receiver's spectrum between `lo` and `hi` MHz: what was heard there, by
+ * name, a signal on all the time that isn't broadcast as steady, and from the scans (`signals`)
+ * the receivers' own lines and other receivers' clock lines. */
+export function dialMarkers(heard: Any[], signals: Any[], lo: number, hi: number): Marker[] {
+  const inside = (f: number) => f >= lo && f <= hi;
+  const out: Marker[] = heard.filter((e) => inside(e.mhz)).map((e) => ({
+    mhz: e.mhz,
+    name: e.user_name || e.name || e.rds?.ps || "",
+    kind: e.passes >= 10 && e.seen === e.passes && e.privacy !== "broadcast" ? "steady" : "station",
+  }));
+  for (const s of signals) if (s.spur && inside(s.mhz)) out.push({ mhz: s.mhz, name: "", kind: s.clock_hz != null ? "clock" : "own" });
+  return out;
+}
+
+/** A receiver tuned by hand, live: the tuning and what is there, the sound, and its window as
+ * spectrum and waterfall, where a click listens. `signals`: a scan's findings in the window, for
+ * the lines that aren't transmissions. */
+export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[]; signals: Any[]; onAdd: (pre: Any) => void }) {
+  const st = t.st;
+  useLivePoll(t, null);
+  const steps = useSteps(t, null);
+  const name = rxName(t.dev);
+  const play = () => { t.stopPlayer(); t.startPlayer(st.audio); };
+  return (
+    <div className="dl-view" role="group" aria-label={`What Receiver ${name} hears now`}>
+      <TunedHead t={t} steps={steps} />
+      <div className="m-actions">
+        {t.playing
+          ? <Button variant="secondary" icon="mute" onClick={t.stopPlayer}>Mute</Button>
+          : <Button variant="primary" icon="speaker" onClick={play}>Listen</Button>}
+        <Button icon="plus" onClick={() => onAdd({ mhz: st.mhz, mode: st.mode, name: st.rds?.ps?.trim() || "", privacy: st.privacy, device: t.dev, t: Date.now() })}>
+          Add as a station
+        </Button>
+        <ActButton variant="ghost" icon="stop" run={t.close}>Let Receiver {name} go</ActButton>
+      </div>
+      {t.blocked && <p className="m-trouble">The browser held the sound back: press Listen.</p>}
+      {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain under Advanced.</p>}
+      {!st.connected && (st.error || st.reconnects > 0) && (
+        <p className="m-trouble">{st.error ? `Receiver ${name} stopped: ${st.error}. Look here again to restart it.` : `Receiver ${name} has stopped sending: reconnecting…`}</p>
+      )}
+      <Scope spectrum={st.spectrum || null} centerMhz={st.center_mhz} spanMhz={st.span_mhz} view={null} tunedMhz={st.mhz} mode={st.mode}
+             channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={st.band} markers={dialMarkers(heard, signals, steps.lo, steps.hi)}
+             onTune={(mhz) => t.tune(steps.keep({ mhz: +mhz.toFixed(5) }), true)} onStep={steps.step} />
+      <p className="m-hint">
+        Receiver {name} hears {steps.lo.toFixed(2)} to {steps.hi.toFixed(2)} MHz. Click a signal, or anywhere, to listen there; the arrow
+        keys step. Nothing heard here is kept until you add it as a station.
+        {st.paused?.length > 0 && ` ${and(st.paused)} ${st.paused.length === 1 ? "waits" : "wait"} until you let the receiver go.`}
+      </p>
+      <Advanced id="dl-tune" label="Tuning">
+        <TuneControls t={t} steps={steps} play={play} />
+      </Advanced>
     </div>
   );
 }

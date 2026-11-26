@@ -18,6 +18,7 @@ from wavescribe import admin
 from wavescribe.admin import AdminError
 from wavescribe.app import ChangeError
 from wavescribe.config import ConfigError
+from wavescribe.radio import stills
 from wavescribe.radio.service import RadioError
 from wavescribe.registry import ModelError
 
@@ -368,6 +369,12 @@ def _radio_scan_cancel(app: App, m, q, b) -> Any:
 @route("POST", "/radio/tune")
 def _radio_tune(app: App, m, q, b) -> Any:
     return app.radio.tune(_body(b))
+
+
+@route("GET", "/radio/scans")
+def _radio_still(app: App, m, q, b) -> Any:
+    """A still picture of ``lo`` to ``hi`` MHz from the saved scans (radio/stills.py)."""
+    return {"scan": stills.still(app.radio.catalog.root / "scans", float(q["lo"]), float(q["hi"]))}
 
 
 # -- listening by hand (radio/live.py) ---------------------------------------------------------
