@@ -45,6 +45,7 @@ from wavescribe.settings import (
     effective_config,
     station_dict,
 )
+from wavescribe.translate import unsupported_targets
 
 if TYPE_CHECKING:
     from wavescribe.alerts import Alerter
@@ -96,6 +97,15 @@ def _plays_meanwhile(reason: str) -> str:
         return ("Plays without text until the speech models are downloaded: Settings → Languages "
                 "and models, or `wavescribe models fetch`.")  # fmt: skip
     return f"Plays without text until its speech model is downloaded: {reason}"
+
+
+def _untranslated(mt_id: str | None, missing: list[str]) -> str:
+    """Why some of a station's translations are missing. It still runs and alerts on its own
+    words, and the other languages are translated."""
+    names = ", ".join(_lang_name(t) for t in missing)
+    return (f"Not translated into {names}: {mt_id} can't translate into "
+            f"{'it' if len(missing) == 1 else 'them'}. Choose another translator for this "
+            "station, or other translation languages.")  # fmt: skip
 
 
 class ChangeError(ValueError):
@@ -168,6 +178,11 @@ class App:
         # Stations to be written down whose models aren't downloaded yet: they play without
         # text meanwhile, and the reason says what to download. A new install starts so.
         self.listen_only: dict[str, str] = {sid: _plays_meanwhile(r) for sid, r in missing.items()}
+        # Translation languages a station's translator lacks (MADLAD has a fixed list): it
+        # still runs and alerts, translated into the rest, and its reason names them.
+        self.untranslated: dict[str, list[str]] = {}
+        self._target_checks: dict[tuple[object, ...], list[str]] = {}
+        self._check_translations(quiet=True)  # plan_available has logged them
         self._mark_unavailable()
         if store is not None:
             self._apply_retention(settings.get("retention") or {})
@@ -370,8 +385,12 @@ class App:
                 "running": s.id in running,
                 "disabled": s.disabled,
                 "available": s.id not in self.unavailable,
-                "reason": self.unavailable.get(s.id) or self.listen_only.get(s.id),
+                "reason": self.unavailable.get(s.id) or self.listen_only.get(s.id) or (
+                    _untranslated(self._translator_id(s), self.untranslated[s.id])
+                    if s.id in self.untranslated else None),
                 "listen_only": s.id in self.listen_only,
+                # Translation languages its translator lacks; it runs and translates the rest.
+                "translate_to_missing": self.untranslated.get(s.id, []),
                 "privacy": s.privacy,
                 # Kept stricter after a change of region, until confirmed (radio/service.py).
                 "privacy_region": s.privacy_region,
@@ -390,6 +409,24 @@ class App:
     def _translator_id(self, s: Station) -> str | None:
         mt = self.plan.translator_for(s)
         return mt[0].id if mt else None
+
+    def _check_translations(self, *, quiet: bool = False) -> None:
+        """Find the translation languages each station's translator lacks, after anything that
+        may change them (the station, its translator, the model order, a download). Never
+        fatal: alerts run on the station's own words, and the rest is translated."""
+        found: dict[str, list[str]] = {}
+        for s in self.config.stations:
+            mt = self.plan.translator_for(s) if s.translation_targets else None
+            if mt is None:
+                continue
+            key = (mt[0].id, str(mt[1]), s.translation_targets)
+            if key not in self._target_checks:  # MADLAD's list is read from its vocabulary
+                self._target_checks[key] = unsupported_targets(*mt, s.translation_targets)
+            if self._target_checks[key]:
+                found[s.id] = self._target_checks[key]
+                if not quiet and self.untranslated.get(s.id) != found[s.id]:
+                    log.warning("station %s: %s", s.id, _untranslated(mt[0].id, found[s.id]))
+        self.untranslated = found
 
     def add_station(self, raw: dict[str, Any], *, start: bool = False) -> dict[str, Any]:
         """A station from the page: a stream URL, a feed of another Wavescribe, or a device."""
@@ -631,6 +668,7 @@ class App:
                 planned = self._replan(s, None)
                 if waiting and planned is not None and s.id in self.running():
                     self.pipeline.update_station(s, planned)  # it plays already: now with text
+            self._check_translations()
             self._mark_unavailable()
         event(log, "models_changed", model=model_id, waiting=len(self.listen_only))
 
@@ -659,6 +697,7 @@ class App:
                 self.plan.mt_station.pop(sid, None)
                 self.unavailable.pop(sid, None)
                 self.listen_only.pop(sid, None)
+            self._check_translations()
             self._mark_unavailable()
             self.hub.config = self.config
             self.hub.unavailable = self.unavailable
@@ -889,6 +928,7 @@ class App:
                 raise ChangeError(str(e)) from e
             if self.plan.mt is None or mt[0] != self.plan.mt[0]:
                 self.pipeline.set_translator(mt)
+                self._check_translations()
 
     def plan_view(self) -> Plan:
         return self.plan

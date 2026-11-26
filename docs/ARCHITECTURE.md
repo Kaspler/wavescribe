@@ -82,7 +82,12 @@ translation thread loads it on its first job and unloads it after 15 idle minute
 shared translator serves everything else. A station that should be transcribed but
 whose models aren't downloaded plays without text meanwhile (`App.listen_only`, with the reason;
 the pipeline gets a copy with `transcribe` off); `App.models_changed()`, called when a page
-download finishes, re-plans those and switches a running one to transcribing. `Pipeline.ingest` takes
+download finishes, re-plans those and switches a running one to transcribing. A station whose
+translator lacks one of its translation languages (MADLAD has a fixed list) runs all the same:
+it is written down, alerts on its own words and is translated into the rest, while
+`App.untranslated` names what is missing (`App._check_translations()`, after every change of a
+station, its translator, the model order or a download). The page gets that as the station's
+`reason` and `translate_to_missing`, from startup on. `Pipeline.ingest` takes
 a transcript made by another Wavescribe (remote stations) through the same store, rules and page,
 translating only into languages it didn't arrive with. `status()` reports the loaded models,
 load failures, models that failed 20 calls in a row, why a station is down and when it is tried again, and per-station lag: seconds from the end of an utterance to its text and to its

@@ -248,3 +248,33 @@ def test_without_models_stations_play_and_get_text_once_downloaded(tmp_path: Pat
     finally:
         app.pipeline.stop()
         app.store.close()
+
+
+def test_a_translation_language_the_translator_lacks_is_named_and_the_station_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MADLAD has a fixed list of languages. A station asking for one it lacks still runs, is
+    written down and alerts on its own words; it is translated into the rest, and its reason
+    names what is missing, from startup on and after every change on the page."""
+    monkeypatch.setattr("wavescribe.app.unsupported_targets",
+                        lambda _e, _p, targets: [t for t in targets if t == "uk"])  # fmt: skip
+    page = {"overrides": {"b": {"translate_to": ["en", "uk"]}}}
+    app = make_app(tmp_path, page=page, start=["b"])
+    try:
+        b = next(v for v in app.stations_view() if v["id"] == "b")
+        assert b["available"] and not b["listen_only"] and b["translate_to_missing"] == ["uk"]
+        assert b["reason"].startswith("Not translated into Ukrainian: m can't translate into it")
+        assert app._startable("b") and "b" not in app.unavailable
+
+        with caplog.at_level("WARNING", logger="wavescribe.app"):
+            view = app.add_station({"name": "Nova", "stream": "http://example.test/nova",
+                                    "translate_to": ["en", "uk"]}, start=True)  # fmt: skip
+        assert view["available"] and view["translate_to_missing"] == ["uk"] and view["reason"]
+        assert "station nova: Not translated into Ukrainian" in caplog.text
+        view = app.update_station("nova", {"translate_to": ["en"]})
+        assert view["translate_to_missing"] == [] and view["reason"] is None
+        view = app.update_station("b", {"translate": False})  # not translated: nothing to lack
+        assert view["translate_to_missing"] == [] and view["reason"] is None
+    finally:
+        app.pipeline.stop()
+        app.store.close()
