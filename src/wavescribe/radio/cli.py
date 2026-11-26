@@ -117,6 +117,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             last[0] = line
 
     catalog = Catalog()
+    _old_spurs(catalog, serial, args.receiver)
     sw, signals = scan(serial, start, stop, region, gain_db=gain, ppm=ppm, rds=not args.no_rds,
                        rds_seconds=args.rds_seconds, min_snr_db=args.min_snr,
                        watch_s=args.watch * 60, spurs=catalog.spurs(serial),
@@ -124,11 +125,27 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if sys.stderr.isatty():
         sys.stderr.write("\r" + " " * 40 + "\r")
     catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw)
+    _warn(sw)
     print(f"# {len(signals)} signals in {time.time() - t0:.0f} s; kept in data/radio/heard.json",
           file=sys.stderr)  # fmt: skip
     for s in signals:
         print(_signal_line(s.to_dict()))
     return 0
+
+
+def _warn(sw: Any) -> None:
+    """What may be wrong with a sweep (the tuner didn't lock, a range had no reading)."""
+    for w in getattr(sw, "warnings", None) or []:
+        print(f"# warning: {w}", file=sys.stderr)
+
+
+def _old_spurs(catalog: Any, serial: str, receiver: str) -> None:
+    """Spurs learnt by an earlier version, at about 87 kHz bins, miss narrow lines."""
+    info = catalog.spur_info().get(serial)
+    if info and info.get("count") and not info.get("bin_hz"):
+        print(f"# {serial}'s spurs were learnt by an earlier version, which missed narrow ones: "
+              f"learn them again with `wavescribe radio spurs {receiver} --learn`",
+              file=sys.stderr)  # fmt: skip
 
 
 def _signal_line(s: dict[str, Any]) -> str:
@@ -169,6 +186,8 @@ def cmd_spurs(args: argparse.Namespace) -> int:
         if not freqs:
             print(f"No spurs learnt for {serial}. Disconnect its antenna, then run "
                   f"`wavescribe radio spurs {args.receiver} --learn`.")  # fmt: skip
+        else:
+            _old_spurs(catalog, serial, args.receiver)
         for f in freqs:
             print(f"{f / 1e6:10.5f} MHz")
         return 0
@@ -184,10 +203,11 @@ def cmd_spurs(args: argparse.Namespace) -> int:
             sys.stderr.write(f"\r  sweep {p.done}/{p.total}   ")
             sys.stderr.flush()
 
-    _, freqs = learn_spurs(serial, start, stop, gain_db=args.gain or gain, ppm=ppm,
-                           on_progress=progress)  # fmt: skip
+    sw, freqs = learn_spurs(serial, start, stop, gain_db=args.gain or gain, ppm=ppm,
+                            on_progress=progress)  # fmt: skip
     if sys.stderr.isatty():
         sys.stderr.write("\r" + " " * 30 + "\r")
+    _warn(sw)
     catalog.save_spurs(serial, freqs, start, stop)
     print(f"# {len(freqs)} spurs kept; scans with {serial} will flag them", file=sys.stderr)
     for f in freqs:

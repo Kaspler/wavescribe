@@ -15,6 +15,7 @@ MIN_CHANNEL_HZ, MAX_CHANNEL_HZ = 2_500, 30_000
 CHANNEL_STOP_HZ = IF_RATE // 2  # a station must sit this far inside the device's band edge
 NARROW_MARGIN_HZ = 60_000  # a narrowband channel, clear of the dongle's own filter roll-off
 MODES = ("wfm", "nfm", "am")  # broadcast FM, narrowband FM, AM
+WFM_CHANNEL_HZ = 200_000  # a broadcast FM channel, for its edges (bandplan.lookup)
 # Channel spacing by mode when neither the station nor the band plan gives one.
 # NFM, 12.5 kHz (PMR446, European repeaters and business radio): the filter is flat to ±5.6 kHz,
 # which holds ±2.5 kHz deviation and 3 kHz of audio. A ±5 kHz signal (marine VHF, weather radio,

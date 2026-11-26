@@ -18,6 +18,7 @@ from wavescribe.dsp import (
     MIN_CHANNEL_HZ,
     MODES,
     OFF_CENTRE_HZ,
+    WFM_CHANNEL_HZ,
     check_tunable,
     frequency_hz,
     in_band,
@@ -351,14 +352,15 @@ def default_mode(freq_hz: float, region: str | None) -> str:
 
 
 def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: bool,
-                 where: str) -> tuple[str, str | None]:  # fmt: skip
+                 where: str, width_hz: float | None = None) -> tuple[str, str | None]:  # fmt: skip
     """The privacy class and band of an SDR frequency, and an acknowledgement where the band
     plan wants one: the user confirms they may receive it where they are (docs/RADIO.md).
-    Digital services can be tuned too, but only analogue demodulators exist: no digital
-    decoder, no decryption."""
+    ``width_hz`` is the channel's width, when it's known: the class is the strictest of the
+    bands its edges reach (``bandplan.lookup``). Digital services can be tuned too, but only
+    analogue demodulators exist: no digital decoder, no decryption."""
     from wavescribe.radio.bandplan import AUTO, POLICIES, lookup
 
-    band = lookup(freq_hz, region or AUTO)
+    band = lookup(freq_hz, region or AUTO, width_hz)
     privacy = band.privacy if band else "private"
     what = band.name if band else "a frequency no band plan lists"
     if mode not in MODES:
@@ -423,7 +425,8 @@ def parse_sdr_source(spec: str, region: str | None = None) -> SdrTuning:
     tuning_hz = _pick_frequency((freq,), device, mode)
     if tuning_hz is None:
         raise ConfigError(f"{spec!r}: {freq} MHz is outside the band around {center} MHz")
-    radio_policy(tuning_hz, mode, region, q.get("ack") in ("1", "true", "yes"), spec)
+    width = WFM_CHANNEL_HZ if mode == "wfm" else channel
+    radio_policy(tuning_hz, mode, region, q.get("ack") in ("1", "true", "yes"), spec, width)
     if not off_centre(tuning_hz, device.center_hz, mode, channel):
         raise ConfigError(
             f"{spec!r}: {freq} MHz is at the centre of the band around {center} MHz, where every "
@@ -493,7 +496,8 @@ def build_station(
         if channel and not MIN_CHANNEL_HZ <= channel * 1e3 <= MAX_CHANNEL_HZ:
             raise ConfigError(f"{where}: 'channel_khz' must be {MIN_CHANNEL_HZ / 1e3:g} to "
                               f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25")  # fmt: skip
-        privacy, band = radio_policy(freq, mode, region, bool(d.get("acknowledge")), where)
+        width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else None
+        privacy, band = radio_policy(freq, mode, region, bool(d.get("acknowledge")), where, width)
         floor = d.get("privacy_floor")
         if floor is not None:
             from wavescribe.radio.bandplan import STRICTNESS, stricter

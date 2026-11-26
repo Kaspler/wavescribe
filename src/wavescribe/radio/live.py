@@ -359,7 +359,6 @@ class LiveService:
         mode = str(raw.get("mode") or (band.mode if band and band.mode else "nfm"))
         if mode not in MODES:
             raise LiveError(f"the mode is one of {', '.join(MODES)}")
-        self._check_ack(d.id, freq, mode, region, bool(raw.get("acknowledge")))
         squelch = raw.get("squelch_db")
         try:
             squelch_db = float(squelch) if squelch not in (None, "") else None
@@ -367,6 +366,7 @@ class LiveService:
             raise LiveError("the squelch is a level in dB, e.g. -40") from e
         channel_hz = None if mode == "wfm" else _channel_hz(raw) or _band_channel_hz(band, mode)
         tuning = Tuning(freq, mode, squelch_db=squelch_db, channel_hz=channel_hz)
+        self._check_ack(d.id, freq, mode, region, bool(raw.get("acknowledge")), tuning.width_hz)
         gain = raw.get("gain_db")
         with self._lock:
             self._refuse_while_scanning(d.id)
@@ -444,7 +444,7 @@ class LiveService:
             rx.last_seen = time.time()
         region, _ = self.app.radio.region()
         t, h = rx.tuning, rx.health
-        band = lookup(t.freq_hz, region)
+        band = lookup(t.freq_hz, region, t.width_hz)  # its class, as wide as it's heard
         lo = float(lo_mhz) * 1e6 if lo_mhz not in (None, "") else None
         hi = float(hi_mhz) * 1e6 if hi_mhz not in (None, "") else None
         out.update({
@@ -564,12 +564,13 @@ class LiveService:
         rx = next((r for r in self.app.radio.receivers() if r["id"] == device_id), None)
         return [h for h in (rx["busy"] if rx else []) if h != "the live receiver"]
 
-    def _check_ack(self, device_id: str, freq: int, mode: str, region: str, ack: bool) -> None:
-        band = lookup(freq, region)
+    def _check_ack(self, device_id: str, freq: int, mode: str, region: str, ack: bool,
+                   width_hz: float | None = None) -> None:  # fmt: skip
+        band = lookup(freq, region, width_hz)
         privacy = band.privacy if band else "private"
         known = self._acks.setdefault(device_id, set())
         try:
-            radio_policy(freq, mode, region, ack or privacy in known, "here")
+            radio_policy(freq, mode, region, ack or privacy in known, "here", width_hz)
         except ConfigError as e:
             raise LiveError(str(e).split(": ", 1)[-1].replace(
                 " Set acknowledge = true to confirm", " Confirm"), "acknowledge",

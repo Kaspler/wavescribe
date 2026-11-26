@@ -238,3 +238,20 @@ def test_sdr_source_override() -> None:
             parse_sdr_source(bad)
     assert parse_sdr_source("sdr:00001234/446.00625?mode=nfm&ack=1").device.center_hz == 445_756_250
     assert parse_sdr_source("sdr:00001234/94.4?rate=960000").device.sample_rate == 960_000
+
+
+def test_a_stations_class_goes_by_its_channel_width() -> None:
+    def privacy(**more: object) -> str:
+        raw = {
+            "defaults": {"language": "es-ES"},
+            "radio": {"region": "cept"},
+            "device": [{"id": "a", "serial": "00001234", "center_mhz": 379.7, "gain_db": 20}],
+            "station": [{"id": "s", "mhz": 379.99, "device": "a", "acknowledge": True, **more}],
+        }
+        return parse_stations(raw, P).stations[0].privacy
+
+    # 10 kHz below the digital services from 380 MHz: a channel as wide as the plan's default
+    # reaches them; a 2.5 kHz one stays clear of them.
+    assert privacy() == "digital"
+    assert privacy(channel_khz=2.5) == "private"
+    assert privacy(channel_khz=25) == "digital"
