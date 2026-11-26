@@ -320,13 +320,20 @@ def test_cancel_kills_a_running_sweep_at_once(
 ) -> None:
     monkeypatch.setenv("FAKE_POWER_HANG", "1")
     monkeypatch.setenv("FAKE_POWER_PID", str(tmp_path / "pid"))
-    cancel = threading.Event()
-    threading.Timer(0.5, cancel.set).start()
-    t0 = time.monotonic()
+    pid, cancel, cancelled_at = tmp_path / "pid", threading.Event(), []
+
+    def cancel_once_running() -> None:  # a busy machine may take a while to start Python
+        deadline = time.monotonic() + 30
+        while not pid.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        cancelled_at.append(time.monotonic())
+        cancel.set()
+
+    threading.Thread(target=cancel_once_running, daemon=True).start()
     with pytest.raises(S.Cancelled):
         S.sweep("000001", 446e6, 446.2e6, command=fake_power, cancel=cancel)
-    assert time.monotonic() - t0 < 3  # not the default deadline of about 16 s
-    assert _gone(int((tmp_path / "pid").read_text()))
+    assert time.monotonic() - cancelled_at[0] < 3  # not the default deadline of about 16 s
+    assert _gone(int(pid.read_text()))
 
 
 def test_a_range_outside_the_tuner_is_refused() -> None:
