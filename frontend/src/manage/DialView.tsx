@@ -3,10 +3,11 @@
 // fine tick under them. A band chosen on it is explained underneath (BandCard). The geometry lives
 // in dial.ts.
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { cx } from "../components/ui";
+import { Lamp, cx } from "../components/ui";
 import type { Any } from "./api";
 import { type Band, bandWords } from "./bands";
-import { type Segment, kindOf, labelRows, makeScale, onDial, segments, ticks } from "./dial";
+import { type Segment, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks } from "./dial";
+import { rxName } from "./Receivers";
 
 const NAME_FONT = 12; // px, as --t-sm
 const MIN_INNER_PX = 14; // a band inside another stays this wide
@@ -92,6 +93,7 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says }: {
      <div className="dl-in" ref={wrap}>
       {width > 0 && (
         <>
+          {overlay?.(width, scale)}
           <div className="dl-names" aria-hidden="true">
             {segs.map((s) => {
               const at = names[s.band.id];
@@ -121,7 +123,6 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says }: {
               );
             })}
           </svg>
-          {overlay?.(width, scale)}
         </>
       )}
      </div>
@@ -180,6 +181,121 @@ export function BandCard({ band, kept, policies, heard, children }: { band: Band
         {kindOf(band) === "text" && heard > 0 && ` ${heard === 1 ? "One frequency" : `${heard} frequencies`} heard here so far.`}
       </p>
       {children}
+    </div>
+  );
+}
+
+// -- receivers on the dial ---------------------------------------------------------------------
+
+/** What a receiver is doing, as the dial draws it and says it. */
+export interface RxStatus {
+  id: string;
+  /** Its window: what it hears now, or, while it scans, the range it sweeps. */
+  lo: number;
+  hi: number;
+  state: "idle" | "hand" | "stations" | "scanning" | "trouble";
+  lamp: "off" | "dim" | "on" | "wait" | "trouble";
+  /** "following 2 stations: Valley and City News", "idle", … */
+  words: string;
+  /** Running stations a move would pause. */
+  holders: string[];
+}
+
+export const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "");
+
+/** A receiver's state from what the radio view (`r`: stations, scan) and the tuner (`live`: where
+ * the dongle is tuned now, whether it is tuned by hand and answering) say about it. */
+export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStatus {
+  const centre = live?.center_mhz ?? r.center_mhz;
+  const span = live?.span_mhz ?? r.span_mhz;
+  const running = (r.stations || []).filter((s: Any) => s.running).map((s: Any) => s.name);
+  const base = { id: r.id, lo: centre - span / 2, hi: centre + span / 2, holders: running };
+  const scanning = r.scanning || (job && job.device === r.id && !["done", "error"].includes(job.phase));
+  if (scanning) {
+    return { ...base, lo: job?.start_mhz ?? base.lo, hi: job?.stop_mhz ?? base.hi, state: "scanning", lamp: "wait",
+      words: `scanning ${job?.what || "a band"}` };
+  }
+  if (live?.open) {
+    if (live.error || (live.connected === false && live.reconnects > 0)) {
+      return { ...base, state: "trouble", lamp: "trouble",
+        words: live.error ? `stopped: ${live.error}` : "not answering: another program may be using it, or it was unplugged" };
+    }
+    const waiting: string[] = live.paused || [];
+    return { ...base, state: "hand", lamp: "dim",
+      words: `tuned by hand to ${mhzText(live.mhz, live.mode)}${waiting.length ? `; ${and(waiting)} ${waiting.length === 1 ? "waits" : "wait"} until it's let go` : running.length ? `, beside ${and(running)}` : ""}` };
+  }
+  if (running.length) {
+    return { ...base, state: "stations", lamp: "on", words: `following ${running.length === 1 ? "1 station" : `${running.length} stations`}: ${and(running)}` };
+  }
+  return { ...base, state: "idle", lamp: "off", words: "idle" };
+}
+
+export const mhzText = (mhz: number, mode?: string | null) => `${mode === "wfm" ? mhz.toFixed(1) : +mhz.toFixed(5)} MHz`;
+
+const TAB_ROW = 22; // px per row of receiver tabs above the band names
+const TO_TRACK = 38; // px from the band names' top to the bar's (.dl-names and its margin)
+const TRACK = 26; // the bar's height (.dl-track)
+
+/** The receivers drawn over the dial: each one's window as a pale column down to the bar, hung
+ * from a tab with its lamp and letter. A tab is a button (it chooses the receiver) and a handle:
+ * dragged along the dial, it asks to send the receiver there. */
+export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDrop }: {
+  width: number;
+  scale: ReturnType<typeof makeScale>;
+  rxs: RxStatus[];
+  chosen: string;
+  bands: Band[];
+  onChoose: (id: string) => void;
+  /** A tab dropped at a centre frequency, in MHz. */
+  onDrop: (id: string, centre: number) => void;
+}) {
+  const [drag, setDrag] = useState<{ id: string; from: number; x: number } | null>(null);
+  const placed = marks(rxs.map((r) => ({ id: r.id, lo: r.lo, hi: r.hi })), scale, width, 40);
+  const rows = Math.max(1, ...placed.map((m) => m.row + 1));
+  const by = Object.fromEntries(rxs.map((r) => [r.id, r]));
+  const span = (id: string) => by[id].state === "scanning" ? 2.4 : by[id].hi - by[id].lo;
+  return (
+    <div className="dl-rxs" style={{ height: rows * TAB_ROW }}>
+      {placed.map((m) => {
+        const r = by[m.id];
+        const dragging = drag?.id === m.id && Math.abs(drag.x - drag.from) > 4;
+        const centre = dragging ? dragCentre(drag.x / width, scale, bands, span(m.id)) : null;
+        const ghost = centre != null ? { x0: scale.x(centre - span(m.id) / 2), x1: scale.x(centre + span(m.id) / 2) } : null;
+        const left = (ghost ? (ghost.x0 + ghost.x1) / 2 : m.xc) * width;
+        const band = bandOfWindow(bands, r.lo, r.hi);
+        return (
+          <div key={m.id} className={cx("dl-rx", `is-${r.state}`, m.id === chosen && "is-chosen", dragging && "is-dragging")}>
+            <span className="dl-rx-stem" aria-hidden="true"
+                  style={{ left: Math.round(left), top: (m.row + 1) * TAB_ROW - 4, height: rows * TAB_ROW + TO_TRACK - (m.row + 1) * TAB_ROW + 1 }} />
+            <span className="dl-rx-win" aria-hidden="true"
+                  style={{ left: (ghost?.x0 ?? m.x0) * width, width: Math.max(8, ((ghost?.x1 ?? m.x1) - (ghost?.x0 ?? m.x0)) * width),
+                           top: rows * TAB_ROW + TO_TRACK - 3, height: TRACK + 6 }} />
+            <button type="button" className="dl-rx-tab" style={{ left, top: m.row * TAB_ROW }}
+                    aria-pressed={m.id === chosen}
+                    aria-label={`Receiver ${rxName(m.id)}, ${r.words}, ${r.state === "scanning" ? "over" : "hearing"} ${+r.lo.toFixed(2)} to ${+r.hi.toFixed(2)} MHz${band ? ` in ${bandWords(band).name}` : ""}`}
+                    title={centre != null ? `Look at ${mhzText(centre)} with Receiver ${rxName(m.id)}` : `Receiver ${rxName(m.id)}: ${r.words}. Drag along the dial to move it.`}
+                    onClick={() => { if (!dragging) onChoose(m.id); }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 || r.state === "scanning") return;
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      const x = e.clientX - (e.currentTarget.parentElement!.parentElement!.getBoundingClientRect().left);
+                      setDrag({ id: m.id, from: x, x });
+                    }}
+                    onPointerMove={(e) => {
+                      if (drag?.id !== m.id) return;
+                      setDrag({ ...drag, x: e.clientX - e.currentTarget.parentElement!.parentElement!.getBoundingClientRect().left });
+                    }}
+                    onPointerUp={() => {
+                      if (drag?.id === m.id && centre != null) onDrop(m.id, centre);
+                      setTimeout(() => setDrag(null)); // after the click this release also fires
+                    }}
+                    onPointerCancel={() => setDrag(null)}>
+              <Lamp state={r.lamp} onBand />
+              {rxName(m.id)}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

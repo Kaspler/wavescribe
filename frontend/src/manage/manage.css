@@ -320,7 +320,7 @@ tr.is-off td { color: var(--ink-3); }
 .dl { padding: var(--s4) var(--s5) var(--s3); border-radius: 8px; background: var(--band); color: var(--band-ink-2); }
 .dl-in { position: relative; min-height: 86px; }
 .dl-names { position: relative; height: 34px; }
-.dl-name { position: absolute; line-height: 16px; font-size: var(--t-sm); font-weight: 600; white-space: nowrap; cursor: pointer; transition: color var(--fast) var(--ease); }
+.dl-name { position: absolute; z-index: 2; margin-inline: -3px; padding-inline: 3px; background: var(--band); line-height: 16px; font-size: var(--t-sm); font-weight: 600; white-space: nowrap; cursor: pointer; transition: color var(--fast) var(--ease); }
 .dl-name.is-row0 { bottom: 1px; }
 .dl-name.is-row1 { bottom: 17px; }
 .dl-name:hover, .dl-name.is-chosen { color: var(--band-ink); }
@@ -365,3 +365,35 @@ tr.is-off td { color: var(--ink-3); }
 .dl-card-tech { font-size: var(--t-sm); font-weight: 400; color: var(--ink-3); }
 .dl-card-text { max-width: 66ch; margin-top: var(--s3); font-size: var(--t-md); line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .dl-card-who { margin-bottom: var(--s5); }
+/* Receivers on the dial: a tab with the receiver's lamp and letter on a stem down to its window,
+   a pale box on the bar. The receiver in view below has the pointer's edge. */
+.dl-rxs { position: relative; }
+/* A dark edge on either side of the light one keeps the window visible on a chosen, light band. */
+.dl-rx-win { position: absolute; z-index: 1; border: 1px solid var(--band-ink); border-radius: 2px; background: color-mix(in oklab, var(--band-ink) 22%, transparent); box-shadow: 0 0 0 1px var(--band), inset 0 0 0 1px var(--band); pointer-events: none; }
+.dl-rx-stem { position: absolute; z-index: 1; width: 1px; background: var(--band-ink-2); pointer-events: none; }
+.dl-rx-tab {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px 0 5px;
+  border: 1px solid var(--band-ink-2);
+  border-radius: 4px;
+  background: var(--band);
+  color: var(--band-ink);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  transform: translateX(-50%);
+  cursor: grab;
+  touch-action: none;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.dl-rx-tab:hover { border-color: var(--band-ink); }
+.dl-rx.is-chosen .dl-rx-tab { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.dl-rx.is-scanning .dl-rx-win { border-style: dashed; background: color-mix(in oklab, var(--band-ink) 7%, transparent); }
+.dl-rx.is-dragging .dl-rx-tab { cursor: grabbing; }
+.dl-rx.is-dragging .dl-rx-win { border-color: var(--accent); background: var(--accent-tint); }
+.dl-rx.is-dragging .dl-rx-stem { background: var(--accent); }
+.dl-rx-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
