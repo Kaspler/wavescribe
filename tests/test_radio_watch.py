@@ -112,6 +112,21 @@ def test_each_channel_of_a_watch_takes_the_class_its_own_edges_reach() -> None:
     assert wide.sdr.policed("2") == (379_987_500, 30_000)
 
 
+@pytest.mark.parametrize("spec", [446.1, [446.0], [446.0, "446.2"], [446.0, True], {"a": 1}])
+def test_a_watch_that_is_neither_a_band_nor_a_range_is_a_config_error(
+    spec: object, tmp_path: Path
+) -> None:
+    from wavescribe.config import load_stations
+
+    with pytest.raises(ConfigError, match=r"two frequencies in MHz.*or a band id"):
+        watch_station(watch=spec)
+    if isinstance(spec, float):  # at start-up, from the stations file
+        path = tmp_path / "stations.toml"
+        path.write_text(EDGE.replace("watch = [432.0, 434.0]", f"watch = {spec}"))
+        with pytest.raises(ConfigError, match="'watch' is two frequencies in MHz"):
+            load_stations(path)
+
+
 def test_a_watch_its_device_cant_hear_all_of_is_refused_with_a_centre_that_works() -> None:
     far = SdrDevice("a", "00001234", 445_000_000, 30.0, RATE)
     with pytest.raises(ConfigError, match=r"center_mhz = 445\.75625"):

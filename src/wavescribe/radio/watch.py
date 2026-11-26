@@ -132,8 +132,12 @@ def _plan(
             ) from None
         lo, hi, label, key = band.start_hz, band.stop_hz, band.name, spec
     else:
-        if len(spec) != 2 or not all(isinstance(x, int | float) for x in spec):
-            raise WatchError("a watch's range is two frequencies in MHz, e.g. [446.0, 446.2]")
+        pair = isinstance(spec, list | tuple) and len(spec) == 2
+        if not pair or any(isinstance(x, bool) or not isinstance(x, int | float) for x in spec):
+            raise WatchError(
+                "'watch' is two frequencies in MHz, e.g. [446.0, 446.2], or a band id from "
+                '`wavescribe radio bands`, e.g. "pmr446"'
+            )
         lo, hi = round(spec[0] * 1e6), round(spec[1] * 1e6)
         if lo >= hi:
             raise WatchError(f"{spec[0]}-{spec[1]} MHz: the start must be below the stop")
