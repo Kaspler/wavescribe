@@ -652,7 +652,8 @@ containing one falls back to `LIKE`. Query text is always quoted, so FTS operato
 searched as plain text. The index finds each word as a substring, which alone made "eau" find
 "niveau"; `search.py` then keeps the rows where every word starts a word (after a space,
 punctuation or the start), so a word also finds its inflections that add letters at the end
-("agua" finds "águas"). `*word` asks for a fragment anywhere inside words (compounds), and in
+("agua" finds "águas"). It folds case and accents as the keyword rules do (`rules/text.py`):
+accents only where they are optional, so a Devanagari nukta or a kana voicing mark still counts. `*word` asks for a fragment anywhere inside words (compounds), and in
 scripts written without spaces every word matches anywhere. The same code serves `wavescribe
 search`, `/api/search` and everything built on it, and marks the matches in a snippet of about 80
 characters.

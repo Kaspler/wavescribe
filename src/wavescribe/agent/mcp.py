@@ -155,8 +155,10 @@ TOOLS = (
         "search",
         "Full-text search of everything Wavescribe has kept (by default a year of broadcast "
         "radio), in the original words and in the translations, ignoring case and accents. "
-        "Every word given must appear, as a word or part of one. Returns {utterances}, newest "
-        "first, at most 60. " + UTTERANCES + "Use it to find when something was said; use ask "
+        "Every word given must appear at the start of a word (flood finds floods); write *word "
+        "to find it inside words too (*eau finds niveau). In languages written without spaces "
+        "every word matches anywhere. Returns {utterances}, newest first, at most "
+        "60. " + UTTERANCES + "Use it to find when something was said; use ask "
         "for a question whose answer needs several moments read together. It searches all "
         "radio kept on this machine, including radio that isn't broadcast. " + UNTRUSTED,
         _arguments(

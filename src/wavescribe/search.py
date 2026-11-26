@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """How a search query matches text: the same for the CLI, the page and the agent tools.
 
-- Every word of the query must be found, ignoring case and accents.
+- Every word of the query must be found, ignoring case and accents, folded as the keyword
+  rules fold them (``rules.text``): accents only where they are optional (Latin, Greek,
+  Cyrillic, Hebrew, Arabic), so a Japanese voicing mark or a Thai tone mark still counts.
 - A word matches at the start of a word: "agua" finds "Águas", "eau" finds "l'eau" but not
   "niveau". Inflections that only add letters at the end are found; compounds are not.
 - A word written with a leading ``*`` matches anywhere, inside words too: "*eau" finds "niveau".
@@ -15,11 +17,11 @@ ones whose words start where they should and says where, for highlighting.
 
 from __future__ import annotations
 
-import functools
 import unicodedata
 from dataclasses import dataclass
 
 from wavescribe.rules.text import NO_SPACES
+from wavescribe.rules.text import _folded as _rules_folded  # one folding for rules and search
 
 FRAGMENT = "*"
 SNIPPET_CHARS = 80  # about what FTS5's snippet() gave over trigrams, cut at spaces
@@ -103,22 +105,12 @@ def snippet(
 
 
 def _folded(text: str) -> tuple[str, list[int]]:
-    """``text`` in lower case without accents, and the index in ``text`` that each folded
-    character comes from. Folded one character at a time, so query and text fold alike."""
-    out, origin = [], []
-    for i, c in enumerate(text):
-        f = _fold_char(c)
-        out.append(f)
-        origin += [i] * len(f)
-    return "".join(out), origin
-
-
-@functools.lru_cache(maxsize=8192)
-def _fold_char(c: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", c.casefold())
-    bare = "".join(d for d in decomposed if not unicodedata.combining(d))
-    return unicodedata.normalize("NFC", bare)
+    """``text`` folded (decomposed), and the index in ``text`` that each folded character comes
+    from. Query and text fold alike, one character at a time."""
+    pairs = list(_rules_folded(text))
+    return "".join(c for c, _ in pairs), [i for _, i in pairs]
 
 
 def _is_word(c: str) -> bool:
+    """Part of a word, as the rules cut words: a letter, digit or ``_``, or a mark kept on one."""
     return c.isalnum() or c == "_" or unicodedata.category(c).startswith("M")

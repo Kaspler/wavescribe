@@ -79,7 +79,7 @@ stderr: stdout carries the protocol and nothing else.
 |---|---|
 | `stations` | The stations set up: id, name, language, kind (stream, receiver, another Wavescribe), running, connected, last heard, lag. |
 | `recent` | What was said, oldest first: from some minutes ago, or after the last utterance it saw (`after_id`), so the agent can follow along without reading anything twice. |
-| `search` | Full-text search of everything kept, in the original words and the translations, newest first (60 at most). |
+| `search` | Full-text search of everything kept, in the original words and the translations, newest first (60 at most). Each word is found at the start of a word (*flood* finds *floods*); `*word` finds it inside words too. |
 | `alerts` | Recent alerts, newest first, with their status and what was said. |
 | `wait_for_alert` | Waits up to 300 s for the next announced alert, optionally only from some stations or above a severity. |
 | `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It needs a language model as the translator; otherwise it fails with the reason. |
