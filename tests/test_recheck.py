@@ -381,3 +381,102 @@ def test_the_feed_streams_a_line_that_finished_after_a_later_one(tmp_path: Path)
         assert [(i, d["id"], d["flags"]) for i, d in events] == [("12", 12, []), ("12", 10, [FLAG])]
     finally:
         r.close()
+
+
+# Synthetic speech for the real models (macOS `say`), and how the station's model is made to
+# fail the way Parakeet does now and then: it answers a Portuguese line in English.
+SPEECH = {
+    "pt": ("Joana", "A proteção civil pede às populações da zona ribeirinha que abandonem as "
+           "suas casas e se dirijam aos pontos de encontro."),
+    "en": ("Daniel", "Civil protection asks residents of the riverside area to leave their homes "
+           "and go to the assembly points."),
+    "de": ("Anna", "Der Katastrophenschutz bittet die Anwohner am Fluss, ihre Häuser zu "
+           "verlassen und die Sammelpunkte aufzusuchen."),
+    "uk": ("Lesya", "Цивільний захист просить мешканців прибережної зони залишити свої домівки "
+           "та прямувати до пунктів збору."),
+}  # fmt: skip
+MISRENDERED = "Civil protection asks the people of the riverside to leave their houses now."
+
+
+@pytest.mark.models
+def test_real_models_recheck_and_cost(tmp_path: Path) -> None:
+    """Parakeet and Whisper large-v3-turbo on `say` speech: the verdicts, and what a re-check
+    costs (run with -s to see the figures for docs/MEASUREMENTS.md)."""
+    import shutil
+    import statistics
+
+    from tests.helpers import say_to_pcm
+    from wavescribe.asr import load_transcriber
+
+    if shutil.which("say") is None or shutil.which("ffmpeg") is None:
+        pytest.skip("needs macOS `say` and ffmpeg")
+    reg = ModelRegistry.load(local=None, catalog=None)
+    try:
+        parakeet = reg.installed("parakeet-tdt-0.6b-v3", "pt")
+        whisper = reg.installed("whisper-large-v3-turbo", "pt")
+    except Exception as e:
+        pytest.skip(str(e))
+    clips = {k: say_to_pcm(tmp_path / k, text, voice) for k, (voice, text) in SPEECH.items()}
+
+    # 1. Each step on its own, warm: language ID, then a transcription with the language given.
+    t0 = time.perf_counter()
+    model = load_transcriber(*whisper)
+    load_s = time.perf_counter() - t0
+    lid: dict[str, list[float]] = {}
+    asr: dict[str, list[float]] = {}
+    for _ in range(3):
+        for lang, samples in clips.items():
+            t0 = time.perf_counter()
+            probs = model.identify_language(samples)  # type: ignore[attr-defined]
+            lid.setdefault(lang, []).append(time.perf_counter() - t0)
+            assert max(probs, key=probs.__getitem__) == lang
+            t0 = time.perf_counter()
+            model.transcribe(samples, lang)
+            asr.setdefault(lang, []).append(time.perf_counter() - t0)
+    del model
+    print(f"\nwhisper-large-v3-turbo load + warm-up: {load_s:.1f} s")
+    for lang, samples in clips.items():
+        s = len(samples) / SAMPLE_RATE
+        li, tr = statistics.median(lid[lang]), statistics.median(asr[lang])
+        print(
+            f"{lang}: {s:.1f} s of speech; language ID {li * 1000:.0f} ms (kept), "
+            f"+ transcription {tr * 1000:.0f} ms = {(li + tr) * 1000:.0f} ms (replaced)"
+        )
+
+    # 2. Through the pipeline on a pt-PT station: a Portuguese line the station's model renders
+    # in English (replaced), and an English one (kept).
+    class Misrendering:
+        def __init__(self, inner) -> None:
+            self.inner, self.model_id = inner, inner.model_id
+
+        def transcribe(self, samples: np.ndarray, language: str) -> Transcript:
+            out = self.inner.transcribe(samples, language)
+            if "prote" in out.text.lower():
+                return Transcript(MISRENDERED, language, self.model_id)
+            return out
+
+    def load(e: ModelEntry, p: Path):
+        model = load_transcriber(e, p)
+        return Misrendering(model) if e.id == parakeet[0].id else model
+
+    gap = np.zeros(2 * SAMPLE_RATE, dtype=np.float32)
+    audio = np.concatenate([gap, clips["pt"], gap, clips["en"], gap])
+    st = station("a", translate_to=())
+    plan, _ = plan_available(reg, [st], translate=False, use_gate=False)
+    results: list[Result] = []
+    rechecked: list[Result] = []
+    pipeline = Pipeline([st], plan, results.append, on_rechecked=rechecked.append,
+                        source_factory=lambda s: ListSource(s.id, audio),
+                        transcriber_factory=load)  # fmt: skip
+    t0 = time.perf_counter()
+    pipeline.run(duration=300)
+    wall = time.perf_counter() - t0
+    [replaced] = [r for r in results if r.transcript.model == whisper[0].id]
+    assert replaced.flags == (FLAG,) and "prote" in replaced.transcript.text.lower()
+    [kept] = [r for r in results if r.transcript.model == parakeet[0].id]
+    assert kept.flags == ("lang:en", FLAG)
+    print(
+        f"pipeline: replaced in {replaced.timings['recheck_ms']:.0f} ms, kept in "
+        f"{kept.timings['recheck_ms']:.0f} ms; status {pipeline.status()['rechecks']}; "
+        f"{wall:.1f} s wall for {len(audio) / SAMPLE_RATE:.0f} s of audio"
+    )
