@@ -267,6 +267,12 @@ def test_catches_route_gives_other_machines_only_what_may_leave(
         assert status == 200 and [c["freq_hz"] for c in here] == [PMR[0], TWO_M]
         assert here[1]["name"] == "calling channel"  # this machine sees its notes
         assert request(server, "GET", f"/api/catches?mhz={TWO_M / 1e6}")[0] == 200
+        status, body = request(server, "GET", "/api/catches?limit=1")
+        assert [c["freq_hz"] for c in json.loads(body)["catches"]] == [PMR[0]]  # the newest
+        near = (TWO_M + 10_000) / 1e6
+        assert json.loads(request(server, "GET", f"/api/catches?mhz={near}")[1])["catches"] == []
+        body = request(server, "GET", f"/api/catches?mhz={near}&width_khz=12.5")[1]
+        assert [c["freq_hz"] for c in json.loads(body)["catches"]] == [TWO_M]
         assert request(server, "GET", "/api/catches?hours=nan")[0] == 400
         monkeypatch.setattr(Handler, "_is_local", lambda _self: False)
         status, body = request(server, "GET", "/api/catches")

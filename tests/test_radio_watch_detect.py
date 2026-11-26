@@ -166,6 +166,42 @@ def test_the_mirror_image_of_a_strong_signal_is_no_catch() -> None:
     assert got.freq_hz == PMR[11]
 
 
+def test_a_strong_signals_splatter_on_its_neighbours_is_no_catch() -> None:
+    strong = Burst(PMR[6], 1.0, 3.0, amp=0.6)
+    splatter = Burst(PMR[7], 1.0, 3.0, amp=0.6 / 20)  # 26 dB down, still well over the noise
+    [got] = run(catcher(), air(4.5, [strong, splatter], noise=0.01))
+    assert got.freq_hz == PMR[6]
+
+
+def test_overlapping_channels_catch_a_transmission_once_where_it_is() -> None:
+    """Region 2's 2 m plan: a 25 kHz channel every 5 kHz, so each transmission is heard on
+    the channels either side of its own as well."""
+    centre, f0 = 146_000_000, 146_520_000
+    channels = tuple(146_300_000 + 5_000 * k for k in range(60))
+    device = SdrDevice("a", "00001234", centre, 30.0, FS)
+    watch = Watch((146.3, 146.595), channels, 5_000)
+    c = Catcher(SdrTuning(device, channels[30], mode="nfm", channel_hz=25_000, watch=watch))
+
+    def voice(t: np.ndarray) -> np.ndarray:
+        on = (t >= 1.0) & (t < 5.0)
+        m = np.sin(2 * np.pi * 300 * t) + 0.7 * np.sin(2 * np.pi * 1_100 * t + 1)
+        m = (m + 0.5 * np.sin(2 * np.pi * 2_300 * t + 2)) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t))
+        phase = 2 * np.pi * ((f0 - centre) * t + 2_500 * np.cumsum(m) / FS)
+        return on * 0.3 * np.exp(1j * phase)
+
+    [got] = run(c, air(7.0, [], centre=centre, extra=voice))
+    assert got.freq_hz == f0 and got.duration == pytest.approx(4.0, abs=0.15)
+
+
+def test_a_catch_after_a_carrier_never_repeats_the_carriers_audio() -> None:
+    # A carrier, learnt into the floor after 2 s, then someone much stronger on top of it: the
+    # second catch's pre-roll starts where the first catch's audio ended, not before.
+    bursts = [Burst(PMR[3], 1.0, 6.0, deviation_hz=0.0), Burst(PMR[3], 3.2, 5.0, amp=0.5)]
+    first, second = run(catcher(carrier_s=2.0), air(7.5, bursts))
+    assert first.reason == "carrier" and second.t_start == pytest.approx(T0 + 3.2, abs=0.1)
+    assert second.audio_from == pytest.approx(first.audio_to, abs=1e-6)
+
+
 def louder(start_s: float, stop_s: float = 1e9, amp: float = 0.14) -> Callable:
     """More noise across the whole window (about 9 dB more): a charger, USB, overload."""
     rng = np.random.default_rng(5)
