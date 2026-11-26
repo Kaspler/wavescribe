@@ -62,6 +62,26 @@ TOKEN_SCOPES = ("read", "push")
 MAX_PUSH_STATIONS_PER_NODE = 25
 MAX_PUSH_STATIONS = 100
 MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is dropped
+PUSH_ID_CHARS = 40  # a pushed station's id here: <node>-<station>
+PUSH_NODE_CHARS = 16  # what is kept of a long node name in it
+
+
+def push_id(node: str, remote_id: str) -> str:
+    """The id here of a station another machine pushes: ``<node>-<station>``. When that is too
+    long, the node part is shortened first and a short hash of both names is added, so two
+    long names never come out the same."""
+    sid = f"{node}-{remote_id}"
+    if len(sid) <= PUSH_ID_CHARS:
+        return sid
+    tag = hashlib.sha256(f"{node}\n{remote_id}".encode()).hexdigest()[:6]
+    head = _push_node(node)
+    return f"{head}-{remote_id[: PUSH_ID_CHARS - len(head) - len(tag) - 2].rstrip('-')}-{tag}"
+
+
+def _push_node(node: str) -> str:
+    return node[:PUSH_NODE_CHARS].rstrip("-")
+
+
 # Why a station that is switched off doesn't run (``App._mark_unavailable``).
 SWITCHED_OFF = "switched off on the page"
 UNCONFIRMED = "switched off until you confirm you may receive it under the region chosen"
@@ -688,7 +708,7 @@ class App:
             made = {s.id: s.remote_station for s in self.config.stations if s.remote == "push"}
             saved = {s.get("id") for s in self.settings.get("station") or []}
             others = ({s.id for s in self.config.stations} | saved) - set(made)
-            from_node = sum(sid.startswith(f"{node}-") for sid in made)
+            from_node = sum(sid.startswith((f"{node}-", f"{_push_node(node)}-")) for sid in made)
             new: list[dict[str, Any]] = []
             said: dict[str, str] = {}  # the class each station's latest event gave it
             for ev in events[:MAX_BATCH_EVENTS]:
@@ -702,7 +722,10 @@ class App:
                     refused[str(e)] += 1
                     continue
                 remote_id = slug(heard.station_id)
-                sid = f"{node}-{remote_id}"[:40]
+                sid = push_id(node, remote_id)
+                legacy = f"{node}-{remote_id}"[:PUSH_ID_CHARS]  # cut short, before the hash
+                if made.get(legacy) == remote_id:
+                    sid = legacy  # made that way earlier: its text stays in one station
                 if sid in others or made.get(sid, remote_id) != remote_id:
                     refused["the id belongs to another station here"] += 1
                     continue

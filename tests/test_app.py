@@ -715,10 +715,27 @@ def test_a_push_only_writes_into_stations_that_pushing_made(central: App) -> Non
     untagged = {**heard("es"), "station": {"id": "es", "language": "not a tag"}}
     assert push(central, [untagged]) == {"accepted": 0, "rejected": 1}
 
-    # Two of a node's stations whose ids here come out the same: the first keeps the id.
-    long = "n" * 38
-    assert push(central, [heard("ab"), heard("ac", "other")], long)["rejected"] == 1
-    assert [u["text"] for u in central.store.recent(f"{long}-a")] == ["Olá"]
+
+def test_long_names_give_pushed_stations_ids_of_their_own(central: App, monkeypatch) -> None:
+    long = "n" * 38  # "<node>-ab" and "<node>-ac" cut at 40 characters were the same id
+    assert push(central, [heard("ab"), heard("ac", "other")], long) == {"accepted": 2,
+                                                                       "rejected": 0}  # fmt: skip
+    ids = {s.remote_station: s.id for s in central.config.stations if s.remote == "push"}
+    assert ids["ab"] != ids["ac"] and all(len(i) <= 40 for i in ids.values())
+    assert all(i.startswith("n" * 16 + "-a") for i in ids.values())  # the node part went first
+    assert [u["text"] for u in central.store.recent(ids["ac"])] == ["other"]
+    assert push(central, [heard("ac", "again")], long)["accepted"] == 1  # the same id again
+    assert len(central.store.recent(ids["ac"])) == 2
+    monkeypatch.setattr("wavescribe.app.MAX_PUSH_STATIONS_PER_NODE", 2)  # still counted as its
+    assert push(central, [heard("ad")], long) == {"accepted": 0, "rejected": 1}
+
+    # A station made before ids got their hash keeps its id, and its text stays together.
+    old = f"{'o' * 38}-ab"[:40]
+    made = {"id": old, "name": "AB", "language": "pt-PT", "remote": "push", "remote_station": "ab"}
+    central.settings.update(lambda d: d.setdefault("station", []).append(made))
+    central._reload()
+    assert push(central, [heard("ab", "still here")], "o" * 38)["accepted"] == 1
+    assert [u["text"] for u in central.store.recent(old)] == ["still here"]
 
 
 def test_pushed_stations_are_capped_and_saved_once_a_batch(central: App, monkeypatch) -> None:

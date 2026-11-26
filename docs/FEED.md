@@ -206,7 +206,8 @@ with the `push` scope. On each place, add an output:
 - header: `Authorization: Bearer <that token>`
 
 Each of a place's stations appears on the central server the first time it sends something, as
-`<place>-<station>`, with `remote = "push"`. A push only writes into stations that pushes made:
+`<place>-<station>`, with `remote = "push"`. An id longer than 40 characters keeps the first 16
+of the place's name and gets a short hash of both names, so two long names never share an id. A push only writes into stations that pushes made:
 an event whose id would land on any other station here is refused. One place can make 25
 stations and all places together 100. The answer is `{"accepted": n, "rejected": m}` with status
 200; the log says why events were refused. An event is refused whole if a value is out of
