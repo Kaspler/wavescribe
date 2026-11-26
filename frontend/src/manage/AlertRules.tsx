@@ -7,7 +7,20 @@ import {
 } from "../components/ui";
 import { type Any, SEVERITIES, SEV_WORD, del, get, post, useLoad } from "./api";
 
+/** Said under the page's heading, whatever follows: what an alert can and can't be relied on for. */
+const NOT_A_WARNING_SYSTEM = (
+  <p className="m-standing">
+    Alerts are a help, not a warning system. One may come late, be wrong, or not come at all, and no alert doesn't mean
+    nothing is happening. Don't rely on Wavescribe where life, health or property is at stake: follow official warnings
+    and the emergency services.
+  </p>
+);
+
 export function AlertRules() {
+  return <>{NOT_A_WARNING_SYSTEM}<RulesPage /></>;
+}
+
+function RulesPage() {
   const { data: v, error, reload, setData } = useLoad(async () => {
     const [rules, st] = await Promise.all([get("/rules"), get("/stations")]);
     return { ...rules, stations: st.stations as Any[] };
@@ -154,7 +167,7 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
         </Field>
         {llm ? (
           <Field id="ru-prompt" wide label="Alert when the radio says that…"
-                 hint="In any language. The model reads what each station said, about every 45 s, and says why it matches; matches go through the same cooldown and actions.">
+                 hint="In any language. The model on this machine reads what each station said, about every 45 s, and says why it matches; matches go through the same cooldown and actions. It decides alone, and can miss what you mean or misread what was said.">
             <Textarea id="ru-prompt" rows={3} value={prompt} placeholder="e.g. residents are told to leave their homes or to stay indoors" onChange={(e) => setPrompt(e.target.value)} />
           </Field>
         ) : (

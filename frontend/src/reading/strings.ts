@@ -78,6 +78,8 @@ export const T = {
   hiddenNote: "Hidden stations keep running; they just aren't shown here.",
   addStation: "Add a station",
   healthHint: "Open Health",
+  alertsCanFail: "Alerts can be missed or wrong. For anything that matters, follow official warnings.",
+  byMachine: "Transcripts and translations are made by machine and can be wrong. Wavescribe is not a safety system and comes without warranty.",
   alertRulesHint: "Alerts come from the rules under",
   alertRules: "Settings, Alerts",
   connecting: "Connecting…",

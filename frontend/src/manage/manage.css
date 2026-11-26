@@ -27,6 +27,12 @@
 /* The notices of what the page is built from: there when wanted, quieter than any page. */
 .m-nav a.m-nav-foot { display: inline-block; height: auto; margin-top: var(--s6); padding: 0 10px; background: none; box-shadow: none; color: var(--ink-3); font-size: var(--t-sm); font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
 .m-nav a.m-nav-foot:hover { background: none; color: var(--ink); }
+.m-nav-note { max-width: 30ch; margin-top: var(--s6); padding: 0 10px; color: var(--ink-3); font-size: var(--t-sm); line-height: 1.45; text-wrap: pretty; }
+.m-nav-note + .m-nav-foot { margin-top: var(--s3); }
+/* On a phone the list of pages sits at the top, so the note goes to the page's foot instead. */
+.m-page-foot { display: none; max-width: 72ch; margin-top: var(--s9); color: var(--ink-3); font-size: var(--t-sm); line-height: 1.45; }
+/* A standing note under a page's heading: quiet, always there, read as ordinary text. */
+.m-standing { max-width: 72ch; margin: calc(-1 * var(--s4)) 0 var(--s7); color: var(--ink-3); font-size: var(--t-sm); line-height: 1.5; text-wrap: pretty; }
 .m-nav-h { margin: 0 10px var(--s4); color: var(--ink-3); font-size: var(--t-sm); font-weight: 600; }
 .m-title { margin-bottom: var(--s7); font-size: var(--t-xl); font-weight: 650; letter-spacing: -0.015em; }
 .m-loading { padding: var(--s8) 0; color: var(--ink-3); }
@@ -202,6 +208,8 @@ tr:hover .rd-name-cell .btn, .rd-name-cell .btn:focus-visible { opacity: 1; }
   .m-nav-h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .m-nav ul { display: flex; flex-wrap: wrap; gap: 4px; }
   .m-nav a { white-space: nowrap; height: 34px; }
+  .m-nav-note { display: none; }
+  .m-page-foot { display: block; }
   .m-page { padding: var(--s6) var(--s6) 80px; }
   .meter { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
   .trace, .meter-detail { grid-column: 1 / -1; }

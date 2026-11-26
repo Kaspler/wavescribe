@@ -64,6 +64,7 @@ export function AlertList({ max, compact }: { max?: number; compact?: boolean })
           {rec.length - shown.length} more
         </button>
       )}
+      <p className="alerts-foot">{T.alertsCanFail}</p>
     </div>
   );
 }

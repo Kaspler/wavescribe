@@ -52,6 +52,7 @@ export function FirstRun() {
         <p>{T.firstRunBody(gb)}</p>
       </div>
       <Button variant="primary" icon="right" onClick={() => go("#/settings/languages")}>{T.getModels}</Button>
+      <p className="firstrun-note">{T.byMachine}</p>
     </section>
   );
 }

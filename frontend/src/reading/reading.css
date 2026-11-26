@@ -378,6 +378,7 @@ a.playing-label:hover { text-decoration: underline; }
 .firstrun {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s5) var(--s6);
   padding: var(--s5) var(--s7);
@@ -388,6 +389,8 @@ a.playing-label:hover { text-decoration: underline; }
 .firstrun-text { flex: 1; min-width: 0; max-width: 72ch; }
 .firstrun h2 { font-size: var(--t-md); font-weight: 650; color: var(--ink); }
 .firstrun p { margin-top: 2px; color: var(--ink-2); font-size: var(--t-ui); line-height: 1.5; text-wrap: pretty; }
+/* A row of its own under the rest, from where the text starts (the icon is 16 px). */
+.firstrun p.firstrun-note { flex: 0 0 calc(100% - 16px - var(--s6)); margin: calc(-1 * var(--s3)) 0 0 calc(16px + var(--s6)); color: var(--ink-3); font-size: var(--t-sm); }
 .firstrun .btn { flex: none; }
 
 .para { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 12px; margin-bottom: calc(var(--read) * 0.85); }
@@ -537,6 +540,7 @@ mark.found { color: inherit; background: var(--accent-tint); border-radius: 2px;
 .alerts-none { padding: var(--s5) 0; color: var(--ink-3); }
 .alerts-none a { color: var(--ink-2); }
 .alerts-more { margin-top: 8px; padding: 0; border: 0; background: none; color: var(--ink-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.alerts-foot { margin-top: var(--s4); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-3); text-wrap: pretty; }
 
 .alert { border-bottom: 1px solid var(--rule); }
 .alert-sum {

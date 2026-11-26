@@ -6,6 +6,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { Advanced, cx } from "../components/ui";
 import { langName } from "../lib/lang";
 import type { Area } from "../lib/router";
+import { T } from "../reading/strings";
 import { knownLangs } from "./api";
 import { AlertRules } from "./AlertRules";
 import { FeedApi } from "./FeedApi";
@@ -82,7 +83,10 @@ export default function Manage({ area, page }: { area: Area; page: string }) {
             ))}
           </ul>
           {area === "settings" && (
-            <a className="m-nav-foot" href="/licenses.txt" target="_blank" rel="noopener">Licences of the page's parts</a>
+            <>
+              <p className="m-nav-note">{T.byMachine}</p>
+              <a className="m-nav-foot" href="/licenses.txt" target="_blank" rel="noopener">Licences of the page's parts</a>
+            </>
           )}
         </nav>
       )}
@@ -91,6 +95,7 @@ export default function Manage({ area, page }: { area: Area; page: string }) {
           <h2 className="m-title" id="m-title">{current[1]}</h2>
           {RADIO_PAGES.has(`${area}/${current[0]}`) && <Responsibility />}
           {current[3]()}
+          {area === "settings" && <p className="m-page-foot">{T.byMachine}</p>}
         </div>
         <datalist id="m-langs">{knownLangs().map((t) => <option key={t} value={t}>{langName(t)}</option>)}</datalist>
       </main>
