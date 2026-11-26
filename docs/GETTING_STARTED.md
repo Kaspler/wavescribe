@@ -155,7 +155,10 @@ rewritten.
 Type in the field at the top (**Search or ask**):
 
 - **Search** finds words in everything heard, in the original and in the translations, in any
-  language and with or without accents. Click a result to read around it or hear it.
+  language and with or without accents. A word is found at the start of a word, so *flood*
+  finds *floods* and *flooding* but *eau* doesn't find *niveau*; put a `*` in front (`*eau`) to
+  find it anywhere inside words. In languages written without spaces (Chinese, Japanese, Thai)
+  every word is found anywhere. Click a result to read around it or hear it.
 - **Ask** answers a question in plain language from what was said, such as *"what did they say
   about the trains this morning?"*. The answer comes in the language you asked in, with the
   stations and times it's based on, which you can play. It takes about 5 to 15 seconds and needs

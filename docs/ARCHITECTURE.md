@@ -172,8 +172,8 @@ lets a wildcard bind succeed anyway, and "localhost" would then reach the other 
 **Load earlier** button that pages back by segment id (`GET /api/history?station=&before_id=`).
 Old text is trimmed from the page only while the reader follows the live end, with a hard cap of
 3,000 utterances per station. The search box (`GET /api/search?q=`) finds words in the source text
-and in every translation, ignoring case and accents and matching inside words, and highlights the
-matches. A paragraph's timestamp, and each search hit, plays the archived speech
+and in every translation, ignoring case and accents, at the start of a word (`*word` anywhere
+inside one; below, *Search*), and highlights the matches. A paragraph's timestamp, and each search hit, plays the archived speech
 (`GET /api/segments/<id>/audio.pcm`) through the same Web Audio player as **Listen**. Live
 payloads carry the stored segment id, so the live stream and history merge into one list on the
 page. `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
@@ -642,10 +642,16 @@ finishes; its translations are added when they arrive. Empty transcripts (silenc
 
 **Search** uses FTS5's `trigram` tokenizer with `remove_diacritics 1`. Trigrams need no word
 boundaries, so search works the same in languages written without spaces (Japanese, Chinese,
-Thai) and matches inside words (Portuguese inflections, compounds). It ignores case and accents,
-and it needs no per-language stemmer, which keeps the store language-agnostic. Words shorter than
-3 characters can't use a trigram index, so a query containing one falls back to `LIKE`. Query text
-is always quoted, so FTS operators in a query are searched as plain text.
+Thai). It ignores case and accents, and it needs no per-language stemmer, which keeps the store
+language-agnostic. Words shorter than 3 characters can't use a trigram index, so a query
+containing one falls back to `LIKE`. Query text is always quoted, so FTS operators in a query are
+searched as plain text. The index finds each word as a substring, which alone made "eau" find
+"niveau"; `search.py` then keeps the rows where every word starts a word (after a space,
+punctuation or the start), so a word also finds its inflections that add letters at the end
+("agua" finds "águas"). `*word` asks for a fragment anywhere inside words (compounds), and in
+scripts written without spaces every word matches anywhere. The same code serves `wavescribe
+search`, `/api/search` and everything built on it, and marks the matches in a snippet of about 80
+characters.
 
 **Speech audio** is archived as Opus (20 kbit/s, `-application voip`: about 2.5 KB per second of
 speech) under `data/audio/<station>/<date>/<segment>.ogg`, encoded by an ffmpeg subprocess on its

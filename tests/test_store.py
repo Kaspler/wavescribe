@@ -58,7 +58,7 @@ def test_recent_pages_backwards(tmp_path: Path) -> None:
     ]
 
 
-def test_search_ignores_accents_and_case_and_matches_inside_words(tmp_path: Path) -> None:
+def test_search_ignores_accents_and_case_and_finds_word_starts(tmp_path: Path) -> None:
     store = Store(tmp_path / "w.db")
     store.add_transcript(result("a", "As ÁGUAS subiram no rio Tâmega", 1000.0))
     store.add_transcript(result("b", "Trânsito normal na A3", 1001.0))
@@ -68,6 +68,26 @@ def test_search_ignores_accents_and_case_and_matches_inside_words(tmp_path: Path
     assert store.search("agua", station_id="b") == []
     assert [h["station"] for h in store.search("A3")] == ["b"]  # short word: LIKE fallback
     assert store.search('"quoted AND NOT ( odd') == []  # FTS syntax in a query is just text
+
+
+def test_search_matches_whole_words_or_their_starts_unless_asked_for_a_fragment(
+    tmp_path: Path,
+) -> None:
+    store = Store(tmp_path / "w.db")
+    store.add_transcript(result("f", "Coupure d'eau demain", 1000.0, lang="fr"))
+    for i in range(5):  # newer, and each has "eau" inside a word
+        store.add_transcript(result("f", f"Le niveau monte {i}", 1001.0 + i, lang="fr"))
+    store.add_transcript(result("f", "Il va pleuvoir", 1010.0, lang="fr"))
+    store.add_transcript(result("f", "Le cheval court", 1011.0, lang="fr"))
+
+    [hit] = store.search("eau", limit=1)  # inside-word hits don't crowd out the limit
+    assert hit["text"] == "Coupure d'eau demain" and f"d'{HIT_START}eau{HIT_END}" in hit["snippet"]
+    assert len(store.search("*eau")) == 6  # a leading * asks for a fragment
+    assert f"niv{HIT_START}eau{HIT_END}" in store.search("*eau")[0]["snippet"]
+    assert [h["text"] for h in store.search("coup*")] == ["Coupure d'eau demain"]  # a start
+    assert [h["text"] for h in store.search("va")] == ["Il va pleuvoir"]  # short: the same
+    assert [h["text"] for h in store.search("*va")] == ["Le cheval court", "Il va pleuvoir"]
+    store.close()
 
 
 def test_search_finds_translations_and_any_script(tmp_path: Path) -> None:
@@ -81,6 +101,7 @@ def test_search_finds_translations_and_any_script(tmp_path: Path) -> None:
     assert hit["id"] == seg and hit["field"] == "translation" and hit["field_lang"] == "en"
     assert store.search("світла")[0]["id"] == seg
     assert store.search("停電が")[0]["station"] == "j"  # no spaces between words: still found
+    assert store.search("電が発")[0]["station"] == "j"  # and anywhere: there are no word starts
 
 
 def test_find_reaches_two_character_words_where_words_are_that_short(tmp_path: Path) -> None:

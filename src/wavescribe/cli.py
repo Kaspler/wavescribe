@@ -824,7 +824,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_doctor_parser(sub)
 
     p = sub.add_parser("search", help="search everything heard so far, in any language")
-    p.add_argument("query", nargs="+", help="words to find (accents and case don't matter)")
+    p.add_argument(
+        "query", nargs="+", help="words to find, at the start of a word (*word: anywhere in one)"
+    )
     p.add_argument("--station", help="only this station")
     p.add_argument("--limit", type=int, default=30)
     add_json_arg(p)

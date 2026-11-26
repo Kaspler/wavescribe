@@ -9,7 +9,8 @@ Alerts, their mentions (for highlighting) and their translated summaries live he
 
 Search uses FTS5 with the trigram tokenizer, which matches substrings in any script (languages
 written without spaces included), ignoring case and accents: "agua" finds "águas". Queries with a
-word shorter than three characters fall back to a LIKE scan.
+word shorter than three characters fall back to a LIKE scan. ``wavescribe.search`` then keeps
+the hits where each word starts a word, unless it was written ``*word``.
 """
 
 from __future__ import annotations
@@ -32,6 +33,9 @@ from wavescribe.audio import SAMPLE_RATE
 from wavescribe.config import Station
 from wavescribe.log import event
 from wavescribe.pipeline import Result
+from wavescribe.search import match as search_match
+from wavescribe.search import parse as search_terms
+from wavescribe.search import snippet as search_snippet
 
 if TYPE_CHECKING:
     from wavescribe.alerts import Alert
@@ -803,14 +807,16 @@ class Store:
         limit: int = 50,
         exports: Exports | None = None,
     ) -> list[dict[str, Any]]:
-        """Utterances whose source text or any translation contains every word of ``query``.
+        """Utterances whose source text or any translation has every word of ``query`` at the
+        start of a word, or anywhere for a word written ``*word`` (``wavescribe.search``).
 
         Newest first. Each hit carries ``snippet`` (the matching text with HIT_START/HIT_END
         around matches), ``field`` ("source" or "translation") and ``field_lang``.
         """
-        words = query.split()
-        if not words:
+        terms = search_terms(query)
+        if not terms:
             return []
+        words = [t.text for t in terms]
         where, where_args = _exports_sql(exports)
         if station_id:
             where += " AND s.station_id = ?"
@@ -818,49 +824,60 @@ class Store:
         if all(len(w) >= 3 for w in words):
             match = " ".join('"' + w.replace('"', '""') + '"' for w in words)
             sql = f"""
-                SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start,
-                       snippet(transcripts_fts, 0, char(2), char(3), '…', 64) AS snippet
+                SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start, t.text AS text
                 FROM transcripts_fts
                 JOIN transcripts t ON t.segment_id = transcripts_fts.rowid
                 JOIN segments s ON s.id = t.segment_id
                 WHERE transcripts_fts MATCH ?{where}
                 UNION ALL
-                SELECT s.id, 'translation', tr.lang, s.t_start,
-                       snippet(translations_fts, 0, char(2), char(3), '…', 64)
+                SELECT s.id, 'translation', tr.lang, s.t_start, tr.text
                 FROM translations_fts
                 JOIN translations tr ON tr.id = translations_fts.rowid
                 JOIN segments s ON s.id = tr.segment_id
                 WHERE translations_fts MATCH ?{where}
-                ORDER BY t_start DESC LIMIT ?"""
-            args: list[Any] = [match, *where_args, match, *where_args, limit * 2]
+                ORDER BY t_start DESC"""
+            args: list[Any] = [match, *where_args, match, *where_args]
         else:  # trigrams can't index words under 3 characters: scan instead
             like = " AND ".join(["text LIKE ?"] * len(words))
             pats = [f"%{w}%" for w in words]
             sql = f"""
-                SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start, t.text AS snippet
+                SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start, t.text AS text
                 FROM transcripts t JOIN segments s ON s.id = t.segment_id
                 WHERE {like}{where}
                 UNION ALL
                 SELECT s.id, 'translation', tr.lang, s.t_start, tr.text
                 FROM translations tr JOIN segments s ON s.id = tr.segment_id
                 WHERE {like.replace("text", "tr.text")}{where}
-                ORDER BY t_start DESC LIMIT ?"""
-            args = [*pats, *where_args, *pats, *where_args, limit * 2]
+                ORDER BY t_start DESC"""
+            args = [*pats, *where_args, *pats, *where_args]
         with self._read_lock:
+            # The index finds every word as a substring; keep the rows where each starts where
+            # it may, one per utterance, preferring the source text, until ``limit`` are found.
+            best: dict[int, tuple[sqlite3.Row, list[tuple[int, int]]]] = {}
+            oldest = float("inf")
             try:
-                hits = self._reader.execute(sql, args).fetchall()
+                for h in self._reader.execute(sql, args):
+                    if len(best) >= limit and h["t_start"] < oldest:
+                        break
+                    spans = search_match(terms, h["text"])
+                    if spans is None:
+                        continue
+                    known = best.get(h["id"])
+                    if known is None and len(best) < limit:
+                        best[h["id"]], oldest = (h, spans), h["t_start"]
+                    elif known is not None and h["field"] == "source" != known[0]["field"]:
+                        best[h["id"]] = (h, spans)
             except sqlite3.OperationalError as e:  # a query FTS5 can't parse
                 log.info("search %r failed: %s", query, e)
                 return []
-            best: dict[int, sqlite3.Row] = {}
-            for h in hits:  # one hit per utterance, preferring the source text
-                if h["id"] not in best or (h["field"] == "source" != best[h["id"]]["field"]):
-                    best[h["id"]] = h
-            ids = sorted(best, key=lambda i: -best[i]["t_start"])[:limit]
             out = []
-            for payload in self._payloads(ids, self._reader):
-                h = best[payload["id"]]
-                payload.update(snippet=h["snippet"], field=h["field"], field_lang=h["lang"])
+            for payload in self._payloads(list(best), self._reader):
+                h, spans = best[payload["id"]]
+                payload.update(
+                    snippet=search_snippet(h["text"], spans, (HIT_START, HIT_END)),
+                    field=h["field"],
+                    field_lang=h["lang"],
+                )
                 out.append(payload)
             return sorted(out, key=lambda p: -p["t_start"])
 
