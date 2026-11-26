@@ -179,8 +179,10 @@ TOOLS = (
     Tool(
         "alerts",
         "Recent alerts, newest first: moments the user's alert rules caught on the radio. "
-        "Returns {alerts}, at most 30, each with id, rule (its name), kind (keyword, or llm for "
-        "a rule written in plain language), severity (low, medium, high, critical), status "
+        "Returns {alerts}, at most 30, each with id, rule (its name), kind (keyword; llm for a "
+        "rule written in plain language; silence when a station went quiet; traffic when an FM "
+        "station started a traffic announcement, both without words from the radio), severity "
+        "(low, medium, high, critical), status "
         "(pending: still being checked or translated; delivered, partial, failed or logged: "
         "announced; covered: another alert announced it), time (UTC, of the latest mention), "
         "mentions, terms (the words that matched), reason (the local model's, when it checked "
