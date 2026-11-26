@@ -72,7 +72,7 @@ def registry(tmp_path: Path) -> ModelRegistry:
 
 
 def make_app(tmp_path: Path, name: str = "node", *, transcriber=SpeakingTranscriber,
-             audio=None, transport=None, start=None) -> App:  # fmt: skip
+             audio=None, transport=None, start=None, stations=None) -> App:  # fmt: skip
     root = tmp_path / name
     root.mkdir()
     (root / "alerts.toml").write_text(ALERTS)
@@ -80,7 +80,7 @@ def make_app(tmp_path: Path, name: str = "node", *, transcriber=SpeakingTranscri
     settings = Settings(root / "ui.toml")
     settings.update(lambda d: d.setdefault("node", {}).update(name=name))
     return App(
-        parse_stations(BASE, root / "stations.toml"), settings, registry(root),
+        parse_stations(stations or BASE, root / "stations.toml"), settings, registry(root),
         store=Store(root / "w.db"), alerts_path=root / "alerts.toml",
         keywords_dir=pack(root), start=start if start is not None else [],
         pipeline_kwargs={
@@ -865,6 +865,30 @@ def test_a_sender_that_starts_stating_a_stricter_class_tightens_its_station(
     monkeypatch.setitem(bandplan.POLICIES, "amateur", gone)
     central.store.prune_short_lived()
     assert [u["text"] for u in central.store.recent("north-scan")] == ["before"]
+
+
+def test_a_remote_station_set_stricter_in_the_stations_file_stays_so(tmp_path: Path) -> None:
+    pushed = {"id": "north-tsf", "name": "TSF", "remote": "push", "remote_station": "tsf",
+              "privacy": "utility"}  # fmt: skip
+    app = make_app(tmp_path, "central", stations={**BASE, "station": [*BASE["station"], pushed]})
+    try:
+        saves: list = []
+        app.settings.observe(saves.append)
+        batch = [classed("tsf", "broadcast", "um"), classed("tsf", None, "dois")]
+        assert push(app, batch)["accepted"] == 2
+        assert app.config.get("north-tsf").privacy == "utility"  # the sender's is looser
+        assert "north-tsf" not in app.hub.exports().stations
+        assert {u["privacy"] for u in app.store.recent("north-tsf")} == {"utility"}
+        assert saves == []  # nothing to note while the file's class covers it
+        assert push(app, [classed("tsf", "private", "três")])["accepted"] == 1
+        assert app.config.get("north-tsf").privacy == "private"  # a stricter one is followed
+        assert push(app, [classed("tsf", "broadcast", "quatro")])["accepted"] == 1
+        assert app.config.get("north-tsf").privacy == "utility"  # and never below the file's
+        assert len(saves) == 2
+    finally:
+        app.pipeline.stop()
+        app.close()
+        app.store.close()
 
 
 def test_a_pushed_name_with_control_characters_leaves_a_ui_toml_that_loads(central: App) -> None:

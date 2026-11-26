@@ -295,7 +295,8 @@ Feed tokens (scopes `read`, `push`) guard other machines once the first one exis
 itself needs none to read, and a push always needs one.
 
 Remote text is checked field by field (`remote.read_utterance`) and then goes through
-`Pipeline.ingest` with the privacy class its events carry, so it is stored, searched, asked about and checked by
+`Pipeline.ingest` with the privacy class its events carry (never looser than a `privacy` the
+station's config gives it), so it is stored, searched, asked about and checked by
 **this** machine's rules like local text. Rules match its source-language text; translations
 are added only for languages it didn't arrive with. The feed carries no audio: `audio_url`
 (`/api/segments/<id>/audio.wav`) points back to the machine that recorded it.

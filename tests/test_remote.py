@@ -81,6 +81,30 @@ def test_the_privacy_class_travels_with_the_text() -> None:
     assert read_utterance(newer, now=NOW).privacy == "private"
 
 
+def test_a_class_set_in_the_config_is_the_least_strict_a_followed_station_gets(tmp_path) -> None:
+    from wavescribe.config import ConfigError, parse_stations
+    from wavescribe.settings import effective_config
+
+    far = {"id": "far", "language": "pt-PT", "remote": "http://n.test:8", "remote_station": "tsf"}
+    config = parse_stations({"station": [{**far, "privacy": "amateur"}]}, tmp_path / "s.toml")
+    ours = config.get("far")
+    assert (ours.privacy, ours.privacy_set) == ("amateur", "amateur")
+
+    def sent(cls: str) -> object:
+        return read_utterance({**EVENT, "station": {"id": "tsf", "privacy": cls}}, now=NOW)
+
+    assert to_result(sent("broadcast"), ours).station.privacy == "amateur"
+    assert to_result(sent("private"), ours).station.privacy == "private"
+    # The same after a restart, from the class the sender gave last (kept in ui.toml).
+    for said, held in (("broadcast", "amateur"), ("utility", "utility")):
+        again, errors = effective_config(config, {"remote_privacy": {"far": said}})
+        assert again.get("far").privacy == held and not errors
+    stream = {"id": "s", "language": "pt-PT", "stream": "http://s.test/a", "privacy": "private"}
+    for bad in ({**far, "privacy": "secret"}, stream):
+        with pytest.raises(ConfigError, match="'privacy' is for remote stations"):
+            parse_stations({"station": [bad]}, tmp_path / "s.toml")
+
+
 BAD = [
     ("t_start", math.inf), ("t_start", -math.inf), ("t_start", math.nan), ("t_start", 1e18),
     ("t_start", 10**400), ("t_start", -1.0), ("t_start", 0), ("t_start", NOW - 30 * 86400),

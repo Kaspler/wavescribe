@@ -664,10 +664,17 @@ class App:
         where it isn't the one they have, and add the stations a push brought (``new``): one
         write of ui.toml for both. Everything that asks whether a station's text may be
         shown to other machines or sent on reads the class from the station."""
+        from wavescribe.remote import held_as
+
         new = list(new)
         with self._lock:
-            have = {s.id: s.privacy for s in self.config.stations}
-            changed = {sid: cls for sid, cls in said.items() if have.get(sid) != cls}
+            have = {s.id: s for s in self.config.stations}
+            noted = self.settings.get("remote_privacy") or {}
+            # Kept when it changes how the station is handled, or what its sender says (a
+            # stricter class in the station's config may cover that, until the config changes).
+            changed = {sid: cls for sid, cls in said.items() if sid not in have
+                       or have[sid].privacy != held_as(cls, have[sid])
+                       or noted.get(sid, cls) != cls}  # fmt: skip
             if not changed and not new:
                 return
 

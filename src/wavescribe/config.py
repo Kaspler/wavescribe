@@ -36,7 +36,7 @@ _STATION_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _DEFAULT_KEYS = {"language", "translate_to", "alert_languages", "priority", "deemphasis_us"}
 _STATION_KEYS = _DEFAULT_KEYS | {
     "id", "name", "fm_mhz", "mw_khz", "stream", "stream_hls", "device",
-    "remote", "remote_station", "remote_token",
+    "remote", "remote_station", "remote_token", "privacy",
     "mhz", "mode", "channel_khz", "squelch_db", "acknowledge", "transcribe", "translate",
     "privacy_floor",
 }  # fmt: skip
@@ -112,6 +112,9 @@ class Station:
     # Set when a stricter class is kept after a change of region (``privacy_floor``): the class
     # the region gives, which applies once the user confirms it.
     privacy_region: str | None = None
+    # A remote station's class from its config: the other machine may make it stricter, never
+    # looser (remote.py).
+    privacy_set: str | None = None
 
     @property
     def translation_targets(self) -> tuple[str, ...]:
@@ -519,6 +522,14 @@ def build_station(
             raise ConfigError(f"{where}: 'remote' must be the other machine's http(s) URL")
         if not isinstance(remote_station, str) or not remote_station:
             raise ConfigError(f"{where}: 'remote' needs 'remote_station' (its id over there)")
+    if (stated := d.get("privacy")) is not None:
+        from wavescribe.radio.bandplan import PRIVACY
+
+        if remote is None or stated not in PRIVACY:
+            classes = ", ".join(PRIVACY)
+            raise ConfigError(f"{where}: 'privacy' is for remote stations, one of {classes}; "
+                              "radio heard here has its band's class")  # fmt: skip
+        privacy = stated
     for key in ("stream", "stream_hls"):  # ffmpeg opens files and sockets too: http(s) only
         url = d.get(key)
         if url is not None and (
@@ -549,6 +560,7 @@ def build_station(
         privacy=privacy,
         band=band,
         privacy_region=privacy_region,
+        privacy_set=stated,
         transcribe=d.get("transcribe", True),
         translate=d.get("translate", True),
     )

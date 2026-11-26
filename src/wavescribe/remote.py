@@ -42,7 +42,7 @@ from wavescribe.asr import Transcript
 from wavescribe.config import _BCP47, Station
 from wavescribe.log import event
 from wavescribe.pipeline import Result
-from wavescribe.radio.bandplan import PRIVACY
+from wavescribe.radio.bandplan import PRIVACY, STRICTNESS
 from wavescribe.segment import Utterance
 
 log = logging.getLogger(__name__)
@@ -186,12 +186,19 @@ def _number(value: object, what: str, low: float, high: float, *, whole: bool = 
     return float(value)
 
 
+def held_as(said: str, station: Station) -> str:
+    """The class a remote station's text is handled by when its sender says ``said``: that,
+    unless the station's config gives a stricter one (``privacy`` in stations.toml)."""
+    return max(said, station.privacy_set or said, key=STRICTNESS.index)
+
+
 def to_result(heard: Heard, station: Station) -> Result:
     """A checked utterance from another machine as a pipeline result for ``station`` (ours).
-    The result's station has the class the sender gave: what is kept of it, whether alerts
-    quote it and whether it is sent on then follow that class as for a station heard here."""
-    if heard.privacy is not None and heard.privacy != station.privacy:
-        station = replace(station, privacy=heard.privacy)
+    The result's station has the class the sender gave, or the stricter one its config gives:
+    what is kept of it, whether alerts quote it and whether it is sent on then follow that
+    class as for a station heard here."""
+    if heard.privacy is not None and held_as(heard.privacy, station) != station.privacy:
+        station = replace(station, privacy=held_as(heard.privacy, station))
     utt = Utterance(station.id, heard.seq, np.zeros(0, dtype=np.float32), heard.t_start,
                     heard.t_start + heard.duration, time.time())  # fmt: skip
     node = heard.node or "remote"

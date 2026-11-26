@@ -45,7 +45,9 @@ Utterance fields:
   The class is the sender's statement: a sender that leaves it out is taken to send broadcast,
   so a program that pushes radio that isn't broadcast must say so. A class the receiver doesn't
   know is handled as `private`. Once a sender states a stricter class, the station is handled
-  by it from then on.
+  by it from then on. On the receiving machine, `privacy` on a remote station in
+  `stations.toml` (pulled or `remote = "push"`) sets the least strict class its text gets:
+  what the sender says can make it stricter, never looser.
 
 ```json
 {
@@ -190,6 +192,7 @@ translate_to = ["en", "es"]
 remote = "http://north-node.local:8765"
 remote_station = "tsf"
 remote_token = "wst_…"      # if that node has feed tokens
+privacy = "amateur"         # optional: handle its text at least this strictly
 ```
 
 - The central server subscribes to the node's feed and catches up on the last hour the first

@@ -227,10 +227,12 @@ def effective_config(
 def _remote_class(station: Station, said: object) -> Station:
     """A station heard through another machine has the class that machine gave it, which the
     app notes in [remote_privacy] as events arrive. One nobody gave a class stays broadcast
-    (``read_utterance`` says why); a class that isn't one is handled as private."""
-    from wavescribe.radio.bandplan import PRIVACY
+    (``read_utterance`` says why); a class that isn't one is handled as private. Never less
+    strict than the station's own ``privacy``."""
+    from wavescribe.radio.bandplan import PRIVACY, STRICTNESS
 
-    return replace(station, privacy=said if said in PRIVACY else "private")
+    cls = said if said in PRIVACY else "private"
+    return replace(station, privacy=max(cls, station.privacy_set or cls, key=STRICTNESS.index))
 
 
 def _build(
@@ -312,6 +314,8 @@ def station_dict(s: Station) -> dict[str, Any]:
         d["remote_station"] = s.remote_station
         if s.remote_token:
             d["remote_token"] = s.remote_token
+        if s.privacy_set:
+            d["privacy"] = s.privacy_set
     return d
 
 
