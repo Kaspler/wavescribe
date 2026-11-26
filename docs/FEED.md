@@ -66,7 +66,11 @@ Utterance fields:
 
 Alert fields:
 
-- `kind`: `keyword` or `llm` (a rule written in plain language and checked by the LLM).
+- `kind`: `keyword` or `llm` (a rule written in plain language and checked by the LLM), or a
+  station alert: `silence` (a station gone silent) or `traffic` (an FM station's RDS traffic
+  announcement). A station alert's `text` is Wavescribe's own wording, in English (`language`
+  `en`), with no words heard and no `terms`; when a silent station's audio is back, a second
+  event for the same alert carries "Audio is back on …" as its `text` and `reason`.
 - `reason`: the LLM's one-line reason, when it was involved.
 - `text`: what was announced, in the source language.
 - `translations`: only translations checked to be in their target language.
