@@ -66,6 +66,9 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --prefix frontend
+      # Node's own test runner on the TypeScript sources: no test packages to install.
+      - name: The page's own tests
+        run: npm --prefix frontend test
       - name: Type-check and build the page
         run: npm --prefix frontend run build
       - name: A fresh build gives the committed page, byte for byte

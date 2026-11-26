@@ -89,7 +89,8 @@ radio, and the radio code is tested on synthetic signals.
   run build` writes `src/wavescribe/web/dist/`. The built page is always committed with its
   sources, so running Wavescribe never needs Node. The build works offline from
   `package-lock.json` and bundles every asset (no CDN, no web fonts). `npm --prefix frontend
-  test` runs the page's own tests with Node's built-in test runner, so they need no packages.
+  test` runs the page's own tests with Node's built-in test runner, so they need no test
+  packages (after `npm ci --prefix frontend`, for the modules they import).
 
 ## Commit checks
 
@@ -103,9 +104,9 @@ radio, and the radio code is tested on synthetic signals.
 Checks of your own can go in `.git/hooks/pre-commit.local`: the hook runs it afterwards when it
 exists and is executable. Do what a blocked commit says and commit again; don't bypass the hook.
 
-Every pull request runs the same checks on GitHub: ruff, the tests that need no models, a
-fresh build of the page compared with the committed one, and the licence check over every
-commit it brings (`commit_checks.py check --base <rev>`).
+Every pull request runs the same checks on GitHub: ruff, the tests that need no models, the
+page's own tests, a fresh build of the page compared with the committed one, and the licence
+check over every commit it brings (`commit_checks.py check --base <rev>`).
 
 ## License
 
