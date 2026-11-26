@@ -1,0 +1,177 @@
+# World stations over the internet: public-broadcaster news and talk in several languages, for
+# when local radio isn't enough and the only link is a slow one (satellite, mobile, shared Wi-Fi).
+# Use it as is or copy what you need into config/stations.toml:
+#
+#   uv run wavescribe serve --config config/stations.world.example.toml
+#   uv run wavescribe listen bbc-ws dlf --config config/stations.world.example.toml
+#
+# Every station sets its own `language`, so one file holds them all. English stations translate
+# to nothing: a target in the station's own language is skipped, and if no running station needs
+# a translation the translator isn't even loaded.
+#
+# Bandwidth. The bitrate in each comment is the audio rate measured from the stream; HLS adds
+# ~10% for its container. Low-bitrate variants (HE-AAC at 32-64 kbps) were picked wherever the
+# broadcaster offers one; HE-AAC at 48 kbps is still fine for speech recognition. All 18 at once
+# need ~1.7 Mbit/s. A ~500 kbit/s link (a satellite dish on a low-data plan, for example) carries
+# about 6-8 of the light ones (<= 64 kbps), or 2-3 of the 128+ kbps ones, with room to spare.
+# HLS stations point at one variant playlist, not the master: with a master playlist ffmpeg
+# opens every variant when it connects.
+#
+# ASR. Parakeet-TDT-0.6B-v3 (first in the default chain) covers every language here except
+# Hebrew, which falls through to Whisper large-v3-turbo, the chain's second model. Fetch it once:
+#   uv run wavescribe models fetch whisper-large-v3-turbo
+# Without it, kan-bet shows as unavailable and the other stations run as usual.
+#
+# Stream URLs are the broadcasters' own endpoints (or their official CDN), each verified on
+# 2026-11-21 by pulling 10 s with ffmpeg and transcribing a minute of each. Broadcasters move and
+# geo-restrict streams without notice: re-check with ffprobe if one fails. Each stream comes with
+# its broadcaster's terms of use, which can limit where and how it may be played: check them.
+
+[defaults]
+translate_to = ["en"]          # continuous; skipped for stations already in English
+alert_languages = ["en"]
+priority = 3
+
+# -- English -------------------------------------------------------------------------------------
+
+[[station]]
+id = "bbc-ws"
+name = "BBC World Service"
+language = "en-GB"
+priority = 1                   # HE-AAC 48 kbps
+stream_hls = "https://as-hls-ww-live.akamaized.net/pool_87948813/live/ww/bbc_world_service/bbc_world_service.isml/bbc_world_service-audio%3d48000.norewind.m3u8"
+
+[[station]]
+id = "bbc-r4"
+name = "BBC Radio 4"
+language = "en-GB"
+priority = 2                   # HE-AAC 48 kbps (international feed)
+stream_hls = "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d48000.norewind.m3u8"
+
+[[station]]
+id = "rte1"
+name = "RTÉ Radio 1"
+language = "en-IE"
+priority = 3                   # AAC-LC 128 kbps: the lowest RTÉ offers
+stream_hls = "https://liveaudio.rte.ie/hls-radio/radio1/chunklist.m3u8"
+
+[[station]]
+id = "rnz"
+name = "RNZ National"
+language = "en-NZ"
+priority = 3                   # HE-AAC 64 kbps
+stream = "https://stream-ice.radionz.co.nz/national_aac64"
+
+[[station]]
+id = "abc-news"
+name = "ABC NewsRadio (Australia)"
+language = "en-AU"
+priority = 2                   # HE-AACv2 ~32 kbps audio (playlist says 82 kbps with overhead)
+# Variant of https://streaming.abc-cdn.net.au/audio/hls/newsradio.m3u8; use that if this one moves.
+stream_hls = "https://mediaserviceslive.akamaized.net/hls/live/2109425/newsradio/v0-222.m3u8"
+
+[[station]]
+id = "cbc1"
+name = "CBC Radio One (Montréal)"
+language = "en-CA"
+priority = 3                   # AAC-LC 48 kbps
+stream_hls = "https://cbcradiolive.akamaized.net/hls/live/2041030/ES_R1EMT/adaptive_48/chunklist_ao.m3u8"
+
+[[station]]
+id = "npr"
+name = "NPR 24-hour program stream"
+language = "en-US"
+priority = 3                   # HE-AAC 64 kbps
+stream = "https://npr-ice.streamguys1.com/live.aac"
+
+# -- Ukrainian (Suspilne) ------------------------------------------------------------------------
+
+[[station]]
+id = "ur1"
+name = "Ukrainian Radio (Suspilne)"
+language = "uk"
+priority = 1                   # MP3 128 kbps: the lowest Suspilne offers
+stream = "http://radio.ukr.radio:8000/ur1-mp3-m"
+
+[[station]]
+id = "promin"
+name = "Radio Promin (Suspilne)"
+language = "uk"
+priority = 3                   # MP3 128 kbps
+stream = "http://radio.ukr.radio:8000/ur2-mp3-m"
+
+[[station]]
+id = "kultura"
+name = "Radio Kultura (Suspilne)"
+language = "uk"
+priority = 4                   # MP3 128 kbps
+stream = "http://radio.ukr.radio:8000/ur3-mp3-m"
+
+# -- Hebrew --------------------------------------------------------------------------------------
+
+[[station]]
+id = "kan-bet"
+name = "Kan Reshet Bet"
+language = "he"
+priority = 2                   # MP3 128 kbps. ASR: Whisper only (see the header)
+stream = "https://playerservices.streamtheworld.com/api/livestream-redirect/KAN_BET.mp3"
+
+# -- Spanish -------------------------------------------------------------------------------------
+# Domestic RNE stations are in stations.es.example.toml.
+
+[[station]]
+id = "ree"
+name = "Radio Exterior de España (RNE)"
+language = "es-ES"
+priority = 3                   # MP3 128 kbps: the lowest RTVE offers
+stream = "https://dispatcher.rndfnk.com/crtve/rneree/main/mp3/high"
+
+# -- French --------------------------------------------------------------------------------------
+
+[[station]]
+id = "franceinfo"
+name = "franceinfo"
+language = "fr-FR"
+priority = 2                   # HE-AACv2 32 kbps, all-news
+stream = "https://icecast.radiofrance.fr/franceinfo-lofi.aac"
+
+[[station]]
+id = "rfi"
+name = "RFI Monde"
+language = "fr"
+priority = 3                   # MP3 64 kbps
+stream = "https://rfimonde64k.ice.infomaniak.ch/rfimonde-64.mp3"
+
+# -- German --------------------------------------------------------------------------------------
+
+[[station]]
+id = "dlf"
+name = "Deutschlandfunk"
+language = "de-DE"
+priority = 2                   # HE-AACv2 48 kbps (a 24 kbps Opus feed exists: /dlf/01/low/opus/stream.opus)
+stream = "https://st01.sslstream.dlf.de/dlf/01/low/aac/stream.aac"
+
+[[station]]
+id = "dlf-kultur"
+name = "Deutschlandfunk Kultur"
+language = "de-DE"
+priority = 4                   # HE-AACv2 48 kbps
+stream = "https://st02.sslstream.dlf.de/dlf/02/low/aac/stream.aac"
+
+# -- Italian -------------------------------------------------------------------------------------
+
+[[station]]
+id = "rai1"
+name = "Rai Radio 1"
+language = "it-IT"
+priority = 3                   # MP3 256 kbps: heavy, and the only public feed found
+stream = "https://icestreaming.rai.it/1.mp3"
+
+# -- Polish --------------------------------------------------------------------------------------
+
+[[station]]
+id = "pr24"
+name = "Polskie Radio 24"
+language = "pl-PL"
+priority = 3                   # MP3 192 kbps: heavy, and the only public feed found
+stream = "http://stream3.polskieradio.pl:8080/"

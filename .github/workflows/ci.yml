@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # run by hand from the Actions tab
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # Wavescribe targets macOS on Apple Silicon, and its MLX dependencies exist only there.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+      # The stream, archive and catalogue tests render and decode synthetic audio with ffmpeg,
+      # and are skipped without it. No radio tools: tests/ has stand-ins for rtl_sdr and
+      # rtl_power.
+      - run: brew install ffmpeg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # Tests marked `models` need about 8 GB of downloaded models and run on a developer's Mac
+      # only. test_machine_on_this_mac expects efficiency cores, which a virtual Mac doesn't
+      # report.
+      - run: >-
+          uv run pytest -m "not models"
+          --deselect tests/test_catalog_models.py::test_machine_on_this_mac
+
+  page:
+    # The built page is committed with its sources, so running Wavescribe never needs Node.
+    # This job checks that the two still belong together. It runs on macOS because the
+    # committed page was built there and the last step compares it byte for byte.
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The committed page was built from the committed sources
+        run: python3 scripts/commit_checks.py check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --prefix frontend
+      - name: Type-check and build the page
+        run: npm --prefix frontend run build
+      - name: A fresh build gives the committed page, byte for byte
+        run: |
+          git add --all src/wavescribe/web/dist
+          git diff --cached --stat --exit-code

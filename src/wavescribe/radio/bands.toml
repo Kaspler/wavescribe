@@ -1,0 +1,258 @@
+# Band plans: what is where on the dial, written for Wavescribe from public allocation facts
+# (ITU Radio Regulations, CEPT/ECC decisions, IARU region band plans, national rules). No text
+# or tables are copied from those documents; frequencies and channel rasters are facts.
+#
+# Frequencies are in MHz. `mode` is how voice is demodulated (wfm, nfm, am); `step_khz` the
+# channel raster; `channel_khz` the channel width when it differs from the raster.
+# `privacy` decides what Wavescribe does with what it hears (docs/RADIO.md):
+#   broadcast  meant for the public: transcribed, stored and exported like a stream
+#   amateur    open by design: transcribed; text kept briefly, no audio, not exported
+#   utility    airband, marine: opt-in; text kept briefly, no audio, not exported
+#   private    licence-free personal radio and anything unlisted: opt-in with an
+#              acknowledgement; live text only, nothing stored or exported
+#   digital    digital or encrypted services: opt-in with an acknowledgement; Wavescribe has
+#              no digital decoder and never decrypts, so tuning one gives noise
+# These are the defaults; the user can change what is kept per class ([radio.policy.<class>]).
+# `regions` are ITU regions ("1" Europe, Africa, the Middle East; "2" the Americas; "3" Asia
+# and Oceania), or "cept" for the CEPT countries' harmonised bands.
+
+[[band]]
+id = "fm"
+name = "FM broadcast"
+start = 87.5
+stop = 108.0
+mode = "wfm"
+step_khz = 100
+privacy = "broadcast"
+regions = ["1", "3"]
+
+[[band]]
+id = "fm-americas"
+name = "FM broadcast"
+start = 88.1
+stop = 107.9
+mode = "wfm"
+step_khz = 200
+privacy = "broadcast"
+regions = ["2"]
+
+[[band]]
+id = "fm-japan"
+name = "FM broadcast (Japan)"
+start = 76.0
+stop = 95.0
+mode = "wfm"
+step_khz = 100
+privacy = "broadcast"
+regions = ["jp"]
+
+[[band]]
+id = "mw"
+name = "Medium wave (AM broadcast)"
+start = 0.531
+stop = 1.611
+mode = "am"
+step_khz = 9
+channel_khz = 9
+privacy = "broadcast"
+regions = ["1", "3"]
+
+[[band]]
+id = "mw-americas"
+name = "Medium wave (AM broadcast)"
+start = 0.530
+stop = 1.700
+mode = "am"
+step_khz = 10
+channel_khz = 10
+privacy = "broadcast"
+regions = ["2"]
+
+[[band]]
+id = "airband"
+name = "Airband (civil aviation voice)"
+start = 118.0
+stop = 137.0
+mode = "am"
+step_khz = 8.3333333  # 25 kHz split in three: Europe's raster, which includes the 25 kHz one
+channel_khz = 8.3333333
+privacy = "utility"
+regions = ["1"]
+
+[[band]]
+id = "airband-25"
+name = "Airband (civil aviation voice)"
+start = 118.0
+stop = 137.0
+mode = "am"
+step_khz = 25
+channel_khz = 8.3333333  # AM voice fits; a narrower filter lets in less noise
+privacy = "utility"
+regions = ["2", "3"]
+
+[[band]]
+id = "marine"
+name = "Marine VHF"
+start = 156.0
+stop = 162.025
+mode = "nfm"
+step_khz = 25
+channel_khz = 25
+privacy = "utility"
+regions = ["1", "2", "3"]
+
+[[band]]
+id = "weather-us"
+name = "Weather radio (NOAA)"
+start = 162.400
+stop = 162.550
+mode = "nfm"
+step_khz = 25
+channel_khz = 25
+privacy = "broadcast"
+regions = ["2"]
+
+[[band]]
+id = "2m"
+name = "Amateur 2 m"
+start = 144.0
+stop = 146.0
+mode = "nfm"
+step_khz = 12.5
+privacy = "amateur"
+regions = ["1"]
+
+[[band]]
+id = "2m-wide"
+name = "Amateur 2 m"
+start = 144.0
+stop = 148.0
+mode = "nfm"
+# Repeaters here sit on 5, 15 and 20 kHz steps with ±5 kHz deviation: a 25 kHz channel.
+step_khz = 5
+channel_khz = 25
+privacy = "amateur"
+regions = ["2", "3"]
+
+[[band]]
+id = "70cm"
+name = "Amateur 70 cm"
+start = 430.0
+stop = 440.0
+mode = "nfm"
+step_khz = 12.5
+privacy = "amateur"
+regions = ["1"]
+
+[[band]]
+id = "70cm-wide"
+name = "Amateur 70 cm"
+start = 420.0
+stop = 450.0
+mode = "nfm"
+step_khz = 12.5
+channel_khz = 25
+privacy = "amateur"
+regions = ["2", "3"]
+
+# Licence-free walkie-talkies: 16 analogue channels, 12.5 kHz apart (ECC/DEC/(15)05).
+[[band]]
+id = "pmr446"
+name = "PMR446 walkie-talkies"
+start = 446.0
+stop = 446.2
+mode = "nfm"
+step_khz = 12.5
+privacy = "private"
+regions = ["cept"]
+channels = [
+  446.00625, 446.01875, 446.03125, 446.04375, 446.05625, 446.06875, 446.08125, 446.09375,
+  446.10625, 446.11875, 446.13125, 446.14375, 446.15625, 446.16875, 446.18125, 446.19375,
+]
+
+# The Americas' licence-free radios: FRS channels 1–22 (GMRS shares them).
+[[band]]
+id = "frs"
+name = "FRS/GMRS walkie-talkies"
+start = 462.55
+stop = 467.725
+mode = "nfm"
+step_khz = 12.5
+privacy = "private"
+regions = ["2"]
+channels = [
+  462.5625, 462.5875, 462.6125, 462.6375, 462.6625, 462.6875, 462.7125,
+  467.5625, 467.5875, 467.6125, 467.6375, 467.6625, 467.6875, 467.7125,
+  462.5500, 462.5750, 462.6000, 462.6250, 462.6500, 462.6750, 462.7000, 462.7250,
+]
+
+# Short-range devices: remotes, sensors and, where allowed, LPD433 walkie-talkies.
+[[band]]
+id = "srd433"
+name = "433 MHz short-range devices"
+start = 433.05
+stop = 434.79
+mode = "nfm"
+step_khz = 25
+privacy = "private"
+regions = ["1"]
+
+[[band]]
+id = "cb"
+name = "CB radio (27 MHz)"
+start = 26.965
+stop = 27.405
+mode = "am"
+step_khz = 10
+channel_khz = 10
+privacy = "private"
+regions = ["1", "2", "3"]
+
+# Digital services: shown in a sweep. There is no digital decoder (and no decryption).
+[[band]]
+id = "dab"
+name = "Digital broadcast (DAB)"
+start = 174.0
+stop = 240.0
+privacy = "digital"
+regions = ["1"]
+
+[[band]]
+id = "digital-emergency"
+name = "Digital and encrypted services (TETRA and similar)"
+start = 380.0
+stop = 400.0
+privacy = "digital"
+regions = ["cept"]
+
+[[band]]
+id = "dvbt"
+name = "Digital TV (DVB-T)"
+start = 470.0
+stop = 694.0
+privacy = "digital"
+regions = ["1"]
+
+[[band]]
+id = "cellular"
+name = "Mobile networks"
+start = 694.0
+stop = 960.0
+privacy = "digital"
+regions = ["1", "2", "3"]
+
+[[band]]
+id = "adsb"
+name = "Aircraft transponders (ADS-B)"
+start = 1089.0
+stop = 1091.0
+privacy = "digital"
+regions = ["1", "2", "3"]
+
+[[band]]
+id = "gnss"
+name = "Satellite navigation"
+start = 1559.0
+stop = 1610.0
+privacy = "digital"
+regions = ["1", "2", "3"]

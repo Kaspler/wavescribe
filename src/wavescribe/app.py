@@ -1,0 +1,1099 @@
+# SPDX-License-Identifier: Apache-2.0
+"""``wavescribe serve`` as one object: the pipeline, store, alerts, outputs and page, and every
+change the page makes to them while they run.
+
+Each change follows one path: validate it against a draft of the settings, save it to
+``config/ui.toml`` (``settings.py``), then apply it to the running parts. Nothing the page does
+needs a restart, and the hand-edited TOML files are never rewritten.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import logging
+import re
+import secrets
+import socket
+import threading
+import time
+from collections import Counter, deque
+from collections.abc import Callable, Iterable
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from wavescribe.config import ConfigError, Station, StationsConfig
+from wavescribe.languages import language_name
+from wavescribe.log import event
+from wavescribe.outputs import OutputConfig, OutputError, Outputs
+from wavescribe.pipeline import (
+    NO_VAD,
+    Pipeline,
+    Plan,
+    Result,
+    fan_out,
+    plan_available,
+    plan_station,
+)
+from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
+from wavescribe.rules import LlmRule, parse_rule
+from wavescribe.settings import (
+    OVERRIDE_KEYS,
+    Settings,
+    apply_radio_policies,
+    effective_config,
+    station_dict,
+)
+
+if TYPE_CHECKING:
+    from wavescribe.alerts import Alerter
+    from wavescribe.ask import Asker
+    from wavescribe.remote import Heard, RemoteFollower
+    from wavescribe.rules.llm import LlmRuleChecker
+    from wavescribe.store import Store
+    from wavescribe.web.server import WebHub
+
+log = logging.getLogger(__name__)
+
+TOKEN_SCOPES = ("read", "push")
+# A place runs a handful of stations and a household collects a few places. Past these, a push
+# token is filling ui.toml and the page with stations, by mistake or on purpose.
+MAX_PUSH_STATIONS_PER_NODE = 25
+MAX_PUSH_STATIONS = 100
+MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is dropped
+# Why a station that is switched off doesn't run (``App._mark_unavailable``).
+SWITCHED_OFF = "switched off on the page"
+UNCONFIRMED = "switched off until you confirm you may receive it under the region chosen"
+
+
+def _plays_meanwhile(reason: str) -> str:
+    """Why a station that should be written down only plays: its models aren't downloaded."""
+    if reason == NO_VAD:
+        return ("Plays without text until the speech models are downloaded: Settings → Languages "
+                "and models, or `wavescribe models fetch`.")  # fmt: skip
+    return f"Plays without text until its speech model is downloaded: {reason}"
+
+
+class ChangeError(ValueError):
+    """A change from the page that can't be applied; the message is shown to the user."""
+
+
+def slug(text: str) -> str:
+    """An id from a name: "Rádio Sol" -> "radio-sol"; names with no Latin letters -> "station"."""
+    from wavescribe.rules.text import fold
+
+    s = re.sub(r"[^a-z0-9]+", "-", fold(text)).strip("-")
+    return s[:40].strip("-") or "station"
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class App:
+    def __init__(
+        self,
+        base: StationsConfig,
+        settings: Settings,
+        registry: ModelRegistry,
+        *,
+        translate: bool = True,
+        asr_model: str | None = None,
+        mt_model: str | None = None,
+        use_gate: bool = True,
+        store: Store | None = None,
+        alerts_path: Path | None = None,
+        keywords_dir: Path | None = None,
+        alerts_enabled: bool = True,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        start: list[str] | None = None,
+        pipeline_kwargs: dict[str, Any] | None = None,
+        outputs_transport: Any = None,
+    ) -> None:
+        from wavescribe.alerts import DEFAULT_KEYWORDS_DIR
+
+        self.base = base
+        self.settings = settings
+        self.registry = registry
+        self.translate = translate
+        self.asr_model = asr_model
+        self.mt_model = mt_model
+        self.use_gate = use_gate
+        self.store = store
+        self.host, self.port = host, port
+        self.alerts_path = alerts_path
+        self.keywords_dir = keywords_dir or DEFAULT_KEYWORDS_DIR
+        self._lock = threading.RLock()
+        self.started_at = time.time()
+
+        for cap, ids in (settings.get("models") or {}).items():
+            try:
+                registry.set_chain(cap, [i for i in ids if _known(registry, i)])
+            except ModelError as e:
+                log.warning("ignoring the page's %s model order: %s", cap, e)
+        self.config, self.config_errors = effective_config(base, settings.snapshot())
+        apply_radio_policies(base, settings.snapshot())
+        self.plan, missing = plan_available(
+            registry, list(self.config.stations), translate,
+            asr_model=asr_model, mt_model=mt_model, use_gate=use_gate,
+        )  # fmt: skip
+        # Stations that can't start, with the reason (no source, switched off).
+        self.unavailable: dict[str, str] = {}
+        # Stations to be written down whose models aren't downloaded yet: they play without
+        # text meanwhile, and the reason says what to download. A new install starts so.
+        self.listen_only: dict[str, str] = {sid: _plays_meanwhile(r) for sid, r in missing.items()}
+        self._mark_unavailable()
+        if store is not None:
+            self._apply_retention(settings.get("retention") or {})
+            for s in self.config.stations:
+                store.add_station(s)
+            # Only now is it known what is kept and for how long (the policies, the retention):
+            # from here on the store prunes by itself, also while no station says anything.
+            store.adopt_classes(self.config.stations)
+            store.keep_pruned()
+
+        from wavescribe.web.server import WebHub
+
+        self.hub: WebHub = WebHub(self.config, self.plan, self.unavailable, store=store)
+        self.hub.app = self
+        self.outputs = Outputs(
+            self._output_configs(),
+            store=store,
+            stations=lambda: {s.id: s for s in self.config.stations},
+            node=self.node,
+            **({"transport": outputs_transport} if outputs_transport else {}),
+        )
+        self.hub.final_hooks.append(self.outputs.on_utterance)
+
+        self.alerter: Alerter | None = None
+        if alerts_enabled:
+            self.alerter = self._make_alerter()
+        self.llm_rules: LlmRuleChecker | None = None
+
+        starting = start if start is not None else self._autostart()
+        starting = [s for s in starting if self._startable(s)]
+        self.pipeline = Pipeline(
+            [self._runtime(self.config.get(s)) for s in starting if not self.config.get(s).remote],
+            self.plan,
+            # The store runs first: it assigns the segment id the page's payloads carry. The
+            # alerter runs next, so the page gets the utterance with its keyword highlights.
+            fan_out(store and store.add_translations, self.hub.on_result),
+            on_transcript=fan_out(
+                store and store.add_transcript,
+                self.alerter and self.alerter.on_transcript,
+                self._llm_rules_transcript,
+                self.hub.on_transcript,
+            ),
+            on_filtered=self.alerter and self.alerter.on_filtered,
+            on_audio=self.hub.on_audio,
+            **(pipeline_kwargs or {}),
+        )
+        self.hub.attach(self.pipeline)
+        if self.alerter is not None:
+            from wavescribe.rules.llm import LlmRuleChecker
+
+            self.alerter.attach(self.pipeline.request_translation)
+            self.alerter.on_alert = self.hub.on_alert
+            self.alerter.on_delivered = self.outputs.on_alert
+            self.llm_rules = LlmRuleChecker(
+                self._llm_rule_list,
+                self.pipeline.request_llm,
+                self.alerter.on_hits,
+                reason_language=self._primary_language(),
+            )
+            self.alerter.verify = self.llm_rules.verify
+        self.asker: Asker | None = None
+        if store is not None:
+            from wavescribe.ask import Asker
+
+            self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
+            self.hub.asker = self.asker
+        from wavescribe.downloads import Downloads
+
+        self.downloads = Downloads(registry, on_done=self.models_changed)
+        self.followers: dict[str, RemoteFollower] = {}
+        self._pushed: dict[str, float] = {}  # pushed station -> when it last sent something
+        self._monitor: Any = None
+        self._resources: deque[dict[str, Any]] = deque(maxlen=240)  # an hour at 15 s
+        self._last_snapshot: dict[str, Any] | None = None
+        self._starting_remote = [s for s in starting if self.config.get(s).remote]
+
+    # -- lifecycle ----------------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Run until Ctrl-C (the pipeline's loop)."""
+        for sid in self._starting_remote:
+            self._start_follower(self.config.get(sid))
+        try:
+            self.pipeline.run(until_idle=False)
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if getattr(self, "_live", None) is not None:
+            self._live.close_all()
+        for f in list(self.followers.values()):
+            f.close()
+        if self.llm_rules is not None:
+            self.llm_rules.close()
+        self.outputs.close()
+        self.hub.close()
+
+    # -- node --------------------------------------------------------------------------------
+
+    def node(self) -> dict[str, Any]:
+        """This machine as other programs see it: its name and the URL links point at."""
+        n = self.settings.get("node") or {}
+        # Not the hostname: it often holds the owner's name, and events carry this to others.
+        name = n.get("name") or "wavescribe"
+        url = n.get("public_url")
+        if not url:
+            local = self.host in ("127.0.0.1", "::1", "localhost")
+            host = "localhost" if local else f"{socket.gethostname().removesuffix('.local')}.local"
+            url = f"http://{host}:{self.port}"
+        return {"name": name, "url": url.rstrip("/")}
+
+    def set_node(self, name: str | None, public_url: str | None) -> dict[str, Any]:
+        if public_url and not re.match(r"^https?://[^\s/]+", public_url):
+            raise ChangeError("the public URL starts with http:// or https://")
+        self.settings.update(lambda d: d.setdefault("node", {}).update(
+            name=(name or "").strip()[:60] or None, public_url=(public_url or "").strip() or None
+        ))  # fmt: skip
+        return self.node()
+
+    def _primary_language(self) -> str:
+        counts: dict[str, int] = {}
+        for s in self.config.stations:
+            for t in s.translate_to[:1]:
+                counts[t] = counts.get(t, 0) + 1
+        return max(counts, key=counts.get) if counts else "en"  # type: ignore[arg-type]
+
+    # -- stations ----------------------------------------------------------------------------
+
+    def _autostart(self) -> list[str]:
+        run = self.settings.get("run") or {}
+        return [s for s in run.get("stations", []) if any(x.id == s for x in self.config.stations)]
+
+    def _startable(self, sid: str) -> bool:
+        try:
+            s = self.config.get(sid)
+        except (KeyError, ValueError, ConfigError):
+            return False
+        return not s.disabled and sid not in self.unavailable
+
+    def _runtime(self, s: Station) -> Station:
+        """The station as the pipeline runs it: without text while its models are missing."""
+        return replace(s, transcribe=False) if s.id in self.listen_only else s
+
+    def _mark_unavailable(self) -> None:
+        page = {s.get("id"): s for s in self.settings.get("station") or []}
+        overrides = self.settings.get("overrides") or {}
+        for s in self.config.stations:
+            if s.remote:
+                self.unavailable.pop(s.id, None)
+            elif not (s.sdr or s.stream or s.stream_hls):
+                self.unavailable.setdefault(s.id, "no SDR device or stream URL configured")
+            if s.disabled:
+                # Off on the page, or (settings._build) by a region whose class wants a
+                # confirmation; the error says which, and what to do.
+                by_page = (page.get(s.id) or overrides.get(s.id) or {}).get("disabled")
+                self.unavailable[s.id] = SWITCHED_OFF if by_page else UNCONFIRMED
+            elif self.unavailable.get(s.id) in (SWITCHED_OFF, UNCONFIRMED):
+                del self.unavailable[s.id]
+        for sid, err in self.config_errors.items():
+            if any(s.id == sid for s in self.config.stations):
+                log.warning("page change to %s not applied: %s", sid, err)
+
+    @property
+    def radio(self) -> Any:
+        """Find → On the air and Listen → On the air here: scans, the heard catalogue, tuning
+        (radio/service.py)."""
+        if getattr(self, "_radio", None) is None:
+            from wavescribe.radio.service import RadioService
+
+            self._radio = RadioService(self)
+        return self._radio
+
+    @property
+    def live(self) -> Any:
+        """Listen → Tune by hand: receivers tuned by hand, never transcribed (radio/live.py)."""
+        if getattr(self, "_live", None) is None:
+            from wavescribe.radio.live import LiveService
+
+            self._live = LiveService(self)
+        return self._live
+
+    def running(self) -> set[str]:
+        ids = set(self.pipeline.status()["stations"])
+        return ids | {sid for sid, f in self.followers.items() if not f.closed}
+
+    def stations_view(self) -> list[dict[str, Any]]:
+        page_ids = {s.get("id") for s in self.settings.get("station") or []}
+        overrides = self.settings.get("overrides") or {}
+        running = self.running()
+        out = []
+        for s in self.config.stations:
+            planned = self.plan.asr.get(s.id)
+            out.append({
+                **station_dict(s),
+                "remote_token": bool(s.remote_token),
+                "origin": "page" if s.id in page_ids else "file",
+                "overridden": sorted(overrides.get(s.id, {})),
+                "running": s.id in running,
+                "disabled": s.disabled,
+                "available": s.id not in self.unavailable,
+                "reason": self.unavailable.get(s.id) or self.listen_only.get(s.id),
+                "listen_only": s.id in self.listen_only,
+                "privacy": s.privacy,
+                # Kept stricter after a change of region, until confirmed (radio/service.py).
+                "privacy_region": s.privacy_region,
+                "error": self.config_errors.get(s.id),
+                "asr_model": planned[0].id if planned else None,
+                "asr_choice": s.asr_model,
+                "transcribe": s.transcribe,
+                "translate": s.translate,
+                "mt_model": self._translator_id(s),
+                "mt_choice": s.mt_model,
+                "language_name": _lang_name(s.language),
+                "kind": "remote" if s.remote else "sdr" if s.sdr else "stream",
+            })  # fmt: skip
+        return out
+
+    def _translator_id(self, s: Station) -> str | None:
+        mt = self.plan.translator_for(s)
+        return mt[0].id if mt else None
+
+    def add_station(self, raw: dict[str, Any], *, start: bool = False) -> dict[str, Any]:
+        """A station from the page: a stream URL, a feed of another Wavescribe, or a device."""
+        raw = {k: v for k, v in raw.items() if v not in (None, "", [])}
+        raw.setdefault("id", self._free_id(slug(str(raw.get("name") or raw.get("id") or ""))))
+        sid = str(raw["id"])
+        if any(s.id == sid for s in self.config.stations):
+            raise ChangeError(f"there is already a station called {sid!r}")
+        raw.setdefault("name", sid)
+        self._check_draft(lambda d: d.setdefault("station", []).append(raw), sid)
+        self.settings.update(lambda d: d.setdefault("station", []).append(raw))
+        self._reload()
+        if start:
+            self.start_station(sid)
+        return next(v for v in self.stations_view() if v["id"] == sid)
+
+    def update_station(self, sid: str, changes: dict[str, Any]) -> dict[str, Any]:
+        """Change a station: page stations are edited in place, stations.toml ones get an
+        override (``[overrides.<id>]``) and the file stays as it is."""
+        self.config.get(sid)
+        page = any(s.get("id") == sid for s in self.settings.get("station") or [])
+        unknown = set(changes) - OVERRIDE_KEYS - ({"remote", "remote_station", "remote_token",
+                                                    "mw_khz"} if page else set())  # fmt: skip
+        if unknown:
+            raise ChangeError(f"can't change {', '.join(sorted(unknown))} here")
+        if changes.get("acknowledge"):  # confirmed where it is: a class kept stricter goes too
+            changes = {**changes, "privacy_floor": None}
+
+        def mutate(d: dict[str, Any]) -> None:
+            if page:
+                entry = next(s for s in d["station"] if s.get("id") == sid)
+                for k, v in changes.items():
+                    if v is None:
+                        entry.pop(k, None)
+                    else:
+                        entry[k] = v
+            else:
+                over = d.setdefault("overrides", {}).setdefault(sid, {})
+                for k, v in changes.items():
+                    if v is None:
+                        over.pop(k, None)  # back to what stations.toml says
+                    else:
+                        over[k] = v
+
+        self._check_draft(mutate, sid)
+        self._check_models(mutate, sid, changes)
+        self.settings.update(mutate)
+        self._reload()
+        return next(v for v in self.stations_view() if v["id"] == sid)
+
+    def _check_models(
+        self, mutate: Callable[[dict[str, Any]], None], sid: str, changes: dict[str, Any]
+    ) -> None:
+        """Refuse model choices that can't run, before they are saved: transcribing without a
+        speech model for the language, or a translator that isn't downloaded."""
+        if not {"transcribe", "asr_model", "mt_model"} & set(changes):
+            return
+        draft = self.settings.snapshot()
+        mutate(draft)
+        s = effective_config(self.base, draft)[0].get(sid)
+        if s.remote:
+            return
+        if s.transcribe and ("transcribe" in changes or changes.get("asr_model")):
+            if self.plan.vad is None:
+                raise ChangeError(NO_VAD)
+            try:
+                plan_station(self.registry, s, self.asr_model)
+            except ModelError as e:
+                raise ChangeError(f"{s.name} can't be transcribed yet: {e}") from e
+        if changes.get("mt_model"):
+            try:
+                entry, _ = self.registry.installed(str(changes["mt_model"]))
+            except ModelError as e:
+                raise ChangeError(str(e)) from e
+            if entry.capability != "translate":
+                raise ChangeError(f"{entry.id} is not a translation model")
+
+    def delete_station(self, sid: str) -> None:
+        if not any(s.get("id") == sid for s in self.settings.get("station") or []):
+            raise ChangeError(f"{sid} is in stations.toml: switch it off here, or edit that file")
+        self.stop_station(sid)
+
+        def mutate(d: dict[str, Any]) -> None:
+            d["station"] = [s for s in d.get("station", []) if s.get("id") != sid]
+            d.get("overrides", {}).pop(sid, None)
+            d.get("remote_privacy", {}).pop(sid, None)
+            run = d.get("run", {})
+            run["stations"] = [s for s in run.get("stations", []) if s != sid]
+
+        self.settings.update(mutate)
+        self.pipeline.forget_station(sid)
+        self._reload()
+
+    def start_station(self, sid: str) -> None:
+        station = self.config.get(sid)
+        if sid in self.unavailable:
+            raise ChangeError(self.unavailable[sid])
+        held = station.sdr and getattr(self, "_live", None) and self._live.holds(
+            station.sdr.device.id)  # fmt: skip
+        if held:
+            raise ChangeError(held)
+        if station.remote:
+            self._start_follower(station)
+        else:
+            self.pipeline.add_station(self._runtime(station))
+        self._remember_running(sid, True)
+
+    def stop_station(self, sid: str) -> None:
+        follower = self.followers.pop(sid, None)
+        if follower is not None:
+            follower.close()
+        self.hub.stop_station(sid)
+        self._remember_running(sid, False)
+
+    def _remember_running(self, sid: str, on: bool) -> None:
+        def mutate(d: dict[str, Any]) -> None:
+            run = d.setdefault("run", {})
+            ids = [s for s in run.get("stations", []) if s != sid]
+            run["stations"] = [*ids, sid] if on else ids
+
+        self.settings.update(mutate)
+
+    def _free_id(self, base: str) -> str:
+        ids = {s.id for s in self.config.stations}
+        if base not in ids:
+            return base
+        n = 2
+        while f"{base}-{n}" in ids:
+            n += 1
+        return f"{base}-{n}"
+
+    def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str) -> None:
+        draft = self.settings.snapshot()
+        mutate(draft)
+        _, errors = effective_config(self.base, draft)
+        if sid in errors:
+            raise ChangeError(errors[sid])
+        bad = {k: v for k, v in errors.items() if k.startswith("device:")}
+        if bad:
+            raise ChangeError(next(iter(bad.values())))
+
+    def _replan(self, s: Station, prev: Station | None) -> tuple[ModelEntry, Path] | None:
+        """Plan one station's models after a change; returns its ASR model, or None when it
+        isn't transcribed here (remote, listen only) or has no usable model yet (then it plays
+        without text and ``self.listen_only`` says why)."""
+        sid = s.id
+        if s.remote or not s.transcribe:
+            self.plan.asr.pop(sid, None)
+            self.plan.mt_station.pop(sid, None)
+            self.listen_only.pop(sid, None)
+            if self.unavailable.get(sid) and not s.disabled:
+                del self.unavailable[sid]  # _mark_unavailable puts back what still applies
+            return None
+        planned = self.plan.asr.get(sid)
+        if (
+            planned is None
+            or prev is None
+            or (prev.language, prev.asr_model) != (s.language, s.asr_model)
+        ):
+            planned = None
+            if self.plan.vad is None:
+                self.listen_only[sid] = _plays_meanwhile(NO_VAD)
+            else:
+                try:
+                    planned = plan_station(self.registry, s, self.asr_model)
+                    self.listen_only.pop(sid, None)
+                except ModelError as e:
+                    self.listen_only[sid] = _plays_meanwhile(str(e))
+            if planned is None:
+                self.plan.asr.pop(sid, None)
+            else:
+                self.plan.asr[sid] = planned
+        if s.mt_model and self.translate and not self.mt_model:
+            if prev is None or prev.mt_model != s.mt_model or sid not in self.plan.mt_station:
+                try:
+                    self.plan.mt_station[sid] = self.registry.installed(s.mt_model)
+                except ModelError as e:
+                    log.warning("station %s keeps the shared translator: %s", sid, e)
+                    self.plan.mt_station.pop(sid, None)
+        else:
+            self.plan.mt_station.pop(sid, None)
+        return planned
+
+    def models_changed(self, model_id: str | None = None) -> None:
+        """A model was downloaded: use it where it was missing (the speech detector, the
+        music gate, the translator, stations waiting for a model for their language)."""
+        with self._lock:
+            if self.plan.vad is None:
+                with contextlib.suppress(ModelError):
+                    self.plan.vad = self.registry.resolve("vad")
+            if self.plan.gate is None and self.use_gate:
+                with contextlib.suppress(ModelError):
+                    self.plan.gate = self.registry.resolve("gate")
+            if self.plan.mt is None and self.translate:
+                with contextlib.suppress(ModelError):
+                    mt = (self.registry.installed(self.mt_model) if self.mt_model
+                          else self.registry.resolve("translate"))  # fmt: skip
+                    self.pipeline.set_translator(mt)
+            for s in self.config.stations:
+                if s.disabled or (s.id not in self.unavailable and s.id not in self.listen_only):
+                    continue
+                waiting = s.id in self.listen_only
+                self.plan.asr.pop(s.id, None)  # plan it afresh
+                planned = self._replan(s, None)
+                if waiting and planned is not None and s.id in self.running():
+                    self.pipeline.update_station(s, planned)  # it plays already: now with text
+            self._mark_unavailable()
+        event(log, "models_changed", model=model_id, waiting=len(self.listen_only))
+
+    def _reload(self) -> None:
+        """Lay the settings over stations.toml again and apply the difference."""
+        with self._lock:
+            old = {s.id: s for s in self.config.stations}
+            self.config, self.config_errors = effective_config(self.base, self.settings.snapshot())
+            apply_radio_policies(self.base, self.settings.snapshot())
+            new = {s.id: s for s in self.config.stations}
+            for sid, s in new.items():
+                prev = old.get(sid)
+                planned = self._replan(s, prev)
+                if prev is not None and prev != s:
+                    if s.disabled:
+                        self.stop_station(sid) if sid in self.running() else None
+                    elif not s.remote:  # without a model for it, it goes on without text
+                        self.pipeline.update_station(self._runtime(s), planned)
+                    else:
+                        follower = self.followers.get(sid)
+                        if follower is not None:
+                            follower.station = s
+            for sid in set(old) - set(new):
+                self.plan.asr.pop(sid, None)
+                self.plan.mt_station.pop(sid, None)
+                self.unavailable.pop(sid, None)
+                self.listen_only.pop(sid, None)
+            self._mark_unavailable()
+            self.hub.config = self.config
+            self.hub.unavailable = self.unavailable
+            if self.asker is not None:
+                self.asker.stations = {s.id: s for s in self.config.stations}
+            if self.alerter is not None:
+                self.alerter.station_names = {s.id: s.name for s in self.config.stations}
+            if self.store is not None:
+                for sid in set(new) - set(old):
+                    self.store.add_station(new[sid])
+
+    # -- remote stations ----------------------------------------------------------------------
+
+    def _start_follower(self, station: Station) -> None:
+        from wavescribe.remote import MAX_EVENT_AGE_S, RemoteFollower
+
+        if station.remote == "push":
+            return  # pushed to us: nothing to connect to
+        if station.id in self.followers and not self.followers[station.id].closed:
+            return
+        # Catch up from just after the last utterance stored for it, or the last hour when it
+        # is new here; never from further back than an utterance may be and still be taken.
+        now = time.time()
+        since = now - 3600
+        if self.store is not None:
+            last = self.store.last_heard().get(station.id)
+            if last is not None:
+                since = min(max(last + 0.01, now - MAX_EVENT_AGE_S), now)
+        self.followers[station.id] = RemoteFollower(station, self._take_followed, since=since)
+
+    def _take_followed(self, result: Result) -> None:
+        # The class first: outputs and viewers on other machines ask the station for it.
+        self._note_classes({result.station.id: result.station.privacy})
+        self.pipeline.ingest(result)
+
+    def _note_classes(self, said: dict[str, str], new: Iterable[dict[str, Any]] = ()) -> None:
+        """Keep the privacy class another machine gave its stations (``said``, by our id),
+        where it isn't the one they have, and add the stations a push brought (``new``): one
+        write of ui.toml for both. Everything that asks whether a station's text may be
+        shown to other machines or sent on reads the class from the station."""
+        new = list(new)
+        with self._lock:
+            have = {s.id: s.privacy for s in self.config.stations}
+            changed = {sid: cls for sid, cls in said.items() if have.get(sid) != cls}
+            if not changed and not new:
+                return
+
+            def mutate(d: dict[str, Any]) -> None:
+                d.setdefault("station", []).extend(new)
+                d.setdefault("remote_privacy", {}).update(changed)
+
+            self.settings.update(mutate)
+            self._reload()
+
+    def remote_status(self) -> dict[str, dict[str, Any]]:
+        out = {sid: f.status() for sid, f in list(self.followers.items()) if not f.closed}
+        now = time.time()
+        for sid, t in list(self._pushed.items()):  # ingest adds to it from other threads
+            out[sid] = {"connected": now - t < 120, "reconnects": 0, "pushed": True,
+                        "last_data_age": round(now - t, 1), "in_speech": False,
+                        "music": False, "quiet_s": round(now - t), "level": 0,
+                        "stopping": False}  # fmt: skip
+        return out
+
+    def ingest(self, batch: dict[str, Any]) -> dict[str, int]:
+        """Events pushed by another Wavescribe (its output pointed at our /feed/v1/ingest):
+        each of its stations becomes a station here, created on first sight.
+
+        A push token reaches only the stations pushing made. An event whose id here belongs to
+        any other station is refused, as is one that would take the pushed stations past their
+        caps, or whose values don't check out (``read_utterance``). Returns how many events
+        were taken and how many were refused."""
+        from wavescribe.remote import MAX_NAME_CHARS, BadEvent, read_utterance, to_result
+
+        if not isinstance(batch, dict):
+            raise ChangeError("expected a JSON event or batch")
+        events = batch.get("events") if batch.get("type") == "batch" else [batch]
+        if not isinstance(events, list):
+            raise ChangeError("a batch carries an events list")
+        sender = batch.get("node")
+        name = sender.get("name") if isinstance(sender, dict) else None
+        node = slug(name[:MAX_NAME_CHARS] if isinstance(name, str) and name else "remote")
+        refused: Counter[str] = Counter()
+        if len(events) > MAX_BATCH_EVENTS:
+            refused["too many events in one batch"] = len(events) - MAX_BATCH_EVENTS
+        wanted: list[tuple[Heard, str]] = []
+        with self._lock:  # one batch at a time decides which stations exist
+            made = {s.id: s.remote_station for s in self.config.stations if s.remote == "push"}
+            saved = {s.get("id") for s in self.settings.get("station") or []}
+            others = ({s.id for s in self.config.stations} | saved) - set(made)
+            from_node = sum(sid.startswith(f"{node}-") for sid in made)
+            new: list[dict[str, Any]] = []
+            said: dict[str, str] = {}  # the class each station's latest event gave it
+            for ev in events[:MAX_BATCH_EVENTS]:
+                if not isinstance(ev, dict) or ev.get("type") != "utterance":
+                    continue
+                if not ev.get("text"):
+                    continue  # nothing was heard
+                try:
+                    heard = read_utterance(ev)
+                except BadEvent as e:
+                    refused[str(e)] += 1
+                    continue
+                remote_id = slug(heard.station_id)
+                sid = f"{node}-{remote_id}"[:40]
+                if sid in others or made.get(sid, remote_id) != remote_id:
+                    refused["the id belongs to another station here"] += 1
+                    continue
+                if sid not in made:
+                    if from_node >= MAX_PUSH_STATIONS_PER_NODE or len(made) >= MAX_PUSH_STATIONS:
+                        refused["too many pushed stations"] += 1
+                        continue
+                    new.append({
+                        "id": sid, "name": f"{heard.station_name or remote_id} ({node})",
+                        "language": heard.station_language or heard.language or "und",
+                        "remote": "push", "remote_station": remote_id,
+                    })  # fmt: skip
+                    made[sid] = remote_id
+                    from_node += 1
+                if heard.privacy is not None:
+                    said[sid] = heard.privacy
+                wanted.append((heard, sid))
+            unmade = self._unmakeable(new) if new else set()
+            if unmade:
+                refused["its station can't be made here"] = sum(s in unmade for _, s in wanted)
+            self._note_classes(
+                {sid: cls for sid, cls in said.items() if sid not in unmade},
+                [e for e in new if e["id"] not in unmade],
+            )
+            known = {s.id: s for s in self.config.stations}
+        taken = 0
+        for heard, sid in wanted:
+            station = known.get(sid)
+            if station is None or station.disabled:
+                continue
+            self._pushed[sid] = time.time()
+            self.pipeline.ingest(to_result(heard, station))
+            taken += 1
+        if refused:
+            event(log, "ingest_refused", level=logging.WARNING, node=node, taken=taken,
+                  refused=dict(refused))  # fmt: skip
+        return {"accepted": taken, "rejected": sum(refused.values())}
+
+    def _unmakeable(self, entries: list[dict[str, Any]]) -> set[str]:
+        """The ids of the stations a push brought that the config refuses. They are built
+        the way the page's stations are, and one that doesn't build must not reach ui.toml."""
+        draft = self.settings.snapshot()
+        draft.setdefault("station", []).extend(entries)
+        _, errors = effective_config(self.base, draft)
+        return {e["id"] for e in entries if e["id"] in errors}
+
+    # -- retention ---------------------------------------------------------------------------
+
+    def _apply_retention(self, r: dict[str, Any]) -> None:
+        if self.store is None:
+            return
+        self.store.set_retention(
+            audio_days=r.get("audio_days"),
+            audio_max_gb=r.get("audio_max_gb"),
+            text_days=r.get("text_days"),
+        )
+
+    def set_retention(self, changes: dict[str, Any]) -> dict[str, Any]:
+        if self.store is None:
+            raise ChangeError("this run keeps nothing (started with --no-store)")
+        clean: dict[str, float] = {}
+        limits = {"audio_days": 3650, "audio_max_gb": 10000, "text_days": 36500}
+        for key, top in limits.items():
+            if key in changes and changes[key] is not None:
+                v = float(changes[key])
+                if not 0 <= v <= top:
+                    raise ChangeError(f"{key} is between 0 and {top}")
+                clean[key] = v
+        if self.store.archive is None and clean.get("audio_days"):
+            raise ChangeError("audio recording is off for this run (started with --audio-days 0)")
+        self.settings.update(lambda d: d.setdefault("retention", {}).update(clean))
+        self._apply_retention(clean)
+        return self.store.retention()
+
+    # -- models ------------------------------------------------------------------------------
+
+    def set_chain(self, capability: str, ids: list[str]) -> None:
+        if not ids:
+            raise ChangeError(f"keep at least one {capability} model in the order")
+        try:
+            self.registry.set_chain(capability, ids)
+        except ModelError as e:
+            raise ChangeError(str(e)) from e
+        self.settings.update(lambda d: d.setdefault("models", {}).update({capability: ids}))
+        if capability == "asr":
+            for s in self.config.stations:
+                if s.remote or s.asr_model or self.asr_model:
+                    continue
+                if not s.transcribe:
+                    continue
+                try:
+                    planned = plan_station(self.registry, s)
+                except ModelError as e:
+                    self.listen_only[s.id] = _plays_meanwhile(str(e))
+                    self.plan.asr.pop(s.id, None)
+                    self.pipeline.update_station(self._runtime(s))  # goes on without text
+                    continue
+                self.listen_only.pop(s.id, None)
+                if self.plan.asr.get(s.id, (None,))[0] != planned[0]:
+                    self.plan.asr[s.id] = planned
+                    self.pipeline.update_station(s, planned)
+            self._mark_unavailable()
+        elif capability == "translate" and self.translate and not self.mt_model:
+            try:
+                mt = self.registry.resolve("translate")
+            except ModelError as e:
+                raise ChangeError(str(e)) from e
+            if self.plan.mt is None or mt[0] != self.plan.mt[0]:
+                self.pipeline.set_translator(mt)
+
+    def plan_view(self) -> Plan:
+        return self.plan
+
+    # -- alerts ------------------------------------------------------------------------------
+
+    def _alert_raw(self) -> tuple[dict[str, Any], Path | None]:
+        from wavescribe.alerts import read_alerts, resolve_alerts_path
+
+        path = resolve_alerts_path(self.alerts_path)
+        return (read_alerts(path) if path else {}), path
+
+    def _alert_config(self, page: dict[str, Any] | None = None):  # -> AlertConfig
+        from wavescribe.alerts import merge_page, parse_alerts
+
+        raw, path = self._alert_raw()
+        merged, rules, disabled = merge_page(raw, page if page is not None else
+                                             (self.settings.get("alerts") or {}))  # fmt: skip
+        return parse_alerts(merged, path, self.keywords_dir, rules, disabled)
+
+    def _make_alerter(self):  # -> Alerter
+        from wavescribe.alerts import Alerter
+
+        config = self._alert_config()
+        return Alerter(config, store=self.store,
+                       station_names={s.id: s.name for s in self.config.stations})  # fmt: skip
+
+    def _llm_rule_list(self) -> list[LlmRule]:
+        return list(self.alerter.config.rules.llm_rules) if self.alerter else []
+
+    def _llm_rules_transcript(self, result: Result) -> None:
+        if self.llm_rules is not None:
+            self.llm_rules.on_transcript(result)
+
+    def change_alerts(self, mutate: Callable[[dict[str, Any]], None]) -> None:
+        """Change the page's alert settings (``[alerts]``): validated, saved, applied."""
+        if self.alerter is None:
+            raise ChangeError("alerts are off for this run (started with --no-alerts)")
+        draft = self.settings.get("alerts") or {}
+        mutate(draft)
+        try:
+            config = self._alert_config(draft)
+        except (ConfigError, ValueError) as e:
+            raise ChangeError(str(e)) from e
+        self.settings.update(lambda d: d.__setitem__("alerts", draft))
+        self.alerter.reconfigure(config)
+
+    def save_rule(self, raw: dict[str, Any]) -> None:
+        try:
+            parse_rule(raw, "page")
+        except ValueError as e:
+            raise ChangeError(str(e)) from e
+
+        def mutate(a: dict[str, Any]) -> None:
+            rules = [r for r in a.get("rule", []) if r.get("id") != raw["id"]]
+            a["rule"] = [*rules, raw]
+
+        self.change_alerts(mutate)
+
+    def delete_rule(self, rule_id: str) -> None:
+        self.change_alerts(lambda a: a.__setitem__(
+            "rule", [r for r in a.get("rule", []) if r.get("id") != rule_id]))  # fmt: skip
+
+    def enable_rule(self, rule_id: str, on: bool) -> None:
+        def mutate(a: dict[str, Any]) -> None:
+            off = [r for r in a.get("disabled_rules", []) if r != rule_id]
+            a["disabled_rules"] = off if on else [*off, rule_id]
+
+        self.change_alerts(mutate)
+
+    def rules_view(self) -> dict[str, Any]:
+        raw, path = self._alert_raw()
+        page = self.settings.get("alerts") or {}
+        disabled = set(page.get("disabled_rules", []))
+        rules = []
+        page_ids = {r.get("id") for r in page.get("rule", [])}
+        for r in raw.get("rule", []):
+            if r.get("id") not in page_ids:
+                rules.append({**r, "origin": "file", "enabled": r.get("id") not in disabled,
+                              "kind": r.get("kind", "keyword")})  # fmt: skip
+        for r in page.get("rule", []):
+            rules.append({**r, "origin": "page", "enabled": r.get("id") not in disabled,
+                          "kind": r.get("kind", "keyword")})  # fmt: skip
+        config = self.alerter.config if self.alerter else None
+        packs = {}
+        if config is not None:
+            for lang, p in config.rules.packs.items():
+                packs[lang] = {"topics": {k: list(v) for k, v in p.topics.items()},
+                               "places": sorted(p.places)}  # fmt: skip
+        return {
+            "enabled": self.alerter is not None,
+            "file": str(path) if path else None,
+            "rules": rules,
+            "packs": packs,
+            "delivery": {
+                "notify_language": config.notify_language if config else None,
+                "translation_wait_s": config.translation_wait_s if config else None,
+                "cooldown_minutes": round(config.cooldown_s / 60, 1) if config else None,
+            },
+            "actions": {k: list(v) for k, v in (config.actions if config else {}).items()},
+            "voices": {
+                k: {"voice": v.voice, "intro": v.intro, "fallback": v.fallback}
+                for k, v in (config.voices if config else {}).items()
+            },
+            "installed_voices": sorted(self.alerter._voices or []) if self.alerter else [],
+            "llm": self.llm_rules.status() if self.llm_rules else None,
+        }
+
+    def try_rules(self, text: str, language: str, station: str | None = None) -> list[dict]:
+        """Which rules a sentence would trip (keyword rules only; no alert is raised)."""
+        if self.alerter is None:
+            return []
+        hits = self.alerter.config.rules.evaluate(text, language, (), station)
+        return [{"rule": h.rule_id, "severity": h.severity, "terms": h.terms,
+                 "places": h.places, "spans": h.spans} for h in hits]  # fmt: skip
+
+    # -- outputs -----------------------------------------------------------------------------
+
+    def _output_configs(self) -> list[OutputConfig]:
+        out = []
+        for raw in self.settings.get("output") or []:
+            try:
+                out.append(OutputConfig.from_dict(raw))
+            except OutputError as e:
+                log.warning("output %s skipped: %s", raw.get("id"), e)
+        return out
+
+    def outputs_view(self) -> dict[str, Any]:
+        status = self.outputs.status()
+        return {
+            "outputs": [{**c.public(), "status": status.get(c.id)} for c in self._output_configs()],
+            "deliveries": self.outputs.recent()[:50],
+            "node": self.node(),
+        }
+
+    def save_output(self, raw: dict[str, Any]) -> dict[str, Any]:
+        raw = dict(raw)
+        raw.setdefault("id", slug(str(raw.get("name") or "output")))
+        existing = next((o for o in self.settings.get("output") or []
+                         if o.get("id") == raw["id"]), None)  # fmt: skip
+        # The page never sees secrets: a masked or missing value keeps the stored one.
+        if existing is not None:
+            if raw.get("secret") in (None, True, "•••"):
+                raw["secret"] = existing.get("secret", "")
+            headers = raw.get("headers") or {}
+            raw["headers"] = {k: (existing.get("headers", {}).get(k, "") if v == "•••" else v)
+                              for k, v in headers.items()}  # fmt: skip
+        try:
+            config = OutputConfig.from_dict(raw)
+        except (OutputError, TypeError, ValueError) as e:
+            raise ChangeError(str(e)) from e
+        stored = {k: v for k, v in config.to_dict().items() if v not in ("", [], {}, None)}
+
+        def mutate(d: dict[str, Any]) -> None:
+            outs = [o for o in d.get("output", []) if o.get("id") != config.id]
+            d["output"] = [*outs, stored]
+
+        self.settings.update(mutate)
+        self.outputs.configure(self._output_configs())
+        return config.public()
+
+    def delete_output(self, output_id: str) -> None:
+        self.settings.update(lambda d: d.__setitem__(
+            "output", [o for o in d.get("output", []) if o.get("id") != output_id]))  # fmt: skip
+        self.outputs.configure(self._output_configs())
+
+    def test_output(self, output_id: str) -> dict[str, Any]:
+        config = next((c for c in self._output_configs() if c.id == output_id), None)
+        if config is None:
+            raise ChangeError(f"no output called {output_id!r}")
+        return self.outputs.test(config)
+
+    # -- feed tokens -------------------------------------------------------------------------
+
+    def tokens_view(self) -> list[dict[str, Any]]:
+        return [{k: v for k, v in t.items() if k != "hash"}
+                for t in self.settings.get("feed_token") or []]  # fmt: skip
+
+    def create_token(self, label: str, scopes: list[str]) -> dict[str, Any]:
+        scopes = [s for s in scopes if s in TOKEN_SCOPES] or ["read"]
+        token = "wst_" + secrets.token_urlsafe(24)
+        entry = {"id": secrets.token_hex(4), "label": label.strip()[:60] or "token",
+                 "scopes": scopes, "created": round(time.time()), "hash": _hash(token)}  # fmt: skip
+        self.settings.update(lambda d: d.setdefault("feed_token", []).append(entry))
+        return {**{k: v for k, v in entry.items() if k != "hash"}, "token": token}
+
+    def delete_token(self, token_id: str) -> None:
+        def mutate(d: dict[str, Any]) -> None:
+            d["feed_token"] = [t for t in d.get("feed_token", []) if t.get("id") != token_id]
+
+        self.settings.update(mutate)
+
+    def tokens_required(self) -> bool:
+        return bool(self.settings.get("feed_token"))
+
+    def check_token(self, token: str | None, scope: str) -> bool:
+        if not token:
+            return False
+        digest = _hash(token)
+        return any(
+            secrets.compare_digest(t.get("hash", ""), digest) and scope in t.get("scopes", [])
+            for t in self.settings.get("feed_token") or []
+        )
+
+    # -- status ------------------------------------------------------------------------------
+
+    def start_sampling(self, interval_s: float = 15.0) -> None:
+        """Sample resources in the background (~45 ms of CPU each; 0.3% of a core at 15 s),
+        so the status panel can show the last hour, e.g. the power draw on battery."""
+
+        def loop() -> None:
+            while not self.hub._closed.wait(interval_s):
+                self.sample()
+                if self.config.devices:
+                    try:
+                        self.radio.adopt_rds_names()
+                    except Exception:
+                        log.exception("naming FM stations from RDS")
+
+        threading.Thread(target=loop, daemon=True, name="resources").start()
+
+    def sample(self) -> dict[str, Any]:
+        from wavescribe.system import ResourceMonitor
+
+        with self._lock:
+            if self._monitor is None:
+                self._monitor = ResourceMonitor(_data_dir(self.store))
+            monitor = self._monitor
+        try:
+            snap = monitor.snapshot(self.pipeline.child_pids())
+        except Exception as e:  # a sensor must never take the panel down
+            return {"error": str(e)[:200]}
+        self._last_snapshot = snap
+        self._resources.append({
+            "t": snap.get("time"),
+            "cpu": (snap.get("cpu") or {}).get("total_percent"),
+            "process_cpu": (snap.get("process") or {}).get("cpu_percent"),
+            "footprint_mb": (snap.get("process") or {}).get("footprint_mb"),
+            "memory_used_gb": (snap.get("memory") or {}).get("used_gb"),
+            "gpu": (snap.get("gpu") or {}).get("utilization_percent"),
+            "watts": (snap.get("power") or {}).get("system_watts"),
+            "disk_free_gb": (snap.get("disk") or {}).get("free_gb"),
+            "rx_kbps": (snap.get("network") or {}).get("rx_kbps"),
+            "tx_kbps": (snap.get("network") or {}).get("tx_kbps"),
+        })  # fmt: skip
+        return snap
+
+    def status_view(self) -> dict[str, Any]:
+        snap = self._last_snapshot
+        if snap is None or time.time() - (snap.get("time") or 0) > 3:
+            snap = self.sample()
+        out: dict[str, Any] = {
+            "uptime_s": round(time.time() - self.started_at),
+            "node": self.node(),
+            "pipeline": self.pipeline.status(),
+            "outputs": self.outputs.status(),
+            "llm_rules": self.llm_rules.status() if self.llm_rules else None,
+            "remote": self.remote_status(),
+            "system": snap,
+            "history": list(self._resources),
+        }
+        if self.store is not None:
+            out["store"] = {**self.store.stats(), "retention": self.store.retention()}
+        return out
+
+
+def _known(registry: ModelRegistry, model_id: str) -> bool:
+    try:
+        registry.get(model_id)
+    except ModelError:
+        return False
+    return True
+
+
+def _lang_name(tag: str) -> str:
+    try:
+        return language_name(tag)
+    except Exception:
+        return tag
+
+
+def _data_dir(store: Store | None) -> Path:
+    return store.path.parent if store is not None else Path("data")
+
+
+__all__ = ["App", "ChangeError", "replace"]

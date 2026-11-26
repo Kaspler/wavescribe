@@ -1,0 +1,497 @@
+# SPDX-License-Identifier: Apache-2.0
+import dataclasses
+import sqlite3
+import threading
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import pytest
+
+from tests.test_rules import RULES, pack
+from tests.test_store import result
+from wavescribe.alerts import Alerter, parse_alerts
+from wavescribe.alerts.actions import ActionError
+from wavescribe.alerts.cap import NS, to_cap
+from wavescribe.config import ConfigError
+from wavescribe.store import Store
+
+CONFIG = {
+    **RULES,
+    "delivery": {"notify_language": "en", "translation_wait_s": 2, "cooldown_minutes": 15},
+    "speak": {
+        "uk": {"voice": "Lesya", "intro": "Увага. Радіо повідомляє:", "fallback": "Увага. Радіо."},
+    },
+    "actions": {
+        "critical": ["notify", "speak:uk", "log"],
+        "high": ["notify", "log"],
+        "medium": ["notify", "log"],
+        "low": ["log"],
+    },
+}
+UK = "Завтра відключать воду в центрі міста через ремонт труб."
+EN = "Water will be cut tomorrow in the city centre because of pipe repairs."
+
+
+class FakeActions:
+    def __init__(self, fail: set[str] = frozenset()) -> None:
+        self.calls: list[tuple] = []
+        self.fail = fail
+
+    def notify(self, title: str, body: str) -> None:
+        if "notify" in self.fail:
+            raise ActionError("notifications are off")
+        self.calls.append(("notify", title, body))
+
+    def speak(self, voice: str, text: str) -> None:
+        if "speak" in self.fail:
+            raise ActionError("no audio device")
+        self.calls.append(("speak", voice, text))
+
+    def voices(self) -> set[str]:
+        return {"Lesya"}
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1_000_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def make(tmp_path, translations=None, *, fail=frozenset(), store=None, wait=2.0):
+    raw = {**CONFIG, "delivery": {**CONFIG["delivery"], "translation_wait_s": wait}}
+    config = parse_alerts(raw, None, pack(tmp_path))
+    actions, clock, seen = FakeActions(fail), Clock(), []
+    alerter = Alerter(config, store=store, actions=actions, clock=clock, on_alert=seen.append,
+                      station_names={"a": "Rádio A"})  # fmt: skip
+    requests = []
+
+    def translate(text, source, targets, callback):
+        requests.append((text, source, list(targets)))
+        if translations is not None:
+            threading.Thread(
+                target=callback,
+                args=({t: translations[t] for t in targets if t in translations}, "fake-mt"),
+            ).start()
+
+    alerter.attach(translate)
+    return alerter, actions, clock, requests, seen
+
+
+def settle(alerter: Alerter, n: int = 1, timeout: float = 5) -> list:
+    """Wait until n alerts have left 'pending'."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        done = [a for a in alerter._open.values() if a.status != "pending"]
+        if len(done) >= n:
+            time.sleep(0.05)
+            return done
+        time.sleep(0.01)
+    raise AssertionError("alerts never delivered")
+
+
+def test_critical_alert_is_notified_in_english_and_spoken_in_ukrainian(tmp_path: Path) -> None:
+    alerter, actions, _, requests, seen = make(tmp_path, {"en": EN, "uk": UK})
+    r = result("a", "Corte de água em Vila Nova amanhã.", 1000.0)
+    alerter.on_transcript(r)
+    [alert] = settle(alerter)
+    assert [h.rule_id for h in r.hits] == ["water"]  # the page highlights these
+    assert requests == [("Corte de água em Vila Nova amanhã.", "pt-PT", ["en", "uk"])]
+    assert actions.calls == [
+        ("notify", "CRITICAL · water · Rádio A", EN),
+        ("speak", "Lesya", f"Увага. Радіо повідомляє: {UK}"),
+    ]
+    assert alert.status == "delivered" and alert.delivered_severity == "critical"
+    assert alert.actions == {"notify": "ok", "speak:uk": "ok", "log": "ok"}
+    assert seen[-1]["status"] == "delivered" and seen[-1]["summaries"]["uk"] == UK
+
+
+def test_translation_in_the_wrong_language_is_never_spoken(tmp_path: Path) -> None:
+    # A translator answering in English when asked for Ukrainian (it happened in testing).
+    alerter, actions, *_ = make(tmp_path, {"en": EN, "uk": EN})
+    alerter.on_transcript(result("a", "Corte de água em Vila Nova amanhã.", 1000.0))
+    [alert] = settle(alerter)
+    assert ("speak", "Lesya", "Увага. Радіо.") in actions.calls  # the fixed fallback phrase
+    assert alert.summaries == {"en": EN}
+
+
+def test_delivery_does_not_wait_forever_for_a_translation(tmp_path: Path) -> None:
+    alerter, actions, *_ = make(tmp_path, translations=None, wait=0.1)  # never answers
+    t0 = time.time()
+    alerter.on_transcript(result("a", "Corte de água em Vila Nova amanhã.", 1000.0))
+    settle(alerter)
+    assert time.time() - t0 < 2
+    assert actions.calls[0] == ("notify", "CRITICAL · water · Rádio A",
+                                "Corte de água em Vila Nova amanhã.")  # fmt: skip
+    assert actions.calls[1] == ("speak", "Lesya", "Увага. Радіо.")
+
+
+def test_repeats_inside_the_cooldown_are_folded_in_not_announced(tmp_path: Path) -> None:
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN})
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    settle(alerter)
+    clock.now += 600
+    alerter.on_transcript(result("b", "Sem água em Lisboa desde manhã.", 1600.0))
+    time.sleep(0.2)
+    notes = [c for c in actions.calls if c[0] == "notify"]
+    assert len(notes) == 1
+    [alert] = alerter._open.values()
+    assert alert.mentions == 2 and alert.station_ids == ["a", "b"]
+    assert alert.terms == ["corte de água", "sem água"]
+
+
+def test_the_cooldown_ends_and_a_new_alert_is_announced(tmp_path: Path) -> None:
+    # The negative path: a guard never seen to decline isn't a guard, and vice versa.
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN})
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    settle(alerter)
+    first = alerter._open["water"]
+    clock.now += 15 * 60 + 1
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 2000.0))
+    settle(alerter)
+    assert alerter._open["water"] is not first
+    assert len([c for c in actions.calls if c[0] == "notify"]) == 2
+
+
+def test_an_alert_that_gets_more_serious_is_announced_again(tmp_path: Path) -> None:
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    settle(alerter)
+    clock.now += 60
+    alerter.on_transcript(result("a", "Corte de água também em Vila Nova.", 1060.0))
+    deadline = time.time() + 5
+    while alerter._open["water"].delivered_severity != "critical" and time.time() < deadline:
+        time.sleep(0.01)
+    assert [c[0] for c in actions.calls] == ["notify", "notify", "speak"]
+    assert alerter._open["water"].mentions == 2
+
+
+def held(tmp_path: Path, n: int = 3) -> tuple[Alerter, FakeActions, Clock]:
+    rule = {"id": "water", "topics": ["water"], "near": ["local"], "severity": "high",
+            "min_mentions": n}  # fmt: skip
+    config = parse_alerts({**CONFIG, "rule": [rule]}, None, pack(tmp_path))
+    actions, clock = FakeActions(), Clock()
+    return Alerter(config, actions=actions, clock=clock), actions, clock
+
+
+def test_min_mentions_holds_an_alert_at_low_until_it_is_repeated(tmp_path: Path) -> None:
+    alerter, actions, clock = held(tmp_path, n=3)
+    for i, station in enumerate("aab"):
+        alerter.on_transcript(result(station, "Corte de água em Lisboa.", 1000.0 + 60 * i))
+        alerter.drain()
+        if i < 2:
+            assert actions.calls == [] and alerter._open["water"].severity == "low"
+        clock.now += 60
+    alerter.drain()
+    assert [c[0] for c in actions.calls] == ["notify"]
+    [alert] = alerter._open.values()
+    assert (alert.severity, alert.mentions, alert.delivered_severity) == ("high", 3, "high")
+
+
+def test_a_local_place_confirms_at_the_first_mention(tmp_path: Path) -> None:
+    alerter, actions, _ = held(tmp_path, n=3)
+    alerter.on_transcript(result("a", "Corte de água em Vila Nova.", 1000.0))
+    alerter.drain()
+    assert alerter._open["water"].severity == "critical"  # raised by the place, not held
+    assert [c[0] for c in actions.calls] == ["notify", "speak"]
+
+
+def test_mentions_heard_as_another_language_never_confirm(tmp_path: Path) -> None:
+    alerter, actions, clock = held(tmp_path, n=2)
+    for i in range(3):
+        r = result("a", "Corte de água em Lisboa.", 1000.0 + 60 * i)
+        r.flags = ("lang:es",)
+        alerter.on_transcript(r)
+        alerter.drain()
+        clock.now += 60
+    assert actions.calls == [] and alerter._open["water"].severity == "low"
+
+
+def test_failed_actions_are_recorded_and_never_marked_delivered(tmp_path: Path) -> None:
+    alerter, _, *_ = make(tmp_path, {"en": EN}, fail={"notify"})
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    [alert] = settle(alerter)
+    assert alert.status == "failed" and alert.delivered_at is None
+    assert alert.actions["notify"].startswith("failed: notifications are off")
+    assert alert.actions["log"] == "ok"
+
+
+def test_low_alerts_are_only_logged(tmp_path: Path) -> None:
+    alerter, actions, *_ = make(tmp_path, {"en": EN})
+    heard_as_english = dataclasses.replace(result("a", "Nuclear sabotagem.", 1000.0),
+                                           flags=("lang:en",))  # fmt: skip
+    alerter.on_transcript(heard_as_english)
+    [alert] = settle(alerter)
+    assert alert.severity == "low" and alert.status == "logged" and actions.calls == []
+
+
+def test_a_repeated_call_with_a_message_is_announced(tmp_path: Path) -> None:
+    from wavescribe.asr.checks import check_transcript
+
+    text = "Atenção, atenção, atenção, atenção. Corte de água em Vila Nova."
+    check = check_transcript(text, 6, "pt-PT")
+    assert check.drop is None
+    alerter, actions, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    alerter.on_transcript(dataclasses.replace(result("a", text, 1000.0), flags=check.flags))
+    [alert] = settle(alerter)
+    assert alert.severity == "critical" and [c[0] for c in actions.calls] == ["notify", "speak"]
+
+
+def test_a_dropped_loop_of_a_rule_term_is_kept_low_and_never_announced(tmp_path: Path) -> None:
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    loop = result("a", "Sabotagem, sabotagem, sabotagem, sabotagem, sabotagem.", 1000.0)
+    alerter.on_filtered(loop, "repetition")
+    [alert] = settle(alerter)
+    assert (alert.rule_id, alert.severity, alert.status) == ("conflict", "low", "logged")
+    assert alert.quote == loop.transcript.text and actions.calls == []
+    assert [h.capped for h in loop.hits] == ["repetition"]
+
+    alerter.on_filtered(result("a", "corte de água " * 40, 1010.0), "too_long")
+    assert "water" not in alerter._open  # more text than the audio holds isn't read at all
+
+    clock.now += 60  # the same thing said in a sentence is announced as usual
+    alerter.on_transcript(result("a", "Sabotagem na central.", 1060.0))
+    alerter.drain()
+    assert alert.severity == "medium" and [c[0] for c in actions.calls] == ["notify"]
+
+
+def test_store_keeps_alerts_mentions_and_summaries(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    alerter, *_ = make(tmp_path, {"en": EN, "uk": UK}, store=store)
+    r = result("a", "Corte de água em Vila Nova amanhã.", 1000.0)
+    store.add_transcript(r)
+    alerter.on_transcript(r)
+    settle(alerter)
+    [a] = store.alerts()
+    assert (a["rule"], a["severity"], a["status"], a["segment_id"]) == (
+        "water", "critical", "delivered", r.segment_id)  # fmt: skip
+    assert a["summaries"] == {"en": EN, "uk": UK} and a["summaries_model"] == "fake-mt"
+    assert a["actions"]["speak:uk"] == "ok"
+    [u] = store.recent("a")
+    [hit] = u["hits"]
+    assert hit["rule"] == "water" and hit["alert"] == a["id"]
+    assert [u["text"][s:e] for s, e in hit["spans"]] == ["Corte de água", "Vila Nova"]
+
+    store.prune_text(max_age_s=0)  # the transcript goes; the alert and its quote stay
+    [kept] = store.alerts()
+    assert kept["quote"] == "Corte de água em Vila Nova amanhã." and kept["segment_id"] is None
+
+
+def test_cap_document_with_a_time_no_calendar_holds() -> None:
+    alert = {
+        "id": 8, "rule": "water", "severity": "low", "first_at": float("nan"), "last_at": 1e300,
+        "stations": ["a"], "language": "pt-PT", "quote": "Corte de água.", "terms": [],
+        "mentions": 1,
+    }  # fmt: skip
+    root = ET.fromstring(to_cap(alert))
+    assert root.find(f"{{{NS}}}sent").text == "1970-01-01T00:00:00+00:00"
+
+
+def test_cap_document(tmp_path: Path) -> None:
+    alert = {
+        "id": 7, "rule": "water", "severity": "critical", "first_at": 1_790_000_000.4,
+        "last_at": 1_790_000_060.0, "stations": ["a"], "language": "pt-PT",
+        "quote": "Corte de água em Vila Nova.", "terms": ["corte de água"], "mentions": 2,
+        "summaries": {"en": EN}, "summaries_model": "fake-mt",
+    }  # fmt: skip
+    root = ET.fromstring(to_cap(alert, station_names={"a": "Rádio A"}))
+    q = lambda el, tag: el.find(f"{{{NS}}}{tag}").text  # noqa: E731
+    assert root.tag == f"{{{NS}}}alert" and q(root, "status") == "Actual"
+    assert q(root, "sent").endswith("+00:00")
+    src, en = root.findall(f"{{{NS}}}info")
+    assert (q(src, "language"), q(src, "description")) == ("pt-PT", alert["quote"])
+    assert (q(src, "severity"), q(src, "certainty"), q(src, "urgency")) == (
+        "Extreme", "Unknown", "Unknown")  # fmt: skip
+    assert q(en, "language") == "en" and q(en, "description") == EN
+    params = {q(p, "valueName"): q(p, "value") for p in en.findall(f"{{{NS}}}parameter")}
+    assert params["machine_translation"] == "fake-mt"
+    assert "machine_translation" not in {
+        q(p, "valueName") for p in src.findall(f"{{{NS}}}parameter")
+    }
+
+
+def test_one_sentence_tripping_several_rules_is_announced_once(tmp_path: Path) -> None:
+    alerter, actions, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    alerter.on_transcript(result("a", "Sabotagem: corte de água em Vila Nova.", 1000.0))
+    settle(alerter, 2)
+    water, conflict = alerter._open["water"], alerter._open["conflict"]
+    assert [c[0] for c in actions.calls] == ["notify", "speak"]
+    assert actions.calls[0][1] == "CRITICAL · water + conflict · Rádio A"
+    assert water.status == "delivered"
+    assert conflict.status == "covered"
+    assert conflict.actions == {"covered_by": "water"}  # no store, so no alert ids
+
+
+def test_escalation_during_a_delivery_is_still_announced_once(tmp_path: Path) -> None:
+    # A low alert is still being delivered when a sentence makes it serious and trips a
+    # critical rule too: one announcement for that sentence, not two.
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    gate = threading.Event()
+    deliver = alerter._deliver
+    alerter._deliver = lambda *a: (gate.wait(5), deliver(*a))
+    alerter.config.rules.rules[1] = dataclasses.replace(
+        alerter.config.rules.rules[1], severity="low", near=("local",)
+    )  # conflict: low, medium near a local place
+    alerter.on_transcript(result("a", "Sabotagem em Lisboa.", 1000.0))
+    clock.now += 30
+    alerter.on_transcript(result("a", "Sabotagem e corte de água em Vila Nova.", 1030.0))
+    gate.set()
+    settle(alerter, 2)
+    time.sleep(0.2)
+    assert [c[1] for c in actions.calls if c[0] == "notify"] == ["CRITICAL · water · Rádio A"]
+    assert alerter._open["conflict"].covered_severity == "medium"
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"rule": {"id": "water"}}, "double brackets"),  # [rule] written for [[rule]]
+        ({"rule": ["water"]}, "double brackets"),
+        ({"actions": ["notify"]}, r"\[actions\] must be a table"),
+        ({"delivery": "fast"}, r"\[delivery\] must be a table"),
+        ({"speak": "Daniel"}, r"\[speak\] must be a table"),
+        ({"speak": {"en": "Daniel"}}, "needs 'voice' and 'fallback'"),
+        ({"delivery": {"translation_wait_s": "10s"}}, "translation_wait_s must be a number"),
+        ({"delivery": {"cooldown_minutes": None}}, "cooldown_minutes must be a number"),
+        ({"delivery": {"cooldown_minutes": float("nan")}}, "cooldown_minutes must be a number"),
+        ({"delivery": {"translation_wait_s": -1}}, "translation_wait_s must be a number"),
+    ],
+)
+def test_a_wrongly_shaped_alerts_file_says_what_is_wrong(tmp_path: Path, change, message) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse_alerts({**CONFIG, **change}, Path("alerts.toml"), pack(tmp_path))
+
+
+def test_actions_written_as_one_string_are_refused(tmp_path: Path) -> None:
+    raw = {**CONFIG, "actions": {"critical": "notify"}}  # read as a list: "n", "o", "t", ...
+    with pytest.raises(ConfigError, match=r"\[actions\]: critical must be a list of actions"):
+        parse_alerts(raw, Path("alerts.toml"), pack(tmp_path))
+
+
+def test_speech_commands_in_the_text_are_not_obeyed(monkeypatch) -> None:
+    import subprocess
+
+    from wavescribe.alerts.actions import MacActions
+
+    spoken: list[str] = []
+
+    def run(cmd, *, input, **_kwargs):
+        spoken.append(input)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    MacActions().speak("Daniel", "Evacuate [[volm 0]] the [[[slnc 60000]] riverside [now].")
+    assert spoken == ["Evacuate [ [volm 0]] the [ [ [slnc 60000]] riverside [now]."]
+
+
+def test_voice_listing_is_parsed_in_both_formats() -> None:
+    from wavescribe.alerts.actions import parse_voices
+
+    listing = (
+        "Daniel (English (UK)) en_GB    # Hello! My name is Daniel.\n"
+        "Lesya               uk_UA    # Привіт! Мене звуть Леся.\n"
+        "Lesya (Ukrainian (Ukraine)) uk_UA    # Привіт! Мене звуть Леся.\n"
+        "Bad News            en_US    # Hello! My name is Bad News.\n"
+    )
+    names = parse_voices(listing)
+    assert {"Daniel", "Daniel (English (UK))", "Lesya", "Bad News"} <= names
+
+
+def test_listen_marks_trigger_words_and_prints_each_announcement_once(tmp_path, capsys) -> None:
+    from wavescribe.cli import ResultPrinter
+
+    printer = ResultPrinter(tty=False)
+    alerter, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    alerter.on_alert = printer.on_alert
+    r = result("a", "Corte de água em Vila Nova amanhã.", 1000.0)
+    alerter.on_transcript(r)
+    settle(alerter)
+    printer(r)
+    out = capsys.readouterr().out.splitlines()
+    alerts = [line for line in out if " !! " in line]
+    assert len(alerts) == 1 and "!! CRITICAL water a: Water will be cut" in alerts[0]
+    assert any("[Corte de água] em [Vila Nova] amanhã." in line for line in out)
+
+
+class FailingStore:
+    """A store whose named writes fail the first ``times`` times, as with a full disk."""
+
+    def __init__(self, store: Store, failing: str, times: int = 1000) -> None:
+        self._store, self._failing, self.left = store, failing, times
+
+    def __getattr__(self, name: str):
+        write = getattr(self._store, name)
+        if name != self._failing:
+            return write
+
+        def fail(*args):
+            if self.left > 0:
+                self.left -= 1
+                raise sqlite3.OperationalError("database or disk is full")
+            return write(*args)
+
+        return fail
+
+
+STORE_WRITES = ["add_alert", "add_mention", "add_alert_summaries", "update_delivery"]
+
+
+@pytest.mark.parametrize("failing", STORE_WRITES)
+def test_alerts_are_delivered_whatever_the_store_does(tmp_path: Path, failing: str) -> None:
+    store = FailingStore(Store(tmp_path / "w.db"), failing)
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN, "uk": UK}, store=store)
+    pushed: list[str] = []  # webhooks and feed pushes go out after the store is written
+    alerter.on_delivered = lambda _payload, severity, _text, _checked: pushed.append(severity)
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    [alert] = settle(alerter)
+    assert alert.status == "delivered" and [c[0] for c in actions.calls] == ["notify"]
+
+    clock.now += 60  # and the rule isn't stuck behind it: it still announces what gets worse
+    alerter.on_transcript(result("a", "Corte de água também em Vila Nova.", 1060.0))
+    alerter.drain()
+    assert [c[0] for c in actions.calls] == ["notify", "notify", "speak"]
+    assert alert.delivered_severity == "critical" and pushed == ["high", "critical"]
+
+
+def test_an_alert_the_store_refused_is_stored_with_a_later_write(tmp_path: Path) -> None:
+    store = FailingStore(Store(tmp_path / "w.db"), "add_alert", times=1)
+    alerter, *_ = make(tmp_path, {"en": EN}, store=store)
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    settle(alerter)
+    [kept] = store.alerts()
+    assert (kept["rule"], kept["status"], kept["quote"]) == (
+        "water", "delivered", "Corte de água em Lisboa.")  # fmt: skip
+
+
+def test_a_delivery_that_cannot_run_does_not_leave_the_alert_pending(tmp_path: Path) -> None:
+    alerter, actions, clock, *_ = make(tmp_path, {"en": EN, "uk": UK})
+    deliver, failures = alerter._deliver, [RuntimeError("unexpected")]
+
+    def flaky(*args):
+        if failures:
+            raise failures.pop()
+        deliver(*args)
+
+    alerter._deliver = flaky
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    [alert] = settle(alerter)
+    assert alert.status == "failed" and actions.calls == []
+
+    clock.now += 60  # the next mention announces it
+    alerter.on_transcript(result("a", "Sem água em Lisboa.", 1060.0))
+    alerter.drain()
+    assert alert.status == "delivered" and [c[0] for c in actions.calls] == ["notify"]
+
+
+def test_an_alert_joined_by_radio_kept_only_days_stays_out_of_the_log(tmp_path: Path) -> None:
+    import dataclasses
+
+    alerter, *_ = make(tmp_path, {"en": EN})
+    alerter.on_transcript(result("a", "Corte de água em Lisboa.", 1000.0))
+    assert not alerter._open["water"].short_lived  # broadcast radio opened it
+    r = result("b", "Sem água em Lisboa desde manhã.", 1600.0)
+    r.station = dataclasses.replace(r.station, privacy="amateur")  # text kept 7 days
+    alerter.on_transcript(r)
+    assert alerter._open["water"].short_lived

@@ -1,0 +1,13 @@
+# Bring-your-own models. Copy to config/models.local.toml (gitignored).
+# Use this for models the project doesn't list, such as your own fine-tunes.
+# You are responsible for having the right to use whatever you add here.
+# These never join the default chains: pick one with `--asr <id>` or `--translator <id>`.
+
+[[model]]
+id = "my-whisper-finetune"
+capability = "asr"
+languages = ["de-DE"]
+source = "local:/path/to/an/mlx-audio/model"  # or "hf:<owner>/<repo>"
+backend = "mlx-audio"                         # a backend that can load this format
+license = "unknown"                           # required; "unknown" gives a warning at start
+# revision = "<commit sha>"                   # pin hf: sources, or you get a warning

@@ -1,0 +1,50 @@
+name: Radio correction
+description: A band plan entry, a demodulator, RDS, the hardware guide or a measured figure looks wrong.
+title: "Radio: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Corrections from people who know radio are very welcome. A sentence or two is enough; a source or a measurement helps, and neither is required.
+  - type: dropdown
+    id: about
+    attributes:
+      label: What it's about
+      options:
+        - A band plan entry (bands.toml)
+        - A demodulator (broadcast FM, narrowband FM, AM)
+        - RDS
+        - Scanning or squelch
+        - Hardware advice (dongles, antennas, connectors)
+        - A measured figure
+        - Something else
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The file, the band's `id`, or the section of the doc.
+      placeholder: src/wavescribe/radio/bands.toml, band "pmr446"
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What is wrong
+    validations:
+      required: true
+  - type: textarea
+    id: correct
+    attributes:
+      label: What it should be
+  - type: textarea
+    id: source
+    attributes:
+      label: A source or a measurement
+      description: >-
+        A regulation, a band plan or a datasheet, or what you measured and with what. Please
+        link to documents and don't paste from them: many band plans and frequency registers
+        may not be copied.
+  - type: input
+    id: region
+    attributes:
+      label: Country or region
+      description: Band plans differ from country to country, so say where this holds.
+      placeholder: Norway

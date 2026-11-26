@@ -1,0 +1,12 @@
+# Keeps the actions in .github/workflows current, in one pull request a month.
+# Python and npm dependencies are left out on purpose: every dependency change is
+# licence-checked by hand first (docs/LICENSING.md).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

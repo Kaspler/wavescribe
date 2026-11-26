@@ -1,0 +1,665 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Find what is on the air: sweep a range with ``rtl_power``, pick the signals out of the noise,
+say what each one is from the band plan, and name FM stations from their own RDS.
+
+    rtl_power -f START:STOP:BIN   (a GPL tool: run as a separate process, read as CSV)
+      ─► one power spectrum for the whole range, each hop's bins placed as rtl_power lays
+         them out (the dongle's DC at each hop's centre bridged)
+      ─► peaks a margin above the local noise floor, merged per channel, snapped to the raster
+      ─► band plan: what it is, how to demodulate it, its privacy class; digital ones skipped
+      ─► FM: a few seconds of IQ per ~2 MHz cluster (rtl_sdr), every station in it demodulated
+         at once and its RDS decoded: name, programme identification, type, radiotext
+
+A dongle is open to one process at a time, so a scan needs it idle: no station or monitor on it.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import select
+import shutil
+import subprocess
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field, replace
+from itertools import pairwise
+from typing import Any
+
+import numpy as np
+from scipy.ndimage import percentile_filter, uniform_filter1d
+
+from wavescribe.log import event
+from wavescribe.radio.bandplan import TUNER_RANGE_HZ, Band, lookup, region_bands
+from wavescribe.sources.sdr import device_arg, ppm_args
+
+log = logging.getLogger(__name__)
+
+SWEEP_LIMITS_HZ = TUNER_RANGE_HZ
+SPECTRUM_POINTS = 2_000  # what a scan keeps of its spectrum for the page
+REFERENCE_HZ = 28_800_000  # the V4/V3 crystal: its harmonics show up as narrow spurs
+CLOCK_HZ = 2_400_000  # the sample rate RTL-SDR receivers run at by default (see _clock_lines)
+CROP = 0.2  # of each hop's edges, where the dongle's filter rolls off: rtl_power -c
+MAX_RATE_HZ = 2_800_000  # the highest sample rate rtl_power gives a hop
+
+
+class ScanError(RuntimeError):
+    """The scan couldn't run: no rtl_power, a busy dongle, a bad range."""
+
+
+class Cancelled(ScanError):
+    pass
+
+
+@dataclass
+class Sweep:
+    start_hz: int
+    stop_hz: int
+    bin_hz: float
+    freqs: np.ndarray  # Hz, ascending
+    db: np.ndarray  # power per bin, dB (relative)
+    seconds: float
+    # Where each of rtl_power's hops after the first begins (bin indices). Every hop is tuned
+    # and measured on its own, so its noise level can differ from its neighbours'.
+    hop_starts: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=int))
+
+    def downsampled(self, points: int = SPECTRUM_POINTS) -> dict[str, Any]:
+        """The spectrum for the page: the maximum per slot, so narrow signals survive."""
+        n = len(self.db)
+        if n <= points:
+            db = self.db
+        else:
+            edges = np.linspace(0, n, points + 1).astype(int)
+            db = np.maximum.reduceat(self.db, edges[:-1])
+        return {"start_mhz": self.start_hz / 1e6, "stop_mhz": self.stop_hz / 1e6,
+                "db": [round(float(x), 1) for x in db]}  # fmt: skip
+
+
+@dataclass
+class Signal:
+    """One thing found on the air."""
+
+    freq_hz: int
+    level_db: float  # peak power, dB (relative to the dongle's full scale, as rtl_power reports)
+    snr_db: float  # above the local noise floor
+    width_hz: float  # where its power above the floor stays within 6 dB of its peak
+    band: str | None = None  # band plan id
+    label: str | None = None  # e.g. "PMR446 walkie-talkies, channel 5"
+    mode: str | None = None  # how to listen: wfm, nfm, am; None for digital or unknown
+    privacy: str = "private"
+    spur: bool = False  # probably a receiver's own: a learnt spur, a crystal or clock harmonic
+    clock_hz: int | None = None  # the receiver clock it is a harmonic of, when it is one
+    rds: dict[str, Any] | None = None
+    seen: int = 1  # of `passes` sweeps, how many found it (a watch sweeps again and again)
+    passes: int = 1
+
+    @property
+    def mhz(self) -> float:
+        return self.freq_hz / 1e6
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["mhz"] = round(self.mhz, 5)
+        return d
+
+
+@dataclass
+class Progress:
+    phase: str = "starting"  # sweep, rds, done
+    done: int = 0
+    total: int = 0
+    note: str = ""
+    signals: list[Signal] = field(default_factory=list)
+
+
+ProgressFn = Callable[[Progress], None]
+
+
+def _mhz(hz: float) -> str:
+    return f"{hz / 1e6:.6f}".rstrip("0").rstrip(".")
+
+
+def fit_range(start_hz: float, stop_hz: float) -> tuple[int, int, str]:
+    """The part of a range the tuner reaches, and a sentence saying what was left out (empty
+    when nothing was). A range it doesn't reach at all is a ScanError worded with the range as
+    asked, not a clamped one, which could read "24 to 1.611 MHz"."""
+    lo, hi = SWEEP_LIMITS_HZ
+    asked = f"{_mhz(start_hz)} to {_mhz(stop_hz)} MHz"
+    below = f"below {_mhz(lo)} MHz isn't supported yet"
+    above = f"above {_mhz(hi)} MHz is out of the tuner's reach"
+    if start_hz >= stop_hz:
+        raise ScanError(f"scan {asked}: give the lower frequency first")
+    if stop_hz <= lo or start_hz >= hi:
+        tunes = f"{_mhz(lo)} to {_mhz(hi)} MHz"
+        why = f"; {below}" if stop_hz <= lo else ""
+        raise ScanError(f"{asked} is outside what this receiver tunes ({tunes}){why}")
+    start, stop = max(start_hz, lo), min(stop_hz, hi)
+    left_out = [w for w, cut in ((below, start_hz < lo), (above, stop_hz > hi)) if cut]
+    if not left_out:
+        return round(start), round(stop), ""
+    note = f"scanning {_mhz(start)} to {_mhz(stop)} MHz of the {asked} asked for: "
+    return round(start), round(stop), note + ", and ".join(left_out)
+
+
+def bin_for(start_hz: float, stop_hz: float, band: Band | None = None) -> float:
+    """The sweep's resolution: a fifth of the band's channel (a twentieth for broadcast FM),
+    or, for a free range, whatever keeps it under about 25 000 bins."""
+    if band is not None:
+        target = _expected_width(band) / (20 if band.mode == "wfm" else 5)
+        return max(b for b in (1_000, 2_500, 5_000, 10_000, 25_000) if b <= max(target, 1_000))
+    span = stop_hz - start_hz
+    for b in (2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000):
+        if span / b <= 25_000:
+            return b
+    return 250_000
+
+
+def hop_count(start_hz: float, stop_hz: float) -> int:
+    """How many hops rtl_power cuts a range into (``frequency_range`` in rtl_power.c): the
+    fewest equal ones whose sample rate, the cropped edges included, stays within 2.8 MHz. The
+    rate therefore follows the range (2.64 MHz for the airband, 2.08 MHz for 121 to 126 MHz)."""
+    span = int(stop_hz) - int(start_hz)
+    return next(n for n in range(1, 1500) if int(span // n / (1 - CROP)) <= MAX_RATE_HZ)
+
+
+def _busy(text: str) -> bool:
+    t = text.lower()
+    return "usb_claim_interface" in t or "claimed by second instance" in t
+
+
+def sweep(
+    serial: str,
+    start_hz: float,
+    stop_hz: float,
+    *,
+    gain_db: float = 30.0,
+    ppm: int = 0,
+    bin_hz: float | None = None,
+    integrate_s: float | None = None,
+    command: str = "rtl_power",
+    on_progress: Callable[[int, int], None] | None = None,
+    cancel: threading.Event | None = None,
+) -> Sweep:
+    """One pass of ``rtl_power`` over the part of the range the tuner reaches (``fit_range``).
+    ``on_progress(hops_done, hops_total)``."""
+    start_hz, stop_hz, _ = fit_range(start_hz, stop_hz)
+    if shutil.which(command) is None:
+        raise ScanError("rtl_power isn't installed (brew install librtlsdr)")
+    bin_hz = bin_hz or bin_for(start_hz, stop_hz)
+    total = hop_count(start_hz, stop_hz)
+    if integrate_s is None:  # enough averaging for a steady spectrum, quick for wide sweeps
+        integrate_s = 1.0 if total > 50 else max(2.0, 0.3 * total)
+    # -c crops the edges of each hop, where the dongle's filter rolls off; -1 is a single pass.
+    cmd = [command, "-d", device_arg(serial), "-f", f"{int(start_hz)}:{int(stop_hz)}:{int(bin_hz)}",
+           "-g", f"{gain_db:g}", *ppm_args(ppm), "-c", f"{CROP:.0%}", "-i", f"{integrate_s:g}",
+           "-1", "-"]  # fmt: skip
+    t0 = time.time()
+    event(log, "scan_sweep", serial=serial, start_mhz=start_hz / 1e6, stop_mhz=stop_hz / 1e6,
+          bin_hz=bin_hz, hops=total)  # fmt: skip
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)  # fmt: skip
+    assert proc.stdout is not None and proc.stderr is not None
+    err: list[str] = []
+    threading.Thread(target=lambda: err.extend(proc.stderr), daemon=True).start()  # type: ignore[union-attr]
+    rows: list[tuple[float, float, float, list[float]]] = []
+    try:
+        for line in proc.stdout:
+            if cancel is not None and cancel.is_set():
+                raise Cancelled("scan cancelled")
+            parts = line.strip().split(",")
+            if len(parts) < 7:
+                continue
+            try:
+                lo, hi, step = float(parts[2]), float(parts[3]), float(parts[4])
+                vals = [float(v) for v in parts[6:]]
+            except ValueError:
+                continue
+            rows.append((lo, hi, step, vals))
+            if on_progress is not None:
+                on_progress(min(len(rows), total), total)
+        proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    text = "".join(err)
+    if not rows:
+        if _busy(text):
+            raise ScanError(f"dongle {serial} is busy: another program has it open")
+        raise ScanError(f"rtl_power found nothing to report: {text.strip()[-300:] or 'no output'}")
+    return _assemble(rows, start_hz, stop_hz, bin_hz, time.time() - t0)
+
+
+def _assemble(rows: list[tuple[float, float, float, list[float]]], start_hz: float,
+              stop_hz: float, bin_hz: float, seconds: float) -> Sweep:  # fmt: skip
+    """One spectrum from rtl_power's rows, one row per hop, read the way ``csv_dbm`` in
+    rtl_power.c writes them. A hop's bins lie about its tuned centre, (low + high) / 2, one
+    more below it than above, so of n bins the centre is bin n / 2; the low and high columns
+    are rounded and are not the first and last bin's frequencies. The last bin is written
+    twice, so a row with an odd count ends in a repeat, which would otherwise land one bin past
+    the hop's edge, among the next hop's bins."""
+    freqs, db, hop = [], [], []
+    top = -np.inf
+    for k, (lo, hi, step, vals) in enumerate(sorted(rows, key=lambda r: r[0])):
+        v = np.array(vals[: len(vals) // 2 * 2], dtype=np.float64)
+        n = len(v)
+        if n == 0:
+            continue
+        f = (lo + hi) / 2 + step * (np.arange(n) - n // 2)
+        # rtl_power copies a neighbour into the centre bin, but the dongle's DC offset can
+        # spread a few kHz around it at fine resolution: bridge those bins from either side.
+        # A carrier right on a hop's centre goes with them; a single pass measures each
+        # frequency once, and a second pass offset by half a hop would double the sweep time.
+        c, w = n // 2, round(3_000 / step)
+        a, b = c - w, c + w + 1
+        if a > 0 and b < n:
+            v[a:b] = np.linspace(v[a - 1], v[b], b - a + 2)[1:-1]
+        new = f > top  # neighbouring hops can overlap by a bin
+        freqs.append(f[new])
+        db.append(v[new])
+        hop.append(np.full(int(new.sum()), k))
+        top = max(top, f[-1])
+    f_all, d_all, h_all = np.concatenate(freqs), np.concatenate(db), np.concatenate(hop)
+    keep = np.isfinite(d_all) & (f_all >= start_hz) & (f_all <= stop_hz)
+    starts = np.flatnonzero(np.diff(h_all[keep])) + 1
+    return Sweep(int(start_hz), int(stop_hz), bin_hz, f_all[keep], d_all[keep], seconds, starts)
+
+
+def parse_csv(text: str, start_hz: float, stop_hz: float) -> Sweep:
+    """An ``rtl_power`` CSV (for tests and saved sweeps)."""
+    rows = []
+    for line in text.splitlines():
+        parts = line.split(",")
+        if len(parts) >= 7:
+            rows.append((float(parts[2]), float(parts[3]), float(parts[4]),
+                         [float(v) for v in parts[6:]]))  # fmt: skip
+    step = rows[0][2] if rows else 1.0
+    return _assemble(rows, start_hz, stop_hz, step, 0.0)
+
+
+def _expected_width(band: Band | None) -> float:
+    if band is None or band.mode is None:
+        return 25_000
+    if band.mode == "wfm":
+        return 200_000
+    return band.channel_hz or band.step_hz or 12_500
+
+
+def spur_tolerance(bin_hz: float) -> float:
+    return max(2.5 * bin_hz, 4_000)
+
+
+def _floor(sw: Sweep, bin_hz: float) -> np.ndarray:
+    """The noise floor under each bin: a low percentile over about 2 MHz, so a crowded FM band
+    doesn't lift it, taken within each hop. Every hop is tuned and measured on its own and its
+    noise can sit well above its neighbours' (the V4 switches to its HF input below 28.8 MHz,
+    and a hop the tuner didn't settle on reads high throughout); a floor that reached into a
+    quieter hop would turn the louder hop's noise into signals."""
+    floor = np.empty_like(sw.db)
+    for a, b in pairwise([0, *sw.hop_starts, len(sw.db)]):
+        window = int(min(b - a, max(31, 2e6 / bin_hz))) | 1
+        floor[a:b] = percentile_filter(sw.db[a:b], 20, size=window, mode="nearest")
+    return floor
+
+
+def find_signals(
+    sw: Sweep, region: str, min_snr_db: float = 8.0, spurs: list[int] | tuple[int, ...] = ()
+) -> list[Signal]:
+    """Peaks a margin above the local noise floor, one per channel, with what the band plan
+    says about each. ``spurs``: this receiver's own signals, learnt with no antenna."""
+    if len(sw.db) < 5:
+        return []
+    bin_hz = float(np.median(np.diff(sw.freqs)))
+    floor = _floor(sw, bin_hz)
+    # At fine resolution a signal spans several bins: average three, so noise can't make peaks.
+    # In power, not decibels: a carrier one bin wide then keeps all but 4.8 dB of its margin,
+    # where averaging decibels would cut it to a third. At coarse resolution (whole-range
+    # sweeps) every bin stands alone.
+    smooth = sw.db
+    if bin_hz <= 10_000:
+        smooth = 10 * np.log10(uniform_filter1d(10 ** (sw.db / 10), 3, mode="nearest"))
+    excess = smooth - floor
+    peaks = (
+        np.flatnonzero(
+            (excess[1:-1] >= min_snr_db)
+            & (smooth[1:-1] >= smooth[:-2])
+            & (smooth[1:-1] >= smooth[2:])
+        )
+        + 1
+    )
+    out: list[Signal] = []
+    thin: list[tuple[Signal, float]] = []  # the narrow lines, with their centres
+    taken = np.zeros(len(sw.db), dtype=bool)
+    for i in sorted(peaks, key=lambda k: -excess[k]):
+        if taken[i]:
+            continue
+        f0 = float(sw.freqs[i])
+        band = lookup(f0, region)
+        half = _expected_width(band) / 2
+        lo = int(np.searchsorted(sw.freqs, f0 - half))
+        hi = int(np.searchsorted(sw.freqs, f0 + half))
+        if taken[lo:hi].any():
+            continue  # inside a stronger signal's channel
+        # Width and centre: the run where the power above the floor stays within 6 dB of its
+        # peak, on a spectrum smoothed to a tenth of the band's channel (a raw FM spectrum is
+        # spiky), power-weighted. Above the floor, because a carrier thinner than that, smoothed,
+        # can sit less than 6 dB over the noise and its run would spread across the channel.
+        k = max(1, round(2 * half / 10 / bin_hz))
+        above = 10 ** (sw.db[lo:hi] / 10) - 10 ** (floor[lo:hi] / 10)
+        seg = uniform_filter1d(above, k, mode="nearest")  # the window holds the peak's own bin
+        j = int(np.argmax(seg))
+        a = b = j
+        while a > 0 and seg[a - 1] >= seg[j] / 4:
+            a -= 1
+        while b < len(seg) - 1 and seg[b + 1] >= seg[j] / 4:
+            b += 1
+        a, b = a + lo, b + lo
+        p = 10 ** (sw.db[a : b + 1] / 10)
+        centre = float(np.sum(sw.freqs[a : b + 1] * p) / np.sum(p))
+        width = float(sw.freqs[b] - sw.freqs[a] + bin_hz)
+        taken[lo:hi] = True
+        freq = band.snap(centre) if band is not None and band.contains(centre) else round(centre)
+        narrow = width <= (k + 2) * bin_hz  # the smoothing widens a line to k bins
+        harmonic = abs(f0 - round(f0 / REFERENCE_HZ) * REFERENCE_HZ) <= max(3 * bin_hz, 5_000)
+        tol = spur_tolerance(bin_hz)
+        learnt = any(abs(f0 - x) <= tol or abs(centre - x) <= tol for x in spurs)
+        out.append(Signal(
+            freq_hz=int(freq), level_db=round(float(np.max(sw.db[a : b + 1])), 1),
+            snr_db=round(float(excess[i]), 1), width_hz=round(width),
+            band=band.id if band else None,
+            label=band.label(freq) if band else None,
+            mode=band.mode if band and band.privacy != "digital" else None,
+            privacy=band.privacy if band else "private",
+            spur=bool(learnt or (harmonic and narrow)),
+        ))  # fmt: skip
+        if narrow:
+            thin.append((out[-1], centre))
+    if bin_hz <= 10_000:  # in a whole-range sweep's wide bins every channel looks thin
+        for s, clock in _clock_lines(thin, bin_hz):
+            s.spur, s.clock_hz = True, round(clock)
+    out.sort(key=lambda s: s.freq_hz)
+    return out
+
+
+def _clock_lines(lines: list[tuple[Signal, float]], bin_hz: float) -> list[tuple[Signal, float]]:
+    """Which of these narrow lines are harmonics of a receiver's 2.4 MHz sample clock, each
+    with the clock it fits.
+
+    A receiver streaming at 2.4 MHz (28.8 MHz / 12, what RTL-SDR software runs at by default)
+    puts a comb of steady lines on the receivers near it at multiples of its clock, the odd
+    ones strongest: in the airband at 117.6, 122.4, 127.2, 132 and 136.8 MHz, the same for
+    any range and any sample rate of the receiver that scans. That clock runs off its own
+    crystal, a few ppm to 100 ppm from nominal, so the lines are taken as harmonics of one
+    clock within 100 ppm of 2.4 MHz when two or more agree on it to a couple of bins, and a
+    line on its own when it lies within 30 ppm. A station that happens to sit on such a line
+    is marked with it, not hidden: the mark says "probably"."""
+    near = []
+    for s, f in lines:
+        n = round(f / CLOCK_HZ)
+        if n and abs(f / n - CLOCK_HZ) <= 100e-6 * CLOCK_HZ:
+            near.append((s, f, n))
+    if not near:
+        return []
+    clock = float(np.median([f / n for _, f, n in near]))
+    agree = [(s, n) for s, f, n in near if abs(f - n * clock) <= 2 * bin_hz]
+    if len({n for _, n in agree}) >= 2:  # two harmonics, not two lines beside one
+        return [(s, clock) for s, _ in agree]
+    return [(s, f / n) for s, f, n in near if abs(f - n * CLOCK_HZ) <= max(30e-6 * f, bin_hz)]
+
+
+def clusters(
+    freqs: list[int], rate: int = 2_400_000, margin: int = 140_000
+) -> list[tuple[int, list[int]]]:
+    """Group frequencies into dongle-sized windows: (centre, members). The centre avoids sitting
+    on a member (DC) and keeps everyone ``margin`` inside the band edge."""
+    span = rate - 2 * margin
+    out: list[tuple[int, list[int]]] = []
+    group: list[int] = []
+    for f in sorted(freqs):
+        if group and f - group[0] > span:
+            out.append((_centre(group, rate, margin), group))
+            group = []
+        group.append(f)
+    if group:
+        out.append((_centre(group, rate, margin), group))
+    return out
+
+
+def _centre(group: list[int], rate: int, margin: int) -> int:
+    c = (group[0] + group[-1]) // 2
+    reach = rate // 2 - margin
+    for shift in (0, 60_000, -60_000, 120_000, -120_000, 30_000, -30_000):
+        cc = c + shift
+        if all(abs(f - cc) >= 40_000 and abs(f - cc) <= reach for f in group):
+            return cc
+    return c
+
+
+def name_fm(
+    serial: str,
+    signals: list[Signal],
+    *,
+    gain_db: float = 30.0,
+    ppm: int = 0,
+    seconds: float = 12.0,
+    rate: int = 2_400_000,
+    command: str = "rtl_sdr",
+    on_progress: Callable[[int, int], None] | None = None,
+    cancel: threading.Event | None = None,
+) -> None:
+    """Decode RDS from every FM signal: a few seconds of IQ per cluster, all its stations
+    demodulated at once. Fills ``signal.rds``; a cluster ends early once every station in it has
+    a stable name."""
+    from wavescribe.dsp.rds import RdsDecoder
+    from wavescribe.dsp.wfm import WfmDemodulator, iq_from_u8
+
+    if shutil.which(command) is None:
+        raise ScanError("rtl_sdr isn't installed (brew install librtlsdr)")
+    fm = {s.freq_hz: s for s in signals if s.mode == "wfm" and not s.spur}
+    groups = clusters(list(fm), rate)
+    for k, (centre, members) in enumerate(groups):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled("scan cancelled")
+        if on_progress is not None:
+            on_progress(k, len(groups))
+        demods = {f: WfmDemodulator(rate, f - centre) for f in members}
+        decoders = {f: RdsDecoder() for f in members}
+        cmd = [command, "-d", device_arg(serial), "-f", str(centre), "-s", str(rate), "-g",
+               f"{gain_db:g}", *ppm_args(ppm), "-n", str(int(seconds * rate)), "-"]  # fmt: skip
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)  # fmt: skip
+        assert proc.stdout is not None and proc.stderr is not None
+        err = bytearray()
+
+        def drain(p: subprocess.Popen[bytes] = proc, into: bytearray = err) -> None:
+            into.extend(p.stderr.read())  # type: ignore[union-attr]
+
+        threading.Thread(target=drain, daemon=True).start()
+        chunk = 2 * rate // 4  # 0.25 s of 8-bit IQ
+        buf = bytearray()
+        fd = proc.stdout.fileno()
+        got = 0
+        try:
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("scan cancelled")
+                ready, _, _ = select.select([fd], [], [], 5.0)
+                if not ready:
+                    break
+                data = os.read(fd, 1 << 20)
+                if not data:
+                    break
+                buf += data
+                while len(buf) >= chunk:
+                    iq = iq_from_u8(np.frombuffer(bytes(buf[:chunk]), dtype=np.uint8))
+                    del buf[:chunk]
+                    got += chunk
+                    for f in members:
+                        decoders[f](demods[f].mpx(iq))
+                if got >= 4 * rate and all(_settled(d.info) for d in decoders.values()):
+                    break
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+        if got == 0 and _busy(err.decode(errors="replace")):
+            raise ScanError(f"dongle {serial} is busy: another program has it open")
+        for f in members:
+            info = decoders[f].info
+            if info.pi is not None or info.groups:
+                fm[f].rds = info.to_dict()
+        event(log, "scan_rds", serial=serial, centre_mhz=centre / 1e6, stations=len(members),
+              named=sum(1 for f in members if fm[f].rds and fm[f].rds.get("ps")),
+              seconds=round(got / 2 / rate, 1))  # fmt: skip
+    if on_progress is not None:
+        on_progress(len(groups), len(groups))
+
+
+def _settled(info: Any) -> bool:
+    return bool(info.names) and max(info.names.values()) >= 2 and info.pi is not None
+
+
+def scan(
+    serial: str,
+    start_hz: float,
+    stop_hz: float,
+    region: str,
+    *,
+    gain_db: float = 30.0,
+    ppm: int = 0,
+    rds: bool = True,
+    rds_seconds: float = 12.0,
+    min_snr_db: float = 8.0,
+    watch_s: float = 0.0,
+    spurs: list[int] | tuple[int, ...] = (),
+    on_progress: ProgressFn | None = None,
+    cancel: threading.Event | None = None,
+) -> tuple[Sweep, list[Signal]]:
+    """Sweep, find, classify and (for FM) name. With ``watch_s``, sweep again and again for
+    that long: walkie-talkies, aircraft and amateurs talk now and then, so one sweep rarely
+    catches them. The spectrum returned is then the maximum each bin reached. A range that
+    reaches past the tuner is scanned where it can be, and the first progress note says so."""
+    prog = Progress()
+
+    def report(phase: str, done: int, total: int, note: str = "") -> None:
+        prog.phase, prog.done, prog.total, prog.note = phase, done, total, note
+        if on_progress is not None:
+            on_progress(prog)
+
+    start_hz, stop_hz, cut = fit_range(start_hz, stop_hz)
+    if cut:
+        event(log, "scan_range_cut", note=cut)
+    report("sweep", 0, 1, cut)
+    band = scanned_band(start_hz, stop_hz, region)
+    bin_hz = bin_for(start_hz, stop_hz, band)
+    t0 = time.monotonic()
+    hold: Sweep | None = None
+    found: list[Signal] = []
+    passes = 0
+    while True:
+
+        def hops(d: int, t: int, n: int = passes + 1) -> None:
+            if watch_s > 0:
+                report("watch", int(time.monotonic() - t0), int(watch_s), f"sweep {n}")
+            else:
+                report("sweep", d, t)
+
+        sw = sweep(serial, start_hz, stop_hz, gain_db=gain_db, ppm=ppm, cancel=cancel,
+                   bin_hz=bin_hz, on_progress=hops)  # fmt: skip
+        passes += 1
+        if hold is None or len(hold.db) != len(sw.db):
+            hold = sw
+        else:
+            hold = replace(sw, db=np.maximum(hold.db, sw.db), seconds=hold.seconds + sw.seconds)
+        _merge(found, find_signals(sw, region, min_snr_db, spurs), bin_hz)
+        prog.signals = found
+        if watch_s <= 0 or time.monotonic() - t0 >= watch_s:
+            break
+    for s in found:
+        s.passes = passes
+    found.sort(key=lambda s: s.freq_hz)
+    if rds and any(s.mode == "wfm" and not s.spur for s in found):
+        report("rds", 0, 1)
+        name_fm(serial, found, gain_db=gain_db, ppm=ppm, seconds=rds_seconds, cancel=cancel,
+                on_progress=lambda d, t: report("rds", d, t))  # fmt: skip
+    report("done", 1, 1)
+    assert hold is not None
+    return hold, found
+
+
+def _merge(into: list[Signal], new: list[Signal], bin_hz: float) -> None:
+    """Fold one sweep's signals into those of earlier sweeps: the same channel counts once,
+    with how often it was heard and its strongest reading."""
+    for s in new:
+        tol = max(3 * bin_hz, 3_000)
+        m = next((x for x in into if abs(x.freq_hz - s.freq_hz) <= tol), None)
+        if m is None:
+            into.append(s)
+            continue
+        m.seen += 1
+        m.spur, m.clock_hz = m.spur or s.spur, m.clock_hz or s.clock_hz
+        if s.snr_db > m.snr_db:
+            m.level_db, m.snr_db, m.width_hz = s.level_db, s.snr_db, s.width_hz
+
+
+def scanned_band(start_hz: float, stop_hz: float, region: str) -> Band | None:
+    """The band a range is, when it is (mostly) one: it sets the sweep's resolution."""
+    return next((b for b in region_bands(region) if b.mode and b.start_hz >= start_hz - 200_000
+                 and b.stop_hz <= stop_hz + 200_000 and b.width_hz >= 0.5 * (stop_hz - start_hz)),
+                None)  # fmt: skip
+
+
+def learn_spurs(
+    serial: str,
+    start_hz: float = SWEEP_LIMITS_HZ[0],
+    stop_hz: float = SWEEP_LIMITS_HZ[1],
+    *,
+    gain_db: float = 30.0,
+    ppm: int = 0,
+    min_snr_db: float = 6.0,
+    on_progress: ProgressFn | None = None,
+    cancel: threading.Event | None = None,
+) -> tuple[Sweep, list[int]]:
+    """The receiver's own signals: sweep with the antenna disconnected, so whatever shows up
+    comes from the dongle and the computer (clock harmonics, USB noise). Two passes, and only
+    lines in both count."""
+    start_hz, stop_hz, cut = fit_range(start_hz, stop_hz)
+    prog = Progress(note=cut)
+    seen: list[list[int]] = []
+    sw: Sweep | None = None
+    for k in range(2):
+
+        def hops(d: int, t: int, k: int = k) -> None:
+            prog.phase, prog.done, prog.total = "sweep", k * t + d, 2 * t
+            if on_progress is not None:
+                on_progress(prog)
+
+        sw = sweep(serial, start_hz, stop_hz, gain_db=gain_db, ppm=ppm, cancel=cancel,
+                   on_progress=hops)  # fmt: skip
+        seen.append([round(f) for f in _lines(sw, min_snr_db)])
+    assert sw is not None
+    tol = spur_tolerance(sw.bin_hz)
+    both = [f for f in seen[0] if any(abs(f - g) <= tol for g in seen[1])]
+    return sw, both
+
+
+def _lines(sw: Sweep, min_snr_db: float) -> list[float]:
+    """Every local peak a margin above the floor, at its own bin (no band plan, no channels)."""
+    excess = sw.db - _floor(sw, float(np.median(np.diff(sw.freqs))))
+    peaks = np.flatnonzero((excess[1:-1] >= min_snr_db) & (sw.db[1:-1] >= sw.db[:-2])
+                           & (sw.db[1:-1] >= sw.db[2:])) + 1  # fmt: skip
+    return [float(sw.freqs[i]) for i in peaks]
+
+
+def band_range(band_id: str, region: str) -> tuple[int, int]:
+    """A band's edges for a scan, padded half a channel. The padding stops at the tuner's
+    limits; the band itself doesn't, so that ``scan`` can say what it leaves out."""
+    for b in region_bands(region):
+        if b.id == band_id:
+            fit_range(b.start_hz, b.stop_hz)  # refuses a band the tuner doesn't reach at all
+            pad = int(_expected_width(b) / 2)
+            lo, hi = SWEEP_LIMITS_HZ
+            start = max(min(b.start_hz, lo), b.start_hz - pad)
+            return start, min(max(b.stop_hz, hi), b.stop_hz + pad)
+    raise ScanError(f"no band {band_id!r} in region {region}")

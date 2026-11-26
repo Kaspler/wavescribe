@@ -1,0 +1,65 @@
+[project]
+name = "wavescribe"
+version = "0.1.0a1"
+description = "Offline radio listener for Apple Silicon: transcribes, translates and alerts on FM, SDR and internet radio."
+keywords = [
+    "sdr", "rtl-sdr", "radio", "fm-radio", "rds", "ham-radio", "speech-to-text", "transcription",
+    "translation", "whisper", "mlx", "apple-silicon", "macos", "offline", "local-first",
+    "local-llm", "alerts", "accessibility", "mcp", "ai-agents",
+]
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Vitali Kaspler" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "numpy>=2.2",
+    "scipy>=1.14", # SDR demodulation (FIR design, polyphase decimation)
+    "onnxruntime>=1.20",
+    "huggingface-hub>=0.30",
+    "ctranslate2>=4.5",
+    "sentencepiece>=0.2",
+    "babel>=2.14", # CLDR language names for LLM prompts
+    # Apple Silicon only (MLX); other platforms need different Transcriber/Translator backends.
+    "parakeet-mlx>=0.7; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm>=0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # Whisper (the ASR fallback for languages Parakeet lacks) and the other bake-off contenders.
+    "mlx-audio[stt]>=0.6.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "ai-edge-litert>=2.4.0",
+    "py3langid>=0.4.0",
+    "snowballstemmer>=3.1.1",
+]
+
+[project.scripts]
+wavescribe = "wavescribe.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Kaspler/wavescribe"
+Issues = "https://github.com/Kaspler/wavescribe/issues"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.15"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "models: needs downloaded models (run `wavescribe models fetch` first); skipped otherwise",
+]

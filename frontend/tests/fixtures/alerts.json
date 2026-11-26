@@ -1,0 +1,19 @@
+{
+  "late": {
+    "quote": "Good evening, here is the news at the top of the hour. The weather stays mild for the rest of the week with light winds along the coast, and the ferry timetable is unchanged. Unions have called a general strike for Thursday across the rail network.",
+    "terms": ["strike"],
+    "hits": [{ "rule": "strike", "alert": 7, "spans": [[204, 210]] }, { "rule": "other", "alert": 9, "spans": [[5, 12]] }]
+  },
+  "early": {
+    "quote": "Flood warning for the river valley tonight; residents near the banks should move to higher ground.",
+    "terms": ["flood", "evacuat*"]
+  },
+  "accents": {
+    "quote": "Aviso: ÉVACUATION du quartier nord, et des évacuations au sud.",
+    "terms": ["evacuation"]
+  },
+  "astral": {
+    "quote": "🌊🌊 Storms tonight; storm surge expected.",
+    "terms": ["storm"]
+  }
+}

@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Alert rules: evaluated on source-language text the moment ASR finishes, never on translations.
+
+Keyword rules match topics from per-language packs (``config/keywords/<lang>.toml``), so a rule
+like "water" works for every station whose language has a pack, or their own terms per language
+(rules made on the page). Adding a language is a pack file or a list of terms, never code.
+
+LLM rules are a plain-language description ("they tell people to leave an area"); the LLM reads
+each station's recent source-language text against them (``rules/llm.py``).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from wavescribe.languages import primary_subtag
+from wavescribe.rules.text import Matcher
+
+log = logging.getLogger(__name__)
+
+SEVERITIES = ("low", "medium", "high", "critical")
+
+
+def raise_severity(severity: str, steps: int = 1) -> str:
+    i = min(len(SEVERITIES) - 1, max(0, SEVERITIES.index(severity) + steps))
+    return SEVERITIES[i]
+
+
+def config_file(path: Path) -> Path | None:
+    """The real config file, else its tracked ``.example`` twin, else None."""
+    if path.exists():
+        return path
+    example = path.with_name(path.stem + ".example" + path.suffix)
+    return example if example.exists() else None
+
+
+def _strings(value: Any, what: str) -> tuple[str, ...]:
+    """A list of strings from a rule or a keyword pack. A bare string is refused rather than
+    read letter by letter: ``terms = { pt = "fogo" }`` would match "o", which is in most
+    Portuguese sentences, and ``stations = "tsf"`` would match no station at all."""
+    if value is None:
+        return ()
+    if not isinstance(value, list | tuple) or not all(isinstance(v, str) for v in value):
+        example = [value] if isinstance(value, str) else ["one", "another"]
+        raise ValueError(
+            f"{what} must be a list of strings, e.g. {json.dumps(example, ensure_ascii=False)}"
+        )
+    return tuple(value)
+
+
+def _groups(value: Any, what: str, example: str) -> dict[str, tuple[str, ...]]:
+    """A table of named lists of strings: a pack's topics or places, a rule's terms."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{what} must be a table of lists, e.g. {example}")
+    return {str(k): _strings(v, f"{what}.{k}") for k, v in value.items()}
+
+
+@dataclass(frozen=True)
+class KeywordPack:
+    language: str
+    topics: dict[str, tuple[str, ...]]
+    places: dict[str, tuple[str, ...]]
+
+    @classmethod
+    def load(cls, path: Path) -> KeywordPack:
+        raw = tomllib.loads(path.read_text())
+        if not isinstance(raw.get("language"), str):
+            raise ValueError(f'{path}: needs its language, e.g. language = "pt"')
+        return cls(
+            language=raw["language"],
+            topics=_groups(raw.get("topics"), f"{path}: topics", 'water = ["corte de água"]'),
+            places=_groups(raw.get("places"), f"{path}: places", 'local = ["Vila Nova"]'),
+        )
+
+
+@dataclass(frozen=True)
+class KeywordRule:
+    id: str
+    topics: tuple[str, ...]
+    severity: str
+    near: tuple[str, ...] = ()  # place groups that raise the severity one level
+    # Below this many mentions within the cooldown the alert stays low (stored, not announced),
+    # unless a place from `near` is named: a real event is repeated, a passing reference isn't.
+    min_mentions: int = 1
+    terms: Mapping[str, tuple[str, ...]] = field(default_factory=dict)  # language -> own terms
+    stations: tuple[str, ...] = ()  # only these stations; empty means all
+    verify: bool = False  # the LLM confirms a hit before it is announced above low
+    origin: str = "file"  # "file" (alerts.toml) or "page"
+
+
+@dataclass(frozen=True)
+class LlmRule:
+    """A rule in plain language, checked by the LLM on source-language text."""
+
+    id: str
+    prompt: str
+    severity: str
+    stations: tuple[str, ...] = ()
+    min_mentions: int = 1
+    origin: str = "page"
+
+
+@dataclass
+class Hit:
+    """One rule matching one utterance; the evidence travels with the verdict."""
+
+    rule_id: str
+    severity: str
+    terms: list[str]  # pack terms that matched, as written in the pack
+    places: list[str]
+    spans: list[tuple[int, int]]  # character spans in the source text
+    capped: str | None = None  # why the severity was capped, e.g. "lang:en", "unverified"
+    kind: str = "keyword"  # or "llm"
+    reason: str | None = None  # the LLM's one-line reason (LLM rules and verified hits)
+    again: bool = False  # the LLM confirmed an earlier hit on the same utterance
+
+    def payload(self) -> dict[str, Any]:
+        return {"rule": self.rule_id, "severity": self.severity, "spans": self.spans}
+
+
+_RULE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+
+
+def parse_rule(raw: Mapping[str, Any], origin: str = "file") -> KeywordRule | LlmRule:
+    """One ``[[rule]]`` table, from alerts.toml or the page. Raises ValueError."""
+    rid = str(raw.get("id", ""))
+    if not _RULE_ID.fullmatch(rid):
+        raise ValueError(f"rule {rid!r}: ids are lowercase letters, digits, - or _")
+    severity = raw.get("severity", "medium")
+    if severity not in SEVERITIES:
+        raise ValueError(f"rule {rid}: severity must be one of {SEVERITIES}")
+    min_mentions = raw.get("min_mentions", 1)
+    if not isinstance(min_mentions, int) or isinstance(min_mentions, bool):
+        raise ValueError(f"rule {rid}: min_mentions must be a whole number, e.g. 2")
+    if min_mentions < 1:
+        raise ValueError(f"rule {rid}: min_mentions must be at least 1")
+    stations = _strings(raw.get("stations"), f"rule {rid}: stations")
+    kind = raw.get("kind", "keyword")
+    if kind == "llm":
+        prompt = raw.get("prompt", "")
+        if not isinstance(prompt, str):
+            raise ValueError(f'rule {rid}: prompt must be text, e.g. "they tell people to leave"')
+        if not prompt.strip():
+            raise ValueError(f"rule {rid}: an LLM rule needs a prompt (what to listen for)")
+        return LlmRule(rid, prompt.strip()[:500], severity, stations, min_mentions, origin)
+    if kind != "keyword":
+        raise ValueError(f"rule {rid}: kind is keyword or llm")
+    own = _groups(raw.get("terms") or {}, f"rule {rid}: terms", '{ pt = ["fogo", "incêndio"] }')
+    terms: dict[str, tuple[str, ...]] = {}
+    for lang, words in own.items():
+        clean = tuple(w.strip() for w in words if w.strip())
+        if clean:
+            terms[primary_subtag(lang)] = clean
+    topics = _strings(raw.get("topics"), f"rule {rid}: topics")
+    if not topics and not terms:
+        raise ValueError(f"rule {rid}: needs topics (from a keyword pack) or terms")
+    verify = raw.get("verify", False)
+    if not isinstance(verify, bool):
+        raise ValueError(f"rule {rid}: verify must be true or false")
+    near = _strings(raw.get("near"), f"rule {rid}: near")
+    return KeywordRule(rid, topics, severity, near, min_mentions, terms, stations, verify, origin)
+
+
+@dataclass
+class RuleSet:
+    rules: list[KeywordRule]
+    packs: dict[str, KeywordPack]  # primary subtag -> pack
+    llm_rules: list[LlmRule] = field(default_factory=list)
+    _matchers: dict[str, Matcher] = field(default_factory=dict)
+
+    @classmethod
+    def load(
+        cls,
+        alerts: dict[str, Any],
+        keywords_dir: Path,
+        page_rules: list[Mapping[str, Any]] = (),  # type: ignore[assignment]
+        disabled: tuple[str, ...] = (),
+    ) -> RuleSet:
+        rules: list[KeywordRule] = []
+        llm: list[LlmRule] = []
+        page_ids = {str(r.get("id")) for r in page_rules}
+        tables = [(r, "file") for r in alerts.get("rule", []) if r.get("id") not in page_ids]
+        for raw, origin in [*tables, *((r, "page") for r in page_rules)]:
+            if raw.get("kind", "keyword") not in ("keyword", "llm"):
+                log.info("rule %s: kind %r isn't implemented yet; skipped", raw.get("id"),
+                         raw.get("kind"))  # fmt: skip
+                continue
+            rule = parse_rule(raw, origin)
+            if rule.id in disabled:
+                continue
+            (llm if isinstance(rule, LlmRule) else rules).append(rule)  # type: ignore[arg-type]
+        packs = {}
+        if keywords_dir.is_dir():
+            for path in sorted(keywords_dir.glob("*.toml")):
+                if path.name.endswith(".example.toml") and (
+                    path.with_name(path.name.replace(".example", "")).exists()
+                ):
+                    continue  # the real pack wins over its example
+                pack = KeywordPack.load(path)
+                packs[primary_subtag(pack.language)] = pack
+        return cls(rules, packs, llm)
+
+    def pack_for(self, language: str) -> KeywordPack | None:
+        return self.packs.get(primary_subtag(language))
+
+    def get(self, rule_id: str) -> KeywordRule | LlmRule | None:
+        return next((r for r in [*self.rules, *self.llm_rules] if r.id == rule_id), None)
+
+    def evaluate(
+        self, text: str, language: str, flags: tuple[str, ...] = (), station: str | None = None
+    ) -> list[Hit]:
+        pack = self.pack_for(language)
+        own = primary_subtag(language)
+        if not text or (pack is None and not any(own in r.terms for r in self.rules)):
+            return []
+        topics = pack.topics if pack is not None else {}
+        places = pack.places if pack is not None else {}
+        matcher = self._matchers.setdefault(language, Matcher(language))
+        tokens = matcher.tokens(text)
+        cache: dict[str, list[tuple[int, int]]] = {}
+
+        def find(term: str) -> list[tuple[int, int]]:
+            if term not in cache:
+                cache[term] = matcher.find(term, text, tokens)
+            return cache[term]
+
+        hits = []
+        for rule in self.rules:
+            if rule.stations and station is not None and station not in rule.stations:
+                continue
+            terms, spans = [], []
+            candidates = [t for topic in rule.topics for t in topics.get(topic, ())]
+            for term in [*candidates, *rule.terms.get(own, ())]:
+                found = find(term)
+                if found and term not in terms:
+                    terms.append(term)
+                    spans.extend(found)
+            if not terms:
+                continue
+            named = [p for group in rule.near for p in places.get(group, ()) if find(p)]
+            for p in named:
+                spans.extend(find(p))
+            severity = raise_severity(rule.severity) if named else rule.severity
+            hit = Hit(rule.id, severity, terms, named, sorted(set(spans)))
+            # Text heard as another language: Snowball stems Portuguese "sabotagem" and English
+            # "sabotage" alike, and Parakeet sometimes answers in English. Log it, don't alarm.
+            other = next((f for f in flags if f.startswith("lang:")), None)
+            if other and SEVERITIES.index(hit.severity) > 0:
+                hit.severity, hit.capped = "low", other
+            hits.append(hit)
+        return hits

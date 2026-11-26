@@ -1,0 +1,315 @@
+/* Listen, Find stations and Settings: a quiet surface. Hairline-separated sections, no cards;
+   editing happens in a sunken well under the thing being edited. */
+.manage { flex: 1; min-height: 0; display: grid; grid-template-columns: 216px minmax(0, 1fr); }
+.manage.is-single { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+
+.m-nav { padding: var(--s6) var(--s4); background: var(--body); border-right: 1px solid var(--rule); overflow-y: auto; }
+.m-nav ul { display: grid; gap: 2px; }
+.m-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-control);
+  color: var(--ink-2);
+  font-weight: 550;
+  text-decoration: none;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.m-nav a svg { color: var(--ink-3); transition: color var(--fast) var(--ease); }
+.m-nav a:hover { background: color-mix(in oklab, var(--ink) 5%, transparent); color: var(--ink); }
+.m-nav a.is-current { background: var(--raised); color: var(--ink); box-shadow: 0 0 0 1px var(--rule), 0 1px 2px rgb(0 0 0 / 0.06); }
+.m-nav a.is-current svg { color: var(--accent); }
+
+.m-body { min-height: 0; overflow-y: auto; background: var(--surface); outline: none; }
+.m-page { max-width: 1040px; padding: var(--s8) var(--s10) 96px; }
+/* The notices of what the page is built from: there when wanted, quieter than any page. */
+.m-nav a.m-nav-foot { display: inline-block; height: auto; margin-top: var(--s6); padding: 0 10px; background: none; box-shadow: none; color: var(--ink-3); font-size: var(--t-sm); font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
+.m-nav a.m-nav-foot:hover { background: none; color: var(--ink); }
+.m-nav-h { margin: 0 10px var(--s4); color: var(--ink-3); font-size: var(--t-sm); font-weight: 600; }
+.m-title { margin-bottom: var(--s7); font-size: var(--t-xl); font-weight: 650; letter-spacing: -0.015em; }
+.m-loading { padding: var(--s8) 0; color: var(--ink-3); }
+
+/* lists of things: stations, models, rules, outputs */
+.m-list { border-top: 1px solid var(--rule); }
+.m-item { padding: 12px 0 13px; border-bottom: 1px solid var(--rule); }
+.m-item-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 30px; }
+.m-item-head strong { font-size: var(--t-md); font-weight: 650; }
+.m-item.is-off .m-item-head strong { color: var(--ink-2); font-weight: 550; }
+.m-item-title { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; }
+.m-item-title svg { color: var(--ink-3); }
+.m-item-title:hover strong { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); }
+.m-item-sub { margin-top: 3px; max-width: 76ch; font-size: var(--t-sm); color: var(--ink-3); overflow-wrap: anywhere; }
+.m-item:has(.m-item-title) .m-item-sub, .m-item:has(.m-item-title) > .m-trouble { padding-left: 20px; }
+.m-spacer { flex: 1; }
+.m-pos {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.m-pos.is-out { background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--rule-strong); }
+.m-order { display: inline-flex; }
+
+/* editing wells */
+.m-edit, .m-panel { margin-top: 12px; padding: var(--s6); border-radius: 8px; background: var(--sunken); }
+.m-panel { margin: 0 0 var(--s6); animation: pop-in var(--med) var(--ease); }
+.m-item .m-edit { margin-left: 20px; }
+.m-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: var(--s5); }
+.m-panel h4, .m-new h4, .m-rec h4 { font-size: var(--t-md); font-weight: 650; }
+.m-panel-body { display: grid; gap: 10px; margin-top: var(--s5); }
+.m-new { margin-top: var(--s6); padding-top: var(--s6); border-top: 1px solid var(--rule); }
+.m-new h4 { margin-bottom: 4px; }
+.m-secret { margin-top: var(--s5); }
+.m-secret .m-code { background: var(--raised); }
+
+.m-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s6) var(--s7); margin-top: var(--s5); }
+.m-form-3 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.m-form-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.m-form .input, .m-form .select { width: 100%; }
+.m-form .input-short { width: 96px; }
+.m-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: var(--s6); }
+.m-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.m-row-end { align-items: flex-end; }
+.m-grow { flex: 1; min-width: 200px; }
+.m-row > .input:not(.m-grow) { width: auto; }
+.m-title + .section { border-top: 0; padding-top: 0; }
+.m-row .field { min-width: 140px; }
+
+.m-line { margin: 6px 0; color: var(--ink-2); max-width: 64ch; text-wrap: pretty; }
+.m-hint { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-3); max-width: 66ch; line-height: 1.45; text-wrap: pretty; }
+.m-trouble { margin-top: 4px; font-size: var(--t-sm); color: var(--trouble-ink); }
+.m-muted { color: var(--ink-3); }
+.m-empty { padding: var(--s6) 0 var(--s2); max-width: 64ch; color: var(--ink-3); }
+.m-break { overflow-wrap: anywhere; }
+.mono { font-family: var(--mono); font-size: 0.92em; }
+.manage code { padding: 1px 5px; border-radius: 4px; background: var(--sunken); font-family: var(--mono); font-size: 0.9em; }
+.m-sub-h { margin: var(--s8) 0 var(--s3); font-size: var(--t-md); font-weight: 650; }
+.m-station { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.num-cell .tag { margin-left: 6px; }
+.manage progress { width: 160px; height: 6px; vertical-align: middle; accent-color: var(--accent); }
+
+/* the machine, as instrument readings */
+.meters { border-top: 1px solid var(--rule); }
+.meter {
+  display: grid;
+  grid-template-columns: 104px 120px minmax(140px, 280px) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--s6);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.meter-label { font-weight: 600; color: var(--ink-2); }
+.meter-value { font-size: var(--t-md); font-weight: 650; color: var(--ink); white-space: nowrap; }
+.meter.is-trouble .meter-value { color: var(--trouble-ink); }
+.meter-detail { font-size: var(--t-sm); color: var(--ink-3); }
+.trace { position: relative; display: block; height: 32px; }
+.trace svg { display: block; width: 100%; height: 32px; overflow: visible; cursor: crosshair; }
+.trace polyline { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.trace-base { stroke: var(--rule-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.trace-cursor { stroke: var(--accent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.trace-empty { display: flex; align-items: center; font-size: var(--t-sm); color: var(--ink-3); }
+.trace-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.m-spec { font-size: var(--t-md); color: var(--ink); }
+.m-rec { margin-top: var(--s7); }
+.m-rec h4 { margin-bottom: var(--s3); }
+.m-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.m-then { margin: 0 6px; color: var(--ink-3); font-size: var(--t-sm); }
+
+.m-langs { border-top: 1px solid var(--rule); margin-bottom: var(--s5); }
+.m-langs li { display: flex; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--rule); }
+.m-lang-name { font-weight: 600; min-width: 220px; }
+.m-langs .confirm, .m-langs > li > .btn { margin-left: auto; }
+
+.m-matrix .table th:not(:first-child), .m-cell-check { text-align: center; }
+.m-tick { width: 16px; height: 16px; accent-color: var(--ink); cursor: pointer; vertical-align: middle; }
+.m-add-row td { background: transparent; }
+.table td .input, .table td .select { width: 100%; min-width: 120px; }
+
+.m-code {
+  margin: 6px 0 var(--s5);
+  padding: 10px 12px;
+  border-radius: var(--r-control);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+.m-defs dt { font-weight: 650; }
+.m-defs dd { margin: 2px 0 var(--s5); color: var(--ink-2); max-width: 64ch; }
+
+/* the receiver's scope: dark in both themes, like the scale band */
+.m-scope { margin: var(--s7) 0; }
+.m-spectrum, .m-fall { display: block; width: 100%; border-radius: 8px; background: var(--band); }
+.m-spectrum { height: 180px; }
+.m-fall { height: 140px; margin-top: 4px; image-rendering: pixelated; }
+
+/* radio: scans, tuning, what was heard */
+.rd-form { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.rd-form .field-wide { grid-column: span 2; }
+.rd-inline { margin-top: 0; }
+.rd-progress { display: flex; align-items: center; gap: 10px; margin-top: var(--s5); font-variant-numeric: tabular-nums; }
+.rd-progress.is-trouble { color: var(--trouble-ink); }
+.rd-scope { position: relative; }
+.rd-spectrum { height: 200px; }
+.rd-tip { top: -26px; bottom: auto; }
+.rd-name { font-weight: 650; }
+.rd-what { color: var(--ink-2); }
+.rd-what + .tag { margin-left: 6px; }
+.rd-rt { display: block; max-width: 52ch; margin-top: 2px; font-size: var(--t-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-act { white-space: nowrap; text-align: right; }
+.rd-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); cursor: pointer; }
+.rd-link:hover { color: var(--ink); }
+.rd-missing td { color: var(--ink-3); }
+.rd-name-cell { display: inline-flex; align-items: center; gap: 4px; }
+.rd-name-cell .btn { opacity: 0; transition: opacity var(--fast) var(--ease); }
+tr:hover .rd-name-cell .btn, .rd-name-cell .btn:focus-visible { opacity: 1; }
+.rd-rename { display: flex; gap: 6px; }
+.rd-rename .input { min-width: 140px; }
+.rd-retune { margin-top: var(--s5); }
+
+@media (hover: none) { .rd-name-cell .btn { opacity: 1; } }
+
+@media (max-width: 719px) {
+  .rd-form .field-wide { grid-column: 1 / -1; }
+  .manage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  /* Every page stays in sight: the list wraps rather than scrolling sideways out of view. */
+  .m-nav { padding: 8px var(--s5); border-right: 0; border-bottom: 1px solid var(--rule); overflow: visible; }
+  .m-nav-h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .m-nav ul { display: flex; flex-wrap: wrap; gap: 4px; }
+  .m-nav a { white-space: nowrap; height: 34px; }
+  .m-page { padding: var(--s6) var(--s6) 80px; }
+  .meter { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .trace, .meter-detail { grid-column: 1 / -1; }
+  .m-item .m-edit { margin-left: 0; }
+  .m-lang-name { min-width: 0; flex: 1; }
+  /* On a phone the lag table keeps the medians: Station, State, Text and Translated. */
+  .m-lag :is(th, td:not(.table-empty)):is(:nth-last-child(1), :nth-last-child(2), :nth-last-child(4)) { display: none; }
+}
+
+/* The responsibility note, at the top of the pages that tune a receiver */
+.rd-notice { max-width: 78ch; margin: calc(-1 * var(--s4)) 0 var(--s7); padding: var(--s3) var(--s6); border-radius: 8px; background: var(--sunken); color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
+.rd-notice > summary { color: var(--ink); }
+.rd-notice .fold-body { padding: 2px 0 var(--s3) 20px; }
+.rd-notice p { text-wrap: pretty; }
+.rd-kind { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rd-sub { display: block; max-width: 40ch; margin-top: 2px; font-size: var(--t-sm); color: var(--ink-3); text-wrap: pretty; }
+
+/* A station's mode: listen only, transcribe, or transcribe and translate (saved with the rest). */
+.m-mode { margin-bottom: 16px; }
+.m-mode .seg { display: inline-flex; }
+.m-mode .m-hint { margin-top: 8px; }
+div.m-trouble { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+div.m-trouble > p { margin: 0; }
+
+/* A quiet note about the list below it, with its one way forward. */
+.m-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; max-width: 78ch; margin: 0 0 var(--s6); padding: var(--s5) var(--s6); border-radius: 8px; background: var(--sunken); color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
+.m-note p { flex: 1 1 32ch; text-wrap: pretty; }
+.m-note strong { color: var(--ink); font-weight: 650; }
+.m-item .m-region { margin: 8px 0 0 20px; padding: var(--s5); }
+
+/* Listen: a receiver tuned by hand. The readout and the scope are the instrument; the rest is
+   the quiet settings around it. */
+.lv-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--s5) var(--s8); margin-top: var(--s4); }
+.lv-freq { display: inline-flex; align-items: baseline; gap: var(--s3); }
+.lv-freq-input {
+  min-width: 5ch; padding: 0 2px; border: 0; border-bottom: 1px solid transparent; background: none;
+  font: 600 40px/1.1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--ink);
+}
+.lv-freq-input:hover { border-bottom-color: var(--rule-strong); }
+.lv-freq-input:focus-visible { outline: none; border-bottom-color: var(--accent); }
+.lv-unit { font-size: var(--t-md); color: var(--ink-3); }
+.lv-what { display: grid; gap: 2px; min-width: 0; }
+.lv-what strong { font-size: var(--t-lg); font-weight: 650; }
+.lv-ps { font-family: var(--mono); letter-spacing: 0.04em; }
+.lv-rt { font-size: var(--t-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-meter-wrap { display: inline-flex; align-items: center; gap: var(--s4); }
+.lv-meter { position: relative; width: 140px; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.lv-meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); transition: width 200ms linear; }
+.lv-meter-num { min-width: 7ch; font-size: var(--t-sm); color: var(--ink-2); text-align: right; }
+.lv-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s5) var(--s7); margin: var(--s6) 0 var(--s5); }
+.lv-group { display: inline-flex; align-items: center; gap: var(--s2); }
+.lv-group .select { width: auto; }
+.lv-slider { display: inline-flex; align-items: center; gap: var(--s4); font-size: var(--t-ui); color: var(--ink-2); }
+.lv-slider input[type="range"] { width: 120px; accent-color: var(--accent); }
+.lv-slider-v { min-width: 4ch; font-size: var(--t-sm); color: var(--ink-3); }
+.lv-field { flex-wrap: wrap; align-self: end; padding-bottom: 6px; }
+.lv-audio { gap: var(--s4); }
+.lv-scope { margin: 0; }
+.lv-spectrum, .lv-fall { display: block; width: 100%; background: var(--band); }
+.lv-spectrum { height: 220px; border-radius: 8px 8px 0 0; cursor: crosshair; touch-action: none; }
+.lv-spectrum:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lv-fall { height: 200px; border-radius: 0 0 8px 8px; image-rendering: pixelated; }
+.lv-readout { min-height: 1.45em; }
+.lv-under { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4) var(--s6); margin-top: var(--s4); }
+.lv-chips { display: flex; flex-wrap: wrap; gap: var(--s3); }
+.lv-ask { border-left: 0; }
+.lv-scan-state { display: flex; align-items: center; gap: var(--s4); max-width: none; }
+.lv-bar { display: block; width: 120px; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.lv-bar > span { display: block; height: 100%; background: var(--ink-2); }
+tr.is-current .lv-bar > span { background: var(--accent); }
+tr.is-current td:first-child { color: var(--accent-text); font-weight: 650; }
+tr.is-off td { color: var(--ink-3); }
+@media (max-width: 720px) {
+  .lv-head { grid-template-columns: 1fr; }
+  .lv-freq-input { font-size: 32px; }
+}
+
+/* Listen: the stations as one list to play. A whole row is the button; the one playing shows its
+   stop in the pointer colour, as the station list's speaker does. */
+.ls-list { border-top: 1px solid var(--rule); }
+.ls-row { border-bottom: 1px solid var(--rule); }
+.ls-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px var(--s3);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.ls-main:hover:not(:disabled) { background: color-mix(in oklab, var(--ink) 5%, transparent); }
+.ls-main:disabled { cursor: default; }
+.ls-main > svg { flex: none; color: var(--ink-3); }
+.ls-row.is-playing .ls-main > svg { color: var(--accent); }
+.ls-text { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.ls-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-sub, .ls-why { font-size: var(--t-sm); color: var(--ink-2); }
+.ls-why { color: var(--ink-3); }
+/* On the air here: the frequency leads each row in figures that line up, as on a dial; a find
+   without a name reads quieter than a named station. */
+.ls-freq { flex: none; min-width: 8ch; text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ls-name.is-unnamed { font-weight: 500; color: var(--ink-2); }
+/* The receiver a scan or the tuner uses, named, with the switch to another beside it. */
+.rx-switch { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin: 0 0 var(--s5); font-size: var(--t-sm); color: var(--ink-2); }
+.rx-switch strong { color: var(--ink); font-weight: 650; }
+.rd-nothing .m-actions { margin-top: 0; }
+.ls-volume { display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--ink-2); }
+.ls-volume input { width: 128px; accent-color: var(--accent); }

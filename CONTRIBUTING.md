@@ -1,0 +1,111 @@
+# Contributing to Wavescribe
+
+Wavescribe is an early alpha and the design is still moving: open an issue before starting large
+work. Before changing anything substantial, read
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how it works, and the decisions already made) and
+[docs/LICENSING.md](docs/LICENSING.md) (**check it before adding any dependency or model**).
+[docs/RADIO.md](docs/RADIO.md), [docs/MODELS.md](docs/MODELS.md) and [docs/FEED.md](docs/FEED.md)
+cover their own areas.
+
+## Getting started
+
+```sh
+brew install ffmpeg uv node
+uv python install 3.12                      # newer Pythons lack wheels for some ML dependencies
+uv sync                                     # includes the dev tools (pytest, ruff)
+npm ci --prefix frontend                    # only to change the page
+python3 scripts/commit_checks.py install    # the commit checks, as git hooks
+uv run pytest -m "not models"               # runs without downloaded models
+uv run wavescribe models fetch              # about 8 GB; then `uv run pytest` runs everything
+uv run ruff check . && uv run ruff format --check .
+```
+
+No radio hardware is needed: internet streams go through the same `AudioSource` interface as
+radio, and the radio code is tested on synthetic signals.
+
+## Ground rules
+
+1. **Offline at runtime.** No cloud APIs and no telemetry. The network is used only by explicit
+   setup actions that download models and assets.
+2. **Licences are checked before use.** Every library, tool and model gets a
+   [docs/LICENSING.md](docs/LICENSING.md) entry first, following its tiers. Permissive code can be
+   imported; GPL tools run only as separate processes. We never commit, mirror, convert-and-upload
+   or bundle model weights: users download them from the rights holder. Every dependency must be
+   installable offline from a cache. Say which licence it has in the pull request.
+3. **Nothing private or copyrighted in the repo:** no secrets, personal data, model weights or
+   recorded broadcast audio. Test fixtures are synthetic (e.g. TTS-generated) or clearly licensed.
+4. **Language-agnostic.** Languages are BCP-47 codes in config. The speech and translation
+   models, the keyword pack and the spoken-alert voice are chosen per language from config and
+   the model registry, so adding a language takes configuration and a model.
+5. **Alerts use source-language text.** Translation is for people and never sits on the alert
+   path.
+6. **Receive only.** No transmit code paths, no decryption of protected services.
+7. **Runs 24/7, possibly on battery.** Memory and disk stay bounded, it recovers from SDR or
+   stream dropouts, and power draw stays modest. Measure, don't guess.
+8. **Platform-specific code sits behind interfaces** (MLX, `say`, notifications), with a portable
+   fallback where one is reasonable.
+
+## Code map
+
+`src/wavescribe/` has one module per interface implementation, wired together by `pipeline.py`:
+
+- **Sources:** `sources/stream.py` (internet streams through ffmpeg), `sources/sdr.py` (an
+  `rtl_sdr` pipe) with our numpy/scipy demodulators: `dsp/wfm.py` (broadcast FM),
+  `dsp/channel.py` (NFM and AM with squelch), `dsp/rds.py` (RDS)
+- **Radio:** `radio/` (band plans in `bands.toml` and `bandplan.py` with the privacy classes,
+  `scan.py` sweeps with `rtl_power`, `catalog.py` what was heard here, `service.py` the page's
+  scans and heard stations, `cli.py` `wavescribe radio`); see [docs/RADIO.md](docs/RADIO.md)
+- **Gate and segmenter:** `segment/vad.py` (Silero VAD), `gate/yamnet.py` (drops music)
+- **Speech recognition:** `asr/parakeet.py`, `asr/mlx_audio.py`, and `asr/checks.py` (the
+  hallucination filter)
+- **Translation:** `translate/llm.py`, `translate/madlad.py`
+- **Rules and alerts:** `rules/` (keyword and LLM rules), `alerts/` (notifications, spoken
+  alerts, CAP 1.2)
+- **Storage and questions:** `store.py` (SQLite with FTS5), `ask.py`
+- **Outputs and federation:** `outputs.py` (webhooks and pushes), `events.py` (the shared JSON
+  shape), `remote.py` (follows another Wavescribe's feed)
+- **The web page:** `frontend/` holds the page's sources (`src/reading/` the reading view,
+  `src/manage/` Listen, Find and Settings, `src/components/` and `src/styles/` the shared
+  components and the design tokens in `src/styles/tokens.css`), built into `web/dist/`. `web/`
+  holds the server (`server.py`, `feed.py` for `/feed/v1`, `api.py` for the page's controls);
+  `app.py` runs a session and applies page changes, which `settings.py` keeps in
+  `config/ui.toml`
+- **Models and system:** `models.toml` (the model registry, with pinned revisions and licences)
+  read by `registry.py`; `catalog/` (station and model catalogues), `admin.py`, `downloads.py`,
+  `system.py` (the resource monitor)
+
+## Conventions
+
+- `src/` layout, `pyproject.toml` managed by uv, CLI entry point `wavescribe`.
+- `ruff` for lint and format, `pytest`, type hints on public functions. Prefer small modules.
+- Config is TOML. `config/*.example.toml` is tracked; your real `config/*.toml` is gitignored.
+- Runtime data goes in `data/` (gitignored); models go in `models/` or the tool's own cache.
+- Structured logging, with the timing of every pipeline stage: that's how the latency and
+  capacity targets are proven.
+- Small commits with descriptive messages. When you change an interface or a decision, update
+  the matching doc in the same commit. Decisions live in ARCHITECTURE.md;
+  revisit one with evidence, and record the change there.
+- **The page** is React + TypeScript + Vite. Sources live in `frontend/`; `npm --prefix frontend
+  run build` writes `src/wavescribe/web/dist/`. The built page is always committed with its
+  sources, so running Wavescribe never needs Node. The build works offline from
+  `package-lock.json` and bundles every asset (no CDN, no web fonts). `npm --prefix frontend
+  test` runs the page's own tests with Node's built-in test runner, so they need no packages.
+
+## Commit checks
+
+`scripts/commit_checks.py` runs as a `pre-commit` hook once you've run
+`python3 scripts/commit_checks.py install`. It blocks a commit when:
+
+- the built page doesn't match the page sources being committed;
+- a new dependency has no LICENSING.md entry, or a model is added or re-pinned without
+  LICENSING.md updated in the same commit.
+
+Checks of your own can go in `.git/hooks/pre-commit.local`: the hook runs it afterwards when it
+exists and is executable. Do what a blocked commit says and commit again; don't bypass the hook.
+
+Every pull request runs the same checks on GitHub: ruff, the tests that need no models, and a
+fresh build of the page compared with the committed one.
+
+## License
+
+By contributing you agree that your contributions are licensed under [Apache-2.0](LICENSE).

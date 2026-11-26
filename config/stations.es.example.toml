@@ -1,0 +1,20 @@
+# Example station list for Spain (es-ES), the second source language used to check that Wavescribe
+# stays language-agnostic: same code, different config. Copy and adapt like stations.example.toml.
+# Stream URLs are RTVE's own dispatcher endpoints (verified 2026-11-09).
+
+[defaults]
+language = "es-ES"
+translate_to = ["en"]
+alert_languages = ["en"]
+
+[[station]]
+id = "rne5"
+name = "RNE Radio 5 Todo Noticias"
+priority = 1                   # public broadcaster, all-news
+stream = "https://dispatcher.rndfnk.com/crtve/rne5/main/mp3/high"
+
+[[station]]
+id = "rne1"
+name = "RNE Radio Nacional"
+priority = 2
+stream = "https://dispatcher.rndfnk.com/crtve/rne1/main/mp3/high"

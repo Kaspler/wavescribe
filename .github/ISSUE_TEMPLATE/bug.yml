@@ -1,0 +1,73 @@
+name: Bug report
+description: Something doesn't work, or works differently from what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Wavescribe is an early alpha, so a report from any setup is useful. Only the first three fields are required.
+
+        A security problem doesn't belong here: please report it privately, as [SECURITY.md](https://github.com/Kaspler/wavescribe/blob/main/SECURITY.md) describes.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: >-
+        The command you ran or what you clicked on the page, step by step. If it depends on a
+        station, include its entry from your stations file.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: >-
+        What `uv run wavescribe --version` prints and, in a git clone, what
+        `git rev-parse --short HEAD` prints.
+      placeholder: wavescribe 0.1.0a1, commit 1a2b3c4
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and memory
+      placeholder: MacBook Air M2, 16 GB
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu, About This Mac; or `sw_vers -productVersion`.
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where the audio came from
+      multiple: true
+      options:
+        - An internet stream
+        - An RTL-SDR dongle
+        - Another Wavescribe (a remote station)
+  - type: input
+    id: receiver
+    attributes:
+      label: Receiver and antenna
+      description: >-
+        Only for radio: the dongle's model and, if reception is part of the problem, the antenna
+        and where it stands.
+      placeholder: RTL-SDR Blog V4, telescopic whip indoors
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: >-
+        Wavescribe logs to `data/logs/wavescribe.jsonl` in the folder you start it from; the
+        lines from around the time of the problem are enough. `listen` and `serve` also print
+        what they do to the Terminal when started with `-v`. Before you paste, remove anything
+        private: addresses that carry a token or a password, and the names of machines on your
+        network.
+      render: text

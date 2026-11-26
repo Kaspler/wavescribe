@@ -1,0 +1,115 @@
+# Example alert rules. Rules run on SOURCE-LANGUAGE text, so they never depend on translation.
+# Keyword rules reference topics from config/keywords/<lang>.toml, picked by each station's language.
+# Copy to config/alerts.toml (gitignored) and adapt.
+#
+# Severity: low (stored and highlighted only), medium, high, critical. What each level does is
+# set in [actions]. `near` raises the severity one level when a place from that group is named in
+# the same utterance. Text heard as another language than the station's never goes above low.
+
+[delivery]
+notify_language = "en"         # notifications use this translation when it arrives in time
+translation_wait_s = 10        # wait this long for translations before delivering without them
+cooldown_minutes = 15          # repeats of a rule within this window add to one alert
+
+# Spoken alerts: a voice and a fixed phrase per language. The phrase is spoken when no checked
+# translation is available, so the alert is never silent. Voices come from macOS (System
+# Settings → Accessibility → Spoken Content → System voice → Manage voices).
+# intro is spoken before a checked translation of what was said.
+[speak.en]
+voice = "Daniel"
+intro = "Attention. The radio reports:"
+fallback = "Attention. An important announcement on the radio. Please check the screen."
+
+# Another language, as an example: add "speak:es" to the actions below to use it.
+# [speak.es]
+# voice = "Mónica"
+# intro = "Atención. La radio informa:"
+# fallback = "Atención. Un aviso importante en la radio. Mire la pantalla."
+
+# min_mentions: below this many mentions within the cooldown the alert stays low (stored, not
+# announced), unless a local place from `near` is named. A real event is repeated on every
+# bulletin; a passing reference ("o apagão" in a political debate) is said once.
+# Tune on what you actually hear: `uv run wavescribe alerts replay --alerts <draft.toml>` runs everything
+# stored through a draft and shows what it would have announced.
+
+[[rule]]
+id = "civil-protection"
+topics = ["civil_protection"]
+near = ["local"]
+severity = "critical"
+min_mentions = 2
+
+[[rule]]
+id = "civil-protection-mention"
+topics = ["civil_protection_weak"]
+near = ["local"]
+severity = "low"
+
+[[rule]]
+id = "water"
+topics = ["water"]
+near = ["local"]
+severity = "high"
+min_mentions = 2
+
+[[rule]]
+id = "water-mention"
+topics = ["water_weak"]
+near = ["local"]
+severity = "low"
+
+[[rule]]
+id = "power"
+topics = ["power"]
+near = ["local"]
+severity = "high"
+min_mentions = 3
+
+# Fires, storms and floods are in every national bulletin: announced when they are local.
+[[rule]]
+id = "hazards"
+topics = ["hazards"]
+near = ["local"]
+severity = "low"
+
+[[rule]]
+id = "weather-warning"
+topics = ["hazards_weak"]
+near = ["local"]
+severity = "low"
+
+[[rule]]
+id = "comms"
+topics = ["comms"]
+near = ["local"]
+severity = "medium"
+min_mentions = 2
+
+[[rule]]
+id = "infrastructure-attack"
+topics = ["infrastructure_attack"]
+severity = "medium"
+min_mentions = 2
+
+# "guerra" is in every international bulletin (and in songs): keep it quiet unless it's local.
+[[rule]]
+id = "conflict-mention"
+topics = ["conflict_weak"]
+near = ["local"]
+severity = "low"
+
+# A rule of any kind other than keyword or llm (such as a station going silent, below) is read
+# and skipped: those kinds don't exist yet.
+# [[rule]]
+# id = "station-silent"
+# kind = "silence"
+# stations = ["antena1"]
+# after_seconds = 120
+# severity = "high"
+
+[actions]
+# speak:<lang> speaks a checked translation into <lang> (or that language's fallback phrase).
+critical = ["notify", "speak:en", "log"]
+high = ["notify", "speak:en", "log"]
+medium = ["notify", "log"]
+low = ["log"]

@@ -1,0 +1,50 @@
+# Example station list: Portuguese national broadcasters (streams), as an example of one country.
+# Copy to config/stations.toml (gitignored) and adapt it to where you are.
+# Stream URLs were verified 2026-11-09. FM frequencies depend on your nearest transmitter: look
+# them up (e.g. radiomap.eu or the broadcaster's site) and verify them with your receiver.
+
+[defaults]
+language = "pt-PT"
+translate_to = ["en"]          # continuous
+alert_languages = ["en", "es"] # read, not used yet: alerts.toml sets the alert languages
+
+[[station]]
+id = "antena1"
+name = "RTP Antena 1"
+priority = 1                   # public broadcaster; carries official emergency info
+fm_mhz = [99.0]                # replace with your local frequencies
+mw_khz = 666                   # read, not used yet (medium wave isn't received)
+stream = "https://radiocast.rtp.pt/antena180a.mp3"
+stream_hls = "https://streaming-live.rtp.pt/liveradio/antena180a/playlist.m3u8"
+
+[[station]]
+id = "tsf"
+name = "TSF Rádio Notícias"
+priority = 2                   # all-news
+stream = "https://directo.tsf.pt/tsfdirecto.mp3"
+
+[[station]]
+id = "renascenca"
+name = "Rádio Renascença"
+priority = 2
+stream = "https://playerservices.streamtheworld.com/api/livestream-redirect/RADIO_RENASCENCA.mp3"
+
+[[station]]
+id = "observador"
+name = "Rádio Observador"
+priority = 3
+stream = "https://playerservices.streamtheworld.com/api/livestream-redirect/OBSERVADOR.mp3"
+
+# Radio receivers (RTL-SDR dongles), addressed by USB serial. A station that names a device is
+# heard on it, at whichever of its fm_mhz lies within ±1.08 MHz of center_mhz (at 2.4 MS/s), and
+# the SDR is then used instead of the stream. Set each dongle's serial once with rtl_eeprom
+# (docs/HARDWARE.md). gain_db is manual: lower it if stations bleed into each other.
+#
+# [[device]]
+# id = "a"
+# serial = "00001234"
+# center_mhz = 98.6
+# gain_db = 20
+# ppm = 0           # crystal error in parts per million (rtl_test -p); 0 for a TCXO dongle
+#
+# ...then add `device = "a"` to the antena1 station above.

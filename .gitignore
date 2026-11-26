@@ -1,0 +1,52 @@
+# Runtime data: recordings, transcripts, databases. Broadcast audio is copyrighted, so keep it out of git.
+data/
+recordings/
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
+*.iq
+*.cu8
+*.cs16
+*.sqlite
+*.sqlite3
+*.db
+
+# Models and caches (downloaded during setup, never committed)
+models/
+.cache/
+*.gguf
+*.safetensors
+*.mlpackage
+*.bin
+
+# Local config (copy from config/*.example.toml)
+config/**/*.toml
+!config/**/*.example.toml
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+# The built page is committed with its sources (CONTRIBUTING.md)
+!src/wavescribe/web/dist/
+*.egg-info/
+
+# The page's build tools (frontend/)
+node_modules/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# The lockfile pins every dependency for reproducible, offline-cacheable installs (overrides a global *.lock ignore)
+!uv.lock

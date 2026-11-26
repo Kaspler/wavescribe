@@ -1,0 +1,33 @@
+# Keyword pack for Portuguese (pt). Packs are per source language; rules reference them by topic.
+# Matching ignores case and accents, stems words (so list base forms: plurals match), and respects
+# word boundaries. Terms in CAPITALS (acronyms) match exactly. Phrases match word by word.
+# A term starting with "=" matches only as written (case and accents still don't matter): use it
+# when the stem is shared by a common word. Stemming makes "tornado" match "torna" ("becomes")
+# and "água" match "águias" ("eagles"); `uv run wavescribe alerts replay` shows what each term catches.
+# Add a pack for another language as config/keywords/<lang>.toml, e.g. es.toml or uk.toml.
+# Strong topics are phrases that rarely appear by chance; weak topics are common words that only
+# matter with context (rules raise them when a local place is named in the same utterance).
+
+language = "pt"
+
+[topics]
+power = ["apagão", "corte de energia", "falha de energia", "falha elétrica", "reposição da energia", "sem eletricidade", "E-Redes", "REN"]
+water = ["ferver a água", "imprópria para consumo", "corte de água", "falta de água", "sem água", "água contaminada", "abastecimento de água"]
+water_weak = ["=água", "=águas", "abastecimento", "torneira"]
+# Declared states and instructions: what the authorities say when it is real.
+civil_protection = ["estado de emergência", "estado de calamidade", "situação de calamidade", "situação de contingência", "aviso vermelho", "alerta vermelho", "ordem de evacuação", "centro de acolhimento", "=confinamento"]
+# Named in everyday news (a new law, a house fire far away): it matters near home.
+civil_protection_weak = ["Proteção Civil", "ANEPC", "estado de alerta", "situação de alerta", "evacuação", "evacuar", "desalojados"]
+# "cheia(s)" alone is mostly "full", "tornado" mostly "become" (tinha tornado): say them with an
+# article. "abrigo" is left out: it is mostly "sem abrigo" (homeless) or "ao abrigo de".
+hazards = ["incêndio", "fogo florestal", "sismo", "terramoto", "=a cheia", "=as cheias", "risco de cheia", "inundação", "tempestade", "=o tornado", "=um tornado", "deslizamento de terras"]
+hazards_weak = ["aviso laranja", "aviso amarelo", "vento forte", "chuva forte", "agitação marítima"]
+comms = ["rede móvel", "sem rede", "comunicações em baixo", "falha de comunicações", "internet em baixo"]
+# Bare "ataque" is mostly football.
+conflict_weak = ["guerra", "bombardeamento", "ataque aéreo"]
+infrastructure_attack = ["ciberataque", "ataque informático", "sabotagem", "cabos submarinos"]
+
+[places]
+# Your town, district and river valley (these are fictional). Avoid places that are also
+# common words: a town called Mira would match "mira" ("aims").
+local = ["Vila Exemplo", "Vale do Exemplo"]

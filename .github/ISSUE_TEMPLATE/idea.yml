@@ -1,0 +1,28 @@
+name: Idea
+description: Something you'd want Wavescribe to do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What you'd use it for matters most: the situation tells us more than the feature.
+  - type: textarea
+    id: situation
+    attributes:
+      label: Your situation
+      description: >-
+        Where you use Wavescribe or would like to, what you listen to, and what you were trying
+        to do.
+    validations:
+      required: true
+  - type: textarea
+    id: wish
+    attributes:
+      label: What you'd want Wavescribe to do
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: How you manage today, other tools that do it, or the hardware you have.

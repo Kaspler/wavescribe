@@ -1,0 +1,211 @@
+# Model registry: every model Wavescribe lists. Rules: docs/LICENSING.md ("Model registry rules").
+# Each entry pins an exact revision (Hugging Face commit SHA) or a sha256 for direct downloads.
+# Conversions inherit the upstream licence; `upstream` names the rights holder's original.
+# Bring-your-own models go in the private config/models.local.toml instead.
+#
+# `languages` holds BCP-47 tags. A bare language ("pt") matches every region ("pt-PT", "pt-BR");
+# "*" means the model is language-independent or covers too many languages to list here.
+
+[chains]
+# Default order per capability. For a station's language, the first model in the chain that
+# supports it and is installed wins. The pt-PT bake-off set the ASR order (docs/MODELS.md).
+vad = ["silero-vad-v6"]
+# Speech/music: drops songs before ASR (docs/MODELS.md). Optional: without it, songs are transcribed.
+gate = ["yamnet"]
+# Parakeet covers 25 European languages; Whisper turbo takes every other language it knows
+# (Hebrew in the world stations). A station only loads the model its language resolves to.
+asr = ["parakeet-tdt-0.6b-v3", "whisper-large-v3-turbo"]
+# Qwen3.5 beat MADLAD on both speed and quality (docs/MEASUREMENTS.md).
+translate = ["qwen3.5-9b", "madlad400-3b-ct2"]
+
+[[model]]
+id = "silero-vad-v6"
+capability = "vad"
+backend = "silero-onnx"
+source = "url:https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.3/src/silero_vad/data/silero_vad.onnx"
+sha256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+upstream = "https://github.com/snakers4/silero-vad"
+license = "MIT"
+license_url = "https://github.com/snakers4/silero-vad/blob/v6.2.3/LICENSE"
+tier = "default"
+gated = false
+languages = ["*"]
+attribution = "Silero VAD v6.2.3 by Silero Team (MIT)."
+size_gb = 0.0023
+tested = "Every run so far, on talk radio in several languages"
+
+[[model]]
+id = "yamnet"
+capability = "gate"
+backend = "yamnet-litert"
+# Google's own LiteRT build, published with MediaPipe's audio classifier; labels are embedded.
+source = "url:https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite"
+sha256 = "4d8b4a53282dc83ef04e3e7dbc4fbc98082e34e44ed798e16c3a0cdd4c584faf"
+upstream = "https://github.com/tensorflow/models/tree/master/research/audioset/yamnet"
+license = "Apache-2.0"
+license_url = "https://github.com/tensorflow/models/blob/master/LICENSE"
+tier = "default"
+gated = false
+languages = ["*"]
+attribution = "YAMNet by Google (Apache-2.0); AudioSet class names from the AudioSet ontology (CC-BY-SA-4.0)."
+size_gb = 0.004
+tested = "3 min of audio in 0.16 s of one CPU core; separated songs from talk on pt-PT radio"
+
+[[model]]
+id = "parakeet-tdt-0.6b-v3"
+size_gb = 2.34
+tested = "Bake-off, pt-PT: 63× real time; answers in English on ~3% of utterances"
+capability = "asr"
+backend = "parakeet-mlx"
+source = "hf:mlx-community/parakeet-tdt-0.6b-v3"
+revision = "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15"
+files = ["config.json", "model.safetensors"]
+upstream = "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3"
+license = "CC-BY-4.0"
+license_url = "https://creativecommons.org/licenses/by/4.0/"
+tier = "default"
+gated = false
+languages = ["bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk"]
+attribution = "Parakeet-TDT-0.6B-v3 by NVIDIA (CC-BY-4.0); MLX conversion by mlx-community."
+notes = "Detects the language itself among the languages it supports; trained on European Portuguese."
+
+[[model]]
+id = "madlad400-3b-ct2"
+size_gb = 2.75
+tested = "pt-PT→en: 2.9 s per utterance on CPU; invents content into Ukrainian"
+capability = "translate"
+backend = "ctranslate2-madlad"
+source = "hf:Nextcloud-AI/madlad400-3b-mt-ct2-int8"
+revision = "aa32bbdeba7880eff2096ec044cb155a340a9400"
+files = ["config.json", "model.bin", "shared_vocabulary.json", "spiece.model"]
+upstream = "https://huggingface.co/google/madlad400-3b-mt"
+license = "Apache-2.0"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+tier = "default"
+gated = false
+languages = ["*"]
+attribution = "MADLAD-400 3B MT by Google (Apache-2.0); CTranslate2 int8 conversion by Nextcloud."
+notes = "419 languages; target chosen with a <2xx> prefix token."
+# Measured: pt-PT -> uk produced fluent invented content (docs/MEASUREMENTS.md).
+unsafe_targets = ["uk"]
+
+# -- More ASR models through mlx-audio. Whisper turbo is the chain's fallback; the others are
+# -- bake-off contenders: the bake-offs decide whether and where they go (docs/MEASUREMENTS.md).
+
+[[model]]
+id = "whisper-large-v3-turbo"
+size_gb = 1.5
+tested = "Bake-off, pt-PT: 18× real time; closest to Whisper large-v3"
+capability = "asr"
+backend = "mlx-audio"
+source = "hf:mlx-community/whisper-large-v3-turbo-asr-fp16"
+revision = "624c19c9af5603fa73b83bce14d4aeea96156d18"
+upstream = "https://huggingface.co/openai/whisper-large-v3-turbo"
+license = "MIT"
+license_url = "https://github.com/openai/whisper/blob/main/LICENSE"
+tier = "default"
+gated = false
+languages = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv",
+    "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no",
+    "th", "ur", "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr",
+    "az", "sl", "kn", "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu",
+    "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl",
+    "mg", "as", "tt", "haw", "ln", "ha", "ba", "jv", "su"]
+attribution = "Whisper large-v3-turbo by OpenAI (MIT); MLX conversion by mlx-community."
+notes = "Transcribes only; cannot translate."
+
+[[model]]
+id = "whisper-large-v3"
+size_gb = 2.87
+tested = "Bake-off, pt-PT: 11× real time (the reference for agreement)"
+capability = "asr"
+backend = "mlx-audio"
+source = "hf:mlx-community/whisper-large-v3-asr-fp16"
+revision = "f4b9d561e7f1a5c0587726ff7ff03da2cc80fcf9"
+upstream = "https://huggingface.co/openai/whisper-large-v3"
+license = "Apache-2.0"
+license_url = "https://huggingface.co/openai/whisper-large-v3"
+tier = "default"
+gated = false
+languages = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv",
+    "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no",
+    "th", "ur", "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr",
+    "az", "sl", "kn", "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu",
+    "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl",
+    "mg", "as", "tt", "haw", "ln", "ha", "ba", "jv", "su"]
+attribution = "Whisper large-v3 by OpenAI; MLX conversion by mlx-community."
+notes = "The Hugging Face card says Apache-2.0; the openai/whisper code repo is MIT. Both permissive."
+
+[[model]]
+id = "voxtral-mini-4b-realtime"
+size_gb = 8.26
+tested = "Bake-off, pt-PT: slower than real time at fp16; stopped"
+capability = "asr"
+backend = "mlx-audio"
+source = "hf:mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16"
+revision = "9977a0f5c0fce8472083af92957497118adc412b"
+upstream = "https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602"
+license = "Apache-2.0"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+tier = "default"
+gated = false
+languages = ["en", "fr", "es", "de", "ru", "zh", "ja", "it", "pt", "nl", "ar", "hi", "ko"]
+attribution = "Voxtral Mini 4B Realtime by Mistral AI (Apache-2.0); MLX conversion by mlx-community."
+
+[[model]]
+id = "qwen3-asr-1.7b"
+size_gb = 2.29
+tested = "Bake-off, pt-PT: 10× real time; looped for 78 s once"
+capability = "asr"
+backend = "mlx-audio"
+source = "hf:mlx-community/Qwen3-ASR-1.7B-8bit"
+revision = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
+upstream = "https://huggingface.co/Qwen/Qwen3-ASR-1.7B"
+license = "Apache-2.0"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+tier = "default"
+gated = false
+languages = ["zh", "en", "yue", "ar", "de", "fr", "es", "ru", "pt", "id", "it", "ko", "th", "vi", "ja",
+    "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "hu", "mk", "ro"]
+attribution = "Qwen3-ASR-1.7B by the Qwen team, Alibaba (Apache-2.0); 8-bit MLX conversion by mlx-community."
+notes = "Also 22 Chinese dialects."
+
+[[model]]
+id = "nemotron-3.5-asr-streaming-0.6b"
+size_gb = 1.19
+tested = "Bake-off, pt-PT: 15× real time; drops jingles but also some short phrases"
+capability = "asr"
+backend = "mlx-audio"
+source = "hf:mlx-community/nemotron-3.5-asr-streaming-0.6b"
+revision = "e550040c0478027ed679b2b6b0d055502c103663"
+upstream = "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b"
+license = "LicenseRef-OpenMDW-1.1"
+license_url = "https://openmdw.ai/license/1-1"
+tier = "default"
+gated = false
+languages = ["en", "es", "de", "fr", "it", "ar", "ja", "ko", "pt", "hi", "zh", "vi", "he", "nl",
+    "cs", "da", "pl", "no", "sv", "th", "tr", "bg", "el", "et", "fi", "hr", "hu", "lt", "lv",
+    "ro", "sk", "uk", "mt", "sl"]
+attribution = "Nemotron 3.5 ASR Streaming 0.6B by NVIDIA (OpenMDW-1.1; keep notices); MLX conversion by mlx-community."
+
+# -- LLM translation (backend: mlx-lm). The default continuous translator, and the route
+# -- for alerts and secondary languages.
+
+[[model]]
+id = "qwen3.5-9b"
+size_gb = 5.54
+tested = "pt-PT→en: 1.3 s per utterance, 1.7 s live end of speech to English"
+capability = "translate"
+backend = "mlx-lm"
+source = "hf:mlx-community/Qwen3.5-9B-MLX-4bit"
+revision = "938d8919941c6e7efd3c7150eff7fe9d12afa631"
+upstream = "https://huggingface.co/Qwen/Qwen3.5-9B"
+license = "Apache-2.0"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+tier = "default"
+gated = false
+languages = ["*"]
+attribution = "Qwen3.5-9B by the Qwen team, Alibaba (Apache-2.0); 4-bit MLX conversion by mlx-community."
+notes = "201 languages and dialects. Runs on the GPU next to ASR."

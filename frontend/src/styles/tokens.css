@@ -1,0 +1,173 @@
+/* Wavescribe design tokens. The page is drawn like a well-made receiver: a warm grey body, a white
+   reading surface, one dark scale band with printed lettering and indicator lamps. Colour does
+   jobs: orange is the pointer (what you follow, focus, selection, fresh text), green and amber are
+   lamps (on air, trouble), red belongs to alerts and nothing else. */
+
+:root {
+  color-scheme: light;
+
+  /* body and surfaces */
+  --body: #e5e5e2;
+  --body-2: #dcdcd8;
+  --surface: #fbfbfa;
+  --raised: #ffffff;
+  --sunken: #f1f0ed;
+
+  /* ink */
+  --ink: #1b1a18;
+  --ink-2: #4a4843;
+  --ink-3: #64615b;
+  --ink-inverse: #fbfbfa;
+
+  /* rules */
+  --rule: #d6d5d0;
+  --rule-strong: #bdbcb6;
+  --field-edge: #918e87; /* 3:1 on white: the edge that says "type here" */
+
+  /* the scale band (dark in both themes) */
+  --band: #23221f;
+  --band-ink: #ebe8e1;
+  --band-ink-2: #a8a49c;
+  --band-tick: #4d4a45;
+  --band-hover: #2e2d29;
+
+  /* the pointer: what the reader follows, focus, selection, fresh text */
+  --accent: #d24e14;
+  --accent-ink: #ffffff;
+  --accent-text: #b3420e; /* the pointer as small text: 5.5:1 on the surface */
+  --accent-tint: rgb(210 78 20 / 0.13);
+  --accent-wash: rgb(210 78 20 / 0.07);
+
+  /* lamps */
+  --lamp-speech: #1f9a45;
+  --lamp-on: #1f9a45;
+  --lamp-trouble: #c27a0a;
+  --lamp-off: #85827b;
+  --band-lamp-speech: #4cd472;
+  --band-lamp-trouble: #f2a72e;
+  --band-lamp-off: #7d7972;
+  --trouble-ink: #8f5a00;
+
+  /* alerts own red */
+  --alert: #c4321f;
+  --alert-ink: #ffffff;
+  --alert-tint: rgb(196 50 31 / 0.12);
+  --alert-text: #a82a19;
+
+  --shadow-pop: 0 12px 32px -8px rgb(30 25 20 / 0.28), 0 2px 6px rgb(30 25 20 / 0.10);
+  --pop-border: transparent;
+
+  /* type */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto,
+    "Noto Sans", "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-ui: 13px;
+  --t-md: 14px;
+  --t-lg: 16px;
+  --t-xl: 20px;
+  --read: 17px; /* transcript text; the reader's size setting changes it */
+  --read-lh: 1.55;
+  --measure: calc(var(--read) * 33); /* about 68 characters at any text size */
+
+  /* space, shape, motion */
+  --s1: 2px;
+  --s2: 4px;
+  --s3: 6px;
+  --s4: 8px;
+  --s5: 12px;
+  --s6: 16px;
+  --s7: 20px;
+  --s8: 24px;
+  --s9: 32px;
+  --s10: 40px;
+  --r-control: 6px;
+  --r-pop: 10px;
+  --header-h: 48px;
+  --rack-w: 248px;
+  --rail-w: 320px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --fast: 120ms;
+  --med: 200ms;
+  --slow: 320ms;
+}
+
+:root[data-size="s"] { --read: 15px; }
+:root[data-size="l"] { --read: 20px; }
+:root[data-size="xl"] { --read: 24px; --read-lh: 1.5; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --body: #1c1b19;
+    --body-2: #24231f;
+    --surface: #131312;
+    --raised: #262522;
+    --sunken: #0f0f0e;
+    --ink: #ecebe6;
+    --ink-2: #b9b5ad;
+    --ink-3: #928e86;
+    --ink-inverse: #131312;
+    --rule: #2f2e2b;
+    --rule-strong: #43413c;
+    --field-edge: #726f69;
+    --band: #0c0c0b;
+    --band-ink: #ebe8e1;
+    --band-ink-2: #9e9a92;
+    --band-tick: #3b3935;
+    --band-hover: #1a1917;
+    --accent: #f26b2d;
+    --accent-ink: #131312;
+    --accent-text: #f26b2d;
+    --accent-tint: rgb(242 107 45 / 0.2);
+    --accent-wash: rgb(242 107 45 / 0.09);
+    --lamp-speech: #4cd472;
+    --lamp-on: #3fb862;
+    --lamp-trouble: #f2a72e;
+    --lamp-off: #77746d;
+    --trouble-ink: #f2b552;
+    --alert: #e8503b;
+    --alert-ink: #131312; /* dark lettering on the lighter red: 5.0:1, where white reaches 3.7 */
+    --alert-tint: rgb(232 80 59 / 0.2);
+    --alert-text: #ff8a78;
+    --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.6);
+    --pop-border: var(--rule-strong);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --body: #1c1b19;
+  --body-2: #24231f;
+  --surface: #131312;
+  --raised: #262522;
+  --sunken: #0f0f0e;
+  --ink: #ecebe6;
+  --ink-2: #b9b5ad;
+  --ink-3: #928e86;
+  --ink-inverse: #131312;
+  --rule: #2f2e2b;
+  --rule-strong: #43413c;
+  --field-edge: #726f69;
+  --band: #0c0c0b;
+  --band-ink: #ebe8e1;
+  --band-ink-2: #9e9a92;
+  --band-tick: #3b3935;
+  --band-hover: #1a1917;
+  --accent: #f26b2d;
+  --accent-ink: #131312;
+  --accent-text: #f26b2d;
+  --accent-tint: rgb(242 107 45 / 0.2);
+  --accent-wash: rgb(242 107 45 / 0.09);
+  --lamp-speech: #4cd472;
+  --lamp-on: #3fb862;
+  --lamp-trouble: #f2a72e;
+  --lamp-off: #77746d;
+  --trouble-ink: #f2b552;
+  --alert: #e8503b;
+  --alert-ink: #131312;
+  --alert-tint: rgb(232 80 59 / 0.2);
+  --alert-text: #ff8a78;
+  --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.6);
+  --pop-border: var(--rule-strong);
+}

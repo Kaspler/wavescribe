@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/Kaspler/wavescribe/security/advisories/new
+    about: >-
+      Please report security problems privately, not in a public issue. This opens
+      "Report a vulnerability", GitHub's private form (see SECURITY.md).
