@@ -228,6 +228,9 @@ How it works:
 - Whatever is always there (the dongle's spike at its centre, its own signals learnt with
   `radio spurs --learn`, a beacon) becomes part of the floor. A channel busy for two minutes
   ends as one catch and is then taken as noise.
+- Noise rising on half the channels or more at once is interference, not traffic: nothing is
+  caught while it lasts. If it stays for ten seconds (a charger switched on nearby), it is taken
+  as the new floor, and the station's status says the watch was deaf while it lasted.
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 
@@ -247,19 +250,22 @@ on this machine and are its heard list's names too.
 
 Limits:
 
-- **A watch covers what one receiver hears at once**, about 2 MHz (2.3 MHz at 2.4 MS/s). A wider
-  band is refused with a slice that fits.
+- **A watch covers what one receiver hears at once**, about 2.2 MHz. A wider band is refused
+  with a slice that fits.
 - **NFM and AM only**: no broadcast FM, which talks all the time anyway.
 - **Up to four transmissions at once.** A fifth while four are running isn't caught; the log
-  (`data/logs`) records it as `watch_missed`.
+  (`data/logs`) counts it as `watch_missed`, without its frequency for a class that keeps
+  nothing.
 - **Shorter than 0.3 s isn't kept** (data bursts, key clicks).
 - **A weak signal next to a strong one can be missed:** a channel 20 dB weaker than a busy one
-  within three channels, or than the signal at its mirror frequency, is taken for that signal's
-  splatter or image.
+  within three channels is taken for that signal's splatter. The receiver also shows a weaker
+  mirror of strong signals about its centre, which the watch ignores, so a channel 20 dB weaker
+  than the one opposite it about the centre is missed too.
 - **In a window centred between two channels** (a band wider than about 0.9 MHz), the two
   channels next to the centre lie close to the dongle's spike and are the least sensitive.
 - **Busy bands queue up.** Catches go through speech recognition one after another, so on a band
-  with many transmissions their words come later.
+  with many transmissions their words come later. Beyond 16 waiting, more are counted in the log
+  (`watch_behind`) and not kept.
 - **Started from a terminal or the stations file.** The page lists a watch like any station, and
   doesn't show its catches.
 - **Tested on synthetic signals, and with no antenna** (no false catches in 10 minutes on PMR446

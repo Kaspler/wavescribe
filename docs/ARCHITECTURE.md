@@ -550,32 +550,42 @@ and digital need the acknowledgement once per receiver. A receiver nobody polls 
 closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`), listen-only
 or transcribed.
 
-**Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`). A station
-whose `SdrTuning` carries a `Watch` (the channels of one window) gets a `WatchSource` instead
-of a channel: one more consumer of the shared pipe. On the dongle's thread, each block goes to
-an `IqHistory` (the last 2 s as the dongle's 8-bit samples, about 10 MB) and an
-`ActivityDetector`: 4096-point FFTs averaged into frames of about 55 ms, each channel's power
-over the middle 80 % of its width against a noise floor kept per bin, which follows the bin only
-while its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins and learnt
-spurs are left out. Two frames 8 dB over the floor start a transmission; 1.2 s under it less
-3 dB end it; under 0.3 s it is counted, not kept; after 120 s it ends with reason `carrier` and
-its bins' floors jump to its level. A start 20 dB under a busy channel within three channels, or
-under its own mirror about the centre (I/Q imbalance), is suppressed, and so is every start of a
-frame in which half the channels (at least four) rise at once. A start opens a
-`NarrowbandDemodulator` for its channel fed from the history 0.3 s before the first frame above
-the floor (but never before the previous catch's audio on that channel ended), at most four at
-once (`watch_missed` otherwise); an end gives a `Catch` with the audio up to 0.3 s after. The
-source's iterator hands catches to the pipeline one at a time: quarter-second chunks with the
-catch's `freq_hz`, a discontinuity on the first so the VAD starts afresh, and 0.8 s of silence
-after so its last utterance ends there. `freq_hz` goes from chunk to utterance to
-`segments.freq_hz`. The pipeline tells the source which utterances passed the gate
-(`speech(utt)`), so once the catch's audio has been read it is published (`watch.publish`) with
-`voice` set; the store and the command line subscribe. In the ASR worker, language `auto` runs
-`transcribe_any` (`asr/language.py`): Whisper's language probabilities, narrowed to the
-station's `languages` unless those together are under 10 %, then the station is replaced by one
-in that language for the checks, translation, alerts and the store. `plan_centre` puts a window
-narrower than about 0.9 MHz wholly above the centre (lowest channel − 250 kHz), so the dongle's
-mirror image of it falls outside; a wider one is centred between two channels.
+**Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`). A station whose
+`SdrTuning` carries a `Watch` (the channels of one window) gets a `WatchSource` instead of a
+channel: one more consumer of the shared pipe. On the dongle's thread, each block goes to an
+`IqHistory` (the last 2 s as the dongle's 8-bit samples, about 10 MB) and an `ActivityDetector`:
+4096-point FFTs averaged into frames (29 of them, 49.5 ms, at 2.4 MS/s), each channel's power over
+the middle 80 % of its width against a noise floor kept per bin, which follows the bin only while
+its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins and learnt spurs are
+left out. Two frames 8 dB over the floor start a transmission; 1.2 s under it less 3 dB end it;
+under 0.3 s it is counted, not kept; after 120 s it ends with reason `carrier` and its bins' floors
+jump to its level. A start 20 dB under a busy channel within three channels, or under its own mirror
+about the centre (a receiver shows a weaker mirror of strong signals), is suppressed. While half the
+channels (at least four) rise at once, and for 0.5 s after, nothing starts and the floors hold;
+after 10 s of that without a break the floors are learnt afresh from the median of the next 0.5 s,
+as at the start. Deafness of 3 s or more is logged once (`watch_deaf`, `watch_hearing`) and shown as
+the station's `warning` in the status. A start opens a `NarrowbandDemodulator` for its channel fed
+from the history 0.3 s before the first frame above the floor (but never before the previous catch's
+audio on that channel ended), at most four at once (`watch_missed` otherwise); an end gives a
+`Catch` with the audio up to 0.3 s after. The dongle's thread queues catches for the station's (16
+at most; beyond that `watch_behind` counts them, so that thread never writes to the store), and when
+the watch stops, what is still being caught is cut where the IQ ends and published. For a class that
+keeps no text, those log lines carry counts, not frequencies. The source's iterator hands catches to
+the pipeline one at a time: quarter-second chunks with the catch's `freq_hz`, a discontinuity on the
+first so the VAD starts afresh, and 0.8 s of silence after so its last utterance ends there.
+`freq_hz` goes from chunk to utterance to `segments.freq_hz`. The pipeline tells the source which
+chunks went through the VAD (`checked(chunk)`) and which utterances passed the gate (`speech(utt)`),
+so once the catch's audio has been read it is published (`watch.publish`) with `voice` true, false,
+or null where nothing looked for speech in it (a watch only listened to); the store and the command
+line subscribe. In the ASR worker, language `auto` runs `transcribe_any` (`asr/language.py`) with a
+model whose wrapper says it can tell languages (`MlxAudioTranscriber.tells_languages`: a
+multilingual Whisper, by its config): Whisper's language probabilities, narrowed to the station's
+`languages` unless those together are under 10 %, then the station is replaced by one in that
+language for the checks, translation, alerts and the store. `plan_centre` puts a window narrower
+than about 0.9 MHz wholly above the centre (lowest channel − 250 kHz), so its mirror falls outside;
+a wider one is centred between two channels, and a window is planned as it will be tuned, so a slice
+suggested for a band too wide fits after centring. The class of a watch is its strictest channel's,
+under whatever region is chosen (`SdrTuning.policed_hz`).
 
 ### Alerts
 

@@ -131,8 +131,8 @@ class ActivityDetector:
             near = (np.abs(offsets - (f - center_hz)) <= half) & ~excluded
             self._weights[i, near] = 1.0
             self._owner[near] = i
-            # The same bins mirrored about the centre: where the dongle's image of this channel
-            # lies, and where the signal this channel is an image of would be.
+            # The same bins mirrored about the centre: where the receiver's mirror of this
+            # channel lies, and where the signal this channel would be a mirror of is.
             mirrored = np.abs(offsets + (f - center_hz)) <= half
             self._mirror[i, mirrored & ~excluded] = 1.0
         self._measured = self._weights.sum(axis=1) > 0
@@ -274,7 +274,7 @@ class ActivityDetector:
 
     def _shadowed(self, i: int, above: np.ndarray, mirror_db: np.ndarray) -> bool:
         """Whether channel ``i`` rising is the shadow of a stronger signal: its own splatter
-        on a channel nearby, the dongle's mirror image of it, or the same signal measured on an
+        on a channel nearby, the receiver's mirror of it, or the same signal measured on an
         overlapping channel."""
         snr = self.snr_db[i]
         if mirror_db[i] - snr >= SHADOW_DB:

@@ -56,7 +56,7 @@ def air(
             phase += b.deviation_hz / b.tone_hz * np.sin(2 * np.pi * b.tone_hz * t)
             wave = on * b.amp * np.exp(1j * phase)
             x += wave
-            if b.image_db is not None:  # the dongle's I/Q imbalance
+            if b.image_db is not None:  # the weaker mirror a receiver shows of strong signals
                 x += 10 ** (-b.image_db / 20) * np.conj(wave)
         if extra is not None:
             x += extra(t)
