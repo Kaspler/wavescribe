@@ -559,6 +559,8 @@ class Pipeline:
                 stations[sid]["rds"] = h.rds
             if h.squelch_open is not None:
                 stations[sid]["squelch_open"] = h.squelch_open
+            if h.warning is not None:
+                stations[sid]["warning"] = h.warning
         return {
             "ready": self.ready,
             "stations": stations,

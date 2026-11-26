@@ -23,6 +23,7 @@ class SourceHealth:
     clipped: float | None = None  # SDR only: share of samples at the ADC's limits (overload)
     rds: dict[str, object] | None = None  # SDR FM only: what the station says about itself
     squelch_open: bool | None = None  # SDR NFM/AM only: someone is transmitting
+    warning: str | None = None  # what keeps it from hearing right now (a watch made deaf)
 
 
 class AudioSource(Protocol):

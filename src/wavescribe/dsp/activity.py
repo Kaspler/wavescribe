@@ -15,11 +15,14 @@ A channel busy for minutes is taken into its floor too, so a stuck carrier ends 
 catch instead of holding a demodulator for good.
 
 A strong signal also shows where it isn't: on its neighbours (its own splatter and the
-transmitter's noise) and mirrored about the centre (the dongle's I/Q imbalance leaves an image
-some 30 to 40 dB down). A start 20 dB or more under a signal close by, or under its own mirror
-image, is taken for that signal's shadow. Where channels overlap (a 25 kHz channel on a 5 kHz
-raster), only the strongest of the overlapping ones starts. Many channels rising together is
-interference or overload (USB noise, a strong signal just outside the window), not traffic.
+transmitter's noise) and, weaker, mirrored about the receiver's centre. A start 20 dB or more
+under a signal close by, or under its own mirror image, is taken for that signal's shadow.
+Where channels overlap (a 25 kHz channel on a 5 kHz raster), only the strongest of the
+overlapping ones starts. Many channels rising together is interference or overload (USB noise,
+a strong signal just outside the window), not traffic: while it lasts nothing starts and the
+floors hold. Ten seconds of it without a break is no passing interference but the noise itself
+risen (a charger switched on nearby), so the floors are learnt afresh, as at the start, rather
+than the watch staying deaf for good.
 
 Times are counted in samples since the first block, so the caller can find a transmission's
 beginning in its own history of the IQ and demodulate it from there.
@@ -47,6 +50,8 @@ MEASURED = 0.8  # the middle of each channel is measured, clear of its neighbour
 SHADOW_DB = 20.0  # this much under a signal nearby or at the mirror: its shadow, not traffic
 SHADOW_CHANNELS = 3  # how far "nearby" reaches, in channels
 BROADBAND = 0.5  # this share of the channels rising at once (and at least four): interference
+CLEAR_S = 0.5  # interference is over once this long has passed without it
+BLIND_S = 10.0  # interference this long without a break: the noise rose, learnt afresh
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,8 @@ class ActivityDetector:
         self._min = round(min_s * rate)
         self._carrier = round(carrier_s * rate)
         self._init_frames = max(3, round(INIT_S / frame_s))
+        self._clear = round(CLEAR_S * rate)
+        self._blind = round(BLIND_S * rate)
         self._down = 1.0 - np.exp(-frame_s / FLOOR_DOWN_S)
         self._up = 1.0 - np.exp(-frame_s / FLOOR_UP_S)
         self._window = np.hanning(fft).astype(np.float32)
@@ -142,6 +149,9 @@ class ActivityDetector:
         self._samples = 0  # samples fed so far
         self._frame_start = 0
         self._channels = [_Channel() for _ in self.freqs]
+        self._deaf_since: int | None = None  # where interference across the window began
+        self._interfered = 0  # the end of the last frame with interference
+        self.relearnt = 0  # times the floors were learnt afresh after the noise rose
         self.snr_db = np.zeros(len(self.freqs))  # each channel over its floor, last frame
         self.power_db = np.full(len(self.freqs), -200.0)  # each channel's power, last frame
 
@@ -152,6 +162,13 @@ class ActivityDetector:
     @property
     def samples(self) -> int:
         return self._samples
+
+    @property
+    def deaf_s(self) -> float | None:
+        """How long interference across the window has kept anything from starting, or None."""
+        if self._deaf_since is None:
+            return None
+        return (self._frame_start - self._deaf_since) / self.rate
 
     def feed(self, iq: np.ndarray) -> list[Activity]:
         x = np.concatenate([self._pending, iq]) if len(self._pending) else iq
@@ -194,7 +211,21 @@ class ActivityDetector:
         holding = self.snr_db >= self.threshold_db - STAY_DB
         states = [c.state for c in self._channels]
         rising_now = sum(1 for i in np.flatnonzero(above) if states[i] != "busy")
-        broadband = rising_now >= max(4, BROADBAND * len(self.freqs))
+        if rising_now >= max(4, BROADBAND * len(self.freqs)):
+            self._interfered = end
+            if self._deaf_since is None:
+                self._deaf_since = start
+            elif end - self._deaf_since >= self._blind:
+                self._deaf_since = None
+                self.relearnt += 1
+                self._floor = None  # from the next frames, as at the start
+                for c in self._channels:
+                    if c.state == "rising":
+                        c.state, c.frames = "quiet", 0
+                return []
+        elif self._deaf_since is not None and end - self._interfered >= self._clear:
+            self._deaf_since = None
+        deaf = self._deaf_since is not None
 
         out: list[Activity] = []
         for i in np.flatnonzero(above | np.array([s != "quiet" for s in states])):
@@ -210,7 +241,7 @@ class ActivityDetector:
                 elif end - c.last >= self._hang:
                     out.append(self._end(i))
                 continue
-            if not above[i] or broadband:
+            if not above[i] or deaf:
                 c.state, c.frames = "quiet", 0
                 continue
             if c.state == "quiet":
@@ -232,7 +263,7 @@ class ActivityDetector:
                 )
             )
 
-        if not broadband:
+        if not deaf:
             # Only bins whose channel is quiet learn: a transmission must not lift its own floor.
             hot = np.array([False] + [c.state != "quiet" for c in self._channels])
             learn = ~hot[self._owner + 1]

@@ -166,6 +166,40 @@ def test_the_mirror_image_of_a_strong_signal_is_no_catch() -> None:
     assert got.freq_hz == PMR[11]
 
 
+def louder(start_s: float, stop_s: float = 1e9, amp: float = 0.14) -> Callable:
+    """More noise across the whole window (about 9 dB more): a charger, USB, overload."""
+    rng = np.random.default_rng(5)
+
+    def noise(t: np.ndarray) -> np.ndarray:
+        on = (t >= start_s) & (t < stop_s)
+        return on * amp * (rng.standard_normal(len(t)) + 1j * rng.standard_normal(len(t)))
+
+    return noise
+
+
+def test_noise_rising_across_the_window_is_no_catch() -> None:
+    c = catcher()
+    assert run(c, air(4.0, [], extra=louder(1.5, 2.5))) == []
+    assert c.missed == 0 and c.deaf_s is None
+
+
+def test_a_lasting_rise_of_the_noise_is_learnt_and_said(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("INFO", logger="wavescribe")
+    c = catcher()
+    deaf = []
+    got = []
+    for iq, t_end in air(18.0, [Burst(PMR[3], 15.0, 16.5, amp=0.5)], extra=louder(2.0)):
+        got += c.feed(iq, t_end)
+        deaf.append(c.deaf_s)
+    # Deaf while the noise is new, said so after a few seconds, and hearing again once its
+    # floors have been learnt afresh: the burst after it is caught.
+    assert max(d or 0 for d in deaf) == pytest.approx(10.0, abs=0.6) and deaf[-1] is None
+    assert [g.freq_hz for g in got] == [PMR[3]]
+    assert got[0].t_start == pytest.approx(T0 + 15.0, abs=0.1)
+    said = [r.getMessage() for r in caplog.records if r.getMessage().startswith("watch_")]
+    assert [m.split()[0] for m in said] == ["watch_deaf", "watch_hearing"]
+
+
 def test_the_history_gives_back_the_dongles_samples() -> None:
     rng = np.random.default_rng(1)
     raw = rng.integers(0, 256, size=2 * 3_000, dtype=np.uint8)

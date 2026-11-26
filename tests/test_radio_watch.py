@@ -289,6 +289,19 @@ class FakeDevice:
         pass
 
 
+def test_a_watch_made_deaf_by_noise_says_so_in_its_health() -> None:
+    from tests.test_radio_watch_detect import louder
+
+    station = watch_station()
+    source = WatchSource(station.id, station.sdr, device=FakeDevice([]))
+    warnings = []
+    for i, (iq, t_end) in enumerate(air(13.0, [], extra=louder(1.0))):
+        source._feed(iq, t_end, i == 0)
+        warnings.append(source.health.warning)
+    assert any(w and w.startswith("deaf") for w in warnings)
+    assert warnings[-1] is None  # the noise is the floor now
+
+
 def test_each_catch_is_transcribed_on_its_own_in_the_language_heard() -> None:
     station = watch_station(languages=["pt-PT", "es"], translate_to=["en"])
     bursts = [

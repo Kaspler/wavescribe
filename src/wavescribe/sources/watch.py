@@ -52,6 +52,7 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 # utterance ends with it instead of running into the next catch.
 CLOSING_S = 0.8
 QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, kept unchecked
+SAY_DEAF_S = 3.0  # interference across the window this long is logged and shown, not a click
 
 
 @dataclass
@@ -73,12 +74,14 @@ class Catcher:
         spurs: list[int] | tuple[int, ...] = (),
         max_active: int = MAX_ACTIVE,
         carrier_s: float = CARRIER_S,
+        station_id: str = "",
     ) -> None:
         watch = tuning.watch
         if watch is None:
             raise ValueError("a catcher needs a watch: the channels of a window")
         self.tuning = tuning
         self.watch: Watch = watch
+        self.station_id = station_id
         d = tuning.device
         self._rate, self._centre = d.sample_rate, d.center_hz
         self._decim = d.sample_rate // SAMPLE_RATE
@@ -102,6 +105,18 @@ class Catcher:
         self._anchor = (0, 0.0)  # the newest sample's index and wall-clock time
         self.missed = 0  # transmissions no demodulator was free for
         self.short = 0  # shorter than a catch: data bursts, key clicks
+        self._deaf: tuple[float, int] | None = None  # once said: how long, and relearnt then
+
+    @property
+    def deaf_s(self) -> float | None:
+        return self.detector.deaf_s
+
+    @property
+    def warning(self) -> str | None:
+        """What keeps the watch from catching anything right now, for the station's health."""
+        if (self.deaf_s or 0) < SAY_DEAF_S:
+            return None
+        return "deaf: noise across the whole window; learnt as the new floor if it stays"
 
     @property
     def active(self) -> list[int]:
@@ -126,7 +141,28 @@ class Catcher:
                 self.short += 1
                 continue
             out.append(self._catch(rec, a))
+        self._say_deaf()
         return out
+
+    def _say_deaf(self) -> None:
+        """One line in the log when interference across the window has made the watch deaf,
+        and one when it hears again."""
+        deaf, said = self.deaf_s, self._deaf
+        if deaf is not None and said is not None:
+            self._deaf = (max(said[0], deaf), said[1])
+        elif deaf is not None and deaf >= SAY_DEAF_S:
+            self._deaf = (deaf, self.detector.relearnt)
+            event(log, "watch_deaf", level=logging.WARNING, station=self.station_id)
+        elif deaf is None and said is not None:
+            self._deaf = None
+            learnt = self.detector.relearnt > said[1]  # the floors, afresh: the noise stayed
+            event(
+                log,
+                "watch_hearing",
+                station=self.station_id,
+                deaf_s=round(said[0], 1),
+                learnt=learnt,
+            )
 
     def stop(self) -> list[Catch]:
         """The catches still running, cut where the IQ ends (the dongle stopped)."""
@@ -208,7 +244,7 @@ class WatchSource:
         self.tuning = tuning
         self._device = device or shared_device(tuning.device)
         self._spurs = tuple(spurs)
-        self._catcher = Catcher(tuning, spurs=self._spurs)
+        self._catcher = self._new_catcher()
         self._privacy = privacy
         self._checks = checks
         self._q: queue.Queue[Catch | None] = queue.Queue(maxsize=queue_catches)
@@ -222,6 +258,9 @@ class WatchSource:
     def health(self) -> SourceHealth:
         return self._health
 
+    def _new_catcher(self) -> Catcher:
+        return Catcher(self.tuning, spurs=self._spurs, station_id=self.station_id)
+
     @property
     def catcher(self) -> Catcher:
         return self._catcher
@@ -231,7 +270,7 @@ class WatchSource:
             raise RuntimeError("'rtl_sdr' not found; install it with: brew install librtlsdr")
         if self._error is not None:  # iterated again after a failure: start afresh
             self._error = None
-            self._catcher = Catcher(self.tuning, spurs=self._spurs)
+            self._catcher = self._new_catcher()
         self._device.attach(self)
         try:
             while not self._closed.is_set() and self._error is None:
@@ -249,7 +288,7 @@ class WatchSource:
         finally:
             self._device.detach(self)
             self._health.connected = False
-            self._health.squelch_open = None
+            self._health.squelch_open = self._health.warning = None
             # Caught but not yet heard by the VAD: still caught, so still logged.
             if self._heard is not None:
                 self._unchecked(self._heard)
@@ -294,7 +333,7 @@ class WatchSource:
                 # After a gap the history no longer runs on: what was being caught ends at the
                 # gap, and the floors are learnt again (half a second).
                 caught = self._catcher.stop()
-                self._catcher = Catcher(self.tuning, spurs=self._spurs)
+                self._catcher = self._new_catcher()
             caught += self._catcher.feed(iq, t_end)
         except Exception as e:
             # Raised again in the station's own thread, so the watch is restarted like any
@@ -310,6 +349,7 @@ class WatchSource:
         h.signal_db = round(float(self._catcher.detector.power_db.max()), 1)
         h.clipped = self._device.clipped
         h.squelch_open = bool(self._catcher.active)
+        h.warning = self._catcher.warning
         for catch in caught:
             self._queue(catch)
 
