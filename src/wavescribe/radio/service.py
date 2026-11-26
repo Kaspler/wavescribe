@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from wavescribe.config import ConfigError, radio_policy
 from wavescribe.dsp import OFF_CENTRE_HZ, check_tunable, frequency_hz, in_band, off_centre
+from wavescribe.radio import holders
 from wavescribe.radio import scan as scanner
 from wavescribe.radio.bandplan import (
     AUTO,
@@ -33,6 +34,8 @@ from wavescribe.radio.catalog import Catalog
 
 if TYPE_CHECKING:
     from wavescribe.app import App
+
+HELD_TTL_S = 3.0  # how long a reading of which programs hold the dongles is reused
 
 
 class RadioError(ValueError):
@@ -51,6 +54,7 @@ class RadioService:
         self._lock = threading.Lock()
         self._job: dict[str, Any] | None = None
         self._cancel: threading.Event | None = None
+        self._held: tuple[float, dict[str, Any]] | None = None
 
     # -- what the panel shows --------------------------------------------------------------
 
@@ -88,6 +92,7 @@ class RadioService:
 
     def view(self, dongles: bool = False) -> dict[str, Any]:
         region, source = self.region()
+        held = self.held_elsewhere()
         by_freq: dict[int, str] = {}
         for s in self.app.config.stations:
             if s.sdr is not None:
@@ -102,7 +107,8 @@ class RadioService:
             "region": default_region() if region == AUTO else region, "region_source": source,
             "regions": list(REGIONS),
             "bands": [b.to_dict() for b in region_bands(region)],
-            "receivers": self.receivers(),
+            "receivers": [{**r, "held_elsewhere": held.get(r["serial"])}
+                          for r in self.receivers()],
             "spurs": self.catalog.spur_info(),
             "heard": heard,
             "scan": self.scan_status(),
@@ -113,7 +119,9 @@ class RadioService:
             "defaults": {"language": self.app.base.defaults.get("language"),
                          "translate_to": list(self.app.base.defaults.get("translate_to", ()))},
             "tools": {"rtl_power": _which("rtl_power"), "rtl_sdr": _which("rtl_sdr")},
-            **({"dongles": self.new_dongles()} if dongles or not self.app.config.devices else {}),
+            **({"dongles": [{**d, "held_elsewhere": held.get(d["serial"])}
+                            for d in self.new_dongles()]}
+               if dongles or not self.app.config.devices else {}),
         }  # fmt: skip
 
     def last_scan(self) -> dict[str, Any] | None:
@@ -125,6 +133,14 @@ class RadioService:
             scan["device"] = next((d.id for d in self.app.config.devices if d.serial == serial),
                                   None)  # fmt: skip
         return scan
+
+    def held_elsewhere(self) -> dict[str, Any]:
+        """Dongles another program holds, by serial (radio/holders.py: macOS's USB registry,
+        nothing opened); read again at most every few seconds while the page polls."""
+        now = time.monotonic()
+        if self._held is None or now - self._held[0] > HELD_TTL_S:
+            self._held = (now, holders.held_elsewhere())
+        return self._held[1]
 
     def new_dongles(self) -> list[dict[str, str]]:
         """Dongles on USB that no receiver uses yet (listing them opens none)."""

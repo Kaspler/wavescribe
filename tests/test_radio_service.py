@@ -14,6 +14,7 @@ from wavescribe.radio.scan import Signal, Sweep
 
 @pytest.fixture
 def radio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(service.holders, "held_elsewhere", dict)  # never this Mac's dongles
     r = Running(make_app(tmp_path))
     r.app._radio = service.RadioService(r.app, Catalog(tmp_path / "radio"))
     r.app.settings.update(lambda d: d.setdefault("radio", {}).update(region="cept"))
@@ -72,6 +73,31 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
     assert status == 200 and ham["privacy"] == "amateur"
     assert radio.app.config.devices[0].center_hz == 145_250_000
     assert st["id"] in radio.app.config_errors  # the walkie-talkie channel is out of reach now
+
+
+def test_a_receiver_another_program_holds_says_so(radio: Running, monkeypatch) -> None:
+    from wavescribe.sources import sdr
+
+    held = {"SN0042": {"pid": 4321, "program": "sdrpp", "other_wavescribe": False,
+                       "reason": "sdrpp (pid 4321) is using it; stop it to use this receiver here"},
+            "SN0043": {"pid": 5432, "program": "rtl_sdr", "other_wavescribe": True,
+                       "reason": "another Wavescribe is using it (rtl_sdr, pid 5432)"}}  # fmt: skip
+    readings = []
+    monkeypatch.setattr(service.holders, "held_elsewhere", lambda: readings.append(1) or held)
+    monkeypatch.setattr(sdr, "list_dongles", lambda: [
+        {"index": "0", "vendor": "V", "product": "P", "serial": "SN0042"},
+        {"index": "1", "vendor": "V", "product": "P", "serial": "SN0043"},
+    ])  # fmt: skip
+    view = radio.call("GET", "/api/manage/radio?dongles=1")[1]
+    [rx] = view["receivers"]
+    assert rx["busy"] == [] and rx["held_elsewhere"] == held["SN0042"]  # not ours: its own field
+    assert view["dongles"][0]["held_elsewhere"]["other_wavescribe"] is True
+    radio.call("GET", "/api/manage/radio")
+    assert len(readings) == 1  # the page polls: read again only every few seconds
+
+    radio.app.radio._held = None
+    held.clear()
+    assert radio.call("GET", "/api/manage/radio")[1]["receivers"][0]["held_elsewhere"] is None
 
 
 def test_a_scan_saved_before_scans_named_their_receiver_is_named_by_its_serial(

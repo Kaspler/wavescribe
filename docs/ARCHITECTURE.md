@@ -515,7 +515,15 @@ them as null, and its `device` is filled in from its serial while a receiver has
 receiver with running stations or a spectrum monitor is refused with what holds it, unless the
 page sends `pause: true`: they stop for the scan and start again when it ends. Dongles on USB
 that no receiver uses are listed with `rtl_test -d no-such-dongle`, which prints the list and
-opens none. Every 15 s, a page FM station still named after its frequency takes its RDS name
+opens none. `busy` names what Wavescribe itself holds a receiver for; `held_elsewhere` (on each
+receiver, and on each of those dongles) says when another program holds it: `{pid, program,
+other_wavescribe, reason}`, else null. It comes from macOS's USB registry (`radio/holders.py`:
+`ioreg -r -c IOUSBHostDevice -l`, read at most every 3 s, nothing opened): a `UsbExclusiveOwner`
+of `pid N, name` on the dongle or one of its interfaces, or an interface user client's
+`IOUserClientCreator`. Device user clients alone don't count (browsers make one for every USB
+device they list). A holder whose parent is this process is one of its own rtl tools; one whose
+parent's command line names wavescribe is another Wavescribe (`ps`). `lsof` can't see it: libusb
+on macOS goes through IOKit, not a file. Elsewhere than macOS it is always null. Every 15 s, a page FM station still named after its frequency takes its RDS name
 (`adopt_rds_names()`). `tune` makes a page
 station from a frequency: mode from the band plan, the class's acknowledgement, a name from the
 catalogue or the band, and an idle receiver retuned so the frequency fits (250 or 300 kHz off

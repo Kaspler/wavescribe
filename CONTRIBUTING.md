@@ -54,7 +54,8 @@ radio, and the radio code is tested on synthetic signals.
   `dsp/channel.py` (NFM and AM with squelch), `dsp/rds.py` (RDS)
 - **Radio:** `radio/` (band plans in `bands.toml` and `bandplan.py` with the privacy classes,
   `scan.py` sweeps with `rtl_power`, `catalog.py` what was heard here, `service.py` the page's
-  scans and heard stations, `cli.py` `wavescribe radio`); see [docs/RADIO.md](docs/RADIO.md)
+  scans and heard stations, `holders.py` which other program holds a dongle, from macOS's USB
+  registry, `cli.py` `wavescribe radio`); see [docs/RADIO.md](docs/RADIO.md)
 - **Gate and segmenter:** `segment/vad.py` (Silero VAD), `gate/yamnet.py` (drops music)
 - **Speech recognition:** `asr/parakeet.py`, `asr/mlx_audio.py`, and `asr/checks.py` (the
   hallucination filter)
