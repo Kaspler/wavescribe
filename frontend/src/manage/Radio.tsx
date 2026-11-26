@@ -7,7 +7,9 @@ import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { langName } from "../lib/lang";
 import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
-import { bandLine, fmtMhz } from "./bands";
+import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
+import { BandCard, DialBar, DialLegend, heardIn } from "./DialView";
+import { bandAt as narrowestAt, kindOf, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 
@@ -69,10 +71,7 @@ function snapToBand(bands: Any[], mhz: number): number {
 }
 
 /** The narrowest band of the plan holding `mhz` (the server decides; this is for hints). */
-function bandAt(bands: Any[], mhz: number): Any | null {
-  const here = bands.filter((b) => b.start_mhz <= mhz && mhz <= b.stop_mhz);
-  return here.sort((a, b) => (a.stop_mhz - a.start_mhz) - (b.stop_mhz - b.start_mhz))[0] || null;
-}
+const bandAt = (bands: Any[], mhz: number): Any | null => narrowestAt(bands as Band[], mhz);
 
 /** The radio view and the scan in progress, shared by the pages about radio. */
 export function useRadio() {
@@ -177,7 +176,14 @@ function Finder({ v, job, running, onJob, onAdd, reload }: { v: Any; job: Any; r
   const [rds, setRds] = useState(true);
   const [showAll, setShowAll] = useState(false);
   const rx = v.receivers.find((r: Any) => r.id === device);
-  const chosen = v.bands.find((b: Any) => b.id === band);
+  const chosen: Band | undefined = v.bands.find((b: Any) => b.id === band);
+  const onTheDial = !!chosen && onDial([chosen]).length > 0;
+  // Channels that talk now and then are watched for a while; broadcast is found in one sweep.
+  const choose = (id: string) => {
+    setBand(id);
+    const b = v.bands.find((x: Any) => x.id === id);
+    if (b) setWatch(b.privacy === "broadcast" || b.privacy === "digital" ? "0" : "5");
+  };
   const scanJob = job && !job.learn_spurs ? job : null;
   const failed = scanJob?.phase === "error" && scanJob.error !== "cancelled";
   // Until a scan has something to show, the previous one stays (no jump as a sweep starts).
@@ -196,7 +202,7 @@ function Finder({ v, job, running, onJob, onAdd, reload }: { v: Any; job: Any; r
     ["custom", "A range of my own…"],
   ];
   const pause = !!rx?.busy.length;
-  const scanWhat = band === fm?.id ? "Find FM stations" : chosen ? `Scan ${chosen.name}` : band === "all" ? "Scan everything" : "Scan this range";
+  const scanWhat = chosen && kindOf(chosen) === "text" ? "Find stations here" : chosen ? `Scan ${bandWords(chosen).name}` : band === "all" ? "Scan everything" : "Scan this range";
   const start = async (on = device) => {
     const body: Any = { device: on, rds, watch_min: +watch, pause: !!v.receivers.find((r: Any) => r.id === on)?.busy.length };
     if (band === "custom") Object.assign(body, { start_mhz: +lo, stop_mhz: +hi });
@@ -206,38 +212,63 @@ function Finder({ v, job, running, onJob, onAdd, reload }: { v: Any; job: Any; r
   };
   // The same scan on another receiver, or on a dongle just made one.
   const tryOn = async (id: string) => { await reload(); setDevice(id); await start(id); };
+  const minutes = +watch;
+  const actions = !v.receivers.length ? (
+    <>
+      <UseDongle dongles={v.dongles || []} tools={!!v.tools.rtl_sdr} what={scanWhat} look={reload} then={tryOn} />
+      <p className="m-hint">Internet stations need no receiver: they're added under <a className="rd-link" href="#/add/internet">On the internet</a>.</p>
+    </>
+  ) : (
+    <>
+      <RxSwitch ids={v.receivers.map((r: Any) => r.id)} value={device} onChange={setDevice}
+                note={v.receivers.length > 1 ? "The one with an antenna for this band." : null} />
+      {!v.tools.rtl_power && <p className="m-trouble">Scanning needs the rtl-sdr tools: <code>brew install librtlsdr</code>.</p>}
+      <div className="m-actions">
+        {running && !job.learn_spurs ? (
+          <ActButton icon="stop" run={async () => onJob((await del("/radio/scan")).scan)}>Stop scanning</ActButton>
+        ) : (chosen ? kindOf(chosen) === "text" : true) && (
+          <ActButton variant="primary" icon="search" disabled={!rx || running || !v.tools.rtl_power || (band === "custom" && !(+lo < +hi))}
+                     run={() => start()}>
+            {pause ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
+          </ActButton>
+        )}
+        {!running && !pause && chosen && kindOf(chosen) === "text" && (
+          <span className="m-hint rd-inline">
+            {minutes ? `Watches the band for ${minutes} minutes: these channels talk now and then.` : "One sweep, a minute or two."}
+          </span>
+        )}
+        {pause && !running && (
+          <span className="m-hint rd-inline">Receiver {rxName(rx.id)} is running {rx.busy.join(", ")}. The scan pauses {rx.busy.length === 1 ? "it" : "them"} and starts {rx.busy.length === 1 ? "it" : "them"} again when it ends.</span>
+        )}
+      </div>
+    </>
+  );
   return (
-    <Section id="rd-find" title="Scan for stations"
-             description="The receiver sweeps the band and lists every signal above the noise, with what the band plan says it is; FM stations name themselves. What's found is kept under Heard here.">
-      {!v.receivers.length ? (
-        <>
-          <UseDongle dongles={v.dongles || []} tools={!!v.tools.rtl_sdr} what={scanWhat} look={reload} then={tryOn} />
-          <p className="m-hint">Internet stations need no receiver: they're added under <a className="rd-link" href="#/add/internet">On the internet</a>.</p>
-        </>
+    <Section id="rd-find" title="The dial"
+             description="Everything a receiver can tune, from 24 to 1766 MHz. Choose a band to see what it is and find what's on the air there; what's found is kept under Heard here.">
+      <DialBar bands={v.bands} heard={v.heard} chosen={onTheDial ? band : null} onChoose={choose} />
+      <DialLegend />
+      {onTheDial && chosen ? (
+        <BandCard band={chosen} kept={policyLine(chosen.privacy, v.policies)} policies={v.policies} heard={heardIn(v.heard, chosen).length}>
+          {actions}
+        </BandCard>
       ) : (
+        <div className="dl-card">
+          <h4 className="dl-card-h">{band === "all" ? "Everything the tuner reaches" : band === "custom" ? "A range of your own" : chosen?.name}</h4>
+          <p className="dl-card-text">
+            {band === "all" ? "The whole tuner in coarse steps: good for strong signals, too coarse for narrow channels."
+              : band === "custom" ? "From and to, in MHz, under Advanced." : bandLine(band)}
+          </p>
+          {actions}
+        </div>
+      )}
+      {v.receivers.length > 0 && (
         <>
-          <RxSwitch ids={v.receivers.map((r: Any) => r.id)} value={device} onChange={setDevice}
-                    note={v.receivers.length > 1 ? "The one with an antenna for this band." : null} />
-          {!v.tools.rtl_power && <p className="m-trouble">Scanning needs the rtl-sdr tools: <code>brew install librtlsdr</code>.</p>}
-          <div className="m-actions">
-            {running && !job.learn_spurs ? (
-              <ActButton icon="stop" run={async () => onJob((await del("/radio/scan")).scan)}>Stop scanning</ActButton>
-            ) : (
-              <ActButton variant="primary" icon="search" disabled={!rx || running || !v.tools.rtl_power || (band === "custom" && !(+lo < +hi))}
-                         run={() => start()}>
-                {pause ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
-              </ActButton>
-            )}
-            {pause && !running && (
-              <span className="m-hint rd-inline">Receiver {rxName(rx.id)} is running {rx.busy.join(", ")}. The scan pauses {rx.busy.length === 1 ? "it" : "them"} and starts {rx.busy.length === 1 ? "it" : "them"} again when it ends.</span>
-            )}
-          </div>
-          {chosen && chosen.privacy !== "broadcast" && <p className="m-hint">{policyLine(chosen.privacy, v.policies)}</p>}
           <Advanced id="rd-find">
             <div className="m-form rd-form">
               <Field id="rd-band" label="What to scan" wide
                      hint={chosen ? bandLine(chosen.id) || undefined : band === "all" ? "The whole tuner, in coarse steps: good for strong signals, too coarse for narrow channels." : "From and to, in MHz."}>
-                <Select id="rd-band" value={band} onChange={(e) => setBand(e.target.value)} options={bandOptions} />
+                <Select id="rd-band" value={band} onChange={(e) => choose(e.target.value)} options={bandOptions} />
               </Field>
               {band === "custom" && (
                 <>

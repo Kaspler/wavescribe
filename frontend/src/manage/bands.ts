@@ -53,6 +53,93 @@ const LINES: Record<string, string> = {
 /** The band's line, or "" for a band this page has no words for yet. */
 export const bandLine = (id: string | null | undefined): string => (id && LINES[id]) || "";
 
+/** A band as the dial explains it to someone new to radio: its everyday name (and a shorter one
+ * to print on the dial, when it differs), what is heard there, when, and the antenna it wants.
+ * The band plan's own name stays the technical one. */
+export interface BandWords {
+  name: string;
+  label?: string;
+  what: string;
+  when?: string;
+  antenna?: string;
+}
+
+const FM: BandWords = {
+  name: "FM radio",
+  what: "Music, news and talk from stations near you. They send their own names, so what's found here names itself.",
+  when: "On the air all day.",
+  antenna: "Any antenna hears nearby stations, even the small one that came with the receiver; an outdoor FM antenna brings in distant ones.",
+};
+const AIR: BandWords = {
+  name: "Aircraft",
+  what: "Pilots and air traffic control, in short exchanges: a few words, then silence until the next call.",
+  when: "Busy by day near airports and under flight paths, quiet at night.",
+  antenna: "An upright antenna about 55 cm long, as high as you can put it: aircraft in the sky carry far, the control tower only nearby.",
+};
+const HAM: BandWords = {
+  name: "Radio amateurs",
+  what: "Licensed hobbyists talking to each other, often through repeaters on high ground that pass a voice on over a wide area.",
+  when: "Busiest in the evenings and at weekends; some groups meet on a repeater at fixed times.",
+};
+const WORDS: Record<string, BandWords> = {
+  fm: FM,
+  "fm-americas": FM,
+  "fm-japan": FM,
+  airband: AIR,
+  "airband-25": AIR,
+  marine: {
+    name: "Boats and ports",
+    what: "Ships, harbours and coast stations: a call on channel 16, then a move to a working channel. Coast stations read weather and safety messages at set times.",
+    when: "Busy near the coast and on big rivers; inland, mostly silent.",
+    antenna: "An upright antenna about 45 cm long; height matters more than anything.",
+  },
+  "weather-us": {
+    name: "Weather radio",
+    what: "Weather forecasts and warnings from NOAA, read out without a break.",
+    when: "On all the time.",
+    antenna: "Any antenna, within range of a transmitter.",
+  },
+  "2m": { ...HAM, antenna: "An upright antenna about 50 cm long; one made for 2 m and 70 cm covers both amateur bands." },
+  "2m-wide": { ...HAM, antenna: "An upright antenna about 50 cm long; one made for 2 m and 70 cm covers both amateur bands." },
+  "70cm": { ...HAM, what: "Licensed hobbyists, mostly through local repeaters.", antenna: "An upright antenna about 17 cm long, or one made for 2 m and 70 cm." },
+  "70cm-wide": { ...HAM, what: "Licensed hobbyists, mostly through local repeaters.", antenna: "An upright antenna about 17 cm long, or one made for 2 m and 70 cm." },
+  pmr446: {
+    name: "Walkie-talkies",
+    what: "Licence-free walkie-talkies anyone can buy, used by families, on building sites, at events. Their range is short, so what you hear is close by.",
+    when: "Now and then, more at weekends and events.",
+    antenna: "The receiver's own small antenna is enough.",
+  },
+  frs: {
+    name: "Walkie-talkies",
+    what: "Licence-free FRS radios and licensed GMRS ones, used by families and outdoor groups. Most of what you hear is close by.",
+    when: "Now and then, more at weekends.",
+    antenna: "The receiver's own small antenna is enough.",
+  },
+  srd433: {
+    name: "Remotes and sensors",
+    what: "Car keys, weather stations, doorbells and other gadgets send short bursts of data here; where they're allowed, low-power walkie-talkies talk here too.",
+    when: "Short bursts at any time.",
+    antenna: "The receiver's own small antenna.",
+  },
+  cb: {
+    name: "CB radio",
+    what: "Citizens' band: drivers and hobbyists on 40 shared channels.",
+    when: "Often quiet; on days when conditions carry signals far, voices from other countries come in.",
+    antenna: "A long one: CB antennas are 1 to 3 m. The receiver's small antenna hears only strong stations nearby.",
+  },
+  mw: { name: "Medium wave", what: LINES.mw },
+  "mw-americas": { name: "Medium wave", what: LINES.mw },
+  dab: { name: "Digital radio (DAB)", label: "Digital radio", what: `Radio stations sent digitally, several in each block 1.5 MHz wide. ${NO_DECODER}` },
+  "digital-emergency": { name: "Emergency services", what: `Police, fire and ambulance radio, digital and encrypted. ${NO_DECODER.replace("for it.", "and never decrypts.")}` },
+  dvbt: { name: "TV", what: `Digital television, each channel a block 8 MHz wide. ${NO_DECODER}` },
+  cellular: { name: "Phones and data", what: `Mobile phone networks. ${NO_DECODER}` },
+  adsb: { name: "Aircraft positions", what: `Aircraft send where they are and how high they fly in short digital bursts. ${NO_DECODER}` },
+  gnss: { name: "Satellite navigation", label: "Satnav", what: "GPS, Galileo and other navigation satellites. Their signals arrive below the noise, so they don't show up here." },
+};
+
+/** The band's words for a newcomer; a band this page has none for is named as the plan names it. */
+export const bandWords = (b: { id: string; name: string }): BandWords => WORDS[b.id] || { name: b.name, what: bandLine(b.id) };
+
 /** 98.6 for broadcast FM; 446.00625, 118.050 for channels (at least three decimals). */
 export const fmtMhz = (mhz: number, mode?: string | null) =>
   mode === "wfm" ? mhz.toFixed(1) : mhz.toFixed(5).replace(/(\.\d{3}\d*?)0+$/, "$1");

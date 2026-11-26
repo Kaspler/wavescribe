@@ -313,3 +313,55 @@ tr.is-off td { color: var(--ink-3); }
 .rd-nothing .m-actions { margin-top: 0; }
 .ls-volume { display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--ink-2); }
 .ls-volume input { width: 128px; accent-color: var(--accent); }
+
+/* The dial: everything a receiver tunes on one bar, printed on the dark band like a radio's
+   scale. Voice bands are filled, digital ones outlined, the bare scale is outside any band; what
+   was heard is a fine tick under it. The chosen band carries the pointer's ring. */
+.dl { padding: var(--s4) var(--s5) var(--s3); border-radius: 8px; background: var(--band); color: var(--band-ink-2); }
+.dl-in { position: relative; min-height: 86px; }
+.dl-names { position: relative; height: 34px; }
+.dl-name { position: absolute; line-height: 16px; font-size: var(--t-sm); font-weight: 600; white-space: nowrap; cursor: pointer; transition: color var(--fast) var(--ease); }
+.dl-name.is-row0 { bottom: 1px; }
+.dl-name.is-row1 { bottom: 17px; }
+.dl-name:hover, .dl-name.is-chosen { color: var(--band-ink); }
+.dl-name.is-chosen { text-decoration: underline 2px var(--accent); text-underline-offset: 3px; }
+.dl-track { position: relative; height: 26px; margin-top: var(--s2); border-bottom: 1px solid var(--band-tick); }
+.dl-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  transition: background-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.dl-band.is-text { background: color-mix(in oklab, var(--band-ink-2) 58%, var(--band)); }
+.dl-band.is-shown { box-shadow: inset 0 0 0 1px var(--band-ink-2); }
+.dl-band.is-text:hover { background: var(--band-ink-2); }
+.dl-band.is-shown:hover { background: var(--band-hover); box-shadow: inset 0 0 0 1px var(--band-ink); }
+/* A band inside another (433 MHz gadgets in the 70 cm band) sits over it, set off by the band's
+   own black. */
+.dl-band.is-inner { top: 5px; bottom: 5px; box-shadow: 0 0 0 2px var(--band); }
+.dl-band.is-inner.is-text { background: var(--band-ink-2); }
+.dl-band.is-chosen.is-text { background: var(--band-ink); }
+.dl-band.is-chosen { box-shadow: 0 0 0 2px var(--band), 0 0 0 4px var(--accent); }
+.dl-band.is-chosen.is-shown { box-shadow: inset 0 0 0 1px var(--band-ink), 0 0 0 2px var(--band), 0 0 0 4px var(--accent); }
+.dl-band:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--band), 0 0 0 4px var(--accent); }
+.dl-scale { display: block; overflow: visible; }
+.dl-heard { fill: var(--band-ink); }
+.dl-tick { fill: var(--band-ink-2); }
+.dl-mhz { fill: var(--band-ink-2); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.dl-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s6); margin-top: var(--s4); font-size: var(--t-sm); color: var(--ink-3); }
+.dl-legend span { display: inline-flex; align-items: center; gap: var(--s3); }
+.dl-key { display: inline-block; width: 18px; height: 10px; border-radius: 2px; }
+.dl-key.is-text { background: var(--ink-3); }
+.dl-key.is-shown { box-shadow: inset 0 0 0 1px var(--ink-3); }
+.dl-key.is-none { height: 1px; border-radius: 0; background: var(--ink-3); }
+.dl-key.is-heard { width: 1px; height: 9px; border-radius: 0; background: var(--ink-2); }
+.dl-card { max-width: 76ch; margin-top: var(--s7); }
+.dl-card-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s4); font-size: var(--t-lg); font-weight: 650; }
+.dl-card-tech { font-size: var(--t-sm); font-weight: 400; color: var(--ink-3); }
+.dl-card-text { max-width: 66ch; margin-top: var(--s3); font-size: var(--t-md); line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.dl-card-who { margin-bottom: var(--s5); }
