@@ -439,6 +439,25 @@ def _radio_name(app: App, m, q, b) -> Any:
     return {"ok": True}
 
 
+@route("GET", "/radio/notes")
+def _radio_notes(app: App, m, q, b) -> Any:
+    return {"notes": sorted(app.radio.catalog.notes().values(), key=lambda n: n["freq_hz"])}
+
+
+@route("POST", "/radio/notes/(?P<freq>[0-9]+)")
+def _radio_note(app: App, m, q, b) -> Any:
+    """Name a frequency, note something about it, tag it (a watch's catches show it). A field
+    left out stays as it is; "" or [] clears it."""
+    b = _body(b)
+    for key in ("name", "note"):
+        if b.get(key) is not None and not isinstance(b[key], str):
+            raise ChangeError(f"'{key}' is text")
+    tags = b.get("tags")
+    if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
+        raise ChangeError("'tags' is a list of words")
+    return app.radio.catalog.note(int(m["freq"]), name=b.get("name"), note=b.get("note"), tags=tags)
+
+
 @route("DELETE", "/radio/heard(?:/(?P<freq>[0-9]+))?")
 def _radio_forget(app: App, m, q, b) -> Any:
     app.radio.catalog.forget(int(m["freq"]) if m["freq"] else None)

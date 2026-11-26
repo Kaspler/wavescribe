@@ -168,6 +168,16 @@ class Catch:
         return self.audio_from + len(self.audio) / SAMPLE_RATE
 
 
+def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
+    """Catches as the store gives them, with what the user noted about each one's frequency
+    (``Catalog.notes``): its name, note and tags. For this machine only: notes are the user's
+    own, not something heard."""
+    for r in rows:
+        noted = notes.get(r["freq_hz"]) or {}
+        r.update({k: noted[k] for k in ("name", "note", "tags") if k in noted})
+    return rows
+
+
 # Who hears about catches: the store keeps them, the command line prints them. A catch is
 # published once its audio has been through the VAD and the gate, so ``voice`` is known.
 _listeners: list[Callable[[Catch], object]] = []

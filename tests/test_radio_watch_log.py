@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -228,3 +229,67 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
     assert a.no_store and a.duration == 600 and a.source is None
     err = capsys.readouterr().err
     assert "16 channels" in err and "nothing written down" in err and "00001234" not in err
+
+
+# -- the routes --------------------------------------------------------------------------------
+
+
+def test_catches_route_gives_other_machines_only_what_may_leave(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from tests.test_pipeline import PLAN
+    from tests.test_web import request
+    from wavescribe.config import StationsConfig
+    from wavescribe.web.server import Handler, WebHub, WebServer
+
+    apply_policies(None, {"private": {"text_days": 3}, "amateur": {"export": True}})
+    walkies = watch_station()
+    ham = replace(walkies, id="ham", privacy="amateur")
+    store = Store(tmp_path / "w.db")
+    now = time.time()
+    store.add_transcript(words("ham", TWO_M, now + 0.5, "QSL, 73"))
+    store.add_transcript(words("walkies", PMR[0], now + 0.5, "come home", privacy="private"))
+    store.add_catch(catch(TWO_M, now, station="ham"))
+    store.add_catch(catch(PMR[0], now + 1, privacy="private"))
+    catalog = Catalog(tmp_path / "radio")
+    catalog.note(TWO_M, name="calling channel", note="the club's net on Sundays")
+    hub = WebHub(StationsConfig((walkies, ham), Path("t.toml")), PLAN, {}, store=store)
+    hub.app = SimpleNamespace(radio=SimpleNamespace(catalog=catalog))
+    server = WebServer(("127.0.0.1", 0), hub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, body = request(server, "GET", "/api/catches")
+        here = json.loads(body)["catches"]
+        assert status == 200 and [c["freq_hz"] for c in here] == [PMR[0], TWO_M]
+        assert here[1]["name"] == "calling channel"  # this machine sees its notes
+        assert request(server, "GET", f"/api/catches?mhz={TWO_M / 1e6}")[0] == 200
+        assert request(server, "GET", "/api/catches?hours=nan")[0] == 400
+        monkeypatch.setattr(Handler, "_is_local", lambda _self: False)
+        status, body = request(server, "GET", "/api/catches")
+        [shared] = json.loads(body)["catches"]
+        assert shared["station"] == "ham" and shared["utterances"][0]["text"] == "QSL, 73"
+        assert "name" not in shared and "note" not in shared  # the user's notes stay here
+        assert b"446.00625" not in body and b"come home" not in body
+    finally:
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
+def test_notes_are_set_through_the_control_centre(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from wavescribe.web import api
+
+    app = SimpleNamespace(radio=SimpleNamespace(catalog=Catalog(tmp_path)))
+    path = f"/api/manage/radio/notes/{PMR[0]}"
+    status, noted = api.dispatch(app, "POST", path, {}, {"name": "family", "tags": ["home"]})
+    assert status == 200 and noted["name"] == "family" and noted["tags"] == ["home"]
+    status, _ = api.dispatch(app, "POST", path, {}, {"note": "x" * 2001})
+    assert status == 400
+    status, _ = api.dispatch(app, "POST", path, {}, {"tags": "home"})
+    assert status == 400
+    status, listed = api.dispatch(app, "GET", "/api/manage/radio/notes", {}, None)
+    assert [n["freq_hz"] for n in listed["notes"]] == [PMR[0]]

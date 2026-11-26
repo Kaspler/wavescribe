@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
-from wavescribe.radio.watch import Catch
+from wavescribe.radio.watch import Catch, with_notes
 
 
 def _window(spec: str) -> str | tuple[float, float]:
@@ -150,9 +150,7 @@ def cmd_catches(args: argparse.Namespace) -> int:
             file=out,
         )
         return 0
-    notes = Catalog().notes()
-    for r in rows:
-        r.update({k: v for k, v in (notes.get(r["freq_hz"]) or {}).items() if k != "freq_hz"})
+    with_notes(rows, Catalog().notes())
     if args.json:
         from wavescribe.events import to_json
 

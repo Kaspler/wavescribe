@@ -55,6 +55,7 @@ CLIENT_BACKLOG = 1000  # events per browser before we drop
 STATUS_INTERVAL_S = 1.0
 MAX_LISTENERS = 8  # audio listeners per station
 CONTROL_HEADER = "X-Wavescribe"  # required on changes: a cross-site form can't set it
+MAX_CATCHES = 500  # per request to /api/catches
 
 # On every response. The page has no inline script or style, so the policy needs no exceptions;
 # frame-ancestors and X-Frame-Options stop another site from framing the control centre.
@@ -558,6 +559,8 @@ class Handler(BaseHTTPRequestHandler):
             self._replay(path[len("/api/segments/") : -len("/audio.pcm")])
         elif path == "/api/alerts":
             self._json(self.server.hub.alerts(self._exports()))
+        elif path == "/api/catches":
+            self._catches(query)
         elif path.startswith("/api/alerts/") and path.endswith(".cap"):
             self._cap(path[len("/api/alerts/") : -len(".cap")])
         else:
@@ -794,6 +797,36 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "search needs the store (started with --no-store)"}, 409)
             return
         self._json(store.search(q[:200], station_id=station_id, limit=60, exports=self._exports()))
+
+    def _catches(self, query: dict[str, str]) -> None:
+        """What watches caught and kept (radio/watch.py), newest first, with their words. For
+        another machine only what may leave this one, and none of the user's notes."""
+        hub = self.server.hub
+        try:
+            mhz = float(query["mhz"]) if query.get("mhz") else None
+            width_khz, hours = float(query.get("width_khz") or 0), float(query.get("hours") or 24)
+            limit = int(query.get("limit") or 100)
+            if not all(math.isfinite(x) for x in (mhz or 0, width_khz, hours)):
+                raise ValueError
+        except ValueError:
+            msg = "mhz, width_khz and hours are numbers, limit a whole one"
+            self._json({"error": msg}, HTTPStatus.BAD_REQUEST)
+            return
+        if hub.store is None:
+            self._json({"catches": []})
+            return
+        rows = hub.store.catches(
+            freq_hz=round(mhz * 1e6) if mhz else None,
+            width_hz=width_khz * 1e3,
+            since=time.time() - hours * 3600 if hours > 0 else None,
+            limit=max(1, min(limit, MAX_CATCHES)),
+            exports=self._exports(),
+        )
+        if self._is_local() and hub.app is not None:
+            from wavescribe.radio.watch import with_notes
+
+            with_notes(rows, hub.app.radio.catalog.notes())
+        self._json({"catches": rows})
 
     def _cap(self, alert_id: str) -> None:
         from wavescribe.alerts.cap import to_cap
