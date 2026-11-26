@@ -438,3 +438,7 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
     add_alert_args(p)
     common(p)
     p.set_defaults(func=cmd_tune)
+
+    from wavescribe.radio.watch_cli import add_parsers  # watch, catches, note
+
+    add_parsers(rsub, add_store_args, add_alert_args, common, ppm)

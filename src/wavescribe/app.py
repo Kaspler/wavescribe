@@ -195,6 +195,9 @@ class App:
             # from here on the store prunes by itself, also while no station says anything.
             store.adopt_classes(self.config.stations)
             store.keep_pruned()
+            from wavescribe.radio.watch import subscribe
+
+            self._keep_catches = subscribe(store.add_catch)  # kept like the words (watch.py)
 
         from wavescribe.web.server import WebHub
 
@@ -286,6 +289,8 @@ class App:
         self.downloads.close()  # a download runs as a child process: it mustn't outlive serve
         if getattr(self, "_live", None) is not None:
             self._live.close_all()
+        if getattr(self, "_keep_catches", None) is not None:
+            self._keep_catches()
         for f in list(self.followers.values()):
             f.close()
         if self.llm_rules is not None:

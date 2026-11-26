@@ -1,0 +1,230 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The catch log: what watches caught, kept and shared exactly as their class's words are,
+notes on frequencies, and the command line."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import time
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from tests.test_radio_watch import watch_station
+from tests.test_radio_watch_detect import PMR
+from tests.test_store import result
+from wavescribe.radio.bandplan import apply_policies, exports
+from wavescribe.radio.catalog import Catalog
+from wavescribe.radio.watch import Catch
+from wavescribe.segment import Utterance
+from wavescribe.store import Store
+
+TWO_M = 145_500_000  # the 2 m calling channel
+
+
+@pytest.fixture(autouse=True)
+def default_policies():
+    yield
+    apply_policies()  # each test starts from the defaults
+
+
+def catch(freq: int, t: float, *, privacy: str = "amateur", station: str = "walkies") -> Catch:
+    return Catch(
+        freq,
+        "nfm",
+        t,
+        t + 3.0,
+        t - 0.3,
+        np.zeros(16_000, np.float32),
+        snr_db=21.5,
+        peak_db=-30.0,
+        station_id=station,
+        privacy=privacy,
+        band="2m",
+        label="Amateur 2 m",
+        voice=True,
+    )
+
+
+def words(station_id: str, freq: int, t: float, text: str, privacy: str = "amateur"):
+    """An utterance a watch transcribed on ``freq`` at ``t``."""
+    r = result(station_id, text, t)
+    r.station = replace(r.station, privacy=privacy)
+    r.utterance = Utterance(station_id, 1, r.utterance.samples, t, t + 1, t + 1.5, freq_hz=freq)
+    return r
+
+
+def test_a_catch_is_kept_with_the_words_heard_in_it(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    now = time.time()
+    store.add_transcript(words("walkies", TWO_M, now + 0.5, "CQ CQ from the hill"))
+    store.add_transcript(words("walkies", TWO_M + 12_500, now + 0.7, "the next channel"))
+    store.add_transcript(words("walkies", TWO_M, now + 60, "a later over"))
+    c = catch(TWO_M, now)
+    assert store.add_catch(c) == c.id is not None
+    [row] = store.catches()
+    assert row["freq_hz"] == TWO_M and row["mhz"] == 145.5 and row["duration"] == 3.0
+    assert row["voice"] is True and row["privacy"] == "amateur" and row["label"] == "Amateur 2 m"
+    assert [u["text"] for u in row["utterances"]] == ["CQ CQ from the hill"]
+    assert store.catches(freq_hz=TWO_M + 12_500) == []
+    assert len(store.catches(freq_hz=TWO_M + 10_000, width_hz=12_500)) == 1
+    store.close()
+
+
+def test_a_class_that_keeps_no_text_keeps_no_catch(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    assert store.add_catch(catch(PMR[0], time.time(), privacy="private")) is None
+    assert store.add_catch(catch(PMR[0], time.time(), privacy="digital")) is None
+    assert store.catches() == []
+    store.close()
+
+
+def test_catches_age_out_with_their_class_and_the_store(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db", max_text_age_days=30)
+    now = time.time()
+    store.add_catch(catch(TWO_M, now - 8 * 86400))  # amateur keeps text 7 days
+    store.add_catch(catch(TWO_M, now - 86400))
+    store.add_catch(catch(156_800_000, now - 4 * 86400, privacy="utility"))  # utility: 3 days
+    store.add_catch(catch(156_800_000, now - 2 * 86400, privacy="utility"))
+    store.prune_catches()
+    assert sorted(r["t_start"] for r in store.catches()) == [now - 2 * 86400, now - 86400]
+    apply_policies(None, {"amateur": {"text_days": "keep"}})  # as long as the store keeps text
+    store.add_catch(catch(TWO_M, now - 40 * 86400))
+    store.add_catch(catch(TWO_M, now - 20 * 86400))
+    store.prune_catches()
+    assert len(store.catches(station_ids=["walkies"])) == 3  # past the store's 30 days: gone
+    store.close()
+
+
+def test_what_leaves_the_machine_is_what_its_class_and_station_allow(tmp_path: Path) -> None:
+    """A non-local request sees no catch, and no word in one, that an ordinary station of the
+    same class wouldn't show it."""
+    apply_policies(None, {"private": {"text_days": 3}, "amateur": {"export": True}})
+    walkies = watch_station()
+    ham = replace(walkies, id="ham", privacy="amateur")
+    store = Store(tmp_path / "w.db")
+    now = time.time()
+    store.add_transcript(words("ham", TWO_M, now + 0.5, "QSL, 73"))
+    store.add_transcript(words("walkies", PMR[0], now + 0.5, "come home", privacy="private"))
+    store.add_catch(catch(TWO_M, now, station="ham"))
+    store.add_catch(catch(PMR[0], now, privacy="private"))
+    assert len(store.catches()) == 2  # all of it, here
+    out = exports([ham, walkies])
+    shared = store.catches(exports=out)
+    assert [(r["station"], [u["text"] for u in r["utterances"]]) for r in shared] == [
+        ("ham", ["QSL, 73"])
+    ]
+    # A station no longer configured takes nothing of its own out either.
+    assert store.catches(exports=exports([walkies])) == []
+    # Nor does an ordinary private station's text: the same filter, the same answer.
+    assert all(u["station"] != "walkies" for u in store.window(exports=out))
+    store.close()
+
+
+def test_opens_a_version_6_database_and_adds_the_catch_log(tmp_path: Path) -> None:
+    Store(tmp_path / "w.db").close()
+    old = sqlite3.connect(tmp_path / "w.db")  # make it look like a schema-6 database
+    old.execute("DROP TABLE catches")
+    old.execute("ALTER TABLE segments DROP COLUMN freq_hz")
+    old.execute(
+        "INSERT INTO segments (station_id, t_start, t_end, privacy) "
+        "VALUES ('a', 1000, 1001, 'broadcast')"
+    )
+    old.execute("PRAGMA user_version = 6")
+    old.commit()
+    old.close()
+    store = Store(tmp_path / "w.db")
+    assert store.catches() == []
+    store.add_catch(catch(TWO_M, time.time()))
+    assert len(store.catches()) == 1
+    store.close()
+    db = sqlite3.connect(tmp_path / "w.db")
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert db.execute("SELECT freq_hz FROM segments").fetchall() == [(None,)]
+    db.close()
+
+
+# -- notes on frequencies ----------------------------------------------------------------------
+
+
+def test_a_note_names_a_frequency_wherever_it_is_shown(tmp_path: Path) -> None:
+    catalog = Catalog(tmp_path)
+    catalog._write({"version": 1, "entries": {str(PMR[0]): {"freq_hz": PMR[0], "mhz": 446.00625}}})
+    noted = catalog.note(PMR[0], name="family", note="the kids' walkie-talkies", tags=["home"])
+    assert noted == {
+        "freq_hz": PMR[0],
+        "name": "family",
+        "note": "the kids' walkie-talkies",
+        "tags": ["home"],
+        "t": noted["t"],
+    }
+    assert catalog.entries()[0]["user_name"] == "family"  # the heard catalogue's name too
+    catalog.name(PMR[0], "hiking")
+    assert catalog.note_for(PMR[0])["name"] == "hiking"
+    catalog.note(PMR[0], note="")  # a field cleared, the rest kept
+    assert catalog.note_for(PMR[0])["tags"] == ["home"] and "note" not in catalog.note_for(PMR[0])
+    catalog.note(PMR[1], name="x")
+    catalog.note(PMR[1], name="")
+    assert PMR[1] not in catalog.notes()  # nothing left to say: gone
+    with pytest.raises(ValueError, match="at most 80"):
+        catalog.note(PMR[2], name="x" * 81)
+
+
+# -- the command line --------------------------------------------------------------------------
+
+
+def test_radio_catches_prints_the_log_and_its_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe import cli
+    from wavescribe.radio import watch_cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "DATA_DIR", tmp_path / "data")
+    args = argparse.Namespace(mhz=None, width=0.0, hours=24.0, limit=100, json=False)
+    watch_cli.cmd_catches(args)
+    assert "Nothing caught and kept" in capsys.readouterr().out
+    store = Store(tmp_path / "data" / "wavescribe.db")
+    now = time.time()
+    store.add_transcript(words("walkies", TWO_M, now + 0.5, "CQ CQ"))
+    store.add_catch(catch(TWO_M, now))
+    store.close()
+    Catalog(tmp_path / "data" / "radio").note(TWO_M, name="calling channel")
+    watch_cli.cmd_catches(args)
+    lines = capsys.readouterr().out.splitlines()
+    assert "145.5" in lines[0] and '"calling channel"' in lines[0] and "voice" in lines[0]
+    assert lines[1].split() == ["pt-PT", "CQ", "CQ"]
+    watch_cli.cmd_catches(argparse.Namespace(**{**vars(args), "json": True}))
+    row = json.loads(capsys.readouterr().out)
+    assert row["name"] == "calling channel" and row["utterances"][0]["text"] == "CQ CQ"
+
+
+def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe import cli
+    from wavescribe.cli import build_parser
+    from wavescribe.radio import cli as radio_cli
+
+    monkeypatch.chdir(tmp_path)
+    ran: list[argparse.Namespace] = []
+    monkeypatch.setattr(cli, "cmd_listen", lambda a: ran.append(a) or 0)
+    monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--minutes", "10"]
+    args = build_parser().parse_args(argv)
+    with pytest.raises(ValueError, match="acknowledge"):
+        args.func(args)
+    args = build_parser().parse_args([*argv, "--acknowledge", "--languages", "pt-PT", "es"])
+    assert args.func(args) == 0
+    [a] = ran
+    [s] = a.tuned_stations
+    assert s.language == "auto" and s.languages == ("pt-PT", "es") and s.privacy == "private"
+    assert s.sdr.device.center_hz == PMR[0] - 250_000 and s.sdr.watch.channels == PMR
+    assert a.no_store and a.duration == 600 and a.source is None
+    err = capsys.readouterr().err
+    assert "16 channels" in err and "nothing written down" in err and "00001234" not in err

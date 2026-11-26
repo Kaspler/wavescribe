@@ -40,12 +40,13 @@ from wavescribe.search import snippet as search_snippet
 if TYPE_CHECKING:
     from wavescribe.alerts import Alert
     from wavescribe.radio.bandplan import Exports
+    from wavescribe.radio.watch import Catch
     from wavescribe.rules import Hit
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
-# 5: segments.privacy; 6: the class on every row, alerts.privacy
+SCHEMA_VERSION = 7  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
+# 5: segments.privacy; 6: the class on every row, alerts.privacy; 7: catches, segments.freq_hz
 # Snippet markers around matches; the page turns them into <mark>.
 HIT_START, HIT_END = "\x02", "\x03"
 
@@ -63,8 +64,9 @@ CREATE TABLE IF NOT EXISTS segments (
     kind TEXT NOT NULL DEFAULT 'speech',
     audio_path TEXT,                    -- relative to the audio archive; NULL once pruned
     audio_bytes INTEGER NOT NULL DEFAULT 0,
-    privacy TEXT                        -- the station's privacy class when this was heard;
+    privacy TEXT,                       -- the station's privacy class when this was heard;
                                         -- NULL in rows from before every row carried it
+    freq_hz INTEGER                     -- where it was heard, for radio; NULL otherwise
 );
 CREATE INDEX IF NOT EXISTS segments_station_time ON segments (station_id, t_start);
 CREATE INDEX IF NOT EXISTS segments_audio ON segments (t_start) WHERE audio_path IS NOT NULL;
@@ -142,6 +144,25 @@ CREATE TABLE IF NOT EXISTS alert_summaries (
     model TEXT NOT NULL,
     PRIMARY KEY (alert_id, lang)
 );
+-- What watches caught (radio/watch.py): one row per transmission, words or none. Its words are
+-- the segments of the same station and frequency over the same moments.
+CREATE TABLE IF NOT EXISTS catches (
+    id INTEGER PRIMARY KEY,
+    station_id TEXT NOT NULL,
+    freq_hz INTEGER NOT NULL,
+    t_start REAL NOT NULL,              -- the transmission's first moment above the noise
+    t_end REAL NOT NULL,
+    mode TEXT NOT NULL,
+    band TEXT,
+    label TEXT NOT NULL DEFAULT '',
+    snr_db REAL,
+    peak_db REAL,
+    voice INTEGER,                      -- 1 someone spoke, 0 nobody did, NULL not checked
+    reason TEXT,                        -- 'carrier': on for minutes, learnt into the floor
+    privacy TEXT NOT NULL               -- the watch's class, which decides how long it stays
+);
+CREATE INDEX IF NOT EXISTS catches_time ON catches (t_start);
+CREATE INDEX IF NOT EXISTS catches_freq ON catches (freq_hz, t_start);
 CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5 (
     text, content='transcripts', content_rowid='segment_id',
     tokenize='trigram remove_diacritics 1'
@@ -225,6 +246,8 @@ class Store:
         columns = {r[1] for r in self._db.execute("PRAGMA table_info(segments)")}
         if "privacy" not in columns:  # 4 -> 5: each row's class, so its retention outlives the run
             self._db.execute("ALTER TABLE segments ADD COLUMN privacy TEXT")
+        if "freq_hz" not in columns:  # 6 -> 7: the frequency, for a watch's many (catches is new)
+            self._db.execute("ALTER TABLE segments ADD COLUMN freq_hz INTEGER")
         columns = {r[1] for r in self._db.execute("PRAGMA table_info(alerts)")}
         if "privacy" not in columns:  # 5 -> 6: alerts carry their stations' classes too
             self._db.execute("ALTER TABLE alerts ADD COLUMN privacy TEXT")
@@ -536,9 +559,18 @@ class Store:
             # The class goes on every row. How long the words are kept and whether they may
             # leave the machine is decided by the class they were heard under, whatever the
             # station's id means after a restart, a retune or its deletion.
+            sdr = result.station.sdr
+            freq = u.freq_hz or (sdr.freq_hz if sdr is not None and sdr.watch is None else None)
             cur = db.execute(
-                "INSERT INTO segments (station_id, t_start, t_end, privacy) VALUES (?, ?, ?, ?)",
-                (result.station.id, u.t_start, u.t_start + u.duration, class_of(result.station)),
+                "INSERT INTO segments (station_id, t_start, t_end, privacy, freq_hz) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    result.station.id,
+                    u.t_start,
+                    u.t_start + u.duration,
+                    class_of(result.station),
+                    freq,
+                ),
             )
             segment_id = int(cur.lastrowid or 0)
             db.execute(
@@ -566,6 +598,7 @@ class Store:
         if self.max_text_age_s is not None:
             self.prune_text(max_age_s=self.max_text_age_s)
         self.prune_short_lived()
+        self.prune_catches()
         if self.archive is not None:
             self.archive.maybe_prune(self)
 
@@ -1164,6 +1197,143 @@ class Store:
 
     # -- audio retention --------------------------------------------------------------------
 
+    # -- catches (radio/watch.py) -----------------------------------------------------------
+
+    def add_catch(self, catch: Catch) -> int | None:
+        """Keep what a watch caught; sets ``catch.id``. Catch listener (``watch.subscribe``).
+
+        A catch stays exactly as long as text of its class. So a class that keeps no text
+        (private and digital radio, by default) keeps no catch either: when a channel was busy
+        is part of what was heard there, as the words are."""
+        from wavescribe.radio.bandplan import POLICIES
+
+        policy = POLICIES.get(catch.privacy)
+        if policy is None or policy.text_days == 0:
+            return None  # shown as it's caught, never written down
+        with self._tx() as db:
+            cur = db.execute(
+                "INSERT INTO catches (station_id, freq_hz, t_start, t_end, mode, band, label, "
+                "snr_db, peak_db, voice, reason, privacy) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    catch.station_id,
+                    catch.freq_hz,
+                    catch.t_start,
+                    catch.t_end,
+                    catch.mode,
+                    catch.band,
+                    catch.label,
+                    catch.snr_db,
+                    catch.peak_db,
+                    None if catch.voice is None else int(catch.voice),
+                    catch.reason,
+                    catch.privacy,
+                ),
+            )
+        catch.id = int(cur.lastrowid or 0)
+        self._prune_due()
+        return catch.id
+
+    def catches(
+        self,
+        *,
+        freq_hz: int | None = None,
+        width_hz: float = 0,
+        station_ids: list[str] | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        limit: int = 100,
+        exports: Exports | None = None,
+    ) -> list[dict[str, Any]]:
+        """Catches, newest first, each with the words heard in it. ``freq_hz`` picks one
+        channel, or with ``width_hz`` everything that far either side. With ``exports``, only
+        what may leave this machine, words included."""
+        where, args = _exports_sql(exports, "c")
+        if freq_hz is not None:
+            where += " AND c.freq_hz BETWEEN ? AND ?"
+            args += [freq_hz - width_hz, freq_hz + width_hz]
+        if since is not None:
+            where += " AND c.t_start >= ?"
+            args.append(since)
+        if until is not None:
+            where += " AND c.t_start <= ?"
+            args.append(until)
+        if station_ids:
+            where += f" AND c.station_id IN ({','.join('?' * len(station_ids))})"
+            args.extend(station_ids)
+        words_where, words_args = _exports_sql(exports)
+        out = []
+        with self._read_lock:
+            rows = self._reader.execute(
+                f"SELECT * FROM catches c WHERE 1 = 1{where} ORDER BY c.t_start DESC LIMIT ?",
+                [*args, limit],
+            ).fetchall()
+            for r in rows:
+                # Its words: what the same station transcribed on the same frequency, starting
+                # within the catch (its audio begins a moment before, and ends a moment after).
+                said = self._reader.execute(
+                    "SELECT s.id, s.t_start, t.lang, t.text FROM segments s "
+                    "JOIN transcripts t ON t.segment_id = s.id WHERE s.station_id = ? "
+                    f"AND s.freq_hz = ? AND s.t_start BETWEEN ? AND ?{words_where} "
+                    "ORDER BY s.t_start",
+                    [
+                        r["station_id"],
+                        r["freq_hz"],
+                        r["t_start"] - CATCH_SLACK_S,
+                        r["t_end"] + CATCH_SLACK_S,
+                        *words_args,
+                    ],
+                ).fetchall()
+                out.append(
+                    {
+                        "id": r["id"],
+                        "station": r["station_id"],
+                        "freq_hz": r["freq_hz"],
+                        "mhz": r["freq_hz"] / 1e6,
+                        "t_start": r["t_start"],
+                        "t_end": r["t_end"],
+                        "duration": round(r["t_end"] - r["t_start"], 2),
+                        "mode": r["mode"],
+                        "band": r["band"],
+                        "label": r["label"],
+                        "snr_db": r["snr_db"],
+                        "peak_db": r["peak_db"],
+                        "voice": None if r["voice"] is None else bool(r["voice"]),
+                        "reason": r["reason"],
+                        "privacy": r["privacy"],
+                        "utterances": [
+                            {
+                                "id": u["id"],
+                                "t": u["t_start"],
+                                "language": u["lang"],
+                                "text": u["text"],
+                            }
+                            for u in said
+                        ],
+                    }
+                )
+        return out
+
+    def prune_catches(self) -> int:
+        """Catches past their class's text retention, or past the store's own: the same ages
+        as the words they hold."""
+        from wavescribe.radio.bandplan import POLICIES
+
+        now, deleted = time.time(), 0
+        with self._tx() as db:
+            for privacy, policy in POLICIES.items():
+                if policy.text_days is not None:
+                    cutoff = now - policy.text_days * 86400
+                    deleted += db.execute(
+                        "DELETE FROM catches WHERE privacy = ? AND t_start < ?", (privacy, cutoff)
+                    ).rowcount
+            if self.max_text_age_s is not None:
+                cutoff = now - self.max_text_age_s
+                deleted += db.execute("DELETE FROM catches WHERE t_start < ?", (cutoff,)).rowcount
+        if deleted:
+            event(log, "catches_pruned", catches=deleted)
+        return deleted
+
     def prune_audio(self, *, max_bytes: int, max_age_s: float) -> int:
         """Delete archived audio older than ``max_age_s`` or beyond ``max_bytes`` (oldest first).
 
@@ -1208,17 +1378,18 @@ class Store:
 
 # The condition of the segments_class index, spelled the same in every query that should use it.
 _PRUNED_BY_CLASS = "privacy <> 'broadcast'"
+CATCH_SLACK_S = 0.5  # a catch's audio runs this far either side of its time above the noise
 
 
-def _exports_sql(exports: Exports | None) -> tuple[str, list[Any]]:
-    """SQL conditions on ``s`` (segments) for rows that may leave this machine
-    (``Exports.heard``); none for None, which is this machine reading its own store."""
+def _exports_sql(exports: Exports | None, table: str = "s") -> tuple[str, list[Any]]:
+    """SQL conditions on ``table`` (segments as ``s``, or catches) for rows that may leave this
+    machine (``Exports.heard``); none for None, which is this machine reading its own store."""
     if exports is None:
         return "", []
     stations, classes = sorted(exports.stations), sorted(exports.classes)
     return (
-        f" AND s.station_id IN ({','.join('?' * len(stations))})"
-        f" AND (s.privacy IS NULL OR s.privacy IN ({','.join('?' * len(classes))}))",
+        f" AND {table}.station_id IN ({','.join('?' * len(stations))})"
+        f" AND ({table}.privacy IS NULL OR {table}.privacy IN ({','.join('?' * len(classes))}))",
         [*stations, *classes],
     )
 

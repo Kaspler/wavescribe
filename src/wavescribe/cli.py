@@ -263,11 +263,16 @@ def cmd_listen(args: argparse.Namespace) -> int:
     if alerter is not None:
         alerter.attach(pipeline.request_translation)
         alerter.watch(pipeline.status, lambda: stations)
+    from wavescribe.radio.watch import subscribe
+
+    keep_catches = subscribe(store.add_catch) if store is not None else None  # a watch's
     try:
         pipeline.run(duration=args.duration)
     finally:
         if alerter is not None:
             alerter.close()
+        if keep_catches is not None:
+            keep_catches()
         if store is not None:
             store.close()
     return 0
@@ -655,7 +660,12 @@ class ResultPrinter:
         if not text:
             return
         stamp = time.strftime("%H:%M:%S", time.localtime(result.utterance.t_start))
-        head = f"[{stamp}] {result.station.id:<10}"
+        who = result.station.id
+        if result.utterance.freq_hz:  # a watch's: the channel it was caught on
+            from wavescribe.radio.bandplan import mhz_text
+
+            who = mhz_text(result.utterance.freq_hz / 1e6)
+        head = f"[{stamp}] {who:<10}"
         shown = self._marked(text, result.hits) if result.hits else text
         lines = [f"{head} {_lang(result.transcript.language)}  {shown}"]
         lines += [

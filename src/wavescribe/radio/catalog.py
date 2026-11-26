@@ -20,6 +20,14 @@ from wavescribe.radio.scan import SPUR_BIN_HZ, Signal, Sweep
 
 DEFAULT_DIR = Path("data/radio")
 KEEP_SCANS = 20
+MAX_NAME, MAX_NOTE, MAX_TAGS = 80, 2000, 20
+
+
+def _set(d: dict[str, Any], key: str, value: object) -> None:
+    if value:
+        d[key] = value
+    else:
+        d.pop(key, None)
 
 
 class Catalog:
@@ -106,7 +114,59 @@ class Catalog:
                 e["user_name"] = name
             else:
                 e.pop("user_name", None)
+            if str(freq_hz) in data.get("notes", {}):  # one name for a frequency, wherever given
+                _set(data["notes"][str(freq_hz)], "name", name or "")
             self._write(data)
+
+    # -- what the user knows about a frequency (a name, a note, tags) ----------------------
+
+    def note(
+        self,
+        freq_hz: int,
+        *,
+        name: str | None = None,
+        note: str | None = None,
+        tags: list[str] | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Note something about a frequency (a watch's catches show it). None leaves a field
+        as it is; "" or [] clears it. The name is the heard catalogue's name for it too."""
+        if name is not None and len(name) > MAX_NAME:
+            raise ValueError(f"a name is at most {MAX_NAME} characters")
+        if note is not None and len(note) > MAX_NOTE:
+            raise ValueError(f"a note is at most {MAX_NOTE} characters")
+        if tags is not None:
+            tags = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
+            if len(tags) > MAX_TAGS or any(len(t) > MAX_NAME for t in tags):
+                raise ValueError(f"at most {MAX_TAGS} tags of {MAX_NAME} characters each")
+        with self._lock:
+            data = self._read()
+            notes = data.setdefault("notes", {})
+            n = notes.setdefault(str(freq_hz), {"freq_hz": freq_hz})
+            for key, value in (("name", name), ("note", note), ("tags", tags)):
+                if value is not None:
+                    _set(n, key, value)
+            n["t"] = now or time.time()
+            heard = data["entries"].get(str(freq_hz))
+            if heard is not None and name is not None:
+                _set(heard, "user_name", name)
+            if set(n) <= {"freq_hz", "t"}:  # nothing left to say about it
+                del notes[str(freq_hz)]
+            self._write(data)
+        return self.note_for(freq_hz) or {"freq_hz": freq_hz}
+
+    def note_for(self, freq_hz: int) -> dict[str, Any] | None:
+        """What the user noted about a frequency, with the heard catalogue's name for it."""
+        return self.notes().get(freq_hz)
+
+    def notes(self) -> dict[int, dict[str, Any]]:
+        with self._lock:
+            data = self._read()
+        out = {int(k): dict(v) for k, v in data.get("notes", {}).items()}
+        for e in data["entries"].values():
+            if e.get("user_name"):
+                out.setdefault(e["freq_hz"], {"freq_hz": e["freq_hz"]})["name"] = e["user_name"]
+        return out
 
     def forget(self, freq_hz: int | None = None) -> None:
         with self._lock:
