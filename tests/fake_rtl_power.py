@@ -8,6 +8,10 @@ Environment:
     FAKE_POWER_STARTS   a file that gets one line per start: the arguments
     FAKE_POWER_PID      a file that gets the process id
     FAKE_POWER_HANG     if set, stall after setting up, as a wedged dongle does: print nothing
+    FAKE_POWER_PLL      "startup", "sweep" or an LO in Hz, comma separated: the tuner's PLL
+                        doesn't lock while it calibrates at start-up, on an unnamed hop, or for
+                        that LO (an R820T's IF is 3.57 MHz): that hop shows a carrier that isn't
+                        there
 """
 
 import argparse
@@ -48,11 +52,13 @@ def rows(
     dc_db: float = 15.0,
     floors: dict[int, float] | None = None,
     seed: int = 1,
+    unlocked: tuple[int, ...] = (),
 ) -> list[str]:
     """One CSV line per hop, as ``csv_dbm`` writes them: the low and high columns rounded
     inwards, the bins of the uncropped middle (one more below the centre than above it), then
     the last bin again. ``dc_db`` lifts the bin at each hop's tuned centre; ``floors`` sets a
-    hop's own noise level (hop index: dB)."""
+    hop's own noise level (hop index: dB); a hop tuned for an LO in ``unlocked`` (3.57 MHz
+    above its centre) shows a carrier from wherever the tuner went instead."""
     hops, seen, rate, down, n = layout(lo, hi, step, crop)
     rng = np.random.default_rng(seed)
     out = []
@@ -66,6 +72,8 @@ def rows(
             sigma = max(w / 2.355, rate / (n * down) / 2)
             db = np.maximum(db, -40 + level * np.exp(-0.5 * ((f - c) / sigma) ** 2))
         db[n // 2 - i1] += dc_db
+        if any(abs(lo_hz - 3_570_000 - centre) < seen / 2 for lo_hz in unlocked):
+            db[len(db) // 4] = -10.0
         vals = ", ".join(f"{v:.2f}" for v in [*db, db[-1]])
         out.append(
             f"2026-11-26, 12:00:00, {centre - bw2}, {centre + bw2}, "
@@ -95,7 +103,15 @@ def main() -> int:
         print("usb_claim_interface error -6\nFailed to open rtlsdr device #0.", file=sys.stderr)
         return 1
     print("Found Rafael Micro R820T tuner", file=sys.stderr)
+    pll = list(filter(None, os.environ.get("FAKE_POWER_PLL", "").split(",")))
+    if "startup" in pll:
+        print("[R82XX] PLL not locked!", file=sys.stderr)
     print(f"Tuner gain set to {float(a.g or 0):.2f} dB.", file=sys.stderr, flush=True)
+    for item in pll:
+        if item == "sweep":
+            print("[R82XX] PLL not locked!", file=sys.stderr)
+        elif item.isdigit():
+            print(f"[R82XX] No valid PLL values for {item} Hz!", file=sys.stderr)
     if os.environ.get("FAKE_POWER_HANG"):
         time.sleep(3600)
     lo, hi, step = (int(x) for x in a.f.split(":"))
@@ -104,7 +120,8 @@ def main() -> int:
         mhz, khz, db = (float(x) for x in item.split(":"))
         sigs.append((mhz * 1e6, khz * 1e3, db))
     crop = float(a.c.rstrip("%")) / 100 if a.c else 0.0
-    print("\n".join(rows(lo, hi, step, sigs, crop=crop)))
+    los = tuple(int(x) for x in pll if x.isdigit())
+    print("\n".join(rows(lo, hi, step, sigs, crop=crop, unlocked=los)))
     return 0
 
 

@@ -223,6 +223,31 @@ def test_a_busy_dongle_says_so(fake_power: str, monkeypatch: pytest.MonkeyPatch)
         S.sweep("000001", 446e6, 446.2e6, command=fake_power)
 
 
+def test_a_hop_the_tuner_couldnt_tune_never_becomes_a_signal(
+    fake_power: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_POWER_SIGNALS", "89.1:150:25,105.5:150:18")
+    # Hop 5 of 10 is centred on 96.715 MHz: an R820T names its LO, 3.57 MHz above that, and
+    # the fake shows a carrier there that isn't on the air.
+    monkeypatch.setenv("FAKE_POWER_PLL", "100285000")
+    sw = S.sweep("000001", 87.4e6, 108.1e6, bin_hz=10_000, command=fake_power)
+    assert [s.freq_hz for s in S.find_signals(sw, "cept")] == [89_100_000, 105_500_000]
+    assert [(round(lo / 1e3), round(hi / 1e3)) for lo, hi in sw.gaps] == [(95682, 99818)]
+    assert sw.warnings == ["no reading from 95.682 to 99.818 MHz: the tuner couldn't tune there"]
+    assert sw.downsampled()["warnings"] == sw.warnings
+
+
+def test_a_pll_that_didnt_lock_somewhere_marks_the_sweep(
+    fake_power: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_POWER_PLL", "startup")  # the tuner's calibration: harmless
+    assert S.sweep("000001", 87.4e6, 108.1e6, bin_hz=10_000, command=fake_power).warnings == []
+    monkeypatch.setenv("FAKE_POWER_PLL", "startup,sweep,sweep")
+    sw = S.sweep("000001", 87.4e6, 108.1e6, bin_hz=10_000, command=fake_power)
+    [w] = sw.warnings
+    assert "didn't lock 2 times" in w and "from 87.4 to 108.1 MHz" in w and sw.gaps == []
+
+
 def _gone(pid: int) -> bool:
     try:
         os.kill(pid, 0)

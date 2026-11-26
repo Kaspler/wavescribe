@@ -422,7 +422,15 @@ on it):
 the integration time scales with the hops. `rtl_power` prints every hop at once when its pass
 ends, so it is read against a deadline: silent for 10 s plus three sweeps' worth of time (the
 integration time, or 50 ms a hop when that is longer), it has stalled and is killed, and the scan
-fails with an error that says so. A cancelled scan kills it within 0.1 s. The dongle's DC offset at each hop's centre is
+fails with an error that says so. A cancelled scan kills it within 0.1 s. librtlsdr reports a
+tuner that didn't lock on stderr, but `rtl_power` reports no progress hop by hop, so neither the
+order nor the timing of the message places it. A message that names a frequency (the LO, the
+hop's centre plus an IF of up to 4.57 MHz, or the centre itself on zero-IF tuners) makes the hops
+it can be **gaps** (`Sweep.gaps`): bridged, and no signal or spur is taken there. The usual
+`[R82XX] PLL not locked!` names none: the sweep carries a warning (`Sweep.warnings`, logged, and
+in the spectrum the page and `data/radio/scans/` get) that its whole range may be wrong. Messages
+before the gain is set are the tuner's filter calibration at start-up and don't count. The
+dongle's DC offset at each hop's centre is
 bridged over about 3 kHz from either side. The noise floor is a 20th-percentile filter over about
 2 MHz, taken within each hop, so a crowded band doesn't lift it and a hop that reads louder than
 its neighbours doesn't turn into a row of signals. Peaks 8 dB above it are signals. Each signal's

@@ -53,6 +53,13 @@ strongest level each frequency reached, and counts how many sweeps each channel 
 Real traffic comes and goes. A channel busy in every sweep is a beacon, a recorded weather
 loop, or interference.
 
+**When the tuner can't tune.** Now and then a dongle's tuner fails to lock onto a frequency
+(`[R82XX] PLL not locked!` from `rtl_power`), and what it reports there comes from somewhere
+else. When the message names the frequency, those hops are left out of the scan: no reading,
+no signals. The usual message names none, so the scan warns that what it found in the range may
+be misplaced or missing (in the terminal, and with the scan's spectrum): sweep again. The same
+message once at start-up, before the sweep, is the tuner calibrating itself and is harmless.
+
 **A receiver's own signals.** Every dongle picks up a few signals of its own: harmonics of its
 crystal (28.8 MHz on the RTL-SDR Blog V3/V4), and noise from the computer's USB. Disconnect the
 antenna, then run `uv run wavescribe radio spurs a --learn` (or *Learn* under

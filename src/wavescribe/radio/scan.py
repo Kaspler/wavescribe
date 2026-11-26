@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -49,6 +50,12 @@ HOP_S = 0.05  # a hop, with room to spare
 START_S = 10.0  # opening the dongle and setting up the tuner, with room to spare
 STALL_SWEEPS = 3  # silent for this many sweeps' worth of time: rtl_power has stalled
 POLL_S = 0.1  # how often a running sweep looks at its cancel flag
+# librtlsdr's tuner drivers when the tuner can't tune: "[R82XX] PLL not locked!" (no frequency),
+# "[R82XX] No valid PLL values for 1770570000 Hz!" (its LO: the hop's centre plus an IF of
+# 1-4.57 MHz), "[E4K] PLL not locked for 1150000000 Hz!" (zero IF: the hop's centre itself).
+PLL_TROUBLE = re.compile(r"PLL not locked|no valid PLL", re.IGNORECASE)
+PLL_HZ = re.compile(r"for (\d+) ?Hz")
+IF_MAX_HZ = 4_600_000
 
 
 class ScanError(RuntimeError):
@@ -70,6 +77,11 @@ class Sweep:
     # Where each of rtl_power's hops after the first begins (bin indices). Every hop is tuned
     # and measured on its own, so its noise level can differ from its neighbours'.
     hop_starts: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=int))
+    warnings: list[str] = field(default_factory=list)  # what may be wrong with it, for people
+    gaps: list[tuple[float, float]] = field(default_factory=list)  # Hz: no reading, no signals
+
+    def in_gap(self, hz: float) -> bool:
+        return any(lo <= hz <= hi for lo, hi in self.gaps)
 
     def downsampled(self, points: int = SPECTRUM_POINTS) -> dict[str, Any]:
         """The spectrum for the page: the maximum per slot, so narrow signals survive."""
@@ -80,7 +92,8 @@ class Sweep:
             edges = np.linspace(0, n, points + 1).astype(int)
             db = np.maximum.reduceat(self.db, edges[:-1])
         return {"start_mhz": self.start_hz / 1e6, "stop_mhz": self.stop_hz / 1e6,
-                "db": [round(float(x), 1) for x in db]}  # fmt: skip
+                "db": [round(float(x), 1) for x in db],
+                "warnings": list(self.warnings)}  # fmt: skip
 
 
 @dataclass
@@ -215,7 +228,57 @@ def sweep(
         if _busy(text):
             raise ScanError(f"dongle {serial} is busy: another program has it open")
         raise ScanError(f"rtl_power found nothing to report: {text.strip()[-300:] or 'no output'}")
-    return _assemble(rows, start_hz, stop_hz, bin_hz, time.time() - t0)
+    sw = _assemble(rows, start_hz, stop_hz, bin_hz, time.time() - t0)
+    _unlocked(sw, err, rows)
+    for w in sw.warnings:
+        log.warning("dongle %s: %s", serial, w)
+    return sw
+
+
+def _unlocked(sw: Sweep, err: list[str], rows: list[Row]) -> None:
+    """Where the tuner's PLL didn't lock, a hop's readings come from wherever the tuner ended
+    up. librtlsdr says so on stderr, but rtl_power prints every hop at once when its pass ends
+    and reports no progress hop by hop, so neither the order nor the timing of the message says
+    which hop it was. A message that names a frequency gives the hops it can be: they become
+    gaps, with no reading and no signals. The usual "[R82XX] PLL not locked!" names none, so
+    the sweep says its whole range may be wrong. Messages before the gain is set come from the
+    tuner's own filter calibration while it starts up (at 56 MHz), not from the sweep."""
+    gain = next((i for i, line in enumerate(err) if "tuner gain" in line.lower()), -1)
+    trouble = [line for line in err[gain + 1 :] if PLL_TROUBLE.search(line)]
+    unnamed = 0
+    gaps: list[tuple[float, float]] = []
+    for line in trouble:
+        m = PLL_HZ.search(line)
+        if m is None:
+            unnamed += 1
+            continue
+        hz = int(m.group(1))  # the hop's centre, or its centre plus the IF
+        gaps += [(lo, hi) for lo, hi, _, _ in rows if hz - IF_MAX_HZ <= (lo + hi) / 2 <= hz]
+    for lo, hi in sorted(set(gaps)):
+        if sw.gaps and lo <= sw.gaps[-1][1] + sw.bin_hz:
+            sw.gaps[-1] = (sw.gaps[-1][0], max(hi, sw.gaps[-1][1]))
+        else:
+            sw.gaps.append((lo, hi))
+    for lo, hi in sw.gaps:
+        a = int(np.searchsorted(sw.freqs, lo))
+        b = int(np.searchsorted(sw.freqs, hi, side="right"))
+        if a >= b:
+            continue
+        if a > 0 and b < len(sw.db):  # a straight line between the readings either side
+            sw.db[a:b] = np.linspace(sw.db[a - 1], sw.db[b], b - a + 2)[1:-1]
+        else:  # at the sweep's edge: the floor of what is left
+            rest = np.delete(sw.db, np.s_[a:b])
+            sw.db[a:b] = float(np.percentile(rest, 20)) if len(rest) else -100.0
+        sw.warnings.append(
+            f"no reading from {lo / 1e6:.3f} to {hi / 1e6:.3f} MHz: the tuner couldn't tune there"
+        )
+    if unnamed:
+        times = "once" if unnamed == 1 else f"{unnamed} times"
+        sw.warnings.append(
+            f"the tuner's PLL didn't lock {times} during this sweep, and rtl_power doesn't say "
+            f"where: what was found from {sw.start_hz / 1e6:g} to {sw.stop_hz / 1e6:g} MHz may "
+            "be misplaced or missing. Sweep again"
+        )
 
 
 Row = tuple[float, float, float, list[float]]  # one hop: low and high column, bin, power per bin
@@ -396,6 +459,8 @@ def find_signals(
         if taken[i]:
             continue
         f0 = float(sw.freqs[i])
+        if sw.in_gap(f0):
+            continue  # no reading there: the tuner couldn't tune
         band = lookup(f0, region)
         half = _expected_width(band) / 2
         lo = int(np.searchsorted(sw.freqs, f0 - half))
@@ -632,7 +697,9 @@ def scan(
         if hold is None or len(hold.db) != len(sw.db):
             hold = sw
         else:
-            hold = replace(sw, db=np.maximum(hold.db, sw.db), seconds=hold.seconds + sw.seconds)
+            hold = replace(sw, db=np.maximum(hold.db, sw.db), seconds=hold.seconds + sw.seconds,
+                           warnings=list(dict.fromkeys(hold.warnings + sw.warnings)),
+                           gaps=[g for g in hold.gaps if g in sw.gaps])  # fmt: skip
         _merge(found, find_signals(sw, region, min_snr_db, spurs), bin_hz)
         prog.signals = found
         if watch_s <= 0 or time.monotonic() - t0 >= watch_s:
@@ -644,8 +711,8 @@ def scan(
         report("rds", 0, 1)
         name_fm(serial, found, gain_db=gain_db, ppm=ppm, seconds=rds_seconds, cancel=cancel,
                 on_progress=lambda d, t: report("rds", d, t))  # fmt: skip
-    report("done", 1, 1)
     assert hold is not None
+    report("done", 1, 1, "; ".join(hold.warnings))
     return hold, found
 
 
@@ -710,7 +777,7 @@ def _lines(sw: Sweep, min_snr_db: float) -> list[float]:
     excess = sw.db - _floor(sw, float(np.median(np.diff(sw.freqs))))
     peaks = np.flatnonzero((excess[1:-1] >= min_snr_db) & (sw.db[1:-1] >= sw.db[:-2])
                            & (sw.db[1:-1] >= sw.db[2:])) + 1  # fmt: skip
-    return [float(sw.freqs[i]) for i in peaks]
+    return [float(sw.freqs[i]) for i in peaks if not sw.in_gap(float(sw.freqs[i]))]
 
 
 def band_range(band_id: str, region: str) -> tuple[int, int]:
