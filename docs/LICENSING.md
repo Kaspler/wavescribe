@@ -103,10 +103,11 @@ In place:
   `python3 scripts/commit_checks.py install`; see CONTRIBUTING.md). It blocks a commit that adds
   a direct dependency with no entry here, a transitive package whose licence isn't tier A and
   isn't recorded here, or a new or re-pinned model without this file updated in the same commit.
+  CI runs the same licence check over everything a push or pull request brings
+  (`check --base <rev>`), so a commit made without the hook is caught there.
 - **Third-party telemetry off:** `HF_HUB_DISABLE_TELEMETRY=1` in every process.
 
-Planned: SPDX headers in the page's sources, and the licence check in CI too (today it runs in
-the pre-commit hook; CI checks the page).
+Planned: SPDX headers in the page's sources.
 
 ## Findings that changed the design
 

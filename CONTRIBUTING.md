@@ -103,8 +103,9 @@ radio, and the radio code is tested on synthetic signals.
 Checks of your own can go in `.git/hooks/pre-commit.local`: the hook runs it afterwards when it
 exists and is executable. Do what a blocked commit says and commit again; don't bypass the hook.
 
-Every pull request runs the same checks on GitHub: ruff, the tests that need no models, and a
-fresh build of the page compared with the committed one.
+Every pull request runs the same checks on GitHub: ruff, the tests that need no models, a
+fresh build of the page compared with the committed one, and the licence check over every
+commit it brings (`commit_checks.py check --base <rev>`).
 
 ## License
 

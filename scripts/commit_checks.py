@@ -15,7 +15,10 @@ installed hook runs it after these when it exists and is executable.
 
 Usage:
   commit_checks.py install        Install the pre-commit hook.
-  commit_checks.py check          Checks 1-2 on the staged commit (the pre-commit hook, CI).
+  commit_checks.py check          Checks 1-2 on the staged commit (the pre-commit hook).
+  commit_checks.py check --base REV
+                                  The same on what is checked out, with check 2 on everything
+                                  that changed since commit REV (CI: a pull request or a push).
   commit_checks.py stamp          Record the page sources a build used (the last step of the build).
 
 Standard library only, so it runs on any Python 3.11+ without the project's environment.
@@ -95,10 +98,13 @@ LICENSE_ALIASES = {
 
 class Repo:
     """What the next commit will contain: the index. During `git commit -a` git hands its hooks
-    a temporary index that already holds every tracked change."""
+    a temporary index that already holds every tracked change. ``against`` is the commit it is
+    compared with: HEAD for a commit, an earlier one (``--base``) for a range in CI, where the
+    index is what was checked out."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, against: str | None = None) -> None:
         self.root = root
+        self.against = against
 
     def git(self, *args: str, stdin: str | None = None) -> str:
         return subprocess.run(
@@ -117,8 +123,9 @@ class Repo:
             return None
 
     def read_head(self, path: str) -> str | None:
+        """``path`` as it was in the commit compared with (HEAD, or ``--base``)."""
         try:
-            return self.git("show", f"HEAD:{path}")
+            return self.git("show", f"{self.base()}:{path}")
         except subprocess.CalledProcessError:
             return None
 
@@ -134,6 +141,8 @@ class Repo:
         return {p for p in out.split("\0") if p}
 
     def base(self) -> str:
+        if self.against:
+            return self.against
         return "HEAD" if self.has_head() else EMPTY_TREE
 
     def blobs(self, prefix: str) -> dict[str, str]:
@@ -476,10 +485,20 @@ def repo_at(path: str | Path) -> Repo | None:
 
 def main(argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else "check"
+    base = argv[3] if len(argv) == 4 and argv[2] == "--base" and mode == "check" else None
+    if len(argv) > 2 and base is None:
+        print(__doc__, file=sys.stderr)
+        return 1
     repo = repo_at(Path.cwd()) or repo_at(Path(__file__).resolve().parent)
     if repo is None:
         print("not inside a git repository", file=sys.stderr)
         return 1
+    if base is not None:
+        try:
+            repo.against = repo.git("rev-parse", "--verify", "-q", f"{base}^{{commit}}").strip()
+        except subprocess.CalledProcessError:
+            print(f"--base {base}: no such commit here (fetch it first)", file=sys.stderr)
+            return 1
     if mode == "install":
         print("\n".join(install(repo)))
         return 0

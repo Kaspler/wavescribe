@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the licence check compares with the commit before the push or PR
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
@@ -34,6 +35,14 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
       - run: uv sync --locked
+      # The pre-commit hook checks one commit at a time; this checks everything the push or pull
+      # request brings, after `uv sync` so new transitive packages have their licence metadata.
+      - name: New dependencies and models have licence entries
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git cat-file -e "${BASE:-none}^{commit}" 2>/dev/null || BASE=HEAD^
+          python3 scripts/commit_checks.py check --base "$BASE"
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # Tests marked `models` need about 8 GB of downloaded models and run on a developer's Mac

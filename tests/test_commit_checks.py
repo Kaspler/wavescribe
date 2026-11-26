@@ -135,6 +135,27 @@ def test_models_need_licensing_updated_in_the_same_commit(repo):
     assert "m" in cc.check_licences(repo)[0]
 
 
+def test_ci_checks_the_licences_of_everything_since_a_base_commit(repo):
+    base = git(repo.root, "rev-parse", "HEAD").stdout.strip()
+    stage(repo, {"pyproject.toml": '[project]\ndependencies = ["numpy", "left_pad>=1"]\n'})
+    git(repo.root, "commit", "-qm", "a dependency, no entry")  # e.g. with the hook skipped
+    stage(repo, {"README.md": "later\n"})
+    git(repo.root, "commit", "-qm", "something else")
+    assert cc.check_licences(repo) == []  # what CI sees without a base: a clean checkout
+    assert "left_pad (pyproject.toml)" in cc.check_licences(cc.Repo(repo.root, base))[0]
+
+    def check(*args):
+        return subprocess.run(["python3", "-I", str(SCRIPT), "check", *args], cwd=repo.root,
+                              capture_output=True, text=True)  # fmt: skip
+
+    assert check().returncode == 0
+    found = check("--base", base)
+    assert found.returncode == 1 and "left_pad (pyproject.toml)" in found.stderr
+    assert check("--base", "HEAD").returncode == 0
+    assert "no such commit" in check("--base", "0" * 40).stderr
+    assert check("--base").returncode == 1  # the revision is missing
+
+
 def test_spdx_expressions():
     assert cc.spdx_ok("MIT")
     assert cc.spdx_ok("(MIT OR GPL-3.0-or-later)")
