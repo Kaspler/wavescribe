@@ -16,7 +16,7 @@ from tests.test_outputs import Recorder
 from tests.test_pipeline import ENTRY, FakeTranscriber, FakeTranslator, ListSource
 from tests.test_rules import pack
 from tests.test_segmenter import EnergyVad, silence, tone
-from wavescribe.app import App
+from wavescribe.app import App, ChangeError
 from wavescribe.config import parse_stations
 from wavescribe.registry import ModelRegistry
 from wavescribe.settings import Settings, effective_config
@@ -73,12 +73,15 @@ def registry(tmp_path: Path) -> ModelRegistry:
 
 
 def make_app(tmp_path: Path, name: str = "node", *, transcriber=SpeakingTranscriber,
-             audio=None, transport=None, start=None, stations=None) -> App:  # fmt: skip
+             audio=None, transport=None, start=None, stations=None,
+             page=None) -> App:  # fmt: skip
+    """``page``: what config/ui.toml holds before the app starts."""
     root = tmp_path / name
     root.mkdir()
     (root / "alerts.toml").write_text(ALERTS)
     audio = audio if audio is not None else np.concatenate([silence(0.5), tone(2), silence(1)])
     settings = Settings(root / "ui.toml")
+    settings.update(lambda d: d.update(page or {}))
     settings.update(lambda d: d.setdefault("node", {}).update(name=name))
     return App(
         parse_stations(stations or BASE, root / "stations.toml"), settings, registry(root),
@@ -944,6 +947,31 @@ def test_a_pushed_name_with_control_characters_leaves_a_ui_toml_that_loads(centr
     assert push(central, [{**heard("tsf"), "station": station}])["accepted"] == 1
     again = Settings(central.settings.path)  # as the next start reads it
     assert again.get("station")[0]["name"] == "T\x7fS\x00F\n (north)"
+
+
+def test_a_reception_confirmation_holds_for_its_class_only(tmp_path: Path) -> None:
+    """Marine VHF is utility radio; 155.5 MHz is in no band plan, so private. A confirmation
+    given for the one mustn't carry over when the station moves to the other."""
+    page = {
+        "device": [{"id": "v", "serial": "00004321", "center_mhz": 156.25, "gain_db": 20}],
+        "station": [{"id": "ch16", "name": "Ch 16", "device": "v", "mhz": [156.8],
+                     "mode": "nfm", "acknowledge": True}],  # as saved before classes were kept
+    }  # fmt: skip
+    app = make_app(tmp_path, page=page)
+    saved = lambda: app.settings.get("station")[0]["acknowledge"]  # noqa: E731
+    try:
+        assert app.config.get("ch16").privacy == "utility" and saved() == "utility"
+        with pytest.raises(ChangeError, match="confirmed as utility radio"):
+            app.update_station("ch16", {"mhz": [155.5]})
+        assert app.config.get("ch16").sdr.freq_hz == 156_800_000  # nothing changed
+        view = app.update_station("ch16", {"mhz": [155.5], "acknowledge": True})
+        assert view["available"] and app.config.get("ch16").privacy == "private"
+        assert saved() == ["utility", "private"]  # a yes is kept as the classes it was given for
+        app.update_station("ch16", {"mhz": [156.8]})  # back: confirmed before, so no new yes
+        assert app.config.get("ch16").privacy == "utility"
+    finally:
+        app.pipeline.stop()
+        app.store.close()
 
 
 def test_a_stored_time_that_is_not_a_number_doesnt_stop_the_page(node: Running) -> None:

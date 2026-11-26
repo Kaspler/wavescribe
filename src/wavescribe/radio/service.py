@@ -402,7 +402,7 @@ class RadioService:
             if raw.get(key) is False:
                 station[key] = False
         if POLICIES.get(privacy) and POLICIES[privacy].needs_ack:
-            station["acknowledge"] = True
+            station["acknowledge"] = privacy  # the class confirmed: another one asks again
         try:
             view = self.app.add_station(station, start=True)
         except Exception as e:

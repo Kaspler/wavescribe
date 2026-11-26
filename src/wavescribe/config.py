@@ -351,13 +351,15 @@ def default_mode(freq_hz: float, region: str | None) -> str:
     return band.mode if band is not None and band.mode else "nfm"
 
 
-def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: bool,
+def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: object,
                  where: str, width_hz: float | None = None) -> tuple[str, str | None]:  # fmt: skip
     """The privacy class and band of an SDR frequency, and an acknowledgement where the band
     plan wants one: the user confirms they may receive it where they are (docs/RADIO.md).
-    ``width_hz`` is the channel's width, when it's known: the class is the strictest of the
-    bands its edges reach (``bandplan.lookup``). Digital services can be tuned too, but only
-    analogue demodulators exist: no digital decoder, no decryption."""
+    ``acknowledge`` is true (confirmed now) or the class confirmed before, so a station that
+    moves to another class is asked again (``acknowledged``). ``width_hz`` is the channel's
+    width, when it's known: the class is the strictest of the bands its edges reach
+    (``bandplan.lookup``). Digital services can be tuned too, but only analogue demodulators
+    exist: no digital decoder, no decryption."""
     from wavescribe.radio.bandplan import AUTO, POLICIES, lookup
 
     band = lookup(freq_hz, region or AUTO, width_hz)
@@ -365,9 +367,11 @@ def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: boo
     what = band.name if band else "a frequency no band plan lists"
     if mode not in MODES:
         raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}")
-    if POLICIES[privacy].needs_ack and not acknowledge:
+    if POLICIES[privacy].needs_ack and not acknowledged(acknowledge, privacy):
         extra = (" It carries a digital service: Wavescribe has no digital decoder, so you will "
                  "hear noise.") if privacy == "digital" else ""  # fmt: skip
+        if given := _classes(acknowledge):
+            extra = f" It was confirmed as {' and '.join(given)} radio.{extra}"
         mhz = f"{freq_hz / 1e6:.5f}".rstrip("0").rstrip(".")
         raise ConfigError(
             f"{where}: {mhz} MHz is {what} ({privacy} radio). Laws on receiving it "
@@ -375,6 +379,38 @@ def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: boo
             "where you are (docs/RADIO.md)"
         )
     return privacy, band.id if band else None
+
+
+def acknowledged(acknowledge: object, privacy: str) -> bool:
+    """Whether ``acknowledge`` confirms receiving radio of class ``privacy``: true (given just
+    now, or in a hand-written stations file), or the class or classes it was given for. What
+    the page saves is the classes, so a move to a class never confirmed asks again."""
+    return acknowledge is True or privacy in _classes(acknowledge)
+
+
+def confirmed(acknowledge: object, privacy: str) -> str | list[str]:
+    """What to save once class ``privacy`` is confirmed: it, and any class confirmed before."""
+    from wavescribe.radio.bandplan import STRICTNESS
+
+    classes = sorted({*_classes(acknowledge), privacy}, key=STRICTNESS.index)
+    return classes[0] if len(classes) == 1 else classes
+
+
+def _classes(acknowledge: object) -> list[str]:
+    if isinstance(acknowledge, str):
+        return [acknowledge]
+    return list(acknowledge) if isinstance(acknowledge, list | tuple) else []
+
+
+def _check_acknowledge(value: object, where: str) -> None:
+    from wavescribe.radio.bandplan import PRIVACY
+
+    names = [value] if isinstance(value, str) else value
+    if not isinstance(value, bool) and not (
+        isinstance(names, list | tuple) and names and all(n in PRIVACY for n in names)
+    ):
+        raise ConfigError(f"{where}: 'acknowledge' must be true or false, or the classes of "
+                          f"radio you confirm ({', '.join(PRIVACY)})")  # fmt: skip
 
 
 def parse_sdr_source(spec: str, region: str | None = None) -> SdrTuning:
@@ -496,17 +532,23 @@ def build_station(
         if channel and not MIN_CHANNEL_HZ <= channel * 1e3 <= MAX_CHANNEL_HZ:
             raise ConfigError(f"{where}: 'channel_khz' must be {MIN_CHANNEL_HZ / 1e3:g} to "
                               f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25")  # fmt: skip
-        width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else None
-        privacy, band = radio_policy(freq, mode, region, bool(d.get("acknowledge")), where, width)
-        floor = d.get("privacy_floor")
-        if floor is not None:
-            from wavescribe.radio.bandplan import STRICTNESS, stricter
+        from wavescribe.radio.bandplan import STRICTNESS, stricter
 
-            if floor not in STRICTNESS:
-                raise ConfigError(f"{where}: 'privacy_floor' must be one of "
-                                  f"{', '.join(STRICTNESS)}")  # fmt: skip
-            if stricter(floor, privacy):
-                privacy_region, privacy = privacy, floor
+        width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else None
+
+        acknowledge, floor = d.get("acknowledge", False), d.get("privacy_floor")
+        _check_acknowledge(acknowledge, where)
+        if floor is not None and floor not in STRICTNESS:
+            raise ConfigError(f"{where}: 'privacy_floor' must be one of "
+                              f"{', '.join(STRICTNESS)}")  # fmt: skip
+        if floor is not None and acknowledge is not True and acknowledged(acknowledge, floor):
+            # Kept in the class it was confirmed for after a change of region, while that one
+            # is the stricter: it runs as that class, so the confirmation still holds.
+            heard_as, _ = radio_policy(freq, mode, region, True, where, width)
+            acknowledge = True if stricter(floor, heard_as) else acknowledge
+        privacy, band = radio_policy(freq, mode, region, acknowledge, where, width)
+        if floor is not None and stricter(floor, privacy):
+            privacy_region, privacy = privacy, floor
         if not off_centre(freq, device.center_hz, mode, channel and channel * 1e3):
             raise ConfigError(
                 f"{where}: {freq / 1e6:.5f} MHz is at the centre of device {device_id!r}, where "

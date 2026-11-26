@@ -23,7 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from wavescribe.config import ConfigError, Station, StationsConfig
+from wavescribe.config import ConfigError, Station, StationsConfig, confirmed
 from wavescribe.languages import language_name
 from wavescribe.log import event
 from wavescribe.outputs import OutputConfig, OutputError, Outputs
@@ -157,6 +157,7 @@ class App:
             except ModelError as e:
                 log.warning("ignoring the page's %s model order: %s", cap, e)
         self.config, self.config_errors = effective_config(base, settings.snapshot())
+        self._pin_acknowledgements()
         apply_radio_policies(base, settings.snapshot())
         self.plan, missing = plan_available(
             registry, list(self.config.stations), translate,
@@ -433,7 +434,9 @@ class App:
                     else:
                         over[k] = v
 
-        self._check_draft(mutate, sid)
+        heard = self._check_draft(mutate, sid)
+        if changes.get("acknowledge") is True:  # saved as the classes confirmed, this one too
+            changes["acknowledge"] = confirmed(self._acknowledgement(sid), heard.privacy)
         self._check_models(mutate, sid, changes)
         self.settings.update(mutate)
         self._reload()
@@ -520,15 +523,48 @@ class App:
             n += 1
         return f"{base}-{n}"
 
-    def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str) -> None:
+    def _pin_acknowledgements(self) -> None:
+        """A reception confirmation saved as plain ``acknowledge = true`` (sent that way, or
+        saved before the class was kept) becomes the class the station is in now, so moving
+        it to another class later (a frequency, a region) asks again."""
+        heard = {s.id: s.privacy for s in self.config.stations
+                 if s.sdr is not None and s.id not in self.config_errors}  # fmt: skip
+
+        def entries(d: dict[str, Any]) -> list[tuple[Any, dict[str, Any]]]:
+            return [(e.get("id"), e) for e in d.get("station", [])] + list(
+                d.get("overrides", {}).items())  # fmt: skip
+
+        if any(e.get("acknowledge") is True and sid in heard
+               for sid, e in entries(self.settings.snapshot())):  # fmt: skip
+
+            def mutate(d: dict[str, Any]) -> None:
+                for sid, e in entries(d):
+                    if e.get("acknowledge") is True and sid in heard:
+                        e["acknowledge"] = heard[sid]
+
+            self.settings.update(mutate)
+
+    def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str) -> Station:
         draft = self.settings.snapshot()
         mutate(draft)
-        _, errors = effective_config(self.base, draft)
+        config, errors = effective_config(self.base, draft)
         if sid in errors:
             raise ChangeError(errors[sid])
         bad = {k: v for k, v in errors.items() if k.startswith("device:")}
         if bad:
             raise ChangeError(next(iter(bad.values())))
+        return config.get(sid)
+
+    def _acknowledgement(self, sid: str) -> object:
+        """What a station's saved confirmation says: its page entry, its override, the file."""
+        for e in self.settings.get("station") or []:
+            if e.get("id") == sid:
+                return e.get("acknowledge", False)
+        over = (self.settings.get("overrides") or {}).get(sid, {})
+        if "acknowledge" in over:
+            return over["acknowledge"]
+        base = next((s for s in self.base.stations if s.id == sid), None)
+        return station_dict(base).get("acknowledge", False) if base else False
 
     def _replan(self, s: Station, prev: Station | None) -> tuple[ModelEntry, Path] | None:
         """Plan one station's models after a change; returns its ASR model, or None when it
@@ -603,6 +639,7 @@ class App:
         with self._lock:
             old = {s.id: s for s in self.config.stations}
             self.config, self.config_errors = effective_config(self.base, self.settings.snapshot())
+            self._pin_acknowledgements()
             apply_radio_policies(self.base, self.settings.snapshot())
             new = {s.id: s for s in self.config.stations}
             for sid, s in new.items():

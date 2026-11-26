@@ -191,6 +191,29 @@ def test_a_stricter_region_switches_off_what_it_makes_private() -> None:
     assert (config.get("repeater").privacy, config.get("repeater").disabled) == ("private", False)
 
 
+def test_a_file_stations_confirmation_is_for_the_class_it_was_given_in() -> None:
+    raw = {
+        "defaults": {"language": "en-GB"},
+        "device": [{"id": "v", "serial": "00001234", "center_mhz": 156.25, "gain_db": 20}],
+        "station": [{"id": "ch16", "mhz": 156.8, "mode": "nfm", "device": "v",
+                     "acknowledge": True}],
+    }  # fmt: skip
+    file = parse_stations(raw, Path("stations.toml"))
+    assert file.get("ch16").privacy == "utility"  # marine VHF
+
+    moved = {"overrides": {"ch16": {"mhz": [155.5]}}}  # in no band plan: private
+    config, errors = effective_config(file, moved)
+    assert "confirmed as utility radio" in errors["ch16"] and "acknowledge" in errors["ch16"]
+    assert config.get("ch16").sdr.freq_hz == 156_800_000  # the file's definition stays
+    moved["overrides"]["ch16"]["acknowledge"] = "private"
+    config, errors = effective_config(file, moved)
+    assert not errors and config.get("ch16").privacy == "private"
+
+    raw["station"][0]["acknowledge"] = "privat"
+    with pytest.raises(ConfigError, match="'acknowledge' must be true or false, or the classes"):
+        parse_stations(raw, Path("stations.toml"))
+
+
 def test_remote_stations_need_their_id_over_there() -> None:
     data = {"station": [{"id": "far", "remote": "http://node:8766"}]}
     config, errors = effective_config(base(), data)

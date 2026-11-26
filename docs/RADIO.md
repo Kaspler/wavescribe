@@ -180,6 +180,12 @@ defaults:
 
 - **Asks you first**: before a station on such a frequency is created, you confirm that you may
   receive it where you are (the checkbox on the page, `--acknowledge`, or `acknowledge = true`).
+  The confirmation holds for that class only: the page saves the classes you confirmed for the
+  station (`acknowledge = "utility"`, or `["utility", "private"]` after a second one), and a
+  station that later lands in a class you haven't confirmed (another frequency, another
+  region) is asked again. In `stations.toml`, `acknowledge = true` confirms the class the
+  frequency is in when the file is read; write the class instead to be asked again if that
+  ever changes.
 - **Leaves this machine** covers the `/feed/v1` API, webhooks and live pushes, and other
   Wavescribe nodes following this one. An alert raised on radio that stays here still goes out,
   but only which rule matched, when and on which station: no words, matched terms or audio.

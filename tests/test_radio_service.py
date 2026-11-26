@@ -54,6 +54,7 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
     assert st["name"] == "PMR446 walkie-talkies, channel 1"
     station = radio.app.config.get(st["id"])
     assert station.sdr.mode == "nfm" and station.privacy == "private"
+    assert radio.app.settings.get("station")[0]["acknowledge"] == "private"  # for this class
     assert radio.call("GET", "/api/manage/radio")[1]["heard"][0]["station"] == st["id"]
     # The test's audio ends at once; hold the station as running, as a live channel would be.
     real = radio.app.running

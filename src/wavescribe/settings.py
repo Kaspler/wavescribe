@@ -258,7 +258,7 @@ def _build(
             # Unless a region chosen on the page puts its frequency in a class that wants a
             # confirmation the file never gave. It can't go on running as the class it was
             # made in: it stays listed, switched off, with what to do about it.
-            where, confirmed = f"station {sid!r}", bool(raw.get("acknowledge"))
+            where, confirmed = f"station {sid!r}", raw.get("acknowledge", False)
             try:
                 radio_policy(fallback.sdr.freq_hz, fallback.sdr.mode, region, confirmed, where)
             except ConfigError as unconfirmed:
@@ -306,7 +306,7 @@ def station_dict(s: Station) -> dict[str, Any]:
         if s.sdr.squelch_db is not None:
             d["squelch_db"] = s.sdr.squelch_db
         if s.privacy in ("utility", "private", "digital"):
-            d["acknowledge"] = True  # it was, when the station was made
+            d["acknowledge"] = s.privacy  # it was, for this class, when the station was made
         if s.privacy_region is not None:
             d["privacy_floor"] = s.privacy  # kept stricter after a change of region
     if s.remote is not None:
