@@ -266,7 +266,8 @@ post a plain form there.
 - a click on the page, from the machine itself (LAN viewers can't trigger any of these):
   - a model download, run as a `wavescribe models fetch <id>` child process, which is stopped
     when `serve` stops;
-  - a Hugging Face search, anonymous GETs to the public API;
+  - a Hugging Face search, or adding one of its results (its card is read again), anonymous
+    GETs to the public API;
   - a Radio Browser search or snapshot refresh;
   - checking a stream or playlist URL, and recording 20 s of it to detect its language;
 - what the user configured: the stations' streams, outputs (text and metadata only, to URLs
@@ -276,7 +277,9 @@ Everything else (transcription, translation, search, Ask, alerts, the page itsel
 no network at all. The online model catalogue lists only models whose licence is clear, sorted
 into the same tiers as `models.toml` (LICENSING.md, "Online model catalogue"); a model with no
 licence never appears and stays bring-your-own. Catalogue models added from the page go to
-`config/models.catalog.toml`, pinned to the commit they were found at and marked untested.
+`config/models.catalog.toml`, pinned to the commit they were found at and marked untested; the
+server reads the licence again from the model card at that commit (`catalog.models.model_at`)
+and ignores whatever licence the request carries.
 
 **Feed, outputs and remote stations** ([FEED.md](FEED.md) is the reference). One JSON shape
 per event (`events.py`, version 1: `utterance`, `alert`, `batch`) serves all three:

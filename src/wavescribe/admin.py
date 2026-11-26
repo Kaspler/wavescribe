@@ -120,15 +120,21 @@ def search_models(query: str, capability: str) -> list[dict[str, Any]]:
 
 def add_catalog_model(app: App, raw: dict[str, Any], capability: str) -> dict[str, Any]:
     """Add a search result to config/models.catalog.toml (pinned to its commit, tier from its
-    licence) and to the running registry, at the end of its chain."""
+    licence) and to the running registry, at the end of its chain.
+
+    Only the repo and the commit come from the page. The licence, and with it the tier, is read
+    again from the model card at that commit (online, on this click), so whatever sent the
+    request can't make a model's licence look more permissive than it is."""
     from wavescribe.catalog import models as cat
 
-    fields = {f.name for f in dataclasses.fields(cat.CatalogModel)}
+    repo, sha = str(raw.get("repo") or ""), str(raw.get("sha") or "")
     try:
-        model = cat.CatalogModel(**{k: v for k, v in raw.items() if k in fields
-                                    and k != "caveats" and k != "languages"},
-                                 languages=tuple(raw.get("languages") or ()),
-                                 caveats=tuple(raw.get("caveats") or ()))  # fmt: skip
+        model = cat.model_at(repo, sha, capability)
+    except ValueError as e:  # not a repo and a commit, or not JSON
+        raise AdminError(str(e)) from e
+    except (OSError, cat.CatalogError) as e:  # URLError, HTTPError and timeouts are OSErrors
+        raise AdminError(f"couldn't read {repo} from Hugging Face: {e}") from e
+    try:
         entry_raw = cat.to_registry_entry(model, capability)
         if model.weights_gb:
             entry_raw["size_gb"] = round(model.weights_gb, 2)

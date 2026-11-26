@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The models catalogue: what this Mac can run, licence tiers, and a Hugging Face search.
 
-Everything here works offline except ``search_hf`` and the helpers it calls: an explicit action
-from the web page, never run at import or in the background.
+Everything here works offline except ``search_hf``, ``model_at`` and the helpers they call:
+explicit actions from the web page, never run at import or in the background.
 
 Sizes are in GB of 2**30 bytes, the way Apple counts unified memory ("64 GB" is 64 * 2**30).
 Memory bandwidth is in decimal GB/s, as Apple's specs give it.
@@ -502,6 +502,7 @@ EXPAND = (
     "library_name",
 )
 _REPO = re.compile(r"[\w.-]+/[\w.-]+")
+_SHA = re.compile(r"[0-9a-f]{40}")
 _LANGUAGE = re.compile(r"[a-z]{2,3}(-[a-z0-9]{2,8})*")
 
 
@@ -574,6 +575,31 @@ def search_hf(
     ]
 
 
+def model_at(repo: str, sha: str, capability: str, *, timeout: float = 15) -> CatalogModel:
+    """One repo at a commit, read again from Hugging Face the way a search reads its results:
+    the licence from the model card at that commit (or its upstream's), the backend from its
+    files, the size from their listing. Adding a model from the page goes by this, never by what
+    the page sends back about it. Online."""
+    if not _REPO.fullmatch(repo) or not _SHA.fullmatch(sha):
+        raise ValueError("expected a Hugging Face repo (org/name) and its 40-character commit")
+    if capability not in PIPELINE_TAGS:
+        raise ValueError(f"no catalogue for {capability!r}; try one of {', '.join(PIPELINE_TAGS)}")
+    deadline = time.monotonic() + timeout
+    # At a revision the API answers with the card, tags, config and files of that commit.
+    raw = _get_json(f"{_endpoint()}/api/models/{_quote(repo)}/revision/{sha}?blobs=true",
+                    _left(deadline))  # fmt: skip
+    if not isinstance(raw, dict) or raw.get("sha", sha) != sha:
+        raise CatalogError(f"Hugging Face didn't answer with {repo} at {sha[:12]}")
+    raw = {**raw, "id": raw.get("id") or repo, "sha": sha}
+    base = None
+    if upstream := _base_model(raw):
+        try:
+            base = _get_json(_base_url(upstream), _left(deadline))
+        except (OSError, ValueError) as e:  # then it is added with the caveat a search shows
+            log.debug("Hugging Face card for %s failed: %s", upstream, e)
+    return _catalog_model(raw, capability, raw, base)
+
+
 def hf_weights_gb(repo: str, revision: str = "main", *, timeout: float = 15) -> float | None:
     """Weights size of a repo at a revision, from its file listing. Online."""
     url = f"{_endpoint()}/api/models/{_quote(repo)}/revision/{_quote(revision)}?blobs=true"
@@ -644,10 +670,8 @@ def _details(
         if raw.get("sha"):
             url = f"{_endpoint()}/api/models/{_quote(raw['id'])}/revision/{raw['sha']}?blobs=true"
             jobs[pool.submit(_get_json, url, _left(deadline))] = ("revision", raw["id"])
-    expand = urllib.parse.urlencode([("expand[]", e) for e in ("cardData", "sha", "siblings")])
     for base in sorted({b for raw in top if (b := _base_model(raw))}):
-        url = f"{_endpoint()}/api/models/{_quote(base)}?{expand}"
-        jobs[pool.submit(_get_json, url, _left(deadline))] = ("base", base)
+        jobs[pool.submit(_get_json, _base_url(base), _left(deadline))] = ("base", base)
     done, _ = wait(jobs, timeout=max(0.0, deadline - time.monotonic()))
     pool.shutdown(wait=False, cancel_futures=True)
     revisions: dict[str, dict[str, Any]] = {}
@@ -659,6 +683,12 @@ def _details(
         except (OSError, ValueError) as e:
             log.debug("Hugging Face details for %s failed: %s", key, e)
     return revisions, bases
+
+
+def _base_url(base: str) -> str:
+    """The card of the model a repo was converted from (its licence is the one that counts)."""
+    expand = urllib.parse.urlencode([("expand[]", e) for e in ("cardData", "sha", "siblings")])
+    return f"{_endpoint()}/api/models/{_quote(base)}?{expand}"
 
 
 def _base_model(raw: Mapping[str, Any]) -> str | None:

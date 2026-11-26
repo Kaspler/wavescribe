@@ -77,6 +77,9 @@ public API, with no token and a generic User-Agent. The rules match the registry
   the licence is read from the base model's card, not the converter's.
 - **Each entry added is pinned** to the commit it was found at. It goes to the gitignored
   `config/models.catalog.toml` with its licence URL and attribution, and is marked untested.
+  Adding takes only the repository and the commit from the page: the server reads the card
+  at that commit again (and the base model's) and takes the licence, and so the tier, from
+  there, never from the request.
   Opt-in and restricted entries need the same licence acceptance as registry models before a
   download.
 - **Weights still come only from the rights holder's repository**, through

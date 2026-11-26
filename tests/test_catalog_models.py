@@ -198,12 +198,22 @@ class FakeHub:
             body = self.searches.get(urllib.parse.parse_qs(url.query)["pipeline_tag"][0], [])
         elif "/revision/" in path:
             repo, rev = path.strip("/").split("/revision/")
-            body = {"id": repo, "sha": rev, "siblings": REVISIONS.get(rev, [])}
+            body = self.at_revision(repo, rev)
         elif path.strip("/") in BASES:
             body = BASES[path.strip("/")]
         else:
             raise urllib.error.HTTPError(request.full_url, 404, "Not Found", None, None)
         return io.BytesIO(json.dumps(body).encode())
+
+    def at_revision(self, repo: str, rev: str) -> dict:
+        """GET /api/models/<repo>/revision/<sha>?blobs=true: the repo's card, tags and config
+        at that commit, and its files with their sizes."""
+        listed = next((m for ms in self.searches.values() for m in ms if m["id"] == repo), {})
+        sizes = {f["rfilename"]: f["size"] for f in REVISIONS.get(rev, [])}
+        names = [f["rfilename"] for f in listed.get("siblings", [])]
+        siblings = [{"rfilename": n} | ({"size": sizes[n]} if n in sizes else {}) for n in names]
+        siblings += [f for f in REVISIONS.get(rev, []) if f["rfilename"] not in names]
+        return {**listed, "id": repo, "sha": rev, "siblings": siblings}
 
 
 @pytest.fixture
@@ -420,6 +430,50 @@ def test_to_registry_entry_passes_registry_validation(hub: FakeHub) -> None:
     assert (mms.tier, mms.license, mms.languages) == ("restricted", "CC-BY-NC-4.0", ("*",))
     with pytest.raises(ValueError, match="isn't offered"):
         to_registry_entry(found["example-org/whisper-small-mlx-b"], "asr")
+
+
+def test_adding_a_model_reads_its_licence_again_at_its_commit(
+    hub: FakeHub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+    import tomllib
+    from types import SimpleNamespace
+
+    from wavescribe import admin
+
+    monkeypatch.setattr(admin, "CATALOG_MODELS_PATH", tmp_path / "models.catalog.toml")
+    registry = ModelRegistry([], {}, tmp_path, Licenses(tmp_path / "accepted.json"))
+    app = SimpleNamespace(registry=registry)
+    # A search result as the control centre gets it back, with a licence the model doesn't have.
+    found = {m.repo: m for m in search_hf("", "asr")}["example-org/mms-asr-e"]
+    claimed = dataclasses.asdict(found) | {
+        "license": "apache-2.0", "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "tier": "default", "languages": ["pt"],
+    }  # fmt: skip
+    hub.requests.clear()
+    added = admin.add_catalog_model(app, claimed, "asr")
+    entry = registry.get(added["id"])
+    assert (added["tier"], entry.license) == ("restricted", "CC-BY-NC-4.0")
+    assert entry.revision == sha("e")
+    assert entry.languages == ("*",)  # what the card says, not what was sent
+    assert any(f"/revision/{sha('e')}" in r.full_url for r in hub.requests)
+    saved = tomllib.loads(admin.CATALOG_MODELS_PATH.read_text())["model"]
+    assert [(m["tier"], m["license"]) for m in saved] == [("restricted", "CC-BY-NC-4.0")]
+
+    # A conversion takes its upstream's licence, as in a search.
+    nemotron = {**claimed, "repo": "example-org/nemotron-asr-streaming-d", "sha": sha("d")}
+    added = admin.add_catalog_model(app, nemotron, "asr")
+    assert registry.get(added["id"]).license == "LicenseRef-OpenMDW-1.1"
+    # A card with no licence isn't offered, whatever the request says.
+    unlicensed = {**claimed, "repo": "example-org/whisper-small-mlx-b", "sha": sha("b")}
+    with pytest.raises(admin.AdminError, match="isn't offered"):
+        admin.add_catalog_model(app, unlicensed, "asr")
+    # Only a repo at a full commit is read again: no branch, no stand-in.
+    with pytest.raises(admin.AdminError, match="40-character commit"):
+        admin.add_catalog_model(app, {**claimed, "sha": "main"}, "asr")
+    hub.fail = ("/revision/",)
+    with pytest.raises(admin.AdminError, match="couldn't read"):
+        admin.add_catalog_model(app, {**claimed, "repo": "example-org/other-e"}, "asr")
 
 
 def test_registry_entry_for_an_opt_in_model_needs_acceptance(tmp_path: Path) -> None:
