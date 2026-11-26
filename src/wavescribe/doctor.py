@@ -459,8 +459,9 @@ class Doctor:
             return
         self.alert_config = alerts
         packs = ", ".join(sorted(alerts.rules.packs)) or "none"
-        self.add(g, "alerts", OK, f"{apath}: {len(alerts.rules.rules)} keyword and "
-                 f"{len(alerts.rules.llm_rules)} LLM rules; keyword packs: {packs}")  # fmt: skip
+        self.add(g, "alerts", OK, f"{apath}: {len(alerts.rules.rules)} keyword, "
+                 f"{len(alerts.rules.llm_rules)} LLM and {len(alerts.rules.station_rules)} "
+                 f"station rules; keyword packs: {packs}")  # fmt: skip
 
     def _stations(self, *, transcribed: bool = False) -> list[Any]:
         if self.config is None:

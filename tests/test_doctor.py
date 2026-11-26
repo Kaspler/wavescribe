@@ -233,6 +233,7 @@ def test_a_machine_with_everything_passes(folder: Path) -> None:
     )
     assert status(found, "port") == OK and status(found, "service") == SKIP
     assert status(found, "alerts") == OK and status(found, "stations") == OK
+    assert "0 keyword, 0 LLM and 0 station rules" in found["alerts"][0].summary
     # Read-only: what was run, and never a receiver tool (FakeHost.run asserts that too).
     assert {c[0] for c in host.ran} <= {"ffmpeg", "ioreg", "say", "lsof", "pmset"}
 
