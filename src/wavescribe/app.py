@@ -10,6 +10,7 @@ needs a restart, and the hand-edited TOML files are never rewritten.
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import logging
 import re
@@ -280,9 +281,14 @@ class App:
         self.asker: Asker | None = None
         if store is not None:
             from wavescribe.ask import Asker
+            from wavescribe.digest import DIGEST_PRIORITY, Digester
 
             self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
             self.hub.asker = self.asker
+            llm = functools.partial(
+                self.pipeline.request_llm, name="digest", priority=DIGEST_PRIORITY
+            )
+            self.hub.digester = Digester(store, lambda: self.config.stations, llm)
         from wavescribe.downloads import Downloads
 
         self.downloads = Downloads(registry, on_done=self.models_changed)

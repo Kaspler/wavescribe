@@ -40,12 +40,13 @@ from wavescribe.config import StationsConfig
 from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
 from wavescribe.pipeline import Pipeline, Plan, Result
-from wavescribe.web import feed
+from wavescribe.web import digest, feed
 from wavescribe.web.audio import AudioTap
 
 if TYPE_CHECKING:
     from wavescribe.app import App
     from wavescribe.ask import Asker
+    from wavescribe.digest import Digester
     from wavescribe.radio.bandplan import Exports
     from wavescribe.store import Store
 
@@ -132,6 +133,7 @@ class WebHub:
         self.pipeline: Pipeline | None = None
         self.app: App | None = None  # set by App: page changes, outputs, feed tokens
         self.asker: Asker | None = None
+        self.digester: Digester | None = None
         self.final_hooks: list[Any] = []  # called with each finished utterance's payload
         self.counts: dict[str, int] = {}  # finished utterances per station since start
         self.asks = threading.BoundedSemaphore(MAX_ASKS)
@@ -435,6 +437,7 @@ class WebHub:
             "store": self.store is not None,
             "mt_model": self.plan.mt[0].id if self.plan.mt else None,
             **_ask_fields(self.ask_unavailable()),
+            "digest": digest.unavailable(self),
             "noncommercial": self.plan.noncommercial(),
             "audio_rate": SAMPLE_RATE,
             "recent": recent,
@@ -745,7 +748,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/api/manage/"):
             self._manage("POST", url.path, query)
             return
-        if url.path == "/api/ask":  # from another machine only with --allow-remote-ask
+        # From another machine only with --allow-remote-ask. A digest spends the model as a
+        # question does, so it passes the same gate.
+        if url.path in ("/api/ask", digest.PATH):
             if self.headers.get(CONTROL_HEADER) != "1":
                 self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
                 return
@@ -755,7 +760,10 @@ class Handler(BaseHTTPRequestHandler):
             if feed.page_grant(self, query) is None:  # an answer quotes what was said
                 self._unauthorised()
                 return
-            self._ask()
+            if url.path == digest.PATH:
+                digest.handle(self)
+            else:
+                self._ask()
             return
         if not self._is_local():
             msg = "read-only from the LAN: start and stop stations on the Wavescribe machine"
