@@ -515,7 +515,7 @@ class Pipeline:
         for t in list(self._threads):
             if t.name.startswith("source-"):
                 t.join(timeout=10)
-        self._put_sentinel(self._asr_q)
+        self._put_sentinel(self._asr_q, wait=self._alive("asr"))  # a dead one's never empties
         for t in list(self._threads):
             t.join(timeout=None if drain else 10)
         self._stop.set()
@@ -658,8 +658,11 @@ class Pipeline:
     def _busy_fraction(self, stage: str, now: float, window: float = 60.0) -> float:
         return min(1.0, sum(d for t, d in list(self._busy[stage]) if t > now - window) / window)
 
-    def _put_sentinel(self, q: queue.PriorityQueue) -> None:
-        if self._drain:
+    def _alive(self, name: str) -> bool:
+        return any(t.name == name and t.is_alive() for t in list(self._threads))
+
+    def _put_sentinel(self, q: queue.PriorityQueue, wait: bool = True) -> None:
+        if self._drain and wait:
             q.put((_STOP_DRAINED, 0, None))  # the worker is consuming, so room will appear
         else:
             with contextlib.suppress(queue.Full):  # a busy worker sees _stop after this item
@@ -867,6 +870,16 @@ class Pipeline:
                 mx.clear_cache()
 
     def _asr_worker(self) -> None:
+        try:
+            self._asr_work()
+        finally:
+            # However it ended, a crash included: the translation worker is told to finish,
+            # and nothing waits for this one to be ready. A drained stop joins every worker
+            # without a timeout, so it would otherwise wait forever.
+            self._asr_ready.set()
+            self._put_sentinel(self._mt_q, wait=self._alive("mt"))
+
+    def _asr_work(self) -> None:
         # Models load in this thread (MLX arrays are thread-bound): the starting stations'
         # models now, any other when its station first needs it.
         loaded: dict[str, Transcriber] = {}
@@ -951,7 +964,6 @@ class Pipeline:
                 self._notify(self._on_transcript, result)
             if not result.rechecking:
                 self._translate_or_finish(result)
-        self._put_sentinel(self._mt_q)
 
     def _rechecked(self, result: Result) -> None:
         """Whisper has listened to a flagged line again (asr/recheck.py), on the ASR thread:

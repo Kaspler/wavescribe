@@ -684,3 +684,30 @@ def test_stop_from_another_thread_ends_the_run() -> None:
     pipeline.stop()
     runner.join(timeout=5)
     assert not runner.is_alive()
+
+
+def test_a_drained_stop_ends_even_when_the_asr_worker_crashed(monkeypatch) -> None:
+    """The ASR worker tells the translation worker to finish however it ends: a drained stop
+    joins every worker without a timeout, so a crash must not leave one waiting forever."""
+    calls = []
+    real = Pipeline._worked
+
+    def crash_on_the_second_line(self, *args, **kwargs):
+        if threading.current_thread().name == "asr":
+            calls.append(args)
+            if len(calls) == 2:
+                raise RuntimeError("a bug in the ASR worker")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Pipeline, "_worked", crash_on_the_second_line)
+    results: list[Result] = []
+    audio = np.concatenate([tone(2), silence(1), tone(3), silence(1)])
+    pipeline = fake_pipeline(
+        [station("a")], PLAN, results.append, lambda st: HeldSource(st.id, audio)
+    )
+    pipeline.start()
+    assert wait_for(lambda: len(calls) == 2)  # the first line went to translation, then a crash
+    done = threading.Event()
+    threading.Thread(target=lambda: (pipeline.stop(drain=True), done.set()), daemon=True).start()
+    assert done.wait(15), "stop(drain=True) waited forever on the translation worker"
+    assert [r.transcript.text for r in results] == ["2s"]
