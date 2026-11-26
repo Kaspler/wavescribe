@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+import os
 import stat
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -219,6 +221,40 @@ def test_a_busy_dongle_says_so(fake_power: str, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("FAKE_POWER_BUSY", "1")
     with pytest.raises(S.ScanError, match="busy"):
         S.sweep("000001", 446e6, 446.2e6, command=fake_power)
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def test_a_stalled_sweep_is_killed_with_a_clear_error(
+    fake_power: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_POWER_HANG", "1")
+    monkeypatch.setenv("FAKE_POWER_PID", str(tmp_path / "pid"))
+    t0 = time.monotonic()
+    with pytest.raises(S.ScanError, match="stopped reporting"):
+        S.sweep("000001", 446e6, 446.2e6, command=fake_power, stall_s=1.0)
+    assert time.monotonic() - t0 < 10
+    assert _gone(int((tmp_path / "pid").read_text()))
+
+
+def test_cancel_kills_a_running_sweep_at_once(
+    fake_power: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_POWER_HANG", "1")
+    monkeypatch.setenv("FAKE_POWER_PID", str(tmp_path / "pid"))
+    cancel = threading.Event()
+    threading.Timer(0.5, cancel.set).start()
+    t0 = time.monotonic()
+    with pytest.raises(S.Cancelled):
+        S.sweep("000001", 446e6, 446.2e6, command=fake_power, cancel=cancel)
+    assert time.monotonic() - t0 < 3  # not the default deadline of about 16 s
+    assert _gone(int((tmp_path / "pid").read_text()))
 
 
 def test_a_range_outside_the_tuner_is_refused() -> None:

@@ -419,7 +419,10 @@ on it):
 
 **Scanning** (`radio/scan.py`). `rtl_power -c 20% -1` sweeps the range. The bin follows the band
 (a twentieth of an FM channel, a fifth of a narrow one; about 25 000 bins for a free range), and
-the integration time scales with the hops. The dongle's DC offset at each hop's centre is
+the integration time scales with the hops. `rtl_power` prints every hop at once when its pass
+ends, so it is read against a deadline: silent for 10 s plus three sweeps' worth of time (the
+integration time, or 50 ms a hop when that is longer), it has stalled and is killed, and the scan
+fails with an error that says so. A cancelled scan kills it within 0.1 s. The dongle's DC offset at each hop's centre is
 bridged over about 3 kHz from either side. The noise floor is a 20th-percentile filter over about
 2 MHz, taken within each hop, so a crowded band doesn't lift it and a hop that reads louder than
 its neighbours doesn't turn into a row of signals. Peaks 8 dB above it are signals. Each signal's

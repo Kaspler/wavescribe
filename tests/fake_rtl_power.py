@@ -6,11 +6,14 @@ Environment:
     FAKE_POWER_SIGNALS  "mhz:width_khz:db,..." bumps above a -40 dB floor
     FAKE_POWER_BUSY     if set, fail like a dongle another program holds
     FAKE_POWER_STARTS   a file that gets one line per start: the arguments
+    FAKE_POWER_PID      a file that gets the process id
+    FAKE_POWER_HANG     if set, stall after setting up, as a wedged dongle does: print nothing
 """
 
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -85,9 +88,16 @@ def main() -> int:
     if started := os.environ.get("FAKE_POWER_STARTS"):
         with open(started, "a") as f:
             f.write(" ".join(sys.argv[1:]) + "\n")
+    if pid := os.environ.get("FAKE_POWER_PID"):
+        with open(pid, "w") as f:
+            f.write(str(os.getpid()))
     if os.environ.get("FAKE_POWER_BUSY"):
         print("usb_claim_interface error -6\nFailed to open rtlsdr device #0.", file=sys.stderr)
         return 1
+    print("Found Rafael Micro R820T tuner", file=sys.stderr)
+    print(f"Tuner gain set to {float(a.g or 0):.2f} dB.", file=sys.stderr, flush=True)
+    if os.environ.get("FAKE_POWER_HANG"):
+        time.sleep(3600)
     lo, hi, step = (int(x) for x in a.f.split(":"))
     sigs = []
     for item in filter(None, os.environ.get("FAKE_POWER_SIGNALS", "").split(",")):

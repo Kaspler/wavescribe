@@ -15,6 +15,7 @@ A dongle is open to one process at a time, so a scan needs it idle: no station o
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import select
@@ -42,6 +43,12 @@ REFERENCE_HZ = 28_800_000  # the V4/V3 crystal: its harmonics show up as narrow 
 CLOCK_HZ = 2_400_000  # the sample rate RTL-SDR receivers run at by default (see _clock_lines)
 CROP = 0.2  # of each hop's edges, where the dongle's filter rolls off: rtl_power -c
 MAX_RATE_HZ = 2_800_000  # the highest sample rate rtl_power gives a hop
+# rtl_power prints every hop at once when a sweep ends, so a stall shows as silence. A hop
+# (retune, settle, read) takes about 40 ms: the whole tuner range, 778 hops, in about 30 s.
+HOP_S = 0.05  # a hop, with room to spare
+START_S = 10.0  # opening the dongle and setting up the tuner, with room to spare
+STALL_SWEEPS = 3  # silent for this many sweeps' worth of time: rtl_power has stalled
+POLL_S = 0.1  # how often a running sweep looks at its cancel flag
 
 
 class ScanError(RuntimeError):
@@ -180,9 +187,12 @@ def sweep(
     command: str = "rtl_power",
     on_progress: Callable[[int, int], None] | None = None,
     cancel: threading.Event | None = None,
+    stall_s: float | None = None,
 ) -> Sweep:
     """One pass of ``rtl_power`` over the part of the range the tuner reaches (``fit_range``).
-    ``on_progress(hops_done, hops_total)``."""
+    ``on_progress(hops_done, hops_total)``. ``cancel`` stops it at once. A run silent for
+    ``stall_s`` (by default a few sweeps' worth of time) has stalled: it is killed and the
+    sweep fails."""
     start_hz, stop_hz, _ = fit_range(start_hz, stop_hz)
     if shutil.which(command) is None:
         raise ScanError("rtl_power isn't installed (brew install librtlsdr)")
@@ -190,6 +200,8 @@ def sweep(
     total = hop_count(start_hz, stop_hz)
     if integrate_s is None:  # enough averaging for a steady spectrum, quick for wide sweeps
         integrate_s = 1.0 if total > 50 else max(2.0, 0.3 * total)
+    if stall_s is None:
+        stall_s = START_S + STALL_SWEEPS * max(integrate_s, total * HOP_S)
     # -c crops the edges of each hop, where the dongle's filter rolls off; -1 is a single pass.
     cmd = [command, "-d", device_arg(serial), "-f", f"{int(start_hz)}:{int(stop_hz)}:{int(bin_hz)}",
            "-g", f"{gain_db:g}", *ppm_args(ppm), "-c", f"{CROP:.0%}", "-i", f"{integrate_s:g}",
@@ -197,32 +209,7 @@ def sweep(
     t0 = time.time()
     event(log, "scan_sweep", serial=serial, start_mhz=start_hz / 1e6, stop_mhz=stop_hz / 1e6,
           bin_hz=bin_hz, hops=total)  # fmt: skip
-    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)  # fmt: skip
-    assert proc.stdout is not None and proc.stderr is not None
-    err: list[str] = []
-    threading.Thread(target=lambda: err.extend(proc.stderr), daemon=True).start()  # type: ignore[union-attr]
-    rows: list[tuple[float, float, float, list[float]]] = []
-    try:
-        for line in proc.stdout:
-            if cancel is not None and cancel.is_set():
-                raise Cancelled("scan cancelled")
-            parts = line.strip().split(",")
-            if len(parts) < 7:
-                continue
-            try:
-                lo, hi, step = float(parts[2]), float(parts[3]), float(parts[4])
-                vals = [float(v) for v in parts[6:]]
-            except ValueError:
-                continue
-            rows.append((lo, hi, step, vals))
-            if on_progress is not None:
-                on_progress(min(len(rows), total), total)
-        proc.wait(timeout=30)
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+    rows, err = _run(cmd, serial, total, stall_s, on_progress, cancel)
     text = "".join(err)
     if not rows:
         if _busy(text):
@@ -231,8 +218,82 @@ def sweep(
     return _assemble(rows, start_hz, stop_hz, bin_hz, time.time() - t0)
 
 
-def _assemble(rows: list[tuple[float, float, float, list[float]]], start_hz: float,
-              stop_hz: float, bin_hz: float, seconds: float) -> Sweep:  # fmt: skip
+Row = tuple[float, float, float, list[float]]  # one hop: low and high column, bin, power per bin
+
+
+def _row(line: bytes) -> Row | None:
+    parts = line.strip().split(b",")
+    if len(parts) < 7:
+        return None
+    try:
+        return float(parts[2]), float(parts[3]), float(parts[4]), [float(v) for v in parts[6:]]
+    except ValueError:
+        return None
+
+
+def _run(
+    cmd: list[str],
+    serial: str,
+    total: int,
+    stall_s: float,
+    on_progress: Callable[[int, int], None] | None,
+    cancel: threading.Event | None,
+) -> tuple[list[Row], list[str]]:
+    """Run one ``rtl_power`` and read its rows, with a deadline: the hops and its stderr."""
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)  # fmt: skip
+    assert proc.stdout is not None and proc.stderr is not None
+    err: list[str] = []
+
+    def drain(pipe: Any = proc.stderr) -> None:
+        for raw in pipe:
+            err.append(raw.decode(errors="replace"))
+
+    drainer = threading.Thread(target=drain, daemon=True)
+    drainer.start()
+    rows: list[Row] = []
+    fd = proc.stdout.fileno()
+    pending = b""
+    heard = time.monotonic()
+    try:
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise Cancelled("scan cancelled")
+            ready, _, _ = select.select([fd], [], [], POLL_S)
+            if not ready:
+                if time.monotonic() - heard > stall_s:
+                    raise ScanError(
+                        f"rtl_power on dongle {serial} stopped reporting (nothing for "
+                        f"{stall_s:.0f} s), so it was stopped. Try again; if it keeps "
+                        "happening, unplug the dongle and plug it in again"
+                    )
+                continue
+            data = os.read(fd, 1 << 16)
+            if not data:
+                break
+            heard = time.monotonic()
+            *lines, pending = (pending + data).split(b"\n")
+            for line in lines:
+                if (row := _row(line)) is not None:
+                    rows.append(row)
+                    if on_progress is not None:
+                        on_progress(min(len(rows), total), total)
+        if (row := _row(pending)) is not None:
+            rows.append(row)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)  # it reported; if it doesn't let go of the dongle, it's killed
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        drainer.join(timeout=2)
+    if rows and on_progress is not None:
+        on_progress(total, total)
+    return rows, err
+
+
+def _assemble(rows: list[Row], start_hz: float, stop_hz: float, bin_hz: float,
+              seconds: float) -> Sweep:  # fmt: skip
     """One spectrum from rtl_power's rows, one row per hop, read the way ``csv_dbm`` in
     rtl_power.c writes them. A hop's bins lie about its tuned centre, (low + high) / 2, one
     more below it than above, so of n bins the centre is bin n / 2; the low and high columns
