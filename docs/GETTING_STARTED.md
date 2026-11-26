@@ -287,8 +287,8 @@ radio that isn't broadcast is often protected by law:
 from radio that stays on the Mac reach them without the words that were said.
 
 These are cautious defaults. You can change them under Settings → **Storage and privacy**: the
-broadcast limits under *How long it's kept*, the rest under *What's kept of each kind of radio*. To delete everything heard, stop
-Wavescribe and delete the `data` folder. Models live in the `models` folder and in
+broadcast limits under *How long it's kept*, the rest under *What's kept of each kind of radio*.
+To delete everything heard, stop Wavescribe and delete the `data` folder. Models live in the `models` folder and in
 `~/.cache/huggingface`.
 
 ## 11. Keep it running
@@ -324,6 +324,8 @@ uv run wavescribe service uninstall        # stop it and remove it
 or, for a machine that stays on all the time, run `sudo pmset -a disablesleep 1` (and `0` to
 undo it). Without the service, Wavescribe runs only while its Terminal window is open and
 doesn't keep the Mac awake: start it with `caffeinate -i uv run wavescribe serve --open`.
+Started from a script rather than a Terminal window, stop it with `kill <pid>` (SIGTERM): `uv run`
+passes that on to Wavescribe, but not the SIGINT that Ctrl-C sends in a Terminal.
 
 - Settings → **Health** shows memory, processor and graphics load, battery, disk, and how far
   behind each station is. If the Mac struggles, translate fewer stations: translation is the
