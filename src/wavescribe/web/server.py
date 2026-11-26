@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import io
 import ipaddress
 import json
 import logging
+import math
 import queue
 import socket
 import threading
@@ -75,6 +77,8 @@ LOAD_FAILED = "could not be loaded; the log on the Wavescribe machine says why"
 # tablets use, so only a stuck or hostile device on the LAN meets one; this machine's own
 # requests are never counted.
 REQUEST_TIMEOUT_S = 30.0  # a read or write that makes no progress for this long ends it
+REQUEST_DEADLINE_S = 30.0  # request line and headers, however slowly they trickle in
+BODY_MIN_RATE = 8_192  # bytes/s a body gets on top: a large push over a slow link still fits
 MAX_REMOTE_CONNECTIONS = 64  # served at once: every one is a thread
 MAX_REMOTE_REFUSALS = 16  # more, kept only until they are told to come back; the rest are closed
 REFUSAL_TIMEOUT_S = 2.0  # how long such a connection has to send its request
@@ -431,6 +435,23 @@ class Handler(BaseHTTPRequestHandler):
         over_limit = self.server.over_limit(self.request)
         self.timeout = REFUSAL_TIMEOUT_S if over_limit else REQUEST_TIMEOUT_S
         super().setup()
+        # That timeout is per read, so a client sending a byte now and then would keep its
+        # thread for as long as it liked: reading a request also ends at a deadline.
+        allowed = REFUSAL_TIMEOUT_S if over_limit else REQUEST_DEADLINE_S
+        self._reads = _Deadline(self.rfile.detach(), self.connection, self.timeout, allowed)
+        self.rfile = io.BufferedReader(self._reads)
+
+    def handle_one_request(self) -> None:
+        self._reads.start()
+        super().handle_one_request()
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        size = self.headers.get("Content-Length") or ""  # read later, by the handler
+        if size.isascii() and size.isdigit() and len(size) < 19:
+            self._reads.deadline += min(int(size), feed.MAX_INGEST) / BODY_MIN_RATE
+        return True
 
     def _admit(self) -> bool:
         """Whether to serve this request at all; the reason was sent if not."""
@@ -861,6 +882,38 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             tap.remove_listener(q)
             log.info("audio %s: listener left after %.0f s", station_id, sent / 2 / SAMPLE_RATE)
+
+
+class _Deadline(io.RawIOBase):
+    """A connection's reads, each bounded by the time left until ``deadline`` as well as by the
+    per-read timeout. ``start`` sets the deadline for the next request; writes keep the per-read
+    timeout alone, so the streams go on as long as the other side reads them."""
+
+    def __init__(self, raw: Any, sock: socket.socket, timeout: float, allowed_s: float) -> None:
+        super().__init__()
+        self.raw, self.sock, self.timeout, self.allowed_s = raw, sock, timeout, allowed_s
+        self.deadline = math.inf
+
+    def start(self) -> None:
+        self.deadline = time.monotonic() + self.allowed_s
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int | None:
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("the request took too long to arrive")
+        self.sock.settimeout(min(self.timeout, left))
+        try:
+            return self.raw.readinto(buffer)
+        finally:
+            self.sock.settimeout(self.timeout)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.raw.close()
+        super().close()
 
 
 def _row_id(text: str) -> int | None:

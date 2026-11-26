@@ -156,6 +156,9 @@ It binds to 127.0.0.1 by default. `--lan` binds every interface and prints the L
 phones and tablets; requests that don't come from the machine itself are read-only (they can read
 and listen but not start or stop stations), and every POST needs an `X-Wavescribe` header, which
 a cross-site form can't send. There is no authentication, so use it only on a LAN you trust.
+Other machines get at most 64 connections at once. Every request has 30 s to arrive, however
+slowly its bytes come (a body gets more by its size), and a read or write that stalls for 30 s
+ends the connection, so a stuck or hostile device can't hold the server's threads.
 A request that a proxy forwarded (`Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `Via`), or any
 request under `serve --behind-proxy`, counts as another machine's. Every response carries a
 Content-Security-Policy (`default-src 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`

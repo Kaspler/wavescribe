@@ -271,6 +271,41 @@ def test_a_connection_that_sends_nothing_is_closed_and_streams_go_on(monkeypatch
         server.shutdown()
 
 
+def test_a_client_that_trickles_its_request_is_cut_off(monkeypatch) -> None:
+    import contextlib
+    import socket
+
+    from wavescribe.web import server as web
+
+    monkeypatch.setattr(web, "REQUEST_DEADLINE_S", 0.5)  # each byte comes well within 30 s
+    server, hub = idle_server()
+    stop = threading.Event()
+    sent = b"GET /api/state HTTP/1.1\r\nHost: localhost\r\nX-Pad: " + b"a" * 400
+
+    def trickle(conn: socket.socket) -> None:
+        for byte in sent:
+            if stop.wait(0.02):
+                return
+            try:
+                conn.send(bytes([byte]))
+            except OSError:
+                return  # hung up on
+
+    try:
+        with socket.create_connection(server.server_address, timeout=5) as slow:
+            threading.Thread(target=trickle, args=(slow,), daemon=True).start()
+            started = time.monotonic()
+            with contextlib.suppress(ConnectionResetError):  # closed with bytes still unread
+                assert slow.recv(100) == b""  # no answer: the connection is closed
+            assert time.monotonic() - started < 3  # the whole request would take 9 s
+        stop.set()
+        assert request(server, "GET", "/api/state")[0] == 200  # one sent in one go still works
+    finally:
+        stop.set()
+        hub.close()
+        server.shutdown()
+
+
 def test_other_machines_get_only_so_many_connections(monkeypatch) -> None:
     import socket
 
