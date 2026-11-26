@@ -194,7 +194,9 @@ remote_token = "wst_…"      # if that node has feed tokens
 
 - The central server subscribes to the node's feed and catches up on the last hour the first
   time.
-- After that it resumes after the last utterance it stored, going back a week at most.
+- After that it resumes after the last utterance it stored, going back a week at most. A node
+  whose clock runs fast sends the last few minutes again, since their times were stored here
+  as they arrived; what it sends again is recognised by its words and length and skipped.
 - On a lost connection it reconnects, backing off from 2 s to 60 s.
 
 **The places push.** Use this when they sit behind NAT. On the central server, make a token

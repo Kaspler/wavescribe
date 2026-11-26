@@ -166,10 +166,10 @@ class Feed:
             self.done.set()
         return not self.bodies
 
-    def follow(self, ingest) -> RemoteFollower:
+    def follow(self, ingest, **more) -> RemoteFollower:
         far = dataclasses.replace(station("far"), remote="http://n:8766", remote_station="tsf",
                                   remote_token="wst_s3cret")  # fmt: skip
-        follower = RemoteFollower(far, ingest, opener=self.open, sleep=self.sleep)
+        follower = RemoteFollower(far, ingest, opener=self.open, sleep=self.sleep, **more)
         assert self.done.wait(5)
         follower._thread.join(5)
         return follower
@@ -205,6 +205,21 @@ def test_a_follower_skips_what_isnt_an_utterance_and_keeps_following() -> None:
     # The token goes in a header only: URLs end up in logs, here and on the way.
     assert all(r.get_header("Authorization") == "Bearer wst_s3cret" for r in feed.requests)
     assert not any("s3cret" in r.full_url for r in feed.requests)
+
+
+def test_a_restarted_follower_skips_what_a_fast_clock_replays_of_what_is_stored() -> None:
+    """Stored as it arrived, behind the sender's own times: asked from the last time stored
+    here, the sender sends the last minutes again."""
+    got: list[str] = []
+    replay = sse(said("Bom dia"), 1) + sse(said("Bom dia"), 2) + sse(said("novo"), 3)
+    later = sse(said("novo"), 4)  # said again, and asked for by id: taken
+    feed = Feed(Status(replay), Status(later))
+    stored = [("Bom dia", 6.2), ("Bom dia", 6.21), ("novo", 1.0)]  # twice; once at another length
+    follower = feed.follow(lambda result: got.append(result.transcript.text), since=NOW,
+                           stored=stored)  # fmt: skip
+    assert got == ["novo", "novo"] and follower.repeated == 2
+    assert "since=" in feed.requests[0].full_url
+    assert feed.requests[1].get_header("Last-event-id") == "3"
 
 
 class Endless:

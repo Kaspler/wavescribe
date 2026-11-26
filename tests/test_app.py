@@ -681,6 +681,42 @@ def test_a_central_server_follows_one_node_and_takes_pushes_from_another(tmp_pat
         node.close()
 
 
+def test_a_follower_started_again_is_told_what_was_stored_just_before(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from tests.test_store import result
+    from wavescribe import remote
+
+    made: list[dict] = []
+
+    class Follower:
+        closed = False
+
+        def __init__(self, _station, _ingest, **more) -> None:
+            made.append(more)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(remote, "RemoteFollower", Follower)
+    app = make_app(tmp_path, "central")
+    try:
+        app.add_station({"id": "far", "name": "Far", "remote": "http://n.test:8766",
+                         "remote_station": "tsf"})  # fmt: skip
+        now = time.time()
+        for text, t in (("antes", now - 3600), ("Bom dia", now - 300), ("Boa tarde", now - 60)):
+            app.store.add_transcript(result("far", text, t))
+        app._start_follower(app.config.get("far"))
+        [given] = made
+        assert abs(given["since"] - (now - 60)) < 1
+        # Within the drift a sender's clock may run ahead: what it may send again.
+        assert given["stored"] == [("Bom dia", 1.0), ("Boa tarde", 1.0)]
+    finally:
+        app.pipeline.stop()
+        app.close()
+        app.store.close()
+
+
 def heard(station: str, text: str = "Olá", **more) -> dict:
     """An utterance event as another machine pushes it."""
     return {"type": "utterance", "station": {"id": station, "name": station.upper(),

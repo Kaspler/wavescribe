@@ -632,7 +632,7 @@ class App:
     # -- remote stations ----------------------------------------------------------------------
 
     def _start_follower(self, station: Station) -> None:
-        from wavescribe.remote import MAX_EVENT_AGE_S, RemoteFollower
+        from wavescribe.remote import MAX_EVENT_AGE_S, SENDER_CLOCK_DRIFT_S, RemoteFollower
 
         if station.remote == "push":
             return  # pushed to us: nothing to connect to
@@ -641,12 +641,18 @@ class App:
         # Catch up from just after the last utterance stored for it, or the last hour when it
         # is new here; never from further back than an utterance may be and still be taken.
         now = time.time()
-        since = now - 3600
+        since, stored = now - 3600, []
         if self.store is not None:
             last = self.store.last_heard().get(station.id)
             if last is not None:
                 since = min(max(last + 0.01, now - MAX_EVENT_AGE_S), now)
-        self.followers[station.id] = RemoteFollower(station, self._take_followed, since=since)
+                # Times stored from a sender whose clock runs fast are ours, up to this far
+                # behind its own: what it replays of these is skipped (RemoteFollower).
+                recent = self.store.between(last - SENDER_CLOCK_DRIFT_S, last,
+                                            station_ids=[station.id])  # fmt: skip
+                stored = [(u["text"], u["duration"]) for u in recent]
+        self.followers[station.id] = RemoteFollower(station, self._take_followed, since=since,
+                                                    stored=stored)  # fmt: skip
 
     def _take_followed(self, result: Result) -> None:
         # The class first: outputs and viewers on other machines ask the station for it.

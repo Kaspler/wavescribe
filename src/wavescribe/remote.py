@@ -16,7 +16,9 @@ their station's privacy class (radio/bandplan.py), and the text is kept, quoted 
 here by that class.
 
 Reconnects back off from 2 s to 60 s and resume after the last utterance seen (the feed's
-``Last-Event-ID``), or, after a restart, from the last utterance stored for the station.
+``Last-Event-ID``), or, after a restart, from the time of the last utterance stored for the
+station. A sender whose clock runs fast then replays what was stored in the minutes before
+it; those are recognised by their words and length and skipped.
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator, Mapping
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -244,12 +247,18 @@ class RemoteFollower:
         ingest: Callable[[Result], None],
         *,
         since: float | None = None,
+        stored: Iterable[tuple[str, float]] = (),
         opener: Callable[..., Any] = urllib.request.urlopen,
         sleep: Callable[[float], bool] | None = None,
     ) -> None:
         self.station = station
         self._ingest = ingest
         self._since = since
+        # (text, duration) of what was stored here in the SENDER_CLOCK_DRIFT_S before ``since``.
+        # A sender whose clock runs fast had those stored as they arrived, behind its own times,
+        # so asking it from ``since`` replays them; they are skipped until it gives an id.
+        self._stored = Counter((text, round(duration, 1)) for text, duration in stored)
+        self.repeated = 0  # replayed events skipped as already stored
         self._open = opener
         self._stop = threading.Event()
         self._sleep = sleep or self._stop.wait
@@ -330,6 +339,9 @@ class RemoteFollower:
             raise OSError(f"HTTP {status}")
         self.connected, self.error = True, None
         event(log, "remote_connect", station=self.station.id, url=self.station.remote)
+        by_time = self.last_id is None  # resumed from a time, not an id: may replay what's here
+        if not by_time:
+            self._stored.clear()
         noted = False
         for name, data, last_id in sse_events(feed_lines(resp)):
             if self._stop.is_set():
@@ -352,10 +364,22 @@ class RemoteFollower:
                     event(log, "remote_event_skipped", level=logging.WARNING,
                           station=self.station.id, error=str(e))  # fmt: skip
                 continue
+            if by_time and self._already_stored(heard):
+                continue
             self._ingest(to_result(heard, self.station))
             self.received += 1
             self.last_data_at = time.time()
         raise OSError("the feed ended")
+
+    def _already_stored(self, heard: Heard) -> bool:
+        """Whether a replayed event is one stored here before (by its words and length); each
+        stored one accounts for one replayed event only."""
+        key = (heard.text, round(heard.duration, 1))
+        if self._stored[key] <= 0:
+            return False
+        self._stored[key] -= 1
+        self.repeated += 1
+        return True
 
     def status(self) -> dict[str, Any]:
         now = time.time()
