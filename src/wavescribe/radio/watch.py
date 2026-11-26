@@ -75,6 +75,53 @@ def plan_window(
     """The channels of a band (by its id) or of a range in MHz, with the mode and channel width
     to demodulate them in: from the band plan unless given. A window wider than one receiver
     hears at once is refused, with a slice that fits."""
+    watch, planned, width = _plan(spec, region, mode, channel_hz, threshold_db)
+    if not _fits(watch, width, rate):
+        a, b = _slice(watch, width, region, rate, mode, channel_hz)
+        span = watch.hi_hz - watch.lo_hz + width
+        raise WatchError(
+            f"{watch.label} is {span / 1e6:.2f} MHz wide, and a watch covers what one receiver "
+            f"hears at once, about {usable_mhz(rate)} MHz: watch a slice of it, "
+            f"e.g. {a:.3f}:{b:.3f}"
+        )
+    return watch, planned, width
+
+
+def usable_mhz(rate: int) -> float:
+    """How wide a window can be, rounded down (2.2 MHz at 2.4 MS/s): what one receiver hears,
+    less the edges its filter rolls off."""
+    return math.floor(2 * (rate / 2 - NARROW_MARGIN_HZ) / 1e5) / 10
+
+
+def _fits(watch: Watch, width: float, rate: int) -> bool:
+    return not outside(watch, plan_centre(watch, width, rate), rate, width)
+
+
+def _slice(
+    watch: Watch, width: float, region: str, rate: int, mode: str | None, channel_hz: float | None
+) -> tuple[float, float]:
+    """The widest slice about the middle of a window that a watch can be tuned to, in MHz: the
+    range is planned again from its own band, so the slice is checked as the user will give it."""
+    middle = (watch.lo_hz + watch.hi_hz) / 2
+    half = rate / 2 - NARROW_MARGIN_HZ - width / 2
+    while True:
+        a, b = math.ceil((middle - half) / 1e3) / 1e3, math.floor((middle + half) / 1e3) / 1e3
+        try:
+            again, _, w = _plan((a, b), region, mode, channel_hz, watch.threshold_db)
+        except WatchError:
+            again = None
+        if (again is not None and _fits(again, w, rate)) or half <= watch.step_hz:
+            return a, b
+        half -= watch.step_hz / 2
+
+
+def _plan(
+    spec: str | tuple[float, float] | list[float],
+    region: str,
+    mode: str | None,
+    channel_hz: float | None,
+    threshold_db: float,
+) -> tuple[Watch, str, float]:
     if isinstance(spec, str):
         try:
             band = find(spec)
@@ -110,23 +157,13 @@ def plan_window(
         channels = [round(start + n * step) for n in range(first, last + 1)]
     if not channels:
         raise WatchError(f"{label} has no channel on the {step / 1e3:g} kHz raster")
-    span = channels[-1] - channels[0] + width
-    reach = 2 * (rate / 2 - NARROW_MARGIN_HZ)
-    if span > reach:
-        middle = (channels[0] + channels[-1]) / 2
-        a, b = (middle - (reach - width) / 2) / 1e6, (middle + (reach - width) / 2) / 1e6
-        raise WatchError(
-            f"{label} is {span / 1e6:.2f} MHz wide, and a watch covers what one receiver hears "
-            f"at once, about {reach / 1e6:.1f} MHz: watch a slice of it, e.g. {a:.3f}:{b:.3f}"
-        )
-    watch = Watch(key, tuple(channels), step, threshold_db, region, label)
-    return watch, mode, float(width)
+    return Watch(key, tuple(channels), step, threshold_db, region, label), mode, float(width)
 
 
 def plan_centre(watch: Watch, channel_hz: float, rate: int) -> int:
     """Where to tune for a watch. A narrow window goes wholly above the centre, clear of the
-    dongle's spike, so the mirror image of what is heard (the dongle's I/Q imbalance leaves one
-    some 35 dB down) falls outside it. A wide one is centred between two channels."""
+    dongle's spike, so the weaker mirror of strong signals a receiver shows about its centre
+    falls outside it. A wide one is centred between two channels."""
     reach = rate / 2 - NARROW_MARGIN_HZ
     below = watch.lo_hz - OFF_CENTRE_HZ["nfm"]
     if watch.hi_hz + channel_hz / 2 - below <= reach:

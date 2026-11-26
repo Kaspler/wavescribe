@@ -58,12 +58,18 @@ def test_a_wide_band_is_centred_between_two_channels() -> None:
     assert all(abs(c - centre) <= RATE / 2 - 60_000 - width / 2 for c in w.channels)
 
 
-def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits() -> None:
-    with pytest.raises(WatchError, match=r"about 2\.3 MHz: watch a slice of it, e\.g\. ") as e:
-        plan_window("airband", "1", rate=RATE)
+@pytest.mark.parametrize("band", ["airband", "airband-25", "70cm-wide"])
+def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits(band: str) -> None:
+    from wavescribe.radio.watch import outside
+
+    with pytest.raises(WatchError, match=r"about 2\.2 MHz: watch a slice of it, e\.g\. ") as e:
+        plan_window(band, "1", rate=RATE)
     a, b = (float(x) for x in str(e.value).rsplit(" ", 1)[1].split(":"))
-    w, _, _ = plan_window((a, b), "1", rate=RATE)
-    assert w.channels and w.step_hz == pytest.approx(8_333.33, abs=0.01)
+    # The slice as a watch has it: planned, then centred between two of its channels.
+    w, _, width = plan_window((a, b), "1", rate=RATE)
+    assert w.channels
+    assert outside(w, plan_centre(w, width, RATE), RATE, width) == []
+    assert b - a > 2.0  # and no narrower than it needs to be
 
 
 def test_a_range_takes_the_raster_and_mode_of_its_band() -> None:
