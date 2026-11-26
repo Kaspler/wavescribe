@@ -341,3 +341,43 @@ def test_plan_without_a_registry_whisper_says_nothing(tmp_path: Path, caplog) ->
     assert [r for r in caplog.records if r.name == "wavescribe.asr.recheck"] == []
     plan = Plan(vad=None, asr={}, mt=None)  # built by hand (tests): no re-checks
     assert plan.recheck is None
+
+
+def test_the_feed_streams_a_line_that_finished_after_a_later_one(tmp_path: Path) -> None:
+    """A re-checked line reaches on_result after lines that came later; the live feed must
+    still send it, and its event id must not move a resuming client backwards."""
+    import http.client
+    import json
+
+    from tests.test_app import Running, make_app
+
+    r = Running(make_app(tmp_path))
+    try:
+        conn = http.client.HTTPConnection(*r.server.server_address, timeout=15)
+        conn.request("GET", "/feed/v1/events?events=utterance")
+        resp = conn.getresponse()
+        assert resp.readline().startswith(b"retry:")
+        base = {
+            "station": "a",
+            "privacy": "broadcast",
+            "final": True,
+            "t_start": 1000.0,
+            "duration": 2.0,
+            "language": "pt-PT",
+            "translations": {},
+            "hits": [],
+        }
+        r.app.hub.publish("utterance", {**base, "id": 12, "text": "Mais tarde.", "flags": []})
+        r.app.hub.publish("utterance", {**base, "id": 10, "text": WHISPER_PT[2], "flags": [FLAG]})
+        events: list[tuple[str, dict]] = []
+        while len(events) < 2:
+            line = resp.readline().decode()
+            if line.startswith("id:"):
+                event_id = line.split(":", 1)[1].strip()
+                assert resp.readline().startswith(b"event: utterance")
+                data = json.loads(resp.readline().decode().split(":", 1)[1])
+                events.append((event_id, data))
+        conn.close()
+        assert [(i, d["id"], d["flags"]) for i, d in events] == [("12", 12, []), ("12", 10, [FLAG])]
+    finally:
+        r.close()

@@ -389,6 +389,10 @@ def events(h: Handler, query: dict[str, str]) -> None:
         h.end_headers()
         h.wfile.write(b"retry: 3000\n\n")
         sent_id = last or 0
+        # Utterances finish out of order (a translation queue by priority, a line Whisper
+        # re-checks), so a live one is skipped only when the replay sent it, and the event id
+        # never goes back: a client resuming from it misses nothing it hadn't seen.
+        replayed: set[int] = set()
         stations_, node_ = _context(h)
         for row in replay:
             if not leaving.utterance(row):
@@ -396,6 +400,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
             _write(h, "utterance", utterance_event(row, stations_, node_, languages=langs),
                    row["id"])  # fmt: skip
             sent_id = max(sent_id, row["id"] or 0)
+            replayed.add(row["id"])
         h.wfile.flush()
         next_status = wrote = time.monotonic()
         while True:
@@ -428,13 +433,13 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 if not hub.exports().utterance(data):
                     continue
                 seg = data.get("id")
-                if seg is not None and seg <= sent_id:
+                if seg is not None and seg in replayed:
                     continue  # already replayed
+                if seg is not None:
+                    sent_id = max(sent_id, seg)
                 stations_, node_ = _context(h)
                 _write(h, "utterance", utterance_event(data, stations_, node_, languages=langs),
-                       seg)  # fmt: skip
-                if seg is not None:
-                    sent_id = seg
+                       sent_id if seg is not None else None)  # fmt: skip
             elif name == "alert" and "alert" in want:
                 data = json.loads(text)
                 if only and not only & set(data.get("stations") or []):

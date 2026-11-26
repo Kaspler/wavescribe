@@ -34,8 +34,10 @@ Utterance fields:
   uses it.
 - `text`: what the speech recogniser wrote, in the station's language.
 - `translations`: the languages that machine translates this station into.
-- `flags`: notes from the ASR checks. For example, `lang:es` means it sounded like Spanish, and
-  `repetition` that a phrase was repeated four or more times inside a longer message.
+- `flags`: notes from the ASR checks. For example, `lang:es` means it sounded like Spanish,
+  `repetition` that a phrase was repeated four or more times inside a longer message, and
+  `rechecked` that Whisper listened again to a line heard in another language: without `lang:`
+  beside it, Whisper heard the station's language and the text is its transcript.
 - `rules`: the alert rules this utterance tripped.
 - `audio_url`: appears only when the recording is kept and the machine's address is known.
   The page sets that address under Settings → Connections → *For other programs* (*Public URL*).
@@ -92,9 +94,12 @@ A batch, used by pushes that batch utterances, is
 | `GET /healthz` | `{"ok": true}` once models are loaded (503 before). It needs no token. |
 | `GET /metrics` | Prometheus text: stations running and connected, utterances, queues, drops, lag, outputs, memory footprint, free disk, power draw. |
 
-**Resuming.** Each `utterance` event carries `id:` with its segment id. EventSource sends the
-last one back as `Last-Event-ID` when it reconnects, and the feed replays what was stored since
-(up to 1,000 utterances), then goes live. After a restart, a client that kept no id can ask for
+**Resuming.** Each `utterance` event carries `id:`, the highest segment id this stream has
+sent so far (the event's own segment id is its `id` field). Utterances can finish out of order:
+one whose translation waited behind a busier station, or that Whisper re-checked, arrives after
+later ones, and the `id:` never goes back. EventSource sends the last one back as
+`Last-Event-ID` when it reconnects, and the feed replays what was stored since (up to 1,000
+utterances), then goes live. After a restart, a client that kept no id can ask for
 `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s.
 
 ```sh
