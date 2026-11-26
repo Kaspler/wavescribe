@@ -19,13 +19,14 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 
 from wavescribe.asr import Transcriber, Transcript, load_transcriber
 from wavescribe.asr.checks import check_transcript
+from wavescribe.asr.language import AUTO, plan_detecting, transcribe_any
 from wavescribe.asr.recheck import Rechecker
 from wavescribe.audio import AudioChunk
 from wavescribe.config import Station
@@ -234,6 +235,8 @@ def plan_station(
     """The ASR model for one station: the one named on the command line, else the station's
     own choice (made on the page), else the first installed model of the chain for its
     language."""
+    if station.language == AUTO:
+        return plan_detecting(registry, station, asr_model)
     chosen = asr_model or station.asr_model
     if chosen:
         return registry.installed(chosen, station.language)
@@ -817,6 +820,9 @@ class Pipeline:
                   s=round(utt.duration, 1), speech=verdict.speech, music=verdict.music,
                   ms=_ms(t0))  # fmt: skip
         live.last_talk_at = time.time()
+        speech = getattr(live.source, "speech", None)  # a watch notes which catches had speech
+        if speech is not None:
+            speech(utt)
         self._enqueue_asr(live.station, utt)
 
     def _enqueue_asr(self, station: Station, utt: Utterance) -> None:
@@ -932,7 +938,12 @@ class Pipeline:
             t0 = time.perf_counter()
             transcriber = loaded[planned[0].id]
             try:
-                transcript = transcriber.transcribe(utt.samples, station.language)
+                if station.language == AUTO:
+                    transcript = transcribe_any(transcriber, utt.samples, station.languages)
+                    # From here on, the utterance is one of a station in the language heard.
+                    station = replace(station, language=transcript.language)
+                else:
+                    transcript = transcriber.transcribe(utt.samples, station.language)
                 asr_ms = _ms(t0)
                 check = check_transcript(transcript.text, utt.duration, station.language)
             except Exception as e:

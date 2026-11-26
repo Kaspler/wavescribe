@@ -1,0 +1,265 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Watches as stations: their windows, their config, language "auto", and their catches
+through the pipeline (synthetic IQ, a fake VAD and a fake speech model)."""
+
+from __future__ import annotations
+
+import threading
+import time
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from tests.test_pipeline import ENTRY, FakeTranslator
+from tests.test_radio_watch_detect import BELOW, FS, PMR, Burst, air, dominant_hz
+from tests.test_segmenter import EnergyVad
+from wavescribe.asr import Transcript
+from wavescribe.asr.language import AUTO, likeliest, plan_detecting, transcribe_any
+from wavescribe.config import ConfigError, SdrDevice, Station, build_station
+from wavescribe.events import station_ref
+from wavescribe.pipeline import Pipeline, Plan, Result
+from wavescribe.radio import watch as watches
+from wavescribe.radio.watch import Catch, WatchError, plan_centre, plan_window
+from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
+from wavescribe.settings import station_dict
+from wavescribe.sources.watch import WatchSource
+
+RATE = 2_400_000
+DEVICE = SdrDevice("a", "00001234", BELOW, 30.0, FS)
+
+
+def watch_station(**extra: object) -> Station:
+    d: dict[str, object] = {
+        "id": "walkies",
+        "language": AUTO,
+        "device": "a",
+        "watch": "pmr446",
+        "acknowledge": True,
+    }
+    d.update(extra)
+    return build_station(d, "test", {"a": DEVICE}, "cept")
+
+
+# -- windows ---------------------------------------------------------------------------------
+
+
+def test_a_band_is_watched_on_its_channels_from_below_its_lowest() -> None:
+    w, mode, width = plan_window("pmr446", "cept", rate=RATE)
+    assert w.channels == PMR and mode == "nfm" and width == 12_500
+    assert plan_centre(w, width, RATE) == PMR[0] - 250_000  # its mirror image falls outside
+
+
+def test_a_wide_band_is_centred_between_two_channels() -> None:
+    w, _, width = plan_window("2m", "1", rate=RATE)
+    assert len(w.channels) == 161 and w.lo_hz == 144_000_000 and w.hi_hz == 146_000_000
+    centre = plan_centre(w, width, RATE)
+    assert centre == 145_006_250
+    assert all(abs(c - centre) <= RATE / 2 - 60_000 - width / 2 for c in w.channels)
+
+
+def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits() -> None:
+    with pytest.raises(WatchError, match=r"about 2\.3 MHz: watch a slice of it, e\.g\. ") as e:
+        plan_window("airband", "1", rate=RATE)
+    a, b = (float(x) for x in str(e.value).rsplit(" ", 1)[1].split(":"))
+    w, _, _ = plan_window((a, b), "1", rate=RATE)
+    assert w.channels and w.step_hz == pytest.approx(8_333.33, abs=0.01)
+
+
+def test_a_range_takes_the_raster_and_mode_of_its_band() -> None:
+    w, mode, _ = plan_window((446.0, 446.05), "cept", rate=RATE)
+    assert w.channels == PMR[:4] and mode == "nfm" and w.label == "446-446.05 MHz"
+    with pytest.raises(WatchError, match="narrowband voice"):
+        plan_window("fm", "1", rate=RATE)
+    with pytest.raises(WatchError, match="no band 'nowhere'"):
+        plan_window("nowhere", "1", rate=RATE)
+
+
+# -- as a station ----------------------------------------------------------------------------
+
+
+def test_a_watch_takes_the_strictest_class_and_the_acknowledgement() -> None:
+    s = watch_station()
+    assert s.privacy == "private" and s.band == "pmr446" and s.sdr is not None
+    assert s.sdr.watch is not None and s.sdr.watch.channels == PMR and s.sdr.mode == "nfm"
+    with pytest.raises(ConfigError, match=r"private radio.*acknowledge = true"):
+        watch_station(acknowledge=False)
+    # A range across amateur 70 cm and the 433 MHz devices band is as private as its most
+    # private channel.
+    near = SdrDevice("c", "00001234", 433_256_250, 30.0, RATE)
+    d = {"id": "w", "language": AUTO, "device": "c", "watch": [432.5, 434.0]}
+    with pytest.raises(ConfigError, match="private radio"):
+        build_station(d, "test", {"c": near}, "cept")
+    assert build_station({**d, "acknowledge": True}, "test", {"c": near}, "cept").privacy == (
+        "private"
+    )
+
+
+def test_a_watch_its_device_cant_hear_all_of_is_refused_with_a_centre_that_works() -> None:
+    far = SdrDevice("a", "00001234", 445_000_000, 30.0, RATE)
+    with pytest.raises(ConfigError, match=r"center_mhz = 445\.75625"):
+        build_station(
+            {"id": "w", "language": "en", "device": "a", "watch": "pmr446", "acknowledge": True},
+            "test",
+            {"a": far},
+            "cept",
+        )
+
+
+def test_language_auto_is_for_watches_and_round_trips() -> None:
+    with pytest.raises(ConfigError, match="'auto' is for watches"):
+        build_station({"id": "x", "language": AUTO, "stream": "https://e.x/s"}, "test")
+    with pytest.raises(ConfigError, match="'languages' narrows language 'auto'"):
+        build_station(
+            {"id": "x", "language": "en", "languages": ["en"], "stream": "https://e.x/s"}, "test"
+        )
+    s = watch_station(languages=["pt-PT", "es"], threshold_db=10)
+    again = build_station(station_dict(s), "again", {"a": DEVICE}, "cept")
+    assert again == s
+    assert station_ref(s.id, {s.id: s})["language"] is None  # not a language tag elsewhere
+
+
+# -- language "auto" -------------------------------------------------------------------------
+
+
+class Speaker:
+    """A fake speech model that hears the language from the tone: 800 Hz is Portuguese,
+    anything else sounds most like English, then Spanish."""
+
+    model_id = "fake-whisper"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[float, str]] = []
+
+    def identify_language(self, samples: np.ndarray) -> dict[str, float]:
+        if abs(dominant_hz(samples) - 800) < 50:
+            return {"pt": 0.7, "es": 0.2, "en": 0.1}
+        return {"en": 0.5, "es": 0.4, "pt": 0.1}
+
+    def transcribe(self, samples: np.ndarray, language: str) -> Transcript:
+        self.calls.append((dominant_hz(samples), language))
+        return Transcript(f"{language} words", language, self.model_id)
+
+
+def test_the_likeliest_candidate_is_chosen_by_its_primary_subtag() -> None:
+    probs = {"en": 0.5, "es": 0.4, "pt": 0.1}
+    assert likeliest(probs) == "en"
+    assert likeliest(probs, ("pt-PT", "es")) == "es"  # English isn't among them
+    assert likeliest(probs, ("es", "pt-PT")) == "es"
+    # Clearly none of them: as heard, or Whisper would translate and call it a transcript.
+    assert likeliest({"ru": 0.97, "en": 0.02, "pt": 0.01}, ("pt-PT", "en")) == "ru"
+
+
+def test_transcribe_any_falls_back_to_the_first_candidate_for_a_model_that_cant_tell() -> None:
+    class Plain:
+        model_id = "plain"
+
+        def transcribe(self, samples: np.ndarray, language: str) -> Transcript:
+            return Transcript("", language, self.model_id)
+
+    assert transcribe_any(Plain(), np.zeros(16_000), ("uk", "en")).language == "uk"
+    with pytest.raises(ValueError, match="can't tell"):
+        transcribe_any(Plain(), np.zeros(16_000))
+
+
+def test_auto_needs_a_model_that_tells_languages_apart(tmp_path: Path) -> None:
+    whisper = ModelEntry(
+        "whisper-x",
+        "asr",
+        "mlx-audio",
+        "url:x",
+        "u",
+        "MIT",
+        "u",
+        "default",
+        False,
+        ("en", "pt", "es"),
+        "",
+    )
+    registry = ModelRegistry([ENTRY, whisper], {"asr": ["m", "whisper-x"]}, models_dir=tmp_path)
+    s = watch_station(languages=["pt-PT", "es"])
+    with pytest.raises(ModelError, match="fetch whisper-large-v3-turbo"):
+        plan_detecting(registry, s)  # not downloaded
+    (tmp_path / "whisper-x").mkdir()
+    (tmp_path / "whisper-x" / "x").write_bytes(b"")
+    assert plan_detecting(registry, s)[0].id == "whisper-x"  # skips the one that can't tell
+    with pytest.raises(ModelError, match="m can't tell languages"):
+        plan_detecting(registry, s, "m")
+    with pytest.raises(ModelError, match="doesn't know uk"):
+        plan_detecting(registry, watch_station(languages=["uk"]), "whisper-x")
+
+
+# -- through the pipeline --------------------------------------------------------------------
+
+
+class FakeDevice:
+    """Feeds prepared IQ blocks to whoever attaches, as RtlSdrDevice does from rtl_sdr."""
+
+    available = True
+    clipped = 0.0
+
+    def __init__(self, blocks: list[tuple[np.ndarray, float]]) -> None:
+        self._blocks = blocks
+
+    def attach(self, consumer: WatchSource) -> None:
+        def feed() -> None:
+            for i, (iq, t_end) in enumerate(self._blocks):
+                consumer._feed(iq, t_end, i == 0)
+
+        threading.Thread(target=feed, daemon=True).start()
+
+    def detach(self, consumer: WatchSource) -> None:
+        pass
+
+
+def test_each_catch_is_transcribed_on_its_own_in_the_language_heard() -> None:
+    station = watch_station(languages=["pt-PT", "es"], translate_to=["en"])
+    bursts = [
+        Burst(PMR[1], 1.0, 2.5, tone_hz=800),
+        Burst(PMR[8], 1.8, 3.3, tone_hz=1_500),  # overlaps the first
+        Burst(PMR[12], 4.0, 5.0, deviation_hz=0.0),  # a carrier with nobody speaking
+    ]
+    blocks = list(air(7.0, bursts))
+    speaker = Speaker()
+    results: list[Result] = []
+    caught: list[Catch] = []
+    stop_listening = watches.subscribe(caught.append)
+    plan = Plan(vad=(ENTRY, Path()), asr={station.id: (ENTRY, Path())}, mt=(ENTRY, Path()))
+    pipeline = Pipeline(
+        [station],
+        plan,
+        results.append,
+        source_factory=lambda st: WatchSource(
+            st.id, st.sdr, device=FakeDevice(blocks), privacy=st.privacy
+        ),
+        vad_factory=lambda _path: EnergyVad(),
+        transcriber_factory=lambda _e, _p: speaker,
+        translator_factory=lambda _e, _p: FakeTranslator(),
+    )
+    runner = threading.Thread(target=pipeline.run, daemon=True)  # until the watch is closed
+    runner.start()
+    try:
+        deadline = time.monotonic() + 20
+        while (len(caught) < 3 or len(results) < 2) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        pipeline.stop(drain=True)
+        runner.join(10)
+        stop_listening()
+    assert not runner.is_alive()
+
+    by_freq = {r.utterance.freq_hz: r for r in results}
+    assert sorted(by_freq) == [PMR[1], PMR[8]]
+    pt, es = by_freq[PMR[1]], by_freq[PMR[8]]
+    assert pt.station.language == "pt-PT" and pt.transcript.text == "pt-PT words"
+    assert es.station.language == "es"  # English was likelier, but isn't a candidate
+    assert pt.translations == {"en": "en:pt-PT words"}
+    # Each transcribed alone: one tone each, never both in one utterance.
+    assert sorted(round(hz, -2) for hz, _ in speaker.calls) == [800, 1_500]
+    assert pt.utterance.t_start == pytest.approx(1_000_000 + 1.0, abs=0.35)
+
+    assert [c.freq_hz for c in caught] == [PMR[1], PMR[8], PMR[12]]
+    assert [c.voice for c in caught] == [True, True, False]
+    assert {c.station_id for c in caught} == {"walkies"}
+    assert {c.privacy for c in caught} == {"private"}
+    assert caught[0].band == "pmr446" and caught[0].label == "PMR446 walkie-talkies, channel 2"

@@ -22,6 +22,8 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from wavescribe.asr.language import AUTO
+
 FEED_VERSION = 1
 
 
@@ -72,7 +74,9 @@ def station_ref(sid: str, stations: Mapping[str, Any]) -> dict[str, Any]:
     s = stations.get(sid)
     if s is None:
         return {"id": sid, "name": sid, "language": None}
-    return {"id": s.id, "name": s.name, "language": s.language, "privacy": s.privacy}
+    # A watch's language is "auto": each of its utterances carries the one it was heard in.
+    language = None if s.language == AUTO else s.language
+    return {"id": s.id, "name": s.name, "language": language, "privacy": s.privacy}
 
 
 def _langs(translations: Mapping[str, str], languages: Iterable[str]) -> dict[str, str]:

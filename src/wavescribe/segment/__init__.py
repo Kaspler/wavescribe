@@ -19,6 +19,7 @@ class Utterance:
     t_start: float  # wall-clock epoch seconds
     t_end: float  # when the last kept sample arrived
     ready_at: float  # when the segmenter emitted it (t_end + the end-of-speech wait)
+    freq_hz: int | None = None  # a watch's: the frequency it was caught on
 
     @property
     def duration(self) -> float:

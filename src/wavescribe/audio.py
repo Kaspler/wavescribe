@@ -16,6 +16,7 @@ class AudioChunk:
     t_end: float  # wall-clock time (epoch seconds) when the last sample arrived (a live stream:
     # when it was due at the pace it was spoken, sources/stream.py)
     discontinuity: bool = False  # first chunk after a (re)connect: drop any partial state
+    freq_hz: int | None = None  # a watch's audio: the frequency it was caught on
 
     @property
     def duration(self) -> float:

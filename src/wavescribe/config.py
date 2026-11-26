@@ -42,7 +42,7 @@ _STATION_KEYS = _DEFAULT_KEYS | {
     "id", "name", "fm_mhz", "mw_khz", "stream", "stream_hls", "device",
     "remote", "remote_station", "remote_token", "privacy",
     "mhz", "mode", "channel_khz", "squelch_db", "acknowledge", "transcribe", "translate",
-    "privacy_floor",
+    "privacy_floor", "watch", "languages", "threshold_db",
 }  # fmt: skip
 _RADIO_KEYS = {"region", "policy"}
 _DEVICE_KEYS = {"id", "serial", "center_mhz", "gain_db", "sample_rate", "ppm"}
@@ -93,7 +93,7 @@ class SdrTuning:
 class Station:
     id: str
     name: str
-    language: str  # BCP-47 source language, e.g. "pt-PT"
+    language: str  # BCP-47 source language, e.g. "pt-PT"; a watch's may be "auto"
     translate_to: tuple[str, ...]  # continuous translation targets (primary first)
     alert_languages: tuple[str, ...]
     priority: int = 5  # 1 = most important; drives the ASR queue order
@@ -122,6 +122,7 @@ class Station:
     # A remote station's class from its config: the other machine may make it stricter, never
     # looser (remote.py).
     privacy_set: str | None = None
+    languages: tuple[str, ...] = ()  # language "auto": the ones it may be (none: any)
 
     @property
     def translation_targets(self) -> tuple[str, ...]:
@@ -492,7 +493,15 @@ def build_station(
     language = d.get("language")
     if language is None:
         raise ConfigError(f"{where}: 'language' is required (here or in [defaults])")
-    _check_language(language, where)
+    from wavescribe.asr.language import AUTO
+
+    if language == AUTO and d.get("watch") is None:
+        raise ConfigError(f"{where}: language 'auto' is for watches: give this station's own")
+    if language != AUTO:
+        _check_language(language, where)
+    languages = _languages(d, "languages", where)
+    if languages and language != AUTO:
+        raise ConfigError(f"{where}: 'languages' narrows language 'auto' to the ones it may be")
     translate_to = _languages(d, "translate_to", where)
     alert_languages = _languages(d, "alert_languages", where)
 
@@ -520,7 +529,10 @@ def build_station(
             raise ConfigError(f"{where}: unknown device {device_id!r} (known: {known})")
         if mode not in MODES:
             raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}")
-        freq = _pick_frequency(freqs, device, mode)
+        watch, watch_width = None, None
+        if d.get("watch") is not None:
+            watch, mode, watch_width = _plan_watch(d, device, region, where)
+        freq = watch.middle_hz if watch else _pick_frequency(freqs, device, mode)
         if freq is None:
             key = "mhz" if mhz else "fm_mhz"
             raise ConfigError(
@@ -540,7 +552,9 @@ def build_station(
                               f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25")  # fmt: skip
         from wavescribe.radio.bandplan import STRICTNESS, stricter
 
-        width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else None
+        width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else watch_width
+        # A watch takes the strictest class of any channel in its window.
+        policed = watch.strictest_hz if watch else freq
 
         acknowledge, floor = d.get("acknowledge", False), d.get("privacy_floor")
         _check_acknowledge(acknowledge, where)
@@ -550,12 +564,14 @@ def build_station(
         if floor is not None and acknowledge is not True and acknowledged(acknowledge, floor):
             # Kept in the class it was confirmed for after a change of region, while that one
             # is the stricter: it runs as that class, so the confirmation still holds.
-            heard_as, _ = radio_policy(freq, mode, region, True, where, width)
+            heard_as, _ = radio_policy(policed, mode, region, True, where, width)
             acknowledge = True if stricter(floor, heard_as) else acknowledge
-        privacy, band = radio_policy(freq, mode, region, acknowledge, where, width)
+        privacy, band = radio_policy(policed, mode, region, acknowledge, where, width)
+        if watch and isinstance(watch.spec, str):
+            band = watch.spec
         if floor is not None and stricter(floor, privacy):
             privacy_region, privacy = privacy, floor
-        if not off_centre(freq, device.center_hz, mode, channel and channel * 1e3):
+        if not watch and not off_centre(freq, device.center_hz, mode, channel and channel * 1e3):
             raise ConfigError(
                 f"{where}: {freq / 1e6:.5f} MHz is at the centre of device {device_id!r}, where "
                 "every dongle has a spike of its own that would hold this channel's squelch "
@@ -563,7 +579,7 @@ def build_station(
                 f"{(freq - OFF_CENTRE_HZ[mode]) / 1e6:.5f}"
             )
         sdr = SdrTuning(device, freq, float(deemphasis), mode,
-                        channel * 1e3 if channel else None, squelch)  # fmt: skip
+                        channel * 1e3 if channel else watch_width, squelch, watch)  # fmt: skip
 
     remote, remote_station = d.get("remote"), d.get("remote_station")
     if remote is not None:
@@ -615,7 +631,41 @@ def build_station(
         privacy_set=stated,
         transcribe=d.get("transcribe", True),
         translate=d.get("translate", True),
+        languages=languages,
     )
+
+
+def _plan_watch(
+    d: Mapping[str, Any], device: SdrDevice, region: str | None, where: str
+) -> tuple[Watch, str, float]:
+    """A watch's window (radio/watch.py), which its device must hear all of."""
+    from wavescribe.dsp.activity import THRESHOLD_DB
+    from wavescribe.radio.bandplan import AUTO
+    from wavescribe.radio.watch import WatchError, outside, plan_centre, plan_window
+
+    spec, channel = d["watch"], d.get("channel_khz")
+    threshold = d.get("threshold_db", THRESHOLD_DB)
+    if not _is_number(threshold) or not 3 <= threshold <= 40:
+        raise ConfigError(f"{where}: 'threshold_db' must be 3 to 40 (dB over the noise floor)")
+    try:
+        watch, mode, width = plan_window(
+            tuple(spec) if isinstance(spec, list) else spec,
+            region or AUTO,
+            rate=device.sample_rate,
+            mode=d.get("mode"),
+            channel_hz=channel * 1e3 if _is_number(channel) else None,
+            threshold_db=threshold,
+        )
+    except WatchError as e:
+        raise ConfigError(f"{where}: {e}") from None
+    if missing := outside(watch, device.center_hz, device.sample_rate, width):
+        raise ConfigError(
+            f"{where}: device {device.id!r} doesn't hear all of {watch.label} ({len(missing)} "
+            f"of its {len(watch.channels)} channels are outside its band). Give the device "
+            f"center_mhz = {plan_centre(watch, width, device.sample_rate) / 1e6:.5f}, or watch "
+            "the part it hears"
+        )
+    return watch, mode, width
 
 
 def _check_language(tag: object, where: str) -> None:

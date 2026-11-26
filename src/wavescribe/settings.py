@@ -309,6 +309,11 @@ def station_dict(s: Station) -> dict[str, Any]:
             d["acknowledge"] = s.privacy  # it was, for this class, when the station was made
         if s.privacy_region is not None:
             d["privacy_floor"] = s.privacy  # kept stricter after a change of region
+        if (w := s.sdr.watch) is not None:
+            d["watch"] = w.spec if isinstance(w.spec, str) else list(w.spec)
+            d["threshold_db"] = w.threshold_db
+    if s.languages:
+        d["languages"] = list(s.languages)
     if s.remote is not None:
         d["remote"] = s.remote
         d["remote_station"] = s.remote_station

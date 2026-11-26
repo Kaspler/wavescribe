@@ -43,6 +43,14 @@ class AudioSource(Protocol):
 
 def open_source(station: Station) -> AudioSource:
     """The station's default source: its SDR when one is configured, else its internet stream."""
+    if station.sdr is not None and station.sdr.watch is not None:
+        from wavescribe.radio.catalog import Catalog
+        from wavescribe.sources.watch import WatchSource
+
+        spurs = Catalog().spurs(station.sdr.device.serial)  # learnt with no antenna
+        return WatchSource(
+            station.id, station.sdr, spurs=spurs, privacy=station.privacy, checks=station.transcribe
+        )
     if station.sdr is not None:
         from wavescribe.sources.sdr import SdrChannelSource
 

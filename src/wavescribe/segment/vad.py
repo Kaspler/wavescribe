@@ -97,6 +97,7 @@ class VadSegmenter:
         self._pause = max(1, _frames(pause))
         self._clock = clock
         self._seq = 0
+        self._freq_hz: int | None = None
         self._pending = np.zeros(0, dtype=np.float32)
         self._preroll: deque[tuple[np.ndarray, float]] = deque(maxlen=self._pad)
         self._reset_utterance()
@@ -119,6 +120,7 @@ class VadSegmenter:
             self._vad.reset()
             self._pending = np.zeros(0, dtype=np.float32)
             self._preroll.clear()
+        self._freq_hz = chunk.freq_hz  # a watch marks each new frequency as a discontinuity
         audio = np.concatenate([self._pending, chunk.samples])
         n = len(audio) // FRAME
         for i in range(n):
@@ -194,6 +196,7 @@ class VadSegmenter:
             t_start=t_end - len(samples) / SAMPLE_RATE,
             t_end=t_end,
             ready_at=self._clock(),
+            freq_hz=self._freq_hz,
         )
 
 

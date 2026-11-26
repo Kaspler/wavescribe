@@ -14,22 +14,32 @@ that share its ``rtl_sdr`` pipe (``sources/sdr.py``):
 The detector takes about two frames (100 ms) to be sure, and the history holds two seconds,
 so the first syllable is never lost to the time it takes to notice. Up to four transmissions
 are demodulated at once; one more is counted as missed rather than delayed or crashed.
+
+``WatchSource`` hands the catches to the pipeline as a station's audio, one after another,
+each its own stretch (a discontinuity first, so the VAD starts afresh) with its frequency on
+every chunk. Two catches at once are transcribed one after the other, never mixed.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import queue
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
-from wavescribe.audio import SAMPLE_RATE
+from wavescribe.audio import SAMPLE_RATE, AudioChunk
 from wavescribe.config import SdrTuning
-from wavescribe.dsp.activity import Activity, ActivityDetector, IqHistory
+from wavescribe.dsp.activity import CARRIER_S, Activity, ActivityDetector, IqHistory
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.log import event
-from wavescribe.radio.watch import Catch, Watch
+from wavescribe.radio.bandplan import lookup
+from wavescribe.radio.watch import Catch, Watch, publish
+from wavescribe.sources import SourceHealth
+from wavescribe.sources.sdr import RtlSdrDevice, shared_device
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +47,11 @@ PREROLL_S = 0.3  # audio kept from before the transmission was noticed: its firs
 TAIL_S = 0.3  # and after its last moment above the noise: the end of its last word
 HISTORY_S = 2.0
 MAX_ACTIVE = 4  # demodulators at once (about 2 % of a core each at 2.4 MS/s)
+CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, like live audio
+# Silence after each catch: more than the VAD's end-of-speech wait (0.6 s), so the catch's last
+# utterance ends with it instead of running into the next catch.
+CLOSING_S = 0.8
+QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, kept unchecked
 
 
 @dataclass
@@ -57,7 +72,7 @@ class Catcher:
         *,
         spurs: list[int] | tuple[int, ...] = (),
         max_active: int = MAX_ACTIVE,
-        **detector: Any,
+        carrier_s: float = CARRIER_S,
     ) -> None:
         watch = tuning.watch
         if watch is None:
@@ -76,7 +91,7 @@ class Catcher:
             step_hz=watch.step_hz,
             threshold_db=watch.threshold_db,
             spurs=spurs,
-            **detector,
+            carrier_s=carrier_s,
         )
         self._history = IqHistory(d.sample_rate, HISTORY_S)
         self._max_active = max_active
@@ -170,3 +185,155 @@ class Catcher:
             peak_db=round(max(rec.activity.power_db, a.power_db), 1),
             reason=a.reason,
         )
+
+
+class WatchSource:
+    """A watch as a station's ``AudioSource``: its catches, one after another, as audio."""
+
+    def __init__(
+        self,
+        station_id: str,
+        tuning: SdrTuning,
+        *,
+        device: RtlSdrDevice | None = None,
+        spurs: list[int] | tuple[int, ...] = (),
+        privacy: str = "private",
+        checks: bool = True,
+        queue_catches: int = QUEUE_CATCHES,
+    ) -> None:
+        """``privacy`` is the watch's class, kept with each catch. ``checks``: whether the
+        pipeline runs the VAD and the gate on the audio (a transcribed station), so a catch
+        nobody spoke in can say so."""
+        self.station_id = station_id
+        self.tuning = tuning
+        self._device = device or shared_device(tuning.device)
+        self._spurs = tuple(spurs)
+        self._catcher = Catcher(tuning, spurs=self._spurs)
+        self._privacy = privacy
+        self._checks = checks
+        self._q: queue.Queue[Catch | None] = queue.Queue(maxsize=queue_catches)
+        self._closed = threading.Event()
+        self._error: Exception | None = None  # what catching raised, on the device thread
+        self._health = SourceHealth()
+        self._heard: Catch | None = None  # the catch the pipeline is reading
+        self.dropped = 0  # catches that waited too long for the pipeline: kept unchecked
+
+    @property
+    def health(self) -> SourceHealth:
+        return self._health
+
+    @property
+    def catcher(self) -> Catcher:
+        return self._catcher
+
+    def __iter__(self) -> Iterator[AudioChunk]:
+        if not self._device.available:
+            raise RuntimeError("'rtl_sdr' not found; install it with: brew install librtlsdr")
+        if self._error is not None:  # iterated again after a failure: start afresh
+            self._error = None
+            self._catcher = Catcher(self.tuning, spurs=self._spurs)
+        self._device.attach(self)
+        try:
+            while not self._closed.is_set() and self._error is None:
+                try:
+                    catch = self._q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                if catch is None:
+                    break
+                yield from self._audio(catch)
+                self._heard = None
+                publish(catch)
+            if self._error is not None and not self._closed.is_set():
+                raise RuntimeError(f"catching failed: {self._error}") from self._error
+        finally:
+            self._device.detach(self)
+            self._health.connected = False
+            self._health.squelch_open = None
+            # Caught but not yet heard by the VAD: still caught, so still logged.
+            if self._heard is not None:
+                self._unchecked(self._heard)
+            with contextlib.suppress(queue.Empty):
+                while (catch := self._q.get_nowait()) is not None:
+                    self._unchecked(catch)
+
+    def _audio(self, catch: Catch) -> Iterator[AudioChunk]:
+        self._heard = catch
+        catch.voice = False if self._checks else None
+        closing = np.zeros(round(CLOSING_S * SAMPLE_RATE), dtype=np.float32)
+        audio = np.concatenate([catch.audio, closing])
+        for i in range(0, len(audio), CHUNK):
+            part = audio[i : i + CHUNK]
+            t_end = catch.audio_from + (i + len(part)) / SAMPLE_RATE
+            yield AudioChunk(part, t_end, discontinuity=i == 0, freq_hz=catch.freq_hz)
+
+    def speech(self, utterance: object) -> None:
+        """The pipeline's word that an utterance of this source passed the VAD and the gate."""
+        heard = self._heard
+        if heard is not None and getattr(utterance, "freq_hz", None) == heard.freq_hz:
+            heard.voice = True
+
+    def _unchecked(self, catch: Catch) -> None:
+        if catch.voice is False:  # not heard to the end: whether anyone spoke is unknown
+            catch.voice = None
+        publish(catch)
+
+    def close(self) -> None:
+        self._closed.set()
+        with contextlib.suppress(queue.Full):
+            self._q.put_nowait(None)
+
+    # Called on the device thread.
+
+    def _feed(self, iq: np.ndarray, t_end: float, first: bool) -> None:
+        if self._closed.is_set() or self._error is not None:
+            return
+        try:
+            caught = []
+            if first and self._catcher.detector.samples:
+                # After a gap the history no longer runs on: what was being caught ends at the
+                # gap, and the floors are learnt again (half a second).
+                caught = self._catcher.stop()
+                self._catcher = Catcher(self.tuning, spurs=self._spurs)
+            caught += self._catcher.feed(iq, t_end)
+        except Exception as e:
+            # Raised again in the station's own thread, so the watch is restarted like any
+            # failed source while the device and its other stations go on.
+            self._error = e
+            with contextlib.suppress(queue.Full):
+                self._q.put_nowait(None)
+            return
+        h = self._health
+        h.connected = True
+        h.last_data_at = t_end
+        h.samples_total += len(iq) // (self.tuning.device.sample_rate // SAMPLE_RATE)
+        h.signal_db = round(float(self._catcher.detector.power_db.max()), 1)
+        h.clipped = self._device.clipped
+        h.squelch_open = bool(self._catcher.active)
+        for catch in caught:
+            self._queue(catch)
+
+    def _queue(self, catch: Catch) -> None:
+        band = lookup(catch.freq_hz, self._catcher.watch.region)
+        catch.station_id, catch.privacy = self.station_id, self._privacy
+        catch.band, catch.label = (band.id, band.label(catch.freq_hz)) if band else (None, "")
+        try:
+            self._q.put_nowait(catch)
+        except queue.Full:
+            # The pipeline is far behind (a busy speech model): the catch is logged without its
+            # words rather than held, so the dongle's thread never waits.
+            self.dropped += 1
+            event(
+                log,
+                "watch_behind",
+                level=logging.WARNING,
+                station=self.station_id,
+                mhz=catch.freq_hz / 1e6,
+                dropped=self.dropped,
+            )
+            catch.voice = None
+            publish(catch)
+
+    def _disconnected(self, reconnects: int) -> None:
+        self._health.connected = False
+        self._health.reconnects = reconnects
