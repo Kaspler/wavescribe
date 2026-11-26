@@ -52,7 +52,7 @@ class CatchPrinter:
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
     from wavescribe.cli import cmd_listen
-    from wavescribe.config import DEFAULT_SAMPLE_RATE, build_device, build_station
+    from wavescribe.config import DEFAULT_SAMPLE_RATE, build_device, build_station, radio_policy
     from wavescribe.radio.catalog import Catalog
     from wavescribe.radio.cli import _config, _region, resolve_receiver
     from wavescribe.radio.watch import plan_centre, plan_window, subscribe
@@ -66,6 +66,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
         spec, region, rate=rate, mode=args.mode, threshold_db=args.threshold
     )
     centre = plan_centre(watch, width, rate)
+    # The acknowledgement as this command takes it, before the station checks it again.
+    strictest = watch.strictest_in(region, width)
+    radio_policy(
+        strictest, mode, region, args.acknowledge, "radio watch", width, "Pass --acknowledge"
+    )
     device = build_device(
         {
             "id": "cli",
@@ -131,17 +136,26 @@ def cmd_catches(args: argparse.Namespace) -> int:
     out = sys.stderr if args.json else sys.stdout  # with --json, stdout is JSON only
     path = DATA_DIR / "wavescribe.db"
     rows: list[dict[str, Any]] = []
+    older: list[dict[str, Any]] = []  # the newest before the window, when it has none
     if path.exists():
         store = Store(path)
         try:
-            rows = store.catches(
-                freq_hz=round(args.mhz * 1e6) if args.mhz else None,
-                width_hz=args.width * 1e3,
-                since=time.time() - args.hours * 3600 if args.hours else None,
-                limit=args.limit,
-            )
+            freq = round(args.mhz * 1e6) if args.mhz else None
+            where = {"freq_hz": freq, "width_hz": args.width * 1e3}
+            since = time.time() - args.hours * 3600 if args.hours else None
+            rows = store.catches(**where, since=since, limit=args.limit)
+            if not rows and since is not None:
+                older = store.catches(**where, limit=1)
         finally:
             store.close()
+    if older:
+        newest = time.strftime("%Y-%m-%d %H:%M", time.localtime(older[0]["t_start"]))
+        print(
+            f"Caught and kept, but nothing in the last {args.hours:g} hours: the newest is from "
+            f"{newest}. --hours 0 shows them all.",
+            file=out,
+        )
+        return 0
     if not rows:
         print(
             "Nothing caught and kept. A watch's catches are kept as long as text of its class: "

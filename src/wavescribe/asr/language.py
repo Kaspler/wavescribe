@@ -30,13 +30,17 @@ OUTSIDE = 0.1  # the station's languages together less likely than this: it's no
 
 NEEDS = (
     "language 'auto' needs a speech model that tells languages apart: "
-    "wavescribe models fetch whisper-large-v3-turbo"
+    "wavescribe models fetch whisper-large-v3-turbo; or give the one language spoken, e.g. "
+    '--language pt-PT (language = "pt-PT" in the stations file)'
 )
 
 
-def can_detect(entry: ModelEntry) -> bool:
-    """Whether a model can say which language is spoken (``identify_language``)."""
-    return entry.backend == "mlx-audio" and "whisper" in entry.id
+def can_detect(entry: ModelEntry, path: Path) -> bool:
+    """Whether a model can say which language is spoken (``identify_language``), as its wrapper
+    tells from the model on disk: an English-only Whisper can't."""
+    from wavescribe.asr.mlx_audio import MlxAudioTranscriber
+
+    return entry.backend == "mlx-audio" and MlxAudioTranscriber.tells_languages(path)
 
 
 def plan_detecting(
@@ -51,7 +55,14 @@ def plan_detecting(
     entries = [registry.get(chosen)] if chosen else registry.chain("asr")
     for entry in entries:
         unknown = [tag for tag in station.languages if not entry.supports(tag)]
-        if not can_detect(entry) or unknown:
+        path = registry.local_path(entry) if entry.backend == "mlx-audio" else None
+        if path is None and entry.backend == "mlx-audio":
+            if chosen:
+                raise ModelError(
+                    f"{entry.id} is not installed; run: wavescribe models fetch {entry.id}"
+                )
+            continue
+        if path is None or not can_detect(entry, path) or unknown:
             if chosen:
                 why = f"doesn't know {', '.join(unknown)}" if unknown else "can't tell languages"
                 raise ModelError(f"{entry.id} {why}; {NEEDS}")
@@ -62,13 +73,7 @@ def plan_detecting(
             if chosen:
                 raise
             continue
-        path = registry.local_path(entry)
-        if path is not None:
-            return entry, path
-        if chosen:
-            raise ModelError(
-                f"{entry.id} is not installed; run: wavescribe models fetch {entry.id}"
-            )
+        return entry, path
     raise ModelError(NEEDS)
 
 

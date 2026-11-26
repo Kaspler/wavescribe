@@ -8,6 +8,7 @@ locale key such as ``pt-PT``, and Qwen3-ASR and Voxtral detect it themselves. Li
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,19 @@ class MlxAudioTranscriber:
         self._model = load_model(str(model_path))
         self._family = type(self._model).__module__.split(".")[-2]  # e.g. "whisper"
         self.transcribe(np.zeros(16_000, dtype=np.float32), "en")  # compile Metal kernels now
+
+    @staticmethod
+    def tells_languages(model_path: Path) -> bool:
+        """Whether the model at ``model_path`` can tell languages (``identify_language``), from
+        its config and without loading it: a Whisper that knows more than English (an
+        English-only one has a vocabulary of 51,864 tokens, a multilingual one more)."""
+        folder = model_path if model_path.is_dir() else model_path.parent
+        try:
+            config = json.loads((folder / "config.json").read_text())
+        except (OSError, ValueError):
+            return False
+        vocab = config.get("n_vocab") or config.get("vocab_size") or 0
+        return config.get("model_type") == "whisper" and vocab >= 51_865
 
     def _language_kwargs(self, language: str) -> dict[str, str]:
         if self._family == "whisper":

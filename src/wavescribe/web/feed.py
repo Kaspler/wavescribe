@@ -37,6 +37,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from wavescribe import __version__, jsonsafe
+from wavescribe.asr.language import AUTO
 from wavescribe.events import FEED_VERSION, alert_event, to_json, utterance_event
 
 if TYPE_CHECKING:
@@ -269,7 +270,7 @@ def stations(h: Handler) -> list[dict[str, Any]]:
     lag = status.get("lag", {})
     heard = hub.store.last_heard() if hub.store is not None else {}
     return [{
-        "id": s.id, "name": s.name, "language": s.language,
+        "id": s.id, "name": s.name, "language": None if s.language == AUTO else s.language,
         "translate_to": list(s.translation_targets),
         "kind": "remote" if s.remote else "sdr" if s.sdr else "stream",
         "running": s.id in running,

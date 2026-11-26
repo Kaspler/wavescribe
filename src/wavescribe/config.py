@@ -367,14 +367,15 @@ def default_mode(freq_hz: float, region: str | None) -> str:
 
 
 def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: object,
-                 where: str, width_hz: float | None = None) -> tuple[str, str | None]:  # fmt: skip
+                 where: str, width_hz: float | None = None,
+                 confirm: str = "") -> tuple[str, str | None]:  # fmt: skip
     """The privacy class and band of an SDR frequency, and an acknowledgement where the band
-    plan wants one: the user confirms they may receive it where they are (docs/RADIO.md).
-    ``acknowledge`` is true (confirmed now) or the class confirmed before, so a station that
-    moves to another class is asked again (``acknowledged``). ``width_hz`` is the channel's
-    width, when it's known: the class is the strictest of the bands its edges reach
-    (``bandplan.lookup``). Digital services can be tuned too, but only analogue demodulators
-    exist: no digital decoder, no decryption."""
+    plan wants one: the user confirms they may receive it where they are (docs/RADIO.md), as
+    ``confirm`` says to where it isn't the stations file. ``acknowledge`` is true (confirmed
+    now) or the class confirmed before, so a station that moves to another class is asked
+    again (``acknowledged``). ``width_hz`` is the channel's width, when it's known: the class
+    is the strictest of the bands its edges reach (``bandplan.lookup``). Digital services can
+    be tuned too, but only analogue demodulators exist: no digital decoder, no decryption."""
     from wavescribe.radio.bandplan import AUTO, POLICIES, lookup
 
     band = lookup(freq_hz, region or AUTO, width_hz)
@@ -390,8 +391,8 @@ def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: obj
         mhz = f"{freq_hz / 1e6:.5f}".rstrip("0").rstrip(".")
         raise ConfigError(
             f"{where}: {mhz} MHz is {what} ({privacy} radio). Laws on receiving it "
-            f"differ by country.{extra} Set acknowledge = true to confirm you may receive it "
-            "where you are (docs/RADIO.md)"
+            f"differ by country.{extra} {confirm or 'Set acknowledge = true'} to confirm you "
+            "may receive it where you are (docs/RADIO.md)"
         )
     return privacy, band.id if band else None
 

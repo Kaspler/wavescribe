@@ -205,6 +205,10 @@ def test_radio_catches_prints_the_log_and_its_json(
     assert "Nothing caught and kept" in capsys.readouterr().out
     store = Store(tmp_path / "data" / "wavescribe.db")
     now = time.time()
+    store.add_catch(catch(TWO_M, now - 3 * 86_400))
+    watch_cli.cmd_catches(args)
+    older = capsys.readouterr().out
+    assert "nothing in the last 24 hours" in older and "--hours 0 shows them all" in older
     store.add_transcript(words("walkies", TWO_M, now + 0.5, "CQ CQ"))
     store.add_catch(catch(TWO_M, now))
     store.add_catch(replace(catch(TWO_M + 25_000, now + 10), voice=None))  # listened to only
@@ -212,6 +216,7 @@ def test_radio_catches_prints_the_log_and_its_json(
     Catalog(tmp_path / "data" / "radio").note(TWO_M, name="calling channel")
     watch_cli.cmd_catches(args)
     lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 3  # the one from three days ago is outside the 24 hours
     assert "145.5" in lines[0] and '"calling channel"' in lines[0] and "voice" in lines[0]
     assert lines[1].split() == ["pt-PT", "CQ", "CQ"]
     assert "145.525" in lines[2] and lines[2].endswith("not checked")
@@ -234,8 +239,9 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
     monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
     argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--minutes", "10"]
     args = build_parser().parse_args(argv)
-    with pytest.raises(ValueError, match="acknowledge"):
+    with pytest.raises(ValueError, match="Pass --acknowledge to confirm") as e:
         args.func(args)
+    assert "acknowledge = true" not in str(e.value)  # the stations file's key, not this
     args = build_parser().parse_args([*argv, "--acknowledge", "--languages", "pt-PT", "es"])
     assert args.func(args) == 0
     [a] = ran
@@ -272,7 +278,7 @@ def test_catches_route_gives_other_machines_only_what_may_leave(
     catalog = Catalog(tmp_path / "radio")
     catalog.note(TWO_M, name="calling channel", note="the club's net on Sundays")
     hub = WebHub(StationsConfig((walkies, ham), Path("t.toml")), PLAN, {}, store=store)
-    hub.app = SimpleNamespace(radio=SimpleNamespace(catalog=catalog))
+    hub.app = SimpleNamespace(radio=SimpleNamespace(catalog=catalog), remote_status=dict)
     server = WebServer(("127.0.0.1", 0), hub)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -288,6 +294,9 @@ def test_catches_route_gives_other_machines_only_what_may_leave(
         body = request(server, "GET", f"/api/catches?mhz={near}&width_khz=12.5")[1]
         assert [c["freq_hz"] for c in json.loads(body)["catches"]] == [TWO_M]
         assert request(server, "GET", "/api/catches?hours=nan")[0] == 400
+        listed = json.loads(request(server, "GET", "/feed/v1/stations")[1])
+        # "auto" is no language tag: a machine following the watch would refuse the list.
+        assert {s["id"]: s["language"] for s in listed}["walkies"] is None
         assert request(server, "GET", "/api/catches?mhz=1e303")[0] == 400  # past any tuner
         assert request(server, "GET", "/api/catches?mhz=5")[0] == 400
         monkeypatch.setattr(Handler, "_is_local", lambda _self: False)

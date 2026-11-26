@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -274,15 +275,24 @@ def test_auto_needs_a_model_that_tells_languages_apart(tmp_path: Path) -> None:
         ("en", "pt", "es"),
         "",
     )
-    registry = ModelRegistry([ENTRY, whisper], {"asr": ["m", "whisper-x"]}, models_dir=tmp_path)
+    english = replace(whisper, id="whisper-en", source="url:en")
+    chain = {"asr": ["m", "whisper-en", "whisper-x"]}
+    registry = ModelRegistry([ENTRY, english, whisper], chain, models_dir=tmp_path)
     s = watch_station(languages=["pt-PT", "es"])
-    with pytest.raises(ModelError, match="fetch whisper-large-v3-turbo"):
+    with pytest.raises(ModelError, match=r"fetch whisper-large-v3-turbo.*--language pt-PT"):
         plan_detecting(registry, s)  # not downloaded
-    (tmp_path / "whisper-x").mkdir()
-    (tmp_path / "whisper-x" / "x").write_bytes(b"")
-    assert plan_detecting(registry, s)[0].id == "whisper-x"  # skips the one that can't tell
+    for name, vocab in (("whisper-en", 51_864), ("whisper-x", 51_866)):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / name.split("-")[1]).write_bytes(b"")
+        (tmp_path / name / "config.json").write_text(
+            f'{{"model_type": "whisper", "n_vocab": {vocab}}}'
+        )
+    # Skips the one that isn't Whisper, and the Whisper that only knows English.
+    assert plan_detecting(registry, s)[0].id == "whisper-x"
     with pytest.raises(ModelError, match="m can't tell languages"):
         plan_detecting(registry, s, "m")
+    with pytest.raises(ModelError, match="whisper-en can't tell languages"):
+        plan_detecting(registry, watch_station(), "whisper-en")
     with pytest.raises(ModelError, match="doesn't know uk"):
         plan_detecting(registry, watch_station(languages=["uk"]), "whisper-x")
 
