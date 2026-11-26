@@ -110,14 +110,19 @@ id = "motorway-closed"
 regex = ['\bA\s?\d{1,2}\b.{0,30}\b(cortada|fechada|encerrada)\b']
 severity = "low"
 
-# A rule of any kind other than keyword or llm (such as a station going silent, below) is read
-# and skipped: those kinds don't exist yet.
-# [[rule]]
-# id = "station-silent"
-# kind = "silence"
-# stations = ["antena1"]
-# after_seconds = 120
-# severity = "high"
+# A station gone silent: no audio (its stream or receiver is down or reconnecting), or only dead
+# air (every audio level read below level_db, in dBFS), for after_minutes. Once its audio is back
+# the alert says so, once (notification, log and webhooks, never spoken). Listen-only and
+# switched-off stations never alert, and a station that goes silent while the alert is open
+# joins it: a network outage that silences every stream is one alert. The text is Wavescribe's
+# own, in English, translated like a quote for notify_language and the voices.
+[[rule]]
+id = "station-silent"
+kind = "silence"
+after_minutes = 5
+level_db = -50
+severity = "medium"
+# stations = ["station-id"]   # only these stations; all of them when left out
 
 [actions]
 # speak:<lang> speaks a checked translation into <lang> (or that language's fallback phrase).

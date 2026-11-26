@@ -261,6 +261,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
     )
     if alerter is not None:
         alerter.attach(pipeline.request_translation)
+        alerter.watch(pipeline.status, lambda: stations)
     try:
         pipeline.run(duration=args.duration)
     finally:
@@ -314,8 +315,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     warn_noncommercial(app.plan)
     if app.alerter is not None:
         rules = app.alerter.config.rules
-        print(f"# alerts: {len(rules.rules)} keyword and {len(rules.llm_rules)} LLM rules",
-              file=sys.stderr)  # fmt: skip
+        print(f"# alerts: {len(rules.rules)} keyword, {len(rules.llm_rules)} LLM and "
+              f"{len(rules.station_rules)} station rules", file=sys.stderr)  # fmt: skip
 
     def ready(url: str) -> None:
         print(f"Wavescribe is running at {url}  (Ctrl-C to stop)", file=sys.stderr)

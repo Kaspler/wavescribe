@@ -145,7 +145,9 @@ def test_tracked_examples_load_and_match(tmp_path: Path) -> None:
     assert hit.terms == ["A1 continua cortada"]
     assert config.languages_for("critical", "pt-PT") == ["en"]
     assert config.languages_for("low", "pt-PT") == []
-    assert all(r.id != "station-silent" for r in config.rules.rules)  # not implemented: skipped
+    [silent] = config.rules.station_rules
+    assert (silent.id, silent.kind, silent.after_s, silent.level_db) == (
+        "station-silent", "silence", 300, -50)  # fmt: skip
 
 
 @pytest.mark.parametrize(

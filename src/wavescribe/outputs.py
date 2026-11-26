@@ -350,7 +350,7 @@ class Outputs:
                 "first_at": ev["first_at"] or 0, "last_at": ev["last_at"] or 0,
                 "stations": [s["id"] for s in ev["stations"]], "language": ev["language"],
                 "quote": ev["text"], "terms": ev["terms"], "mentions": ev["mentions"],
-                "summaries": ev["translations"],
+                "summaries": ev["translations"], "kind": ev.get("kind"),
             }  # fmt: skip
             names = {s["id"]: s["name"] for s in ev["stations"]}
             return to_cap(alert, station_names=names).encode(), "application/xml; charset=utf-8"

@@ -218,6 +218,7 @@ class App:
             from wavescribe.rules.llm import LlmRuleChecker
 
             self.alerter.attach(self.pipeline.request_translation)
+            self.alerter.watch(self.pipeline.status, lambda: self.config.stations)
             self.alerter.on_alert = self.hub.on_alert
             self.alerter.on_delivered = self.outputs.on_alert
             self.llm_rules = LlmRuleChecker(

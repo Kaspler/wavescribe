@@ -196,6 +196,12 @@ each station's language. Read them, fix any that are wrong, and save.
   don't have, so leave it out there. A pattern that could take very long (a repeated group that
   repeats inside, like `(\w+ )+`) is refused when the file loads, with the rule's name.
 
+**When a station goes silent:** the example `config/alerts.toml` has a rule for it
+(`kind = "silence"`): a station that sends no audio, or only silence, for 5 minutes raises an
+alert, and you get a notification when its audio is back. It's how you find out that the
+stream, the receiver or the network went down. Stations you only listen to, and stations
+switched off, never raise it.
+
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.

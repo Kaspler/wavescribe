@@ -8,6 +8,10 @@ terms, never code.
 
 LLM rules are a plain-language description ("they tell people to leave an area"); the LLM reads
 each station's recent source-language text against them (``rules/llm.py``).
+
+Station rules are about a station rather than what it says: it went silent (``SilenceRule``), or
+an FM station raised its RDS traffic-announcement flag (``TrafficRule``). They read the
+pipeline's station status, in ``alerts/watch.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from wavescribe.languages import primary_subtag
 from wavescribe.rules.text import Matcher, compile_pattern
@@ -34,6 +38,7 @@ MAX_REGEX_CHARS = 200
 MAX_REGEXES = 20  # per rule
 REGEX_TEXT_CHARS = 2000  # more than any utterance the ASR checks keep (35 chars/s, ~30 s)
 SLOW_REGEX_MS = 50  # a pattern this slow on one utterance is named in the log, once
+STATION_KINDS = ("silence", "traffic")  # rules about a station, not about what it says
 
 
 def raise_severity(severity: str, steps: int = 1) -> str:
@@ -120,6 +125,33 @@ class LlmRule:
     origin: str = "page"
 
 
+@dataclass(frozen=True)
+class SilenceRule:
+    """A running station delivered no audio, or only dead air, for ``after_s`` seconds."""
+
+    id: str
+    severity: str
+    stations: tuple[str, ...] = ()
+    after_s: float = 300.0
+    level_db: float = -50.0  # dead air: every audio level read stays below this (dBFS)
+    origin: str = "file"
+    kind: ClassVar[str] = "silence"
+
+
+@dataclass(frozen=True)
+class TrafficRule:
+    """An FM station's RDS says a traffic announcement is on (TP and TA set)."""
+
+    id: str
+    severity: str
+    stations: tuple[str, ...] = ()
+    origin: str = "file"
+    kind: ClassVar[str] = "traffic"
+
+
+StationRule = SilenceRule | TrafficRule
+
+
 @dataclass
 class Hit:
     """One rule matching one utterance; the evidence travels with the verdict."""
@@ -130,7 +162,7 @@ class Hit:
     places: list[str]
     spans: list[tuple[int, int]]  # character spans in the source text
     capped: str | None = None  # why the severity was capped, e.g. "lang:en", "unverified"
-    kind: str = "keyword"  # or "llm"
+    kind: str = "keyword"  # or "llm", "silence", "traffic"
     reason: str | None = None  # the LLM's one-line reason (LLM rules and verified hits)
     again: bool = False  # the LLM confirmed an earlier hit on the same utterance
 
@@ -156,7 +188,19 @@ def _regexes(value: Any, rid: str) -> tuple[re.Pattern[str], ...]:
     return tuple(compiled)
 
 
-def parse_rule(raw: Mapping[str, Any], origin: str = "file") -> KeywordRule | LlmRule:
+def _number(raw: Mapping[str, Any], key: str, default: float, rid: str, low: float,
+            high: float) -> float:  # fmt: skip
+    value = raw.get(key, default)
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise ValueError(f"rule {rid}: {key} must be a number, e.g. {default:g}")
+    if not low <= value <= high:
+        raise ValueError(f"rule {rid}: {key} must be from {low:g} to {high:g}")
+    return float(value)
+
+
+def parse_rule(
+    raw: Mapping[str, Any], origin: str = "file"
+) -> KeywordRule | LlmRule | SilenceRule | TrafficRule:
     """One ``[[rule]]`` table, from alerts.toml or the page. Raises ValueError."""
     rid = str(raw.get("id", ""))
     if not _RULE_ID.fullmatch(rid):
@@ -178,8 +222,14 @@ def parse_rule(raw: Mapping[str, Any], origin: str = "file") -> KeywordRule | Ll
         if not prompt.strip():
             raise ValueError(f"rule {rid}: an LLM rule needs a prompt (what to listen for)")
         return LlmRule(rid, prompt.strip()[:500], severity, stations, min_mentions, origin)
+    if kind == "silence":
+        after = _number(raw, "after_minutes", 5, rid, 0.5, 24 * 60)
+        level = _number(raw, "level_db", -50, rid, -120, 0)
+        return SilenceRule(rid, severity, stations, after * 60, level, origin)
+    if kind == "traffic":
+        return TrafficRule(rid, severity, stations, origin)
     if kind != "keyword":
-        raise ValueError(f"rule {rid}: kind is keyword or llm")
+        raise ValueError(f"rule {rid}: kind is keyword, llm, silence or traffic")
     own = _groups(raw.get("terms") or {}, f"rule {rid}: terms", '{ pt = ["fogo", "incêndio"] }')
     terms: dict[str, tuple[str, ...]] = {}
     for lang, words in own.items():
@@ -204,6 +254,7 @@ class RuleSet:
     rules: list[KeywordRule]
     packs: dict[str, KeywordPack]  # primary subtag -> pack
     llm_rules: list[LlmRule] = field(default_factory=list)
+    station_rules: list[StationRule] = field(default_factory=list)
     _matchers: dict[str, Matcher] = field(default_factory=dict)
     _slow: set[tuple[str, str]] = field(default_factory=set)  # (rule, pattern) named as slow
 
@@ -217,17 +268,23 @@ class RuleSet:
     ) -> RuleSet:
         rules: list[KeywordRule] = []
         llm: list[LlmRule] = []
+        station: list[StationRule] = []
         page_ids = {str(r.get("id")) for r in page_rules}
         tables = [(r, "file") for r in alerts.get("rule", []) if r.get("id") not in page_ids]
         for raw, origin in [*tables, *((r, "page") for r in page_rules)]:
-            if raw.get("kind", "keyword") not in ("keyword", "llm"):
+            if raw.get("kind", "keyword") not in ("keyword", "llm", *STATION_KINDS):
                 log.info("rule %s: kind %r isn't implemented yet; skipped", raw.get("id"),
                          raw.get("kind"))  # fmt: skip
                 continue
             rule = parse_rule(raw, origin)
             if rule.id in disabled:
                 continue
-            (llm if isinstance(rule, LlmRule) else rules).append(rule)  # type: ignore[arg-type]
+            if isinstance(rule, LlmRule):
+                llm.append(rule)
+            elif isinstance(rule, KeywordRule):
+                rules.append(rule)
+            else:
+                station.append(rule)
         packs = {}
         if keywords_dir.is_dir():
             for path in sorted(keywords_dir.glob("*.toml")):
@@ -237,13 +294,14 @@ class RuleSet:
                     continue  # the real pack wins over its example
                 pack = KeywordPack.load(path)
                 packs[primary_subtag(pack.language)] = pack
-        return cls(rules, packs, llm)
+        return cls(rules, packs, llm, station)
 
     def pack_for(self, language: str) -> KeywordPack | None:
         return self.packs.get(primary_subtag(language))
 
-    def get(self, rule_id: str) -> KeywordRule | LlmRule | None:
-        return next((r for r in [*self.rules, *self.llm_rules] if r.id == rule_id), None)
+    def get(self, rule_id: str) -> KeywordRule | LlmRule | StationRule | None:
+        every = [*self.rules, *self.llm_rules, *self.station_rules]
+        return next((r for r in every if r.id == rule_id), None)
 
     def evaluate(
         self, text: str, language: str, flags: tuple[str, ...] = (), station: str | None = None

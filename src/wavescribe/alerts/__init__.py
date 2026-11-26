@@ -19,6 +19,10 @@ confirmed it, and each action's outcome is stored next to it.
 Delivery never depends on the database: every write to the store is best effort (``_keep``),
 and an alert whose delivery could not run is marked failed rather than left pending, so the
 rule's next mention announces it.
+
+Station alerts (a station gone silent, ``alerts/watch.py``) take the same path with text worded
+by Wavescribe instead of words heard (``on_station``), and say once when it is over
+(``station_back``).
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ from wavescribe.asr.checks import wrong_language
 from wavescribe.config import ConfigError
 from wavescribe.languages import same_language
 from wavescribe.log import event
-from wavescribe.rules import SEVERITIES, Hit, RuleSet
+from wavescribe.rules import SEVERITIES, STATION_KINDS, Hit, RuleSet
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +51,9 @@ DEFAULT_ALERTS_PATH = Path("config/alerts.toml")
 EXAMPLE_ALERTS_PATH = Path("config/alerts.example.toml")
 DEFAULT_KEYWORDS_DIR = Path("config/keywords")
 DELIVERY_QUEUE_MAX = 50
+# Station alerts are worded by Wavescribe, in the language of its page; delivery translates
+# them like a quote, for the notification and the voices.
+STATION_TEXT_LANGUAGE = "en"
 
 # translate(text, source_language, targets, callback(translations, model_id))
 TranslateFn = Callable[[str, str, list[str], Callable[[dict[str, str], str | None], None]], None]
@@ -69,11 +76,13 @@ class AlertConfig:
     cooldown_s: float = 900.0
     path: Path | None = None
 
-    def languages_for(self, severity: str, source: str) -> list[str]:
-        """Languages to translate an alert into before delivering it."""
+    def languages_for(self, severity: str, source: str, spoken: bool = True) -> list[str]:
+        """Languages to translate an alert into before delivering it (``spoken``: with the
+        voices' languages)."""
         actions = self.actions.get(severity, ())
         langs = [self.notify_language] if "notify" in actions and self.notify_language else []
-        langs += [a.split(":", 1)[1] for a in actions if a.startswith("speak:")]
+        if spoken:
+            langs += [a.split(":", 1)[1] for a in actions if a.startswith("speak:")]
         out: list[str] = []
         for lang in langs:
             if not same_language(lang, source) and lang not in out:
@@ -210,8 +219,9 @@ class Alert:
     wanted: str = "low"
     heard: int = 0  # mentions that count towards confirmation (not heard as another language)
     confirmed: bool = True
-    kind: str = "keyword"  # or "llm"
+    kind: str = "keyword"  # or "llm", or a station rule's kind ("silence")
     reason: str | None = None  # the LLM's reason, when an LLM rule or check was involved
+    ended: bool = False  # a station alert whose cause is over (the station is back)
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -295,6 +305,7 @@ class Alerter:
             r.id: r.min_mentions for r in [*config.rules.rules, *config.rules.llm_rules]
         }
         self._deliveries: queue.Queue[tuple | None] = queue.Queue(maxsize=DELIVERY_QUEUE_MAX)
+        self._watch: Any = None  # alerts/watch.py, once ``watch`` starts it
         self._voices = self.actions.voices()
         for lang, v in config.voices.items():
             if self._voices is not None and v.voice not in self._voices:
@@ -315,7 +326,24 @@ class Alerter:
         """Give the alerter a way to translate (``Pipeline.request_translation``)."""
         self.translate = translate
 
+    def watch(
+        self,
+        status: Callable[[], dict[str, Any]],
+        stations: Callable[[], Any],
+        interval_s: float | None = None,
+    ) -> Any:  # -> StationWatch
+        """Check the station rules every few seconds on ``status()``, the pipeline's status
+        snapshot (``Pipeline.status``); ``stations()`` lists the configured stations."""
+        from wavescribe.alerts.watch import INTERVAL_S, StationWatch
+
+        self._watch = StationWatch(self, status, stations, interval_s=interval_s or INTERVAL_S,
+                                   clock=self._clock)  # fmt: skip
+        self._watch.start()
+        return self._watch
+
     def close(self, timeout: float = 5.0) -> None:
+        if self._watch is not None:
+            self._watch.close()
         try:
             self._deliveries.put(None, timeout=timeout)
         except queue.Full:
@@ -473,6 +501,81 @@ class Alerter:
         self._publish(alert)
         return alert, wants
 
+    # -- station alerts (alerts/watch.py) -----------------------------------------------------
+
+    def on_station(self, rule: Any, station: Any, text: str) -> Alert:
+        """A station rule fired (``rules.SilenceRule``): one alert through the usual path, with
+        ``text`` worded by Wavescribe and no words heard. While the rule's alert is open and
+        within the cooldown, another station firing it folds in unannounced: when the network
+        goes down every stream goes quiet at once, and that is one alert."""
+        from wavescribe.radio.bandplan import class_of
+
+        now = self._clock()
+        hit = Hit(rule.id, rule.severity, [], [], [], kind=rule.kind)
+        with self._lock:
+            alert = self._open.get(rule.id)
+            fold = (
+                alert is not None
+                and alert.kind == rule.kind
+                and not alert.ended
+                and now - alert.last_at <= self.config.cooldown_s
+            )
+            if fold:
+                assert alert is not None
+                alert.mentions += 1
+                alert.last_at = now
+                alert.last_text = text
+                if station.id not in alert.station_ids:
+                    alert.station_ids.append(station.id)
+                if class_of(station) not in alert.privacy:
+                    alert.privacy.append(class_of(station))
+            else:
+                alert = Alert(
+                    rule_id=rule.id,
+                    severity=rule.severity,
+                    station_ids=[station.id],
+                    language=STATION_TEXT_LANGUAGE,
+                    quote=text,
+                    terms=[],
+                    first_at=now,
+                    last_at=now,
+                    kind=rule.kind,
+                    privacy=[class_of(station)],
+                    wanted=rule.severity,
+                    heard=1,
+                )
+                self._open[rule.id] = alert
+                alert.status = "pending"
+            self._keep("add_mention", alert, None, hit)
+        event(log, "station_alert", rule=rule.id, kind=rule.kind, station=station.id,
+              folded=fold, text=text)  # fmt: skip
+        self._publish(alert)
+        if not fold:
+            self._dispatch(alert, alert.severity, text)
+        return alert
+
+    def station_back(self, alert: Alert, text: str | None) -> None:
+        """A station alert's cause is over. With ``text`` ("audio is back on …") it is said
+        once, through the notification, log and webhooks but never spoken: nobody needs to stop
+        what they are doing for it. Without, it ends quietly (the station was stopped). Either
+        way the alert closes, so the next time is a new alert."""
+        hit = Hit(alert.rule_id, alert.severity, [], [], [], kind=alert.kind)
+        with self._lock:
+            if alert.ended:
+                return
+            alert.ended = True
+            if self._open.get(alert.rule_id) is alert:
+                del self._open[alert.rule_id]
+            if text is None:
+                return
+            alert.last_at = self._clock()
+            alert.reason = text
+            alert.status = "pending"
+            self._keep("add_mention", alert, None, hit)
+        event(log, "station_back", rule=alert.rule_id, alert=alert.id, text=text)
+        self._publish(alert)
+        self._dispatch(alert, alert.severity, text, back=True)
+
     def _keep(self, write: str, alert: Alert, *args: Any) -> None:
         """Call the store's ``write(alert, *args)``, best effort. A full disk or a locked
         database costs the record, never the announcement. An alert the store hasn't taken yet
@@ -499,11 +602,16 @@ class Alerter:
     # -- delivery ---------------------------------------------------------------------------
 
     def _dispatch(
-        self, alert: Alert, severity: str, text: str, covers: list[str] | None = None
+        self,
+        alert: Alert,
+        severity: str,
+        text: str,
+        covers: list[str] | None = None,
+        back: bool = False,
     ) -> None:
         """Ask for translations of ``text``, then queue delivery when they arrive or the wait
-        runs out."""
-        langs = self.config.languages_for(severity, alert.language)
+        runs out. ``back``: a station alert saying it is over."""
+        langs = self.config.languages_for(severity, alert.language, spoken=not back)
         fired = threading.Event()
         lock = threading.Lock()
 
@@ -517,7 +625,7 @@ class Alerter:
                 return
             timer.cancel()
             try:
-                item = (alert, severity, text, covers or [], translations, model)
+                item = (alert, severity, text, covers or [], translations, model, back)
                 self._deliveries.put_nowait(item)
             except queue.Full:
                 event(log, "alert_dropped", level=logging.WARNING, alert=alert.id)
@@ -593,18 +701,22 @@ class Alerter:
         covers: list[str],
         translations: dict[str, str],
         model: str | None,
+        back: bool = False,
     ) -> None:
         checked = self._keep_summaries(alert, translations, model, keep=text == alert.quote)
         names = [self.station_names.get(s, s) for s in alert.station_ids]
         outcomes: dict[str, str] = {}
         for action in self.config.actions.get(severity, ()):
             kind, _, lang = action.partition(":")
+            if back and kind == "speak":
+                continue
             try:
                 if kind == "notify":
                     lang_ = self.config.notify_language
                     body = checked.get(lang_, "") if lang_ else ""
                     rules = alert.rule_id + (f" + {', '.join(covers)}" if covers else "")
-                    title = f"{severity.upper()} · {rules} · {', '.join(names)}"
+                    label = "BACK" if back else severity.upper()
+                    title = f"{label} · {rules} · {', '.join(names)}"
                     self.actions.notify(title, body or text)
                 elif kind == "speak":
                     self._speak(lang, alert, text, checked)
@@ -660,6 +772,8 @@ class Alerter:
             raise ActionError(f"voice {voice.voice!r} is not installed")
         if same_language(lang, alert.language):
             said = text
+        elif lang in checked and alert.kind in STATION_KINDS:
+            said = checked[lang]  # the intro ("the radio reports:") is for words heard
         elif lang in checked:
             said = f"{voice.intro} {checked[lang]}".strip()
         else:
