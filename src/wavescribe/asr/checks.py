@@ -3,7 +3,9 @@
 
 Two kinds of verdict:
 - **drop**: text that can't be real speech (repetition loops, more text than the audio could
-  hold). Music that slipped past the gate is the usual source.
+  hold), or nothing but the phrases models write over silence and music: subtitle credits and
+  video sign-offs, listed in ``junk.toml`` for every language at once. Music that slipped past
+  the gate is the usual source.
 - **flag**: real-looking text in another language than the station's: a song's lyrics, a clip
   in another language, or the ASR translating instead of transcribing. Flagged text is kept and
   shown dimmed, because Portuguese radio does carry real English interviews. A repeated phrase
@@ -37,8 +39,11 @@ from __future__ import annotations
 
 import functools
 import re
+import tomllib
+import unicodedata
 import zlib
 from dataclasses import dataclass
+from importlib import resources
 
 from wavescribe.languages import primary_subtag
 from wavescribe.rules.text import NO_SPACES
@@ -68,9 +73,40 @@ def check_transcript(text: str, duration_s: float, language: str) -> Check:
     repeated = _repetition(text)
     if repeated == "loop":
         return Check(drop="repetition")
+    if is_junk(text):
+        return Check(drop="junk")
     other = _other_language(text, language)
     flags = (("repetition",) if repeated else ()) + ((f"lang:{other}",) if other else ())
     return Check(flags=flags)
+
+
+def is_junk(text: str) -> bool:
+    """Whether ``text`` is nothing but subtitle credits, "thanks for watching" and the like
+    (``junk.toml``), in any language: what a model writes when it hears no speech. The same
+    words inside a longer line don't count."""
+    normal = _normalise(text)
+    return bool(normal) and not re.search(r"\w", _junk().sub(" ", normal))
+
+
+def _normalise(text: str) -> str:
+    """Lower case, without accents or other marks, and every run of punctuation and spaces as
+    one space: how ``junk.toml`` is matched."""
+    # Turkish dotless i (U+0131) is written "I" in capitals, which folds back to a dotted "i".
+    decomposed = unicodedata.normalize("NFKD", text.casefold().replace("\u0131", "i"))
+    bare = "".join(c for c in decomposed if not unicodedata.category(c).startswith("M"))
+    return " ".join(re.sub(r"[\W_]+", " ", bare).split())
+
+
+@functools.cache
+def _junk() -> re.Pattern[str]:
+    """``junk.toml`` as one pattern of whole words: phrases as written, then the patterns."""
+    source = resources.files("wavescribe.asr").joinpath("junk.toml")
+    raw = tomllib.loads(source.read_text(encoding="utf-8"))
+    phrases = {_normalise(p) for section in raw.values() for p in section.get("phrases", ())}
+    patterns = [p for section in raw.values() for p in section.get("patterns", ())]
+    # Longest first, so a phrase that contains another is taken whole.
+    alternatives = [re.escape(p) for p in sorted(phrases - {""}, key=len, reverse=True)]
+    return re.compile(r"(?<!\w)(?:" + "|".join(alternatives + patterns) + r")(?!\w)")
 
 
 def _repetition(text: str) -> str | None:

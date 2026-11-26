@@ -1,0 +1,101 @@
+# What speech models write when there is no speech to transcribe: subtitle credits and video
+# sign-offs from the subtitled videos they were trained on. Whisper is the best-known source,
+# over silence, music and noise, and any model trained on such data can do it.
+#
+# Read by asr/checks.py. Every entry applies to every station, whatever its language: a model
+# drifts into whichever language its training data put the phrase in, so a Portuguese station
+# can come back with a German subtitle credit. The sections only keep the file readable.
+#
+# A transcript is dropped (reason "junk") only when nothing but these remain. The same words
+# inside a longer line are kept with the line: "Subscribe to our podcast" stays, because
+# "our podcast" is left over. When in doubt, leave a phrase out: a line of junk in the
+# transcript costs less than a real line lost.
+#
+# Matching ignores case, accents and other marks, and punctuation:
+# - `phrases` match whole words as written here;
+# - `patterns` are Python regular expressions for credits that carry a name or a year. They see
+#   the text as matching does: lower case, no accents or marks, every run of punctuation and
+#   spaces turned into one space ("Sous-titrage ST' 501" reads "sous titrage st 501"). Keep
+#   them anchored on words a speaker wouldn't say on air, and bounded (at most a few words).
+
+[any]
+# "… by the Amara.org community", in whatever language the credit came out in.
+patterns = ['(?:\w+ ){0,6}amara org(?: \w+){0,3}']
+
+[ar]
+phrases = ["شكرا للمشاهدة", "شكرا على المشاهدة", "اشتركوا في القناة",
+           "لا تنسوا الاشتراك في القناة"]
+
+[de]
+phrases = ["vielen Dank fürs Zuschauen", "danke fürs Zuschauen", "Untertitel der Amara.org-Community"]
+# "Untertitel im Auftrag des ZDF, 2017", "Untertitelung des ZDF für funk, 2020"
+patterns = ['untertitel(?:ung)?(?: im auftrag)? (?:des|der|von) \w+(?: \w+){0,3}']
+
+[en]
+phrases = ["thanks for watching", "thank you for watching", "thank you so much for watching",
+           "thank you very much for watching", "please subscribe", "subscribe to my channel",
+           "please subscribe to my channel", "like and subscribe", "please like and subscribe",
+           "don't forget to like and subscribe", "see you in the next video",
+           "transcription by CastingWords"]
+patterns = ['subtitles (?:by|from) \w+(?: \w+){0,3}']
+
+[es]
+phrases = ["gracias por ver", "gracias por ver el video", "gracias por ver el vídeo",
+           "suscríbete", "suscríbete al canal", "no olvides suscribirte"]
+# "Subtítulos realizados por la comunidad de Amara.org", "Subtítulos por …"
+patterns = ['subtitulos (?:realizados )?por \w+(?: \w+){0,3}']
+
+[fr]
+phrases = ["merci d'avoir regardé", "merci d'avoir regardé cette vidéo", "abonnez-vous",
+           "abonnez-vous à la chaîne"]
+# "Sous-titrage ST' 501", "Sous-titres réalisés par …", "Sous-titrage Société Radio-Canada"
+patterns = ['sous titr(?:es|age)(?: realises)?(?: par)? \w+(?: \w+){0,3}']
+
+[it]
+phrases = ["grazie per la visione", "grazie per aver guardato", "iscriviti al canale"]
+# "Sottotitoli creati dalla comunità Amara.org", "Sottotitoli a cura di …"
+patterns = ['sottotitoli (?:creati )?(?:a cura di|dalla|dal|da|di) \w+(?: \w+){0,3}']
+
+[ja]
+phrases = ["ご視聴ありがとうございました", "チャンネル登録お願いします",
+           "チャンネル登録よろしくお願いします"]
+
+[ko]
+phrases = ["시청해주셔서 감사합니다", "시청해 주셔서 감사합니다", "구독과 좋아요 부탁드립니다"]
+
+[nl]
+phrases = ["bedankt voor het kijken"]
+# "Ondertiteld door de Amara.org gemeenschap", "Ondertiteling door …"
+patterns = ['ondertitel(?:d|ing) door \w+(?: \w+){0,3}']
+
+[pl]
+phrases = ["dziękuję za obejrzenie", "dzięki za obejrzenie"]
+# "Napisy stworzone przez społeczność Amara.org", "Napisy wykonane przez …"
+patterns = ['napisy (?:stworzone |wykonane |zrobione )?przez \w+(?: \w+){0,3}']
+
+[pt]
+phrases = ["obrigado por assistir", "obrigada por assistir", "obrigado por assistirem",
+           "inscreva-se no canal", "inscrevam-se no canal"]
+# "Legendas pela comunidade Amara.org", "Legendas por …"
+patterns = ['legendas? (?:pela|por|de) \w+(?: \w+){0,3}']
+
+[ru]
+phrases = ["спасибо за просмотр", "продолжение следует", "подписывайтесь на канал"]
+# "Субтитры сделал …", "Субтитры создавал …", "Редактор субтитров … Корректор …"
+patterns = ['субтитры (?:сделал|сделала|сделаны|создавал|создавала|подготовил|подготовила)(?: \w+){1,4}',
+            'редактор субтитров(?: (?!корректор)\w+){1,3}(?: корректор(?: \w+){1,3})?']
+
+[th]
+phrases = ["ขอบคุณที่รับชม"]
+
+[tr]
+phrases = ["izlediğiniz için teşekkürler", "izlediğiniz için teşekkür ederim",
+           "abone olmayı unutmayın"]
+
+[uk]
+phrases = ["дякую за перегляд", "дякуємо за перегляд", "підписуйтесь на канал"]
+patterns = ['субтитри (?:зробив|зробила|зроблені|створив|створила|підготував|підготувала)(?: \w+){1,4}']
+
+[zh]
+phrases = ["谢谢观看", "感谢观看", "謝謝觀看", "字幕由Amara.org社区提供",
+           "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目"]

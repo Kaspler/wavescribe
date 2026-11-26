@@ -89,3 +89,65 @@ def test_flags_text_clearly_in_another_language() -> None:
 def test_no_language_verdict_on_short_text_or_unknown_languages() -> None:
     assert check_transcript("Foi preso.", 1, "pt-PT").flags == ()  # reads as Romanian
     assert check_transcript("No quiero saber nada de lo que pasó.", 3, "tok").flags == ()
+
+
+# What models write over silence and music, in several languages, as the ASR returns it.
+JUNK = [
+    ("Thanks for watching!", "en-GB"),
+    ("Thank you for watching. Please subscribe to my channel.", "en"),
+    ("Legendas pela comunidade Amara.org", "pt-PT"),
+    ("Subtítulos realizados por la comunidad de Amara.org", "es-ES"),
+    ("Untertitel im Auftrag des ZDF, 2017", "de-DE"),
+    ("Untertitelung des ZDF für funk, 2020", "pl"),  # whatever the station's language
+    ("Sous-titrage ST' 501", "fr-FR"),
+    ("Sottotitoli creati dalla comunità Amara.org", "it"),
+    ("Napisy stworzone przez społeczność Amara.org", "pl"),
+    ("Субтитры сделал Иван Петров", "ru"),
+    ("Редактор субтитров О.Петрова Корректор Н.Иванова", "uk"),  # noqa: RUF001
+    ("Дякую за перегляд!", "uk"),
+    ("İzlediğiniz için teşekkürler.", "tr"),
+    ("شكراً على المشاهدة", "ar"),
+    ("ご視聴ありがとうございました", "ja"),
+    ("시청해주셔서 감사합니다.", "ko"),
+    ("字幕由Amara.org社区提供", "zh"),
+    ("ขอบคุณที่รับชม", "th"),
+    ("Merci d'avoir regardé cette vidéo ! Abonnez-vous.", "fr-CA"),
+]
+
+
+@pytest.mark.parametrize(("text", "language"), JUNK)
+def test_drops_subtitle_credits_and_sign_offs_in_any_language(text: str, language: str) -> None:
+    assert check_transcript(text, 3, language).drop == "junk"
+
+
+# The same words where someone is really speaking: anything left over keeps the whole line.
+NOT_JUNK = [
+    ("Subscribe to our podcast for the full interview.", "en"),
+    ("A proteção civil pede às populações que saiam. Obrigado por assistir.", "pt-PT"),
+    ("Obrigado por nos ouvir.", "pt-PT"),  # radio's own sign-off
+    ("Thank you.", "en"),
+    ("Gracias por ver la final con nosotros esta noche en la radio.", "es"),
+    ("Die Untertitel des Films waren schlecht übersetzt worden.", "de"),
+]
+
+
+@pytest.mark.parametrize(("text", "language"), NOT_JUNK)
+def test_keeps_lines_that_say_more_than_a_sign_off(text: str, language: str) -> None:
+    assert check_transcript(text, 4, language).drop is None
+
+
+def test_every_listed_phrase_is_junk_on_its_own() -> None:
+    import tomllib
+    from importlib import resources
+
+    from wavescribe.asr.checks import is_junk
+
+    raw = tomllib.loads(
+        resources.files("wavescribe.asr").joinpath("junk.toml").read_text(encoding="utf-8")
+    )
+    phrases = [p for section in raw.values() for p in section.get("phrases", ())]
+    assert len(phrases) > 40 and len(raw) > 10  # many languages, not one
+    for phrase in phrases:
+        assert is_junk(phrase), phrase
+        assert is_junk(f"{phrase.upper()}!!"), phrase  # case and punctuation don't matter
+        assert not is_junk(f"{phrase} — and then the minister said no"), phrase
