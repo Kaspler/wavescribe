@@ -232,6 +232,7 @@ class App:
             self.close()
 
     def close(self) -> None:
+        self.downloads.close()  # a download runs as a child process: it mustn't outlive serve
         if getattr(self, "_live", None) is not None:
             self._live.close_all()
         for f in list(self.followers.values()):

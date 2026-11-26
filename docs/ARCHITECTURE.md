@@ -264,7 +264,8 @@ post a plain form there.
 **Network use.** Runtime stays offline. The network is used only by:
 
 - a click on the page, from the machine itself (LAN viewers can't trigger any of these):
-  - a model download, run as a `wavescribe models fetch <id>` child process;
+  - a model download, run as a `wavescribe models fetch <id>` child process, which is stopped
+    when `serve` stops;
   - a Hugging Face search, anonymous GETs to the public API;
   - a Radio Browser search or snapshot refresh;
   - checking a stream or playlist URL, and recording 20 s of it to detect its language;
