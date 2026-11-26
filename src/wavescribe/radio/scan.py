@@ -33,7 +33,13 @@ import numpy as np
 from scipy.ndimage import percentile_filter, uniform_filter1d
 
 from wavescribe.log import event
-from wavescribe.radio.bandplan import TUNER_RANGE_HZ, Band, lookup, region_bands
+from wavescribe.radio.bandplan import (
+    TUNER_RANGE_HZ,
+    Band,
+    channel_width,
+    lookup,
+    region_bands,
+)
 from wavescribe.sources.sdr import device_arg, ppm_args
 
 log = logging.getLogger(__name__)
@@ -177,7 +183,7 @@ def bin_for(start_hz: float, stop_hz: float, band: Band | None = None) -> float:
     """The sweep's resolution: a fifth of the band's channel (a twentieth for broadcast FM),
     or, for a free range, whatever keeps it under about 25 000 bins."""
     if band is not None:
-        target = _expected_width(band) / (20 if band.mode == "wfm" else 5)
+        target = channel_width(band) / (20 if band.mode == "wfm" else 5)
         return max(b for b in (1_000, 2_500, 5_000, 10_000, 25_000) if b <= max(target, 1_000))
     span = stop_hz - start_hz
     for b in (2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000):
@@ -487,14 +493,6 @@ def parse_csv(text: str, start_hz: float, stop_hz: float) -> Sweep:
     return _assemble(rows, start_hz, stop_hz, step, 0.0)
 
 
-def _expected_width(band: Band | None) -> float:
-    if band is None or band.mode is None:
-        return 25_000
-    if band.mode == "wfm":
-        return 200_000
-    return band.channel_hz or band.step_hz or 12_500
-
-
 def spur_tolerance(bin_hz: float) -> float:
     return max(2.5 * bin_hz, 4_000)
 
@@ -547,7 +545,7 @@ def find_signals(
         if sw.in_gap(f0):
             continue  # no reading there: the tuner couldn't tune
         band = lookup(f0, region)
-        half = _expected_width(band) / 2
+        half = channel_width(band) / 2
         lo = int(np.searchsorted(sw.freqs, f0 - half))
         hi = int(np.searchsorted(sw.freqs, f0 + half))
         if taken[lo:hi].any():
@@ -872,7 +870,7 @@ def band_range(band_id: str, region: str) -> tuple[int, int]:
     for b in region_bands(region):
         if b.id == band_id:
             fit_range(b.start_hz, b.stop_hz)  # refuses a band the tuner doesn't reach at all
-            pad = int(_expected_width(b) / 2)
+            pad = int(channel_width(b) / 2)
             lo, hi = SWEEP_LIMITS_HZ
             start = max(min(b.start_hz, lo), b.start_hz - pad)
             return start, min(max(b.stop_hz, hi), b.stop_hz + pad)

@@ -254,7 +254,9 @@ frequency takes the strictest class any region gives it (FM broadcast excepted):
 to US English may well be in Europe, where 446 MHz is walkie-talkies rather than amateur radio. Set your region with
 `[radio] region = "2"` in the stations file, or on the page. To add a band, add a `[[band]]` to `bands.toml`: it's data, not
 code. A frequency that no plan for your region lists counts as private. One that any region
-marks as digital counts as digital everywhere.
+marks as digital counts as digital everywhere. A channel is as wide as its band's channels
+(200 kHz for FM, 25 kHz where no plan says), and one whose edge reaches a stricter band takes
+that band's class: a channel just below 380 MHz, where digital services start, counts as digital.
 
 Changing the region never makes a station less strict by itself. If the new region puts a
 station's frequency in a class that keeps more (446 MHz is walkie-talkies in Europe and amateur

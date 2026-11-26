@@ -323,25 +323,61 @@ def region_bands(region: str) -> list[Band]:
     return [_as_in(b, region) for b in bands() if _in_region(b, region)]
 
 
-def lookup(hz: float, region: str) -> Band | None:
+UNLISTED_CHANNEL_HZ = 25_000  # a channel where no plan says: as wide as narrowband FM gets
+
+
+def channel_width(band: Band | None) -> float:
+    """How wide one channel of a band is, for its edges: 200 kHz for broadcast FM, else the
+    band's channel width or raster; 25 kHz where no plan lists one, or for digital services."""
+    if band is None or band.mode is None:
+        return UNLISTED_CHANNEL_HZ
+    if band.mode == "wfm":
+        return 200_000
+    return band.channel_hz or band.step_hz or 12_500
+
+
+def lookup(hz: float, region: str, width_hz: float | None = None) -> Band | None:
     """The narrowest band of the region that contains ``hz``. Digital services of other regions
-    count too. With no region chosen (``AUTO``), see ``_lookup_auto``."""
+    count too. With no region chosen (``AUTO``), see ``_lookup_auto``.
+
+    A channel there reaches ``width_hz / 2`` either side (by default ``channel_width`` of that
+    band): its class is the strictest of every band its edges reach, so a 25 kHz channel at
+    379.99 MHz, beside digital services from 380 MHz, is digital. The band keeps its raster,
+    mode and name; a frequency no plan lists takes the stricter band it reaches. Spectrum that
+    no plan lists doesn't count at the edges (bands like FM end on their outermost channel's
+    centre, not its edge)."""
     if region == AUTO:
-        return _lookup_auto(hz)
-    here = [b for b in region_bands(region) if b.contains(hz)]
-    if here:
-        return min(here, key=lambda b: b.width_hz)
-    digital = [b for b in bands() if b.privacy == "digital" and b.contains(hz)]
-    return min(digital, key=lambda b: b.width_hz) if digital else None
+        return _lookup_auto(hz, width_hz)
+    here = region_bands(region)
+    inside = [b for b in here if b.contains(hz)]
+    band = min(inside, key=lambda b: b.width_hz) if inside else None
+    digital = [b for b in bands() if b.privacy == "digital" and b.id not in {x.id for x in here}]
+    if band is None:
+        inside = [b for b in digital if b.contains(hz)]
+        band = min(inside, key=lambda b: b.width_hz) if inside else None
+    return _reaching(band, hz, width_hz, here + digital)
 
 
-def _lookup_auto(hz: float) -> Band | None:
+def _reaching(band: Band | None, hz: float, width_hz: float | None,
+              candidates: Iterable[Band]) -> Band | None:  # fmt: skip
+    """``band`` with the strictest class of the candidates a channel at ``hz`` overlaps."""
+    half = (width_hz or channel_width(band)) / 2
+    own = band.privacy if band is not None else "private"
+    reached = [b for b in candidates if b.start_hz < hz + half and hz - half < b.stop_hz
+               and stricter(b.privacy, own)]  # fmt: skip
+    if not reached:
+        return band
+    worst = max(reached, key=lambda b: (STRICTNESS.index(b.privacy), -b.width_hz))
+    return replace(band, privacy=worst.privacy) if band is not None else worst
+
+
+def _lookup_auto(hz: float, width_hz: float | None = None) -> Band | None:
     """The locale's band (its raster, mode and name), with the strictest class of any region.
     FM broadcast in the locale's region stays broadcast: Japan doesn't list 95-108 MHz, and FM
     elsewhere mustn't become private because of it. Other broadcast (US weather radio) doesn't:
     its frequencies are land mobile and marine elsewhere."""
-    base = lookup(hz, default_region())
-    strictest = max((privacy_of(hz, r) for r in REGIONS), key=PRIVACY.index)
+    base = lookup(hz, default_region(), width_hz)
+    strictest = max((privacy_of(hz, r, width_hz) for r in REGIONS), key=STRICTNESS.index)
     fm = base is not None and base.privacy == "broadcast" and base.mode == "wfm"
     if base is not None and (base.privacy == strictest or (fm and strictest != "digital")):
         return base
@@ -349,12 +385,16 @@ def _lookup_auto(hz: float) -> Band | None:
              if b.contains(hz) and b.privacy == strictest]  # fmt: skip
     if named:  # e.g. PMR446 for a Mac in Europe set to US English, not the US 70 cm band
         return min(named, key=lambda b: b.width_hz)
-    return replace(base, privacy=strictest) if base is not None else None
+    if base is not None:
+        return replace(base, privacy=strictest)
+    # Nothing here in the locale's plan: the band of that class another region's channel reached.
+    return _reaching(None, hz, width_hz, [b for b in bands() if b.privacy == strictest])
 
 
-def privacy_of(hz: float, region: str) -> str:
-    """The privacy class of a frequency; anything no plan lists counts as private."""
-    band = lookup(hz, region)
+def privacy_of(hz: float, region: str, width_hz: float | None = None) -> str:
+    """The privacy class of a channel at ``hz`` (``lookup``); a frequency no plan lists, and
+    no stricter band reaches, counts as private."""
+    band = lookup(hz, region, width_hz)
     return band.privacy if band else "private"
 
 

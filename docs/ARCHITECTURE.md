@@ -461,6 +461,11 @@ under CEPT, AM elsewhere; `region_bands()` and `lookup()` give the band as the r
 a raster or channel list and a class: `broadcast`,
 `amateur`, `utility`, `private` or `digital`. `lookup()` takes the narrowest band of the region;
 a band any region marks digital counts as digital everywhere; an unlisted frequency is private.
+A channel's class is the strictest of every band its edges reach (`channel_width()`: 200 kHz for
+FM, else the band's channel or raster, 25 kHz unlisted; callers can pass `width_hz`), so a
+channel straddling a boundary takes the stricter side's class, keeping its own band's raster,
+mode and name. Unlisted spectrum doesn't count at the edges: FM's band ends on its outermost
+channel's centre, and its edge mustn't make it private.
 Each class has a `Policy` (`needs_ack`, `text_days`, `audio`, `export`, `quote_in_alerts`).
 With no region chosen (`AUTO`), the page and `radio bands` list the bands of the locale's
 region, but `lookup()` takes the band of any region with the strictest class: a locale says how

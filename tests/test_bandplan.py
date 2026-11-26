@@ -103,6 +103,32 @@ def test_a_band_any_region_marks_digital_is_digital_everywhere() -> None:
     assert lookup(1_090_000_000, "jp").privacy == "digital"
 
 
+def test_a_channel_takes_the_strictest_class_its_edges_reach(monkeypatch) -> None:
+    from wavescribe.config import radio_policy
+    from wavescribe.radio import bandplan
+
+    # A 25 kHz channel at 379.99 MHz reaches the digital services from 380 MHz.
+    for region in ("cept", "2", bandplan.AUTO):
+        assert privacy_of(379_990_000, region) == "digital", region
+    assert privacy_of(379_950_000, "cept") == "private"  # 12.5 kHz short of it
+    assert privacy_of(379_998_000, "cept", width_hz=2_000) == "private"  # a narrow one isn't
+    # A marine channel's centre with its edge in the land mobile gap: marine's raster and
+    # name, the gap's class.
+    edge = lookup(160_610_000, "cept")
+    assert (edge.id, edge.privacy, edge.mode) == ("marine", "private", "nfm")
+    assert lookup(160_625_000, "cept").privacy == "utility"  # channel 60 only touches it
+    # Spectrum no plan lists doesn't count: 88.1 MHz is the Americas' first FM channel.
+    assert lookup(88_100_000, "2").privacy == "broadcast"
+    assert lookup(118_000_000, "cept").privacy == "utility"
+    # Every caller gets it, the stations file included.
+    assert radio_policy(379_990_000, "nfm", "cept", True, "here") == (
+        "digital",
+        "digital-emergency",
+    )
+    monkeypatch.setattr(bandplan, "default_region", lambda: "2")
+    assert lookup(379_990_000, bandplan.AUTO).id == "digital-emergency"
+
+
 def test_unlisted_frequencies_count_as_private() -> None:
     assert privacy_of(300_000_000, "cept") == "private"
     with pytest.raises(ValueError):
