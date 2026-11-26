@@ -564,7 +564,10 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   spoken alert says `intro` plus the checked translation, or the language's fixed `fallback`
   phrase, so nothing unchecked is spoken and no alert is silent. The voice must be installed
   (`say -v Unknown` silently uses the default voice, which would read Ukrainian in English).
-  Actions run one at a time on one thread, so speech never overlaps.
+  Actions run one at a time on one thread, so speech never overlaps. Once an alert is above
+  low, its quote is also translated into its stations' `alert_languages` (`stations.toml`),
+  asked for after the delivery's own translations and never waited for, so the page, CAP and
+  webhooks carry it in those languages whoever is notified in them.
 - **Delivery state** (bandwatch's lesson): `pending`, then `delivered`, `partial`, `failed`,
   `logged` (log only) or `covered`. `delivered_at` is set only when an action that reaches a
   person confirmed it, and each action's outcome is stored (`actions`).

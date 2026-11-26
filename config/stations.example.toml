@@ -6,7 +6,8 @@
 [defaults]
 language = "pt-PT"
 translate_to = ["en"]          # continuous
-alert_languages = ["en", "es"] # read, not used yet: alerts.toml sets the alert languages
+alert_languages = ["en", "es"] # alerts above low are also translated into these, for the
+                               # page, CAP and webhooks; notify and speak are set in alerts.toml
 
 [[station]]
 id = "antena1"

@@ -196,16 +196,22 @@ each station's language. Read them, fix any that are wrong, and save.
   don't have, so leave it out there. A pattern that could take very long (a repeated group that
   repeats inside, like `(\w+ )+`) is refused when the file loads, with the rule's name.
 
-**When a station goes silent:** the example `config/alerts.toml` has a rule for it
+**When a station goes silent:** the example rules (`config/alerts.example.toml`) have one
 (`kind = "silence"`): a station that sends no audio, or only silence, for 5 minutes raises an
 alert, and you get a notification when its audio is back. It's how you find out that the
 stream, the receiver or the network went down. Stations you only listen to, and stations
 switched off, never raise it.
 
 **Traffic announcements:** FM stations flag their traffic news in their broadcast data (RDS).
-Add a rule with `kind = "traffic"` (an example is in `config/alerts.example.toml`) and you get
+Add a rule with `kind = "traffic"` (there is one to uncomment in the example rules) and you get
 an alert when one starts on a station you receive with an SDR, at most once per cooldown. It
 works on stations you only listen to as well, since nothing has to be transcribed.
+
+**Alerts in more languages:** notifications and voices use the languages set under Settings →
+Alerts → **What happens on an alert**. To have a station's alerts translated into other
+languages as well, for everyone reading the page or receiving webhooks, give the station
+`alert_languages = ["es", "fr"]` in `config/stations.toml`. Alerts above *low* are translated
+into them.
 
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice

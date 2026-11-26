@@ -227,6 +227,51 @@ def test_low_alerts_are_only_logged(tmp_path: Path) -> None:
     assert alert.severity == "low" and alert.status == "logged" and actions.calls == []
 
 
+ES = "Mañana cortarán el agua en el centro de la ciudad por unas obras en las tuberías."
+
+
+def wanting(r, *languages: str):
+    """The utterance's station with ``alert_languages``."""
+    station = dataclasses.replace(r.station, alert_languages=languages)
+    return dataclasses.replace(r, station=station)
+
+
+def wait_for(cond, timeout: float = 5.0) -> None:
+    deadline = time.time() + timeout
+    while not cond():
+        assert time.time() < deadline, "timed out"
+        time.sleep(0.01)
+
+
+def test_alerts_are_translated_into_their_stations_alert_languages(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    alerter, actions, _, requests, _ = make(tmp_path, {"en": EN, "es": ES, "uk": UK}, store=store)
+    quote = "Corte de água em Lisboa."
+    r = wanting(result("a", quote, 1000.0), "es", "en", "pt")
+    store.add_transcript(r)
+    alerter.on_transcript(r)  # high: a notification in English
+    [alert] = settle(alerter)
+    wait_for(lambda: "es" in alert.summaries)
+    # The delivery's own translation is asked for first and the others aren't waited for; the
+    # station's own language and one already asked for aren't asked again.
+    assert requests == [(quote, "pt-PT", ["en"]), (quote, "pt-PT", ["es"])]
+    assert actions.calls == [("notify", "HIGH · water · Rádio A", EN)]
+    wait_for(lambda: store.alerts()[0]["summaries"] == {"en": EN, "es": ES})
+
+
+def test_low_alerts_wait_for_their_alert_languages_until_they_rise(tmp_path: Path) -> None:
+    alerter, actions, clock, requests, _ = make(tmp_path, {"en": EN, "es": ES, "uk": UK})
+    quote = "Sabotagem e corte de água em Lisboa."
+    alerter.on_transcript(wanting(dataclasses.replace(result("a", quote, 1000.0),
+                                                      flags=("lang:en",)), "es"))  # fmt: skip
+    settle(alerter, 2)
+    assert requests == [] and actions.calls == []  # low: only logged, nothing translated
+    clock.now += 60
+    alerter.on_transcript(wanting(result("b", "Sem água em Vila Nova.", 1060.0), "es"))
+    wait_for(lambda: "es" in alerter._open["water"].summaries)
+    assert (quote, "pt-PT", ["es"]) in requests  # the quote, now that the alert matters
+
+
 def test_a_repeated_call_with_a_message_is_announced(tmp_path: Path) -> None:
     from wavescribe.asr.checks import check_transcript
 

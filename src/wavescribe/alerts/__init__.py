@@ -222,6 +222,7 @@ class Alert:
     kind: str = "keyword"  # or "llm", or a station rule's kind ("silence", "traffic")
     reason: str | None = None  # the LLM's reason, when an LLM rule or check was involved
     ended: bool = False  # a station alert whose cause is over (the station is back)
+    languages: list[str] = field(default_factory=list)  # its stations' alert_languages
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -267,6 +268,14 @@ def _short_lived(station: Any) -> bool:
 
     policy = policy_of(station)
     return policy is not None and policy.text_days is not None
+
+
+def _add_languages(alert: Alert, station: Any) -> None:
+    """The languages a station wants its alerts in (``alert_languages``), added to an alert it
+    is part of."""
+    for lang in getattr(station, "alert_languages", ()):
+        if lang not in alert.languages:
+            alert.languages.append(lang)
 
 
 def _rank(severity: str | None) -> int:
@@ -459,6 +468,7 @@ class Alerter:
                 # Words from radio kept only for days stay out of the log, whichever station
                 # opened the alert.
                 alert.short_lived = alert.short_lived or _short_lived(station)
+                _add_languages(alert, station)
                 alert.terms += [t for t in hit.terms if t not in alert.terms]
                 if result.segment_id is not None:
                     alert.segment_ids.append(result.segment_id)
@@ -490,6 +500,7 @@ class Alerter:
                     short_lived=_short_lived(station),
                     privacy=[class_of(station)],
                 )
+                _add_languages(alert, station)
                 self._confirm(alert, hit)
                 alert.severity = alert.wanted if alert.confirmed else "low"
                 self._open[hit.rule_id] = alert
@@ -529,6 +540,7 @@ class Alerter:
                     alert.station_ids.append(station.id)
                 if class_of(station) not in alert.privacy:
                     alert.privacy.append(class_of(station))
+                _add_languages(alert, station)
             else:
                 alert = Alert(
                     rule_id=rule.id,
@@ -544,6 +556,7 @@ class Alerter:
                     wanted=rule.severity,
                     heard=1,
                 )
+                _add_languages(alert, station)
                 self._open[rule.id] = alert
                 alert.status = "pending"
             self._keep("add_mention", alert, None, hit)
@@ -635,13 +648,42 @@ class Alerter:
         timer.daemon = True
         if not langs or self.translate is None:
             finish({}, None)
+        else:
+            timer.start()
+            try:
+                self.translate(text, alert.language, langs, finish)
+            except Exception:
+                log.exception("alert translation request failed")
+                finish({}, None)
+        if not back:  # queued behind the delivery's own translations
+            self._translate_quote(alert, severity, skip=langs if text == alert.quote else [])
+
+    def _translate_quote(self, alert: Alert, severity: str, skip: list[str]) -> None:
+        """The quote in its stations' ``alert_languages``, once the alert is above low: for the
+        page, CAP and webhooks, whoever is notified. Asked for after the delivery's own
+        translations (``skip``), and never waited for."""
+        from wavescribe.radio.bandplan import UNQUOTED
+
+        if _rank(severity) < 1 or self.translate is None or alert.quote == UNQUOTED:
             return
-        timer.start()
+        langs = [
+            lang
+            for lang in alert.languages
+            if lang not in skip
+            and lang not in alert.summaries
+            and not same_language(lang, alert.language)
+        ]
+        if not langs:
+            return
+
+        def keep(translations: dict[str, str], model: str | None) -> None:
+            if translations:
+                self._keep_summaries(alert, translations, model)
+
         try:
-            self.translate(text, alert.language, langs, finish)
+            self.translate(alert.quote, alert.language, langs, keep)
         except Exception:
             log.exception("alert translation request failed")
-            finish({}, None)
 
     def _keep_summaries(
         self, alert: Alert, translations: dict[str, str], model: str | None, keep: bool = True
