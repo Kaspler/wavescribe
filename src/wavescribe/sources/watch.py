@@ -36,7 +36,7 @@ from wavescribe.config import SdrTuning
 from wavescribe.dsp.activity import CARRIER_S, Activity, ActivityDetector, IqHistory
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.log import event
-from wavescribe.radio.bandplan import lookup
+from wavescribe.radio.bandplan import POLICIES, lookup
 from wavescribe.radio.watch import Catch, Watch, publish
 from wavescribe.sources import SourceHealth
 from wavescribe.sources.sdr import RtlSdrDevice, shared_device
@@ -51,7 +51,7 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 # Silence after each catch: more than the VAD's end-of-speech wait (0.6 s), so the catch's last
 # utterance ends with it instead of running into the next catch.
 CLOSING_S = 0.8
-QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, kept unchecked
+QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, dropped and counted
 SAY_DEAF_S = 3.0  # interference across the window this long is logged and shown, not a click
 
 
@@ -75,6 +75,7 @@ class Catcher:
         max_active: int = MAX_ACTIVE,
         carrier_s: float = CARRIER_S,
         station_id: str = "",
+        privacy: str = "private",
     ) -> None:
         watch = tuning.watch
         if watch is None:
@@ -82,6 +83,7 @@ class Catcher:
         self.tuning = tuning
         self.watch: Watch = watch
         self.station_id = station_id
+        self.privacy = privacy
         d = tuning.device
         self._rate, self._centre = d.sample_rate, d.center_hz
         self._decim = d.sample_rate // SAMPLE_RATE
@@ -122,6 +124,11 @@ class Catcher:
     def active(self) -> list[int]:
         """The frequencies being caught right now."""
         return [r.activity.freq_hz for r in self._recordings.values()]
+
+    def where(self, **fields: object) -> dict[str, object]:
+        """Fields for the log that say where and when something was heard: none for a class
+        that keeps no text, whose log must not keep what its catches don't."""
+        return fields if POLICIES[self.privacy].text_days != 0 else {}
 
     def feed(self, iq: np.ndarray, t_end: float) -> list[Catch]:
         self._history.append(iq)
@@ -176,14 +183,8 @@ class Catcher:
     def _begin(self, a: Activity) -> None:
         if len(self._recordings) >= self._max_active:
             self.missed += 1
-            event(
-                log,
-                "watch_missed",
-                level=logging.WARNING,
-                mhz=a.freq_hz / 1e6,
-                active=[f / 1e6 for f in self.active],
-                missed=self.missed,
-            )
+            where = self.where(mhz=a.freq_hz / 1e6, active=[f / 1e6 for f in self.active])
+            event(log, "watch_missed", level=logging.WARNING, missed=self.missed, **where)
             return
         start = max(
             a.start - round(PREROLL_S * self._rate),
@@ -241,21 +242,24 @@ class WatchSource:
         self.tuning = tuning
         self._device = device or shared_device(tuning.device)
         self._spurs = tuple(spurs)
-        self._catcher = self._new_catcher()
         self._privacy = privacy
+        self._catcher = self._new_catcher()
         self._q: queue.Queue[Catch | None] = queue.Queue(maxsize=queue_catches)
         self._closed = threading.Event()
+        self._catching = threading.Lock()  # the catcher: fed on the dongle's thread, flushed here
         self._error: Exception | None = None  # what catching raised, on the device thread
         self._health = SourceHealth()
         self._heard: Catch | None = None  # the catch the pipeline is reading
-        self.dropped = 0  # catches that waited too long for the pipeline: kept unchecked
+        self.dropped = 0  # catches the pipeline was too far behind for
 
     @property
     def health(self) -> SourceHealth:
         return self._health
 
     def _new_catcher(self) -> Catcher:
-        return Catcher(self.tuning, spurs=self._spurs, station_id=self.station_id)
+        return Catcher(
+            self.tuning, spurs=self._spurs, station_id=self.station_id, privacy=self._privacy
+        )
 
     @property
     def catcher(self) -> Catcher:
@@ -285,11 +289,18 @@ class WatchSource:
             self._device.detach(self)
             self._health.connected = False
             self._health.squelch_open = self._health.warning = None
-            # Caught but not yet heard by the VAD: still caught, so still logged.
+            # Caught but not yet heard by the VAD, or still being caught: still caught, so
+            # still logged, as far as the IQ went.
             if self._heard is not None:
                 self._unchecked(self._heard)
             with contextlib.suppress(queue.Empty):
                 while (catch := self._q.get_nowait()) is not None:
+                    self._unchecked(catch)
+            if self._error is None:
+                with self._catching:
+                    running = self._catcher.stop()
+                for catch in running:
+                    self._label(catch)
                     self._unchecked(catch)
 
     def _audio(self, catch: Catch) -> Iterator[AudioChunk]:
@@ -331,13 +342,14 @@ class WatchSource:
         if self._closed.is_set() or self._error is not None:
             return
         try:
-            caught = []
-            if first and self._catcher.detector.samples:
-                # After a gap the history no longer runs on: what was being caught ends at the
-                # gap, and the floors are learnt again (half a second).
-                caught = self._catcher.stop()
-                self._catcher = self._new_catcher()
-            caught += self._catcher.feed(iq, t_end)
+            with self._catching:
+                caught = []
+                if first and self._catcher.detector.samples:
+                    # After a gap the history no longer runs on: what was being caught ends at
+                    # the gap, and the floors are learnt again (half a second).
+                    caught = self._catcher.stop()
+                    self._catcher = self._new_catcher()
+                caught += self._catcher.feed(iq, t_end)
         except Exception as e:
             # Raised again in the station's own thread, so the watch is restarted like any
             # failed source while the device and its other stations go on.
@@ -356,26 +368,29 @@ class WatchSource:
         for catch in caught:
             self._queue(catch)
 
-    def _queue(self, catch: Catch) -> None:
+    def _label(self, catch: Catch) -> None:
         band = lookup(catch.freq_hz, self._catcher.watch.region)
         catch.station_id, catch.privacy = self.station_id, self._privacy
         catch.band, catch.label = (band.id, band.label(catch.freq_hz)) if band else (None, "")
+
+    def _queue(self, catch: Catch) -> None:
+        self._label(catch)
         try:
             self._q.put_nowait(catch)
         except queue.Full:
-            # The pipeline is far behind (a busy speech model): the catch is logged without its
-            # words rather than held, so the dongle's thread never waits.
+            # The pipeline is far behind (a busy speech model). Keeping the catch would mean
+            # writing it to the store here, on the thread that feeds every station on this
+            # dongle: it is counted instead, so that thread never waits.
             self.dropped += 1
+            where = self._catcher.where(mhz=catch.freq_hz / 1e6)
             event(
                 log,
                 "watch_behind",
                 level=logging.WARNING,
                 station=self.station_id,
-                mhz=catch.freq_hz / 1e6,
                 dropped=self.dropped,
+                **where,
             )
-            catch.voice = None
-            publish(catch)
 
     def _disconnected(self, reconnects: int) -> None:
         self._health.connected = False

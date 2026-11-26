@@ -298,13 +298,15 @@ class FakeDevice:
 
     def __init__(self, blocks: list[tuple[np.ndarray, float]]) -> None:
         self._blocks = blocks
+        self.feeding: threading.Thread | None = None
 
     def attach(self, consumer: WatchSource) -> None:
         def feed() -> None:
             for i, (iq, t_end) in enumerate(self._blocks):
                 consumer._feed(iq, t_end, i == 0)
 
-        threading.Thread(target=feed, daemon=True).start()
+        self.feeding = threading.Thread(target=feed, daemon=True)
+        self.feeding.start()
 
     def detach(self, consumer: WatchSource) -> None:
         pass
@@ -321,6 +323,98 @@ def test_a_watch_made_deaf_by_noise_says_so_in_its_health() -> None:
         warnings.append(source.health.warning)
     assert any(w and w.startswith("deaf") for w in warnings)
     assert warnings[-1] is None  # the noise is the floor now
+
+
+def test_a_watch_that_failed_starts_afresh_when_iterated_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wavescribe.sources.watch import Catcher
+
+    real, calls = Catcher.feed, []
+
+    def flaky(self: Catcher, iq: np.ndarray, t_end: float) -> list[Catch]:
+        calls.append(t_end)
+        if len(calls) == 3:
+            raise ValueError("a bad block")
+        return real(self, iq, t_end)
+
+    monkeypatch.setattr(Catcher, "feed", flaky)
+    station = watch_station()
+    device = FakeDevice(list(air(4.0, [Burst(PMR[1], 1.0, 2.0)])))
+    source = WatchSource(station.id, station.sdr, device=device)
+    with pytest.raises(RuntimeError, match="catching failed: a bad block"):
+        list(source)
+    assert device.feeding is not None
+    device.feeding.join(5)
+    heard = []
+    for chunk in source:  # as the pipeline does after a failed source's delay
+        heard.append(chunk.freq_hz)
+        source.close()
+    assert set(heard) == {PMR[1]}
+
+
+def test_catches_the_pipeline_is_too_far_behind_for_are_counted_off_the_dongles_thread(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="wavescribe")
+    station = watch_station()
+    source = WatchSource(station.id, station.sdr, device=FakeDevice([]), queue_catches=1)
+    published: list[Catch] = []
+    stop_listening = watches.subscribe(published.append)
+    bursts = [Burst(PMR[k], 1.0 + k, 1.6 + k) for k in (0, 2, 4)]  # one after another
+    try:
+        for i, (iq, t_end) in enumerate(air(7.5, bursts)):
+            source._feed(iq, t_end, i == 0)  # the test is the dongle's thread
+    finally:
+        stop_listening()
+    assert published == [] and source.dropped == 2  # nothing written on the dongle's thread
+    behind = [r for r in caplog.records if r.getMessage() == "watch_behind"]
+    # Private radio keeps nothing, so the log says how many, not where or when.
+    assert [r.fields["dropped"] for r in behind] == [1, 2]
+    assert all("mhz" not in r.fields for r in behind)
+
+
+def test_a_missed_transmission_is_logged_with_its_frequency_only_where_text_is_kept(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from wavescribe.sources.watch import Catcher
+
+    caplog.set_level("INFO", logger="wavescribe")
+    station = watch_station()
+    bursts = [Burst(PMR[k], 1.0, 2.0) for k in (0, 2)]
+    for privacy in ("private", "amateur"):
+        c = Catcher(station.sdr, max_active=1, privacy=privacy)
+        for iq, t_end in air(3.5, bursts):
+            c.feed(iq, t_end)
+    missed = [r.fields for r in caplog.records if r.getMessage() == "watch_missed"]
+    assert len(missed) == 2 and "mhz" not in missed[0] and "active" not in missed[0]
+    assert missed[1]["mhz"] == PMR[2] / 1e6
+
+
+def test_what_was_being_caught_when_the_watch_stops_is_still_logged() -> None:
+    station = watch_station()
+    # Still on when the IQ ends, and one that ended a moment before (within its hang time).
+    blocks = list(air(3.0, [Burst(PMR[1], 1.0, 9.0), Burst(PMR[5], 1.0, 2.5)]))
+    source = WatchSource(station.id, station.sdr, device=FakeDevice(blocks))
+    caught: list[Catch] = []
+    stop_listening = watches.subscribe(caught.append)
+    chunks = iter(source)
+    reader = threading.Thread(target=lambda: list(chunks), daemon=True)
+    reader.start()
+    try:
+        deadline = time.monotonic() + 5
+        while getattr(source._device.feeding, "ident", None) is None:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        source._device.feeding.join(5)
+        t0 = time.monotonic()
+        source.close()
+        reader.join(5)
+        assert time.monotonic() - t0 < 1.0 and not reader.is_alive()
+    finally:
+        stop_listening()
+    assert sorted(c.freq_hz for c in caught) == [PMR[1], PMR[5]]
+    assert {c.voice for c in caught} == {None}  # not heard by the VAD: not checked
 
 
 def test_each_catch_is_transcribed_on_its_own_in_the_language_heard() -> None:
