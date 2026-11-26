@@ -49,6 +49,7 @@ log = logging.getLogger(__name__)
 # Utterances kept in memory per station for page loads, in front of the SQLite store. Per
 # station, so a chatty station never pushes a quiet one's history out.
 RECENT_PER_STATION = 300
+AROUND_DEFAULT = 50  # utterances in a /api/history?around_id= window unless limit says
 RECENT_ALERTS = 30
 CLIENT_BACKLOG = 1000  # events per browser before we drop
 STATUS_INTERVAL_S = 1.0
@@ -325,25 +326,30 @@ class WebHub:
         station_id: str | None = None,
         *,
         before_id: int | None = None,
+        around_id: int | None = None,
+        limit: int = RECENT_PER_STATION,
         exports: Exports | None = None,
     ) -> list[dict[str, Any]]:
-        """Recent utterances (oldest first): from the store when there is one, else memory.
-        For another machine, only what ``exports`` lets leave."""
+        """Recent utterances (oldest first), at most ``limit`` per station: from the store when
+        there is one, else memory. ``around_id``: one station's window around that segment
+        instead (``Store.around``). For another machine, only what ``exports`` lets leave."""
         ids = [station_id] if station_id else [s.id for s in self.config.stations]
         if self.store is not None:
+            if around_id is not None and station_id:
+                return self.store.around(station_id, around_id, limit=limit, exports=exports)
             return [
                 u
                 for sid in ids
-                for u in self.store.recent(
-                    sid, limit=RECENT_PER_STATION, before_id=before_id, exports=exports
-                )
+                for u in self.store.recent(sid, limit=limit, before_id=before_id, exports=exports)
             ]
         with self._lock:
             return [
                 u
                 for sid in ids
-                for u in self._recent.get(sid, {}).values()
-                if before_id is None  # without a store there is nothing older to page to
+                for u in list(self._recent.get(sid, {}).values())[-limit:]
+                # without a store there is nothing older to page to, nor ids to look around
+                if before_id is None
+                and around_id is None
                 and (exports is None or exports.utterance(u))
             ]
 
@@ -540,8 +546,12 @@ class Handler(BaseHTTPRequestHandler):
             self._audio(path[len("/audio/") : -len(".pcm")])
         elif path == "/api/history" and query.get("station"):
             before_id = _row_id(query.get("before_id", ""))
+            around_id = _row_id(query.get("around_id", ""))
+            default = RECENT_PER_STATION if around_id is None else AROUND_DEFAULT
+            limit = min(_row_id(query.get("limit", "")) or default, RECENT_PER_STATION)
             hub = self.server.hub
-            self._json(hub.history(query["station"], before_id=before_id, exports=self._exports()))
+            self._json(hub.history(query["station"], before_id=before_id, around_id=around_id,
+                                   limit=limit, exports=self._exports()))  # fmt: skip
         elif path == "/api/search":
             self._search(query.get("q", ""), query.get("station"))
         elif path.startswith("/api/segments/") and path.endswith("/audio.pcm"):

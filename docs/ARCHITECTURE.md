@@ -185,7 +185,12 @@ lets a wildcard bind succeed anyway, and "localhost" would then reach the other 
 **History, search and replay.** With the store on (the default), the page opens with the last
 300 utterances per station from SQLite, so a restart loses nothing, and each transcript has a
 **Load earlier** button that pages back by segment id (`GET /api/history?station=&before_id=`).
-Old text is trimmed from the page only while the reader follows the live end, with a hard cap of
+**Show in the transcript**, from an alert or a search hit, opens a window around one utterance
+(`GET /api/history?station=&around_id=`, `Store.around`): that utterance if it is still kept,
+about half the window before it and the rest after, oldest first; near either end of what is
+kept, the other side fills the window, and an id that is gone (or another station's) still
+places it where that was said. Every `/api/history` request takes `limit`, at most 300 (the
+default; 50 for `around_id`), and `around_id` wins over `before_id`. Old text is trimmed from the page only while the reader follows the live end, with a hard cap of
 3,000 utterances per station. The search box (`GET /api/search?q=`) finds words in the source text
 and in every translation, ignoring case and accents, at the start of a word (`*word` anywhere
 inside one; below, *Search*), and highlights the matches. A paragraph's timestamp, and each search hit, plays the archived speech

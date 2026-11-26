@@ -759,6 +759,29 @@ class Store:
             ).fetchall()
             return self._payloads([r["id"] for r in reversed(rows)])
 
+    def around(
+        self,
+        station_id: str,
+        segment_id: int,
+        *,
+        limit: int = 50,
+        exports: Exports | None = None,
+    ) -> list[dict[str, Any]]:
+        """A station's utterances around one segment (oldest first): that segment if it is
+        still kept, about half of ``limit`` before it and the rest after; near either end of
+        what is kept, the other side fills the window."""
+        leaving, leaving_args = _exports_sql(exports)
+        args = (station_id, segment_id, *leaving_args, limit)
+        with self._lock:
+            before = [r["id"] for r in self._db.execute(
+                f"SELECT s.id FROM segments s WHERE s.station_id = ? AND s.id <= ?{leaving} "
+                "ORDER BY s.id DESC LIMIT ?", args)]  # fmt: skip
+            after = [r["id"] for r in self._db.execute(
+                f"SELECT s.id FROM segments s WHERE s.station_id = ? AND s.id > ?{leaving} "
+                "ORDER BY s.id LIMIT ?", args)]  # fmt: skip
+            n_before = min(len(before), max(limit - limit // 2, limit - len(after)))
+            return self._payloads(before[:n_before][::-1] + after[: limit - n_before])
+
     def alerts(self, *, limit: int = 50, before_id: int | None = None) -> list[dict[str, Any]]:
         """The latest alerts, newest first."""
         with self._lock:

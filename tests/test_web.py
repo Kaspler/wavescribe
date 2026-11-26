@@ -247,6 +247,33 @@ def idle_server(store: Store | None = None, *, behind_proxy: bool = False):
     return server, hub
 
 
+def test_history_opens_around_one_utterance_with_a_bounded_limit(tmp_path: Path) -> None:
+    """Show in the transcript, from an alert or a search hit: the words around it."""
+    from tests.test_store import result
+
+    store = Store(tmp_path / "w.db")
+    ids = [store.add_transcript(result("a", f"frase {i}", 1000.0 + i)) for i in range(400)]
+    server, hub = idle_server(store)
+
+    def history(query: str) -> list[int]:
+        status, body = request(server, "GET", f"/api/history?station=a&{query}")
+        assert status == 200
+        return [u["id"] for u in json.loads(body)]
+
+    try:
+        assert history(f"around_id={ids[200]}") == ids[176:226]  # 50 by default
+        assert history(f"around_id={ids[200]}&limit=5") == ids[198:203]
+        assert history(f"around_id={ids[200]}&limit=5000") == ids[51:351]  # at most 300
+        assert history(f"around_id={ids[399]}&limit=3") == ids[397:]
+        assert history("limit=2") == ids[398:]  # the live end, also bounded
+        assert history(f"before_id={ids[10]}&limit=3") == ids[7:10]
+        assert len(history("around_id=x")) == 300  # not an id: the latest, as before
+    finally:
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
 def test_a_connection_that_sends_nothing_is_closed_and_streams_go_on(monkeypatch) -> None:
     import socket
 

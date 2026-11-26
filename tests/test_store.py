@@ -58,6 +58,27 @@ def test_recent_pages_backwards(tmp_path: Path) -> None:
     ]
 
 
+def test_around_gives_a_window_on_both_sides_of_one_utterance(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    ids = []
+    for i in range(10):
+        ids.append(store.add_transcript(result("a", f"frase {i}", 1000.0 + i)))
+        store.add_transcript(result("b", f"outra {i}", 1000.5 + i))  # interleaved ids
+
+    def texts(segment_id: int, limit: int) -> list[str]:
+        return [u["text"] for u in store.around("a", segment_id, limit=limit)]
+
+    assert texts(ids[5], 4) == ["frase 4", "frase 5", "frase 6", "frase 7"]
+    assert texts(ids[5], 5) == ["frase 3", "frase 4", "frase 5", "frase 6", "frase 7"]
+    assert texts(ids[0], 4) == ["frase 0", "frase 1", "frase 2", "frase 3"]  # after fills in
+    assert texts(ids[9], 4) == ["frase 6", "frase 7", "frase 8", "frase 9"]  # before fills in
+    assert texts(ids[9], 1) == ["frase 9"]
+    assert len(texts(ids[5], 300)) == 10
+    # Another station's id, or a pruned one, still places the window where it was said.
+    assert texts(ids[5] + 1, 2) == ["frase 5", "frase 6"]
+    assert store.around("c", ids[5]) == []
+
+
 def test_search_ignores_accents_and_case_and_finds_word_starts(tmp_path: Path) -> None:
     store = Store(tmp_path / "w.db")
     store.add_transcript(result("a", "As ÁGUAS subiram no rio Tâmega", 1000.0))
