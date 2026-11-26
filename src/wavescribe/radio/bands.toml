@@ -2,8 +2,9 @@
 # (ITU Radio Regulations, CEPT/ECC decisions, IARU region band plans, national rules). No text
 # or tables are copied from those documents; frequencies and channel rasters are facts.
 #
-# Frequencies are in MHz. `mode` is how voice is demodulated (wfm, nfm, am); `step_khz` the
-# channel raster; `channel_khz` the channel width when it differs from the raster.
+# Frequencies are in MHz. `mode` is how voice is demodulated (wfm, nfm, am), and `region_mode`
+# where a region uses another; `step_khz` the channel raster; `channel_khz` the channel width
+# when it differs from the raster.
 # `privacy` decides what Wavescribe does with what it hears (docs/RADIO.md):
 #   broadcast  meant for the public: transcribed, stored and exported like a stream
 #   amateur    open by design: transcribed; text kept briefly, no audio, not exported
@@ -197,12 +198,15 @@ step_khz = 25
 privacy = "private"
 regions = ["1"]
 
+# CB: AM in the Americas and most of the world. The CEPT countries harmonised its 40 channels
+# on FM (ECC/DEC/(11)03; many allow AM and SSB as well), and FM is what most sets there use.
 [[band]]
 id = "cb"
 name = "CB radio (27 MHz)"
 start = 26.965
 stop = 27.405
 mode = "am"
+region_mode = { cept = "nfm" }
 step_khz = 10
 channel_khz = 10
 privacy = "private"

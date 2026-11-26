@@ -456,7 +456,9 @@ margin then finds thousands of lines over the whole range. Each entry in `spurs.
 `bin_hz`; entries without one are from earlier versions and should be learnt again.
 
 **Band plans and privacy** (`radio/bands.toml`, `radio/bandplan.py`). Each band has edges,
-regions (`cept`, ITU 1-3, `jp`), a mode, a raster or channel list and a class: `broadcast`,
+regions (`cept`, ITU 1-3, `jp`), a mode (and `region_mode` where a region's differs: CB is NFM
+under CEPT, AM elsewhere; `region_bands()` and `lookup()` give the band as the region uses it),
+a raster or channel list and a class: `broadcast`,
 `amateur`, `utility`, `private` or `digital`. `lookup()` takes the narrowest band of the region;
 a band any region marks digital counts as digital everywhere; an unlisted frequency is private.
 Each class has a `Policy` (`needs_ack`, `text_days`, `audio`, `export`, `quote_in_alerts`).

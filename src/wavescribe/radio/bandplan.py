@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 BANDS_PATH = Path(__file__).with_name("bands.toml")
 PRIVACY = ("broadcast", "amateur", "utility", "private", "digital")
 REGIONS = ("cept", "1", "2", "3", "jp")
+MODES = ("wfm", "nfm", "am")
 # No region chosen: bands, rasters and modes come from this machine's locale, but a frequency
 # takes the strictest class any region gives it (unlisted counts as private), unless the locale's
 # region lists it as broadcast. A locale says how a Mac is set up, not where it is: a Mac in
@@ -224,6 +225,7 @@ class Band:
     step_hz: float | None = None
     channel_hz: float | None = None
     channels: tuple[int, ...] = ()
+    region_modes: tuple[tuple[str, str], ...] = ()  # (region, mode) where it isn't `mode`
 
     @property
     def width_hz(self) -> int:
@@ -280,24 +282,37 @@ def bands(path: Path = BANDS_PATH) -> tuple[Band, ...]:
             raise ValueError(f"{path}: band {b['id']}: unknown privacy {b['privacy']!r}")
         step = b.get("step_khz")
         width = b.get("channel_khz")
+        modes = b.get("region_mode", {})
+        for r, m in modes.items():
+            if r not in REGIONS or m not in MODES:
+                raise ValueError(f"{path}: band {b['id']}: region_mode {r} = {m!r}")
         out.append(Band(
             id=b["id"], name=b["name"], start_hz=_mhz(b["start"]), stop_hz=_mhz(b["stop"]),
             privacy=b["privacy"], regions=tuple(b.get("regions", ())), mode=b.get("mode"),
             step_hz=step * 1e3 if step else None, channel_hz=width * 1e3 if width else None,
             channels=tuple(_mhz(c) for c in b.get("channels", ())),
+            region_modes=tuple(modes.items()),
         ))  # fmt: skip
     return tuple(out)
 
 
+def _wider(region: str) -> tuple[str, ...]:
+    """A region and the ITU region it is part of: CEPT's bands are Region 1's and its own."""
+    return {"cept": ("cept", "1"), "jp": ("jp", "3")}.get(region, (region,))
+
+
 def _in_region(band: Band, region: str) -> bool:
-    wanted = {region}
-    if region == "cept":
-        wanted.add("1")
-    elif region == "jp":
-        wanted.add("3")
     if region == "jp" and band.id == "fm":
         return False  # Japan's FM band is its own
-    return bool(wanted & set(band.regions))
+    return bool(set(_wider(region)) & set(band.regions))
+
+
+def _as_in(band: Band, region: str) -> Band:
+    """A band as it is used in a region: its mode there, when the region's differs (CB is FM in
+    the CEPT countries and AM elsewhere), the region's own entry before its ITU region's."""
+    modes = dict(band.region_modes)
+    mode = next((modes[r] for r in _wider(region) if r in modes), None)
+    return replace(band, mode=mode) if mode and mode != band.mode else band
 
 
 def region_bands(region: str) -> list[Band]:
@@ -305,7 +320,7 @@ def region_bands(region: str) -> list[Band]:
         region = default_region()
     if region not in REGIONS:
         raise ValueError(f"unknown radio region {region!r} (one of {', '.join(REGIONS)})")
-    return [b for b in bands() if _in_region(b, region)]
+    return [_as_in(b, region) for b in bands() if _in_region(b, region)]
 
 
 def lookup(hz: float, region: str) -> Band | None:
@@ -330,7 +345,8 @@ def _lookup_auto(hz: float) -> Band | None:
     fm = base is not None and base.privacy == "broadcast" and base.mode == "wfm"
     if base is not None and (base.privacy == strictest or (fm and strictest != "digital")):
         return base
-    named = [b for b in bands() if b.contains(hz) and b.privacy == strictest]
+    named = [_as_in(b, default_region()) for b in bands()
+             if b.contains(hz) and b.privacy == strictest]  # fmt: skip
     if named:  # e.g. PMR446 for a Mac in Europe set to US English, not the US 70 cm band
         return min(named, key=lambda b: b.width_hz)
     return replace(base, privacy=strictest) if base is not None else None

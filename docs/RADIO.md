@@ -238,7 +238,8 @@ regulator. Nothing here is legal advice.
 ## Band plans and regions
 
 `src/wavescribe/radio/bands.toml` lists the bands, each with its edges, regions, demodulation,
-channel raster or channel list, and class. Regions follow the ITU:
+channel raster or channel list, and class. Where a region demodulates a band differently, the
+band says so: CB is narrowband FM in the CEPT countries and AM elsewhere. Regions follow the ITU:
 
 | Region | Where |
 |---|---|

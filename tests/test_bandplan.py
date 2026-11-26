@@ -63,6 +63,20 @@ def test_amateur_fm_in_the_americas_keeps_its_own_raster() -> None:
     assert lookup(145_510_000, "cept").snap(145_510_000) == 145_512_500  # 12.5 kHz in Europe
 
 
+def test_cb_is_fm_in_the_cept_countries_and_am_elsewhere(monkeypatch) -> None:
+    from wavescribe.config import default_mode
+    from wavescribe.radio import bandplan
+
+    channel_19 = 27_185_000
+    assert lookup(channel_19, "cept").mode == "nfm"
+    assert [lookup(channel_19, r).mode for r in ("1", "2", "3")] == ["am", "am", "am"]
+    assert next(b for b in region_bands("cept") if b.id == "cb").to_dict()["mode"] == "nfm"
+    assert default_mode(channel_19, "cept") == "nfm" and default_mode(channel_19, "2") == "am"
+    monkeypatch.setattr(bandplan, "default_region", lambda: "cept")
+    assert lookup(channel_19, bandplan.AUTO).mode == "nfm"  # the locale's way
+    assert bandplan.find("cb").mode == "am"  # the plan's own entry is unchanged
+
+
 def test_frequencies_are_written_to_the_hertz() -> None:
     assert mhz_text(446.00625) == "446.00625" and mhz_text(98.6) == "98.6"
     assert mhz_text(462_562_500 / 1e6) == "462.5625" and mhz_text(100.0) == "100"
