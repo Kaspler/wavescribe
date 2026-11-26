@@ -10,7 +10,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 from wavescribe.dsp import (
@@ -27,6 +27,9 @@ from wavescribe.dsp import (
     supported_rate,
 )
 from wavescribe.languages import translation_targets
+
+if TYPE_CHECKING:
+    from wavescribe.radio.watch import Watch
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +84,9 @@ class SdrTuning:
     mode: str = "wfm"  # wfm (broadcast FM), nfm (narrowband FM), am
     channel_hz: float | None = None  # narrowband channel width; None: the mode's default
     squelch_db: float | None = None  # narrowband: a fixed squelch level (dBFS); None: automatic
+    # A watch listens to every channel of a window instead (radio/watch.py); freq_hz is then
+    # the window's middle, which is what lists of a receiver's stations show.
+    watch: Watch | None = None
 
 
 @dataclass(frozen=True)
