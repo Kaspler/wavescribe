@@ -170,6 +170,9 @@ Alerts tell you when something that matters is said, so you don't have to read a
 run on what was said in the station's own language, never on the translation, so a poor
 translation can't hide an alert.
 
+Alerts are a help, not a warning system: one can be missed, come late or be raised for
+something that wasn't said. In an emergency, follow official warnings and the emergency services.
+
 **The simplest rule:** Settings → **Alerts** → **Words to listen for**. Name it, type the
 **words and phrases** to watch for in your language (*evacuation*, *boil water*, *road
 closed*), and press **Suggest in each language**: the local model proposes the same terms in

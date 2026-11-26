@@ -1,4 +1,5 @@
 # Example alert rules. Rules run on SOURCE-LANGUAGE text, so they never depend on translation.
+# Alerts can be missed or wrong: never the only warning where life, health or property is at stake.
 # Keyword rules reference topics from config/keywords/<lang>.toml, picked by each station's language.
 # Copy to config/alerts.toml (gitignored) and adapt.
 #

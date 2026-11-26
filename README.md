@@ -19,6 +19,11 @@ and the alert are the app's own output.*
 Early alpha, for macOS on Apple Silicon.
 **[Getting started](docs/GETTING_STARTED.md)** · [Documentation](#documentation)
 
+**Not a safety system.** Wavescribe can miss an announcement, or raise an alert for something
+that wasn't said: reception drops, speech recognition and machine translation make mistakes, and
+this is early software. Use it to stay informed, never as your only source where life, health or
+property is at stake: follow official warnings and the emergency services.
+
 ## What it's for
 
 Radio is live, in one language, one station at a time, and gone once it's said. Wavescribe
@@ -141,6 +146,11 @@ Internet streams enter at "audio per station". Details are in
 | [Measurements](docs/MEASUREMENTS.md) | Speed, memory and long-run figures |
 
 ## Using it responsibly
+
+**Don't rely on it for safety.** Wavescribe is not an emergency alert system and no substitute
+for official warnings: sirens, cell broadcast, civil protection, the emergency services. An alert
+may come late, be wrong, or not come at all, and a quiet page doesn't mean nothing is happening.
+Transcripts and translations are made by machine: check the original before you act on one.
 
 **You are responsible for using Wavescribe lawfully where you are.** Laws on receiving radio
 differ by country and by kind of radio. Broadcast radio is meant for the public; transcripts and

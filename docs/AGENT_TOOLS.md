@@ -18,7 +18,8 @@ themselves.
   moments it found, with the station and the time.
 - **Keep watch.** The agent waits for the next alert from your rules (a wildfire, a road
   closure, a strike) and does something with it: tells you, checks it against other sources,
-  writes a short note in your language.
+  writes a short note in your language. Alerts can be missed or wrong, so an agent must never
+  present the absence of alerts as an all-clear, nor act on one where a mistake causes harm.
 - **Summarise.** It reads the last hour of a few stations and tells you what mattered.
 - **Notice trouble.** A station that stopped, a model that isn't loaded, speech that lags
   minutes behind: the status tool says so, and why.

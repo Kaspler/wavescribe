@@ -133,6 +133,9 @@ and isn't gets a 400.
 
 ## Push: outputs
 
+Alerts can be missed, late or wrong: don't connect them to anything where a missed or a false
+alert causes harm.
+
 An output is a URL plus filters, set on the page (*Settings → Connections*) and saved in `config/ui.toml`:
 
 | Field | Meaning |
