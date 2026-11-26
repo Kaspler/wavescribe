@@ -22,8 +22,30 @@ receiver is a `[[device]]` with an `id` and the dongle's `serial` (docs/HARDWARE
 
 ## Finding stations
 
-On the page: **Find** → **On the air**, then **Find FM stations**. Another band or range,
-and how long to watch, are under *Advanced*. From a terminal:
+On the page: **Find** → **On the air**. At the top is the dial: everything a receiver can tune,
+24 to 1766 MHz, with the bands named in everyday words. A filled band carries voices Wavescribe
+can turn into text, an outlined one is digital (shown, not decoded), and a fine tick marks each
+frequency heard here. Each receiver stands on the dial as the window it hears, with its letter
+and a lamp; the line under the dial says in words what each one is doing: idle, tuned by hand,
+following stations, scanning, or not answering.
+
+Choose a band to read what it is, when it is busy and the antenna it wants. Then:
+
+- **Find stations here** sweeps the band with the receiver chosen under *Receiver*: once for
+  broadcast, again and again for a few minutes where channels talk now and then. What it finds
+  is listed under the dial, strongest first, and kept under *Heard here*.
+- **Look here with Receiver A** tunes the receiver to the band and shows its spectrum and
+  waterfall live, with what was heard marked by name. Click a signal, or **Listen** in the list,
+  to hear it there; **Add as a station** keeps it. You can also drag a receiver's letter along
+  the dial. A receiver that is following stations asks first, says which would pause, and offers
+  a free receiver instead.
+
+One receiver is live at a time. For a band without it, the page shows the band from the newest
+scan that covered it, with how long ago that was. With nothing found yet, the page offers one
+button: FM, the easiest radio to hear; after that it suggests a band to try next. On a phone the
+dial is a list of bands, with the receivers on their rows. Another range, and how long to watch,
+are under *Advanced*; while a receiver is live, its frequency, mode, step and gain are under
+*Tuning*. From a terminal:
 
 ```sh
 uv run wavescribe radio bands                 # the band plan for your region

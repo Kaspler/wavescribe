@@ -247,22 +247,26 @@ An SDR ("software-defined radio") dongle is a USB radio receiver: plugged into t
 antenna, it lets Wavescribe hear FM stations with no internet, and other radio too.
 [HARDWARE.md](HARDWARE.md) says what to buy and how to connect it.
 
-Wavescribe opens a receiver only for a station that uses it, a scan, or tuning under **Listen**
-→ **Tune by hand**. Listing receivers (Find → **On the air**, Settings → **Receivers**) opens
-none, so a dongle another program is using is left alone.
+Wavescribe opens a receiver only for a station that uses it, a scan, or listening (under
+**Listen** → **Tune by hand**, or looking at a band on the dial). Listing receivers (Find →
+**On the air**, Settings → **Receivers**) opens none, so a dongle another program is using is
+left alone.
 
 1. **Plug it in.** macOS asks **"Allow accessory to connect?"**: allow it. Until you do, the
    dongle is invisible.
-2. **Find** → **On the air** (or **Listen**) sees the dongle: **Use it** makes it a receiver and
-   scans FM. Settings → **Receivers** sets one up by hand, and changes its centre and gain.
-3. In about two minutes you get the stations it hears, named from their own broadcast data (RDS)
-   when the signal is good enough; **Listen** → **On the air here** lists them to play. Scan
-   other bands from Find → **On the air**.
-4. **Listen** beside a station tunes it under **Listen** → **Tune by hand**: a spectrum and
-   waterfall show what the receiver hears, and you can click a signal, seek to the next one, or
-   let the scanner stop on whatever comes alive. Nothing you listen to there is written down.
-5. **Add as a station** keeps it: it runs all the time like any other station, only listened
-   to, written down, or written down and translated, as you choose.
+2. **Find** → **On the air**. The dongle is listed; **Use it** makes it a receiver.
+3. **Find FM stations with Receiver A**, above the dial. In about two minutes you get the
+   stations it hears, on the dial and in a list, named from their own broadcast data (RDS) when
+   the signal is good enough.
+4. **Listen** beside a station tunes the receiver to it, there on the page: a spectrum and
+   waterfall show what the receiver hears, with the stations marked by name, and a click on a
+   signal tunes it. **Listen** → **Tune by hand** has the same receiver, with seek and a
+   scanner. Nothing you listen to there is written down.
+5. **Add as a station** beside a station keeps it: it runs all the time, written down,
+   translated and watched by your alerts, like any other station.
+
+Choose another band on the dial to read what it is and find what's on it there
+([RADIO.md](RADIO.md#finding-stations)).
 
 One dongle hears a window about 2 MHz wide, so it can carry two to five FM stations that sit
 close together. For stations spread across the band, use more dongles
