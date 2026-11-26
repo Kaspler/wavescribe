@@ -139,6 +139,10 @@ def test_tracked_examples_load_and_match(tmp_path: Path) -> None:
     assert [(h.rule_id, h.severity) for h in hits] == [("civil-protection-mention", "low")]
     hits = config.rules.evaluate("A Proteção Civil evacua casas na Vila Exemplo.", "pt-PT")
     assert [(h.rule_id, h.severity) for h in hits] == [("civil-protection-mention", "medium")]
+    text = "A A1 continua cortada nos dois sentidos."
+    [hit] = config.rules.evaluate(text, "pt-PT")
+    assert (hit.rule_id, hit.severity) == ("motorway-closed", "low")
+    assert hit.terms == ["A1 continua cortada"]
     assert config.languages_for("critical", "pt-PT") == ["en"]
     assert config.languages_for("low", "pt-PT") == []
     assert all(r.id != "station-silent" for r in config.rules.rules)  # not implemented: skipped
@@ -178,3 +182,68 @@ def test_a_keyword_pack_of_the_wrong_shape_names_its_file(tmp_path: Path) -> Non
     (d / "es.toml").write_text('[topics]\nwater = ["corte de agua"]\n')
     with pytest.raises(ValueError, match=r"es\.toml: needs its language, e.g. language = \"pt\""):
         RuleSet.load(RULES, d)
+
+
+def regex_rules(tmp_path: Path, *patterns: str, **extra) -> RuleSet:
+    rule = {"id": "roads", "severity": "medium", "regex": list(patterns), **extra}
+    return RuleSet.load({"rule": [rule]}, pack(tmp_path))
+
+
+def test_regex_rules_match_ignoring_case_and_mark_what_they_matched(tmp_path: Path) -> None:
+    rules = regex_rules(tmp_path, r"\b[AN]-\d{1,3}\b", r"carretera cortada")
+    text = "Atención: CARRETERA CORTADA en la a-7 y en la N-340 por la nieve."
+    [hit] = rules.evaluate(text, "es-ES")  # no Spanish pack: regexes need none
+    assert (hit.rule_id, hit.severity) == ("roads", "medium")
+    assert [text[a:b] for a, b in hit.spans] == ["CARRETERA CORTADA", "a-7", "N-340"]
+    assert hit.terms == ["a-7", "N-340", "CARRETERA CORTADA"]  # what was said, not the pattern
+    assert rules.evaluate("La A-7000 sigue abierta.", "es-ES") == []
+
+
+def test_regex_rules_work_in_scripts_without_spaces(tmp_path: Path) -> None:
+    rules = regex_rules(tmp_path, r"停電|断水", r"\d+号線")
+    text = "東京で停電が発生、3号線は運休"
+    [hit] = rules.evaluate(text, "ja-JP")
+    assert [text[a:b] for a, b in hit.spans] == ["停電", "3号線"]
+
+
+def test_regex_rules_keep_to_their_stations_and_one_utterance(tmp_path: Path) -> None:
+    from wavescribe.rules import REGEX_TEXT_CHARS
+
+    rules = regex_rules(tmp_path, r"\bsturm\b", stations=["b"])
+    assert rules.evaluate("Sturm über Hamburg", "de-DE", station="a") == []
+    assert rules.evaluate("Sturm über Hamburg", "de-DE", station="b")
+    late = "x" * REGEX_TEXT_CHARS + " Sturm"
+    assert rules.evaluate(late, "de-DE", station="b") == []  # only an utterance's worth is read
+
+
+@pytest.mark.parametrize(
+    ("patterns", "message"),
+    [
+        (["(unclosed"], r"regex '\(unclosed' isn't a valid regular expression \(missing \)"),
+        (["(a+)+b"], r"regex '\(a\+\)\+b' repeats a group that itself repeats"),
+        ([r"(\w+\s?)*!"], "repeats a group that itself repeats"),
+        ([r"(?:x|y+)*z"], "repeats a group that itself repeats"),
+        (["(a*?b)+"], "repeats a group that itself repeats"),
+        (["a*"], "matches empty text, so it would match every utterance"),
+        (["x" * 201], "is longer than 200 characters"),
+        ([f"w{i}" for i in range(21)], "at most 20 regular expressions in one rule"),
+        ("storm", r'regex must be a list of strings, e.g. \["storm"\]'),
+    ],
+)
+def test_a_bad_regex_is_refused_at_load_naming_its_rule(
+    tmp_path: Path, patterns, message: str
+) -> None:
+    from wavescribe.alerts import parse_alerts
+    from wavescribe.config import ConfigError
+
+    rule = {"id": "storm", "severity": "high", "regex": patterns}
+    with pytest.raises(ConfigError, match=rf"^alerts\.toml: rule storm: .*{message}"):
+        parse_alerts({"rule": [rule]}, Path("alerts.toml"), pack(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [r"(?>a+)+b", r"(a+)++b", r"(\d{3})+", r"(?:ab)+", r"\d+\s*km", r"[a+]+", r"(red|blue)? sky"],
+)
+def test_repeats_that_cannot_backtrack_are_allowed(tmp_path: Path, pattern: str) -> None:
+    assert regex_rules(tmp_path, pattern).rules[0].regex[0].pattern == pattern

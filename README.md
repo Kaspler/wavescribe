@@ -63,8 +63,8 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 - **Transcribes live** in about 100 languages, and skips the music.
 - **Translates** into your language as it is said, and into other languages for alerts or on
   demand.
-- **Alerts** from keywords or from a plain-language description ("residents are told to leave"),
-  as a notification, a spoken alert in your language, or a webhook.
+- **Alerts** from keywords, regular expressions or a plain-language description ("residents are
+  told to leave"), as a notification, a spoken alert in your language, or a webhook.
 - **Search and Ask**: everything heard is kept and searchable, and a question is answered with
   the moments it was said.
 - **Phones read along** on the same Wi-Fi, read-only.

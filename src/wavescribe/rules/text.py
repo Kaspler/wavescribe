@@ -10,6 +10,9 @@
 - Matches respect word boundaries ("REN" never matches inside "renda").
 - Terms written in capitals (acronyms such as "REN", "ANEPC") match case-sensitively, unstemmed.
 - Scripts written without spaces (Chinese, Japanese, Thai, ...) match by substring.
+
+Regular expressions (``compile_pattern``) match the text as it is, ignoring case. They know no
+language: ``\\b`` is a word boundary, which scripts without spaces don't have between words.
 """
 
 from __future__ import annotations
@@ -19,8 +22,15 @@ import re
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 
 from wavescribe.languages import language_name, primary_subtag
+
+try:  # the parser behind re.compile; used only to spot nested repeats
+    from re import _constants as _sre_constants
+    from re import _parser as _sre_parser
+except ImportError:  # pragma: no cover - a Python that moved it: compile still checks syntax
+    _sre_parser = _sre_constants = None  # type: ignore[assignment]
 
 
 def _mark_class() -> str:
@@ -139,3 +149,55 @@ class Matcher:
             for i in range(len(tokens) - n + 1)
             if have[i : i + n] == want
         ]
+
+
+def _subpatterns(av: Any) -> Iterator[Any]:
+    """The parsed sub-patterns in one node's argument, at any depth of tuples and lists."""
+    if isinstance(av, _sre_parser.SubPattern):
+        yield av
+    elif isinstance(av, tuple | list):
+        for x in av:
+            yield from _subpatterns(x)
+
+
+def _nested_repeat(parsed: Any, inside: bool = False) -> bool:
+    """A repeat of variable length inside a repeat that can run more than once: ``(a+)+``,
+    ``(\\w+\\s?)*``. On text that almost matches, the engine tries every way of splitting it
+    between the two, which takes exponential time. An atomic group or a possessive repeat never
+    gives back what it matched, so it starts afresh."""
+    c = _sre_constants
+    for op, av in parsed:
+        if op in (c.MAX_REPEAT, c.MIN_REPEAT):
+            low, high, sub = av
+            if inside and low != high:
+                return True
+            if _nested_repeat(sub, inside or high > 1):
+                return True
+        elif op == c.POSSESSIVE_REPEAT:
+            if _nested_repeat(av[2]):
+                return True
+        elif op == c.ATOMIC_GROUP:
+            if _nested_repeat(av):
+                return True
+        elif any(_nested_repeat(sub, inside) for sub in _subpatterns(av)):
+            return True
+    return False
+
+
+def compile_pattern(pattern: str, max_chars: int) -> re.Pattern[str]:
+    """A rule's regular expression, compiled once, ignoring case. Raises ValueError saying why
+    it is refused: too long, not valid, matching empty text, or repeats inside repeats."""
+    if len(pattern) > max_chars:
+        raise ValueError(f"is longer than {max_chars} characters")
+    try:
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"isn't a valid regular expression ({e})") from e
+    if compiled.search("") is not None:
+        raise ValueError("matches empty text, so it would match every utterance")
+    if _sre_parser is not None and _nested_repeat(_sre_parser.parse(pattern, re.IGNORECASE)):
+        raise ValueError(
+            "repeats a group that itself repeats, like (a+)+, which can take forever on some "
+            "text; write it without the inner repeat, or make the group atomic: (?>a+)+"
+        )
+    return compiled

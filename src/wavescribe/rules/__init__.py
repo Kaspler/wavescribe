@@ -3,7 +3,8 @@
 
 Keyword rules match topics from per-language packs (``config/keywords/<lang>.toml``), so a rule
 like "water" works for every station whose language has a pack, or their own terms per language
-(rules made on the page). Adding a language is a pack file or a list of terms, never code.
+(rules made on the page), or regular expressions. Adding a language is a pack file or a list of
+terms, never code.
 
 LLM rules are a plain-language description ("they tell people to leave an area"); the LLM reads
 each station's recent source-language text against them (``rules/llm.py``).
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -21,11 +23,17 @@ from pathlib import Path
 from typing import Any
 
 from wavescribe.languages import primary_subtag
-from wavescribe.rules.text import Matcher
+from wavescribe.rules.text import Matcher, compile_pattern
 
 log = logging.getLogger(__name__)
 
 SEVERITIES = ("low", "medium", "high", "critical")
+# Python's re has no timeout, so what a pattern can cost is bounded instead: its length, how
+# many a rule has, nested repeats refused at load, and only one utterance's text read at a time.
+MAX_REGEX_CHARS = 200
+MAX_REGEXES = 20  # per rule
+REGEX_TEXT_CHARS = 2000  # more than any utterance the ASR checks keep (35 chars/s, ~30 s)
+SLOW_REGEX_MS = 50  # a pattern this slow on one utterance is named in the log, once
 
 
 def raise_severity(severity: str, steps: int = 1) -> str:
@@ -95,6 +103,9 @@ class KeywordRule:
     stations: tuple[str, ...] = ()  # only these stations; empty means all
     verify: bool = False  # the LLM confirms a hit before it is announced above low
     origin: str = "file"  # "file" (alerts.toml) or "page"
+    # Regular expressions, compiled at load, matched on the source text ignoring case, whatever
+    # the station's language (`stations` narrows them down).
+    regex: tuple[re.Pattern[str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,7 +126,7 @@ class Hit:
 
     rule_id: str
     severity: str
-    terms: list[str]  # pack terms that matched, as written in the pack
+    terms: list[str]  # pack terms that matched, as written in the pack; a regex's matches
     places: list[str]
     spans: list[tuple[int, int]]  # character spans in the source text
     capped: str | None = None  # why the severity was capped, e.g. "lang:en", "unverified"
@@ -128,6 +139,21 @@ class Hit:
 
 
 _RULE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+
+
+def _regexes(value: Any, rid: str) -> tuple[re.Pattern[str], ...]:
+    """A rule's ``regex`` list, compiled now so a bad pattern fails at load, naming the rule."""
+    patterns = [p for p in _strings(value, f"rule {rid}: regex") if p.strip()]
+    if len(patterns) > MAX_REGEXES:
+        raise ValueError(f"rule {rid}: at most {MAX_REGEXES} regular expressions in one rule")
+    compiled = []
+    for p in patterns:
+        try:
+            compiled.append(compile_pattern(p, MAX_REGEX_CHARS))
+        except ValueError as e:
+            shown = p if len(p) <= 40 else p[:40] + "…"
+            raise ValueError(f"rule {rid}: regex {shown!r} {e}") from e
+    return tuple(compiled)
 
 
 def parse_rule(raw: Mapping[str, Any], origin: str = "file") -> KeywordRule | LlmRule:
@@ -161,13 +187,16 @@ def parse_rule(raw: Mapping[str, Any], origin: str = "file") -> KeywordRule | Ll
         if clean:
             terms[primary_subtag(lang)] = clean
     topics = _strings(raw.get("topics"), f"rule {rid}: topics")
-    if not topics and not terms:
-        raise ValueError(f"rule {rid}: needs topics (from a keyword pack) or terms")
+    regex = _regexes(raw.get("regex"), rid)
+    if not topics and not terms and not regex:
+        raise ValueError(f"rule {rid}: needs topics (from a keyword pack), terms or regex")
     verify = raw.get("verify", False)
     if not isinstance(verify, bool):
         raise ValueError(f"rule {rid}: verify must be true or false")
     near = _strings(raw.get("near"), f"rule {rid}: near")
-    return KeywordRule(rid, topics, severity, near, min_mentions, terms, stations, verify, origin)
+    return KeywordRule(
+        rid, topics, severity, near, min_mentions, terms, stations, verify, origin, regex
+    )
 
 
 @dataclass
@@ -176,6 +205,7 @@ class RuleSet:
     packs: dict[str, KeywordPack]  # primary subtag -> pack
     llm_rules: list[LlmRule] = field(default_factory=list)
     _matchers: dict[str, Matcher] = field(default_factory=dict)
+    _slow: set[tuple[str, str]] = field(default_factory=set)  # (rule, pattern) named as slow
 
     @classmethod
     def load(
@@ -220,7 +250,7 @@ class RuleSet:
     ) -> list[Hit]:
         pack = self.pack_for(language)
         own = primary_subtag(language)
-        if not text or (pack is None and not any(own in r.terms for r in self.rules)):
+        if not text or (pack is None and not any(own in r.terms or r.regex for r in self.rules)):
             return []
         topics = pack.topics if pack is not None else {}
         places = pack.places if pack is not None else {}
@@ -244,6 +274,11 @@ class RuleSet:
                 if found and term not in terms:
                     terms.append(term)
                     spans.extend(found)
+            for pattern in rule.regex:
+                for a, b in self._search(rule.id, pattern, text):
+                    spans.append((a, b))
+                    if text[a:b] not in terms:
+                        terms.append(text[a:b])
             if not terms:
                 continue
             named = [p for group in rule.near for p in places.get(group, ()) if find(p)]
@@ -258,3 +293,15 @@ class RuleSet:
                 hit.severity, hit.capped = "low", other
             hits.append(hit)
         return hits
+
+    def _search(self, rule_id: str, pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
+        """Spans where a rule's regex matches one utterance (its first REGEX_TEXT_CHARS)."""
+        t0 = time.perf_counter()
+        matches = pattern.finditer(text, 0, REGEX_TEXT_CHARS)
+        found = [m.span() for m in matches if m.end() > m.start()]  # zero-width says nothing
+        ms = (time.perf_counter() - t0) * 1000
+        if ms > SLOW_REGEX_MS and (rule_id, pattern.pattern) not in self._slow:
+            self._slow.add((rule_id, pattern.pattern))
+            log.warning("rule %s: regex %r took %.0f ms on one utterance; it runs on every "
+                        "utterance, so make it simpler", rule_id, pattern.pattern, ms)  # fmt: skip
+        return found

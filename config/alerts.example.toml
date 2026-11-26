@@ -99,6 +99,17 @@ topics = ["conflict_weak"]
 near = ["local"]
 severity = "low"
 
+# Regular expressions, beside or instead of topics and terms: matched on the original text,
+# ignoring case, in any language (no accents folded, no plurals). Write them in 'single quotes'
+# so backslashes stay as they are. \b is the edge of a word; scripts written without spaces
+# (Chinese, Japanese, Thai) have none, so leave it out for them. Refused at load: invalid
+# patterns, over 200 characters, and repeats inside repeats such as (a+)+.
+# Here: a motorway named by its number, then closed, within a few words ("A1 cortada").
+[[rule]]
+id = "motorway-closed"
+regex = ['\bA\s?\d{1,2}\b.{0,30}\b(cortada|fechada|encerrada)\b']
+severity = "low"
+
 # A rule of any kind other than keyword or llm (such as a station going silent, below) is read
 # and skipped: those kinds don't exist yet.
 # [[rule]]

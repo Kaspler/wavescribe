@@ -208,6 +208,20 @@ def test_rules_from_the_page(node: Running) -> None:
     assert node.call("POST", "/api/manage/rules", {"id": "x", "kind": "llm"})[0] == 400
 
 
+def test_regex_rules_from_the_page(node: Running, tmp_path: Path) -> None:
+    rule = {"id": "lines", "severity": "medium", "regex": [r"\blinha \d+\b"]}
+    status, view = node.call("POST", "/api/manage/rules", rule)
+    assert status == 200
+    assert next(r for r in view["rules"] if r["id"] == "lines")["regex"] == [r"\blinha \d+\b"]
+    saved = tomllib.loads((tmp_path / "node" / "ui.toml").read_text())
+    assert saved["alerts"]["rule"][0]["regex"] == [r"\blinha \d+\b"]
+    sentence = {"text": "A Linha 4 está parada.", "language": "pt-PT"}
+    [hit] = node.call("POST", "/api/manage/rules/try", sentence)[1]["hits"]
+    assert (hit["rule"], hit["terms"], hit["spans"]) == ("lines", ["Linha 4"], [[2, 9]])
+    status, err = node.call("POST", "/api/manage/rules", {"id": "bad", "regex": ["(a+)+"]})
+    assert status == 400 and err["error"].startswith("rule bad: regex '(a+)+' repeats a group")
+
+
 def test_webhooks_get_alerts_and_the_feed_streams_utterances(tmp_path: Path) -> None:
     rec = Recorder()
     r = Running(make_app(tmp_path, transport=rec))

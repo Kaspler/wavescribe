@@ -39,7 +39,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Transcriber` | utterance → text + language + confidence | `ParakeetMlx` (default for European languages), `MlxAudioTranscriber` (Whisper, Qwen3-ASR, Voxtral, Nemotron through mlx-audio) |
 | Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it. A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
 | `Translator` | text → text in a target language | `LlmTranslator` (Qwen3.5 through mlx-lm, the default; TranslateGemma opt-in), `MadladTranslator` (MADLAD-400 through CTranslate2, CPU, the fallback) |
-| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below) |
+| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below) |
 | `Actions` | Deliver an alert (`alerts/actions.py`) | `MacActions`: `notify` (a macOS notification through `osascript`), `speak:<lang>` (macOS `say`, one voice per language), `log`; `LogOnlyActions` elsewhere. Webhooks go through `Outputs` |
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six retries over about 2 minutes (network errors, 408/425/429, 5xx); an HMAC-SHA256 signature when a secret is set; one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
@@ -511,6 +511,16 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   another language never rises above `low` (Parakeet answering in English turned cured ham into
   "nuclear sabotage", and Snowball stems *sabotage* like *sabotagem*). The `repetition` flag
   doesn't cap severity.
+- **Regular expressions:** a keyword rule can have `regex = [...]` beside its topics and terms,
+  matched on the source text ignoring case and nothing else (no folding, no stemming), in any
+  language; `stations` narrows them down. A match is marked and highlighted like a term, and the
+  hit's `terms` holds what was said. Python's `re` has no timeout, so the cost is bounded
+  instead: patterns are compiled when the rules load and refused, with the rule's id, when
+  invalid, longer than 200 characters, more than 20 in a rule, matching empty text, or repeating
+  a group that itself repeats (`(a+)+`, `(\w+\s?)*`; found on the parsed pattern, and an atomic
+  group or possessive repeat is allowed). Each reads one utterance, at most 2,000 characters,
+  and a pattern slower than 50 ms on one is named in the log. Overlapping alternatives inside a
+  repeat (`(a|ab)+`) are not detected.
 - **Confirmation:** a rule with `min_mentions = N` holds its alert at `low` (stored, not
   announced) until N mentions within the cooldown, or one that names a `near` place. Mentions
   heard as another language don't count. Reaching N raises the alert, which is then announced

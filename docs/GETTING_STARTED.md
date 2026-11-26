@@ -189,6 +189,12 @@ each station's language. Read them, fix any that are wrong, and save.
   about every 45 seconds.
 - **Try a sentence**, as the radio would say it, to see which word rules would fire. Nothing is
   raised.
+- **Patterns:** in `config/alerts.toml`, a keyword rule can match regular expressions as well as
+  words, such as a road and its number: `regex = ['\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b']`. They
+  ignore case and work in any language, but match the text exactly as written otherwise (no
+  accents folded, no plurals). `\b` marks the edge of a word, which Chinese, Japanese or Thai
+  don't have, so leave it out there. A pattern that could take very long (a repeated group that
+  repeats inside, like `(\w+ )+`) is refused when the file loads, with the rule's name.
 
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
