@@ -76,7 +76,8 @@ A scan works like this:
 catches them. `--watch MINUTES` (or *How long* on the page) sweeps again and again, keeps the
 strongest level each frequency reached, and counts how many sweeps each channel was busy in.
 Real traffic comes and goes. A channel busy in every sweep is a beacon, a recorded weather
-loop, or interference.
+loop, or interference. To hear what is said as well, see
+[Catching radio that only talks now and then](#catching-radio-that-only-talks-now-and-then).
 
 **When the tuner can't tune.** Now and then a dongle's tuner fails to lock onto a frequency
 (`[R82XX] PLL not locked!` from `rtl_power`), and what it reports there comes from somewhere
@@ -185,6 +186,84 @@ The demodulators are Wavescribe's own (numpy and scipy, `dsp/`):
   squelch.
 
 When a channel's squelch is closed the page shows "channel quiet" instead of silence.
+
+## Catching radio that only talks now and then
+
+*Experimental.* Walkie-talkies, repeaters and aircraft are quiet most of the time, and when
+someone speaks you rarely know on which channel. A **watch** listens to every channel of a band
+at once and transcribes whatever is said on any of them. Each transmission is caught on its own,
+from its first syllable, with the channel it was on:
+
+```sh
+uv run wavescribe radio watch a pmr446 --acknowledge     # all 16 PMR446 channels
+uv run wavescribe radio watch a 2m --languages de en      # the 2 m band, German or English
+uv run wavescribe radio watch a 446.0:446.1 --acknowledge --minutes 30   # a range in MHz
+uv run wavescribe radio catches                           # what was caught and kept, with its words
+uv run wavescribe radio note 446.00625 --name "Family" --tag home
+```
+
+`radio watch` prints a line for each transmission as it ends: when, the channel, how long and how
+far above the noise it was, and whether anyone spoke in it. What was said comes underneath. In a
+stations file, a watch is a station with `watch` in place of `mhz`:
+
+```toml
+[[station]]
+id = "walkies"
+name = "PMR446"
+device = "a"             # its center_mhz must let it hear the whole band; the error says where
+watch = "pmr446"         # a band id from `radio bands`, or a range: [446.0, 446.1]
+language = "auto"
+languages = ["es-ES", "en"]   # optional: the languages it may be
+acknowledge = true
+# threshold_db = 8       # how far above a channel's noise counts as a transmission
+```
+
+How it works:
+
+- Every channel has a noise floor of its own, learnt while it is quiet. A channel 8 dB above
+  its floor for a tenth of a second is a transmission. A pause shorter than 1.2 s (a breath, the
+  reply on the same channel) stays in the same catch.
+- The receiver's last two seconds are kept, so each catch is demodulated from a moment before
+  it was noticed: the first word isn't lost to the time it takes to notice.
+- Whatever is always there (the dongle's spike at its centre, its own signals learnt with
+  `radio spurs --learn`, a beacon) becomes part of the floor. A channel busy for two minutes
+  ends as one catch and is then taken as noise.
+- Up to four transmissions are demodulated at once. Transmissions on different channels at the
+  same moment are transcribed one after the other, never mixed.
+
+**Language `auto`** (the default for `radio watch`) lets Whisper tell the language of each
+utterance: not everyone on a band speaks the same one. `languages` narrows the choice to the
+ones you expect, which helps with short and noisy utterances. Speech clearly in none of them is
+still taken as the language heard, because told the wrong language Whisper translates instead of
+transcribing. Language `auto` needs a Whisper model (`uv run wavescribe models fetch
+whisper-large-v3-turbo`). A watch with one language works with any model.
+
+**What is kept.** A watch takes the strictest class of any channel in its window, with the same
+confirmation. Its catches are kept as long as text of that class, and leave this machine only
+where that class's text may. With the defaults, a PMR446 watch keeps nothing: its catches and
+words are shown while `radio watch` runs and never written down, so `radio catches` stays empty.
+A 2 m watch keeps both for 7 days, on this machine only. Notes on frequencies (`radio note`) stay
+on this machine and are its heard list's names too.
+
+Limits:
+
+- **A watch covers what one receiver hears at once**, about 2 MHz (2.3 MHz at 2.4 MS/s). A wider
+  band is refused with a slice that fits.
+- **NFM and AM only**: no broadcast FM, which talks all the time anyway.
+- **Up to four transmissions at once.** A fifth while four are running isn't caught; the log
+  (`data/logs`) records it as `watch_missed`.
+- **Shorter than 0.3 s isn't kept** (data bursts, key clicks).
+- **A weak signal next to a strong one can be missed:** a channel 20 dB weaker than a busy one
+  within three channels, or than the signal at its mirror frequency, is taken for that signal's
+  splatter or image.
+- **In a window centred between two channels** (a band wider than about 0.9 MHz), the two
+  channels next to the centre lie close to the dongle's spike and are the least sensitive.
+- **Busy bands queue up.** Catches go through speech recognition one after another, so on a band
+  with many transmissions their words come later.
+- **Started from a terminal or the stations file.** The page lists a watch like any station, and
+  doesn't show its catches.
+- **Tested on synthetic signals, and with no antenna** (no false catches in 10 minutes on PMR446
+  and on 2 m), not yet on the air.
 
 ## What Wavescribe does with each kind of radio
 

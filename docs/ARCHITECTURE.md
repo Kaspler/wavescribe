@@ -550,6 +550,33 @@ and digital need the acknowledgement once per receiver. A receiver nobody polls 
 closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`), listen-only
 or transcribed.
 
+**Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`). A station
+whose `SdrTuning` carries a `Watch` (the channels of one window) gets a `WatchSource` instead
+of a channel: one more consumer of the shared pipe. On the dongle's thread, each block goes to
+an `IqHistory` (the last 2 s as the dongle's 8-bit samples, about 10 MB) and an
+`ActivityDetector`: 4096-point FFTs averaged into frames of about 55 ms, each channel's power
+over the middle 80 % of its width against a noise floor kept per bin, which follows the bin only
+while its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins and learnt
+spurs are left out. Two frames 8 dB over the floor start a transmission; 1.2 s under it less
+3 dB end it; under 0.3 s it is counted, not kept; after 120 s it ends with reason `carrier` and
+its bins' floors jump to its level. A start 20 dB under a busy channel within three channels, or
+under its own mirror about the centre (I/Q imbalance), is suppressed, and so is every start of a
+frame in which half the channels (at least four) rise at once. A start opens a
+`NarrowbandDemodulator` for its channel fed from the history 0.3 s before the first frame above
+the floor (but never before the previous catch's audio on that channel ended), at most four at
+once (`watch_missed` otherwise); an end gives a `Catch` with the audio up to 0.3 s after. The
+source's iterator hands catches to the pipeline one at a time: quarter-second chunks with the
+catch's `freq_hz`, a discontinuity on the first so the VAD starts afresh, and 0.8 s of silence
+after so its last utterance ends there. `freq_hz` goes from chunk to utterance to
+`segments.freq_hz`. The pipeline tells the source which utterances passed the gate
+(`speech(utt)`), so once the catch's audio has been read it is published (`watch.publish`) with
+`voice` set; the store and the command line subscribe. In the ASR worker, language `auto` runs
+`transcribe_any` (`asr/language.py`): Whisper's language probabilities, narrowed to the
+station's `languages` unless those together are under 10 %, then the station is replaced by one
+in that language for the checks, translation, alerts and the store. `plan_centre` puts a window
+narrower than about 0.9 MHz wholly above the centre (lowest channel − 250 kHz), so the dongle's
+mirror image of it falls outside; a wider one is centred between two channels.
+
 ### Alerts
 
 ```
@@ -676,6 +703,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 - `alerts.kind` (`keyword` or `llm`) and `alerts.reason` (the LLM's one-line reason), schema 4. A station alert has kind `silence` or `traffic`, Wavescribe's own words as its quote (language `en`), no mentions rows, and "audio is back …" as its reason once it ended
 - `deliveries(id, output_id, event, ref, t, ok, status, error, attempts, ms)`: one row per output request, capped at 10,000 rows (schema 4)
 - `segments.privacy` (the class the row was heard under), `alerts.privacy` (the classes of the alert's stations when heard, comma-separated), index `segments_class`, schema 6; at start, older rows take their station's current class if it isn't broadcast
+- `catches(id, station_id, freq_hz, t_start, t_end, mode, band, label, snr_db, peak_db, voice, reason, privacy)`: one row per transmission a watch caught, kept and pruned like text of its class (not written at all where the class keeps no text); its words are the segments of the same station and frequency over the same moments. `segments.freq_hz` (where radio was heard), schema 7
 
 The schema version lives in `PRAGMA user_version`. The database runs in WAL mode, so `wavescribe
 search` can read while `listen` or `serve` writes. Searches read through a second, read-only
