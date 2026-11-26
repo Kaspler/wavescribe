@@ -408,3 +408,51 @@ tr.is-off td { color: var(--ink-3); }
 /* The first step, while nothing has been found: one sentence and one button above the dial. */
 .dl-first { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); margin-bottom: var(--s6); }
 .dl-first-line { max-width: 60ch; font-size: var(--t-md); color: var(--ink); text-wrap: pretty; }
+/* The dial as a list, on a narrow screen: a row per band, its kind's swatch, name and range, and
+   the receivers on it at the row's end. */
+.dl.is-list { padding: var(--s3); }
+.dl.is-list + .dl-legend .is-bar { display: none; } /* the list has no bare stretches or ticks */
+.dl.is-list .dl-in { min-height: 0; }
+.dl-list { display: grid; gap: 2px; }
+.dl-row { display: flex; align-items: center; gap: var(--s2); }
+.dl-row-band {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s3);
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--band-ink-2);
+  font-size: var(--t-sm);
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+.dl-row-band:hover { background: var(--band-hover); }
+.dl-row-band.is-chosen { box-shadow: inset 0 0 0 2px var(--accent); }
+.dl-row-band:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.dl-row-band .dl-key.is-text { background: var(--band-ink-2); }
+.dl-row-band .dl-key.is-shown { box-shadow: inset 0 0 0 1px var(--band-ink-2); }
+.dl-row-name { overflow: hidden; color: var(--band-ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dl-row-range, .dl-row-count { flex: none; font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.dl-row-count { margin-left: auto; }
+.dl-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 8px 0 7px;
+  border: 1px solid var(--band-ink-2);
+  border-radius: 4px;
+  background: var(--band);
+  color: var(--band-ink);
+  font-size: var(--t-xs);
+  font-weight: 700;
+}
+.dl-chip.is-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.dl-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-outside { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s3); padding: 0 var(--s3); font-size: var(--t-xs); color: var(--band-ink-2); }

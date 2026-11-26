@@ -14,6 +14,7 @@ import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps } from "./tu
 
 const NAME_FONT = 12; // px, as --t-sm
 const MIN_INNER_PX = 14; // a band inside another stays this wide
+const LIST_BELOW = 560; // px: narrower, the dial is a list of bands, one under another
 
 /** "87.5 to 108 MHz": a range said in words, for names a screen reader reads out. */
 export const rangeWords = (b: Pick<Band, "start_mhz" | "stop_mhz">) => `${+b.start_mhz.toFixed(3)} to ${+b.stop_mhz.toFixed(3)} MHz`;
@@ -43,7 +44,7 @@ function useMeasure() {
   };
 }
 
-export function DialBar({ bands, heard, chosen, onChoose, overlay, says }: {
+export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand, after }: {
   bands: Band[];
   heard: Any[];
   /** The chosen band's id, or null when none is (a range of one's own, the whole tuner). */
@@ -53,6 +54,10 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says }: {
   overlay?: (width: number, scale: ReturnType<typeof makeScale>) => ReactNode;
   /** More to say about a band in its button's name (which receivers are on it). */
   says?: (b: Band) => string;
+  /** On a narrow screen, where the dial is a list: what stands on a band's row (its receivers),
+   * and what follows the list (receivers outside every band). */
+  onBand?: (b: Band) => ReactNode;
+  after?: ReactNode;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -91,10 +96,37 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says }: {
   };
   const roving = chosen && segs.some((s) => s.band.id === chosen) ? chosen : segs[0]?.band.id;
 
+  const list = width > 0 && width < LIST_BELOW;
   return (
-    <div className="dl">
+    <div className={cx("dl", list && "is-list")}>
      <div className="dl-in" ref={wrap}>
-      {width > 0 && (
+      {list && (
+        <>
+          <div className="dl-list" ref={track} role="toolbar" aria-label="Bands on the dial" aria-orientation="vertical" onKeyDown={keys}>
+            {segs.map((s) => {
+              const count = heardIn(heard, s.band).length;
+              const w = bandWords(s.band);
+              return (
+                <div key={s.band.id} className="dl-row">
+                  <button type="button" data-band={s.band.id} className={cx("dl-row-band", s.band.id === chosen && "is-chosen")}
+                          tabIndex={s.band.id === roving ? 0 : -1} aria-pressed={s.band.id === chosen}
+                          aria-label={[w.name, rangeWords(s.band), s.kind === "text" ? "voices to text" : "digital, shown only",
+                            count ? `${count} heard here` : null, says?.(s.band)].filter(Boolean).join(", ")}
+                          onClick={() => onChoose(s.band.id)}>
+                    <i className={cx("dl-key", `is-${s.kind}`)} aria-hidden="true" />
+                    <span className="dl-row-name">{w.name}</span>
+                    <span className="dl-row-range">{+s.band.start_mhz.toFixed(3)}–{+s.band.stop_mhz.toFixed(3)}</span>
+                    {count > 0 && <span className="dl-row-count">{count} heard</span>}
+                  </button>
+                  {onBand?.(s.band)}
+                </div>
+              );
+            })}
+          </div>
+          {after}
+        </>
+      )}
+      {width >= LIST_BELOW && (
         <>
           {overlay?.(width, scale)}
           <div className="dl-names" aria-hidden="true">
@@ -160,8 +192,8 @@ export function DialLegend() {
     <p className="dl-legend">
       <span><i className="dl-key is-text" aria-hidden="true" />Voices Wavescribe can turn into text</span>
       <span><i className="dl-key is-shown" aria-hidden="true" />Digital: shown, not decoded</span>
-      <span><i className="dl-key is-none" aria-hidden="true" />Outside any band</span>
-      <span><i className="dl-key is-heard" aria-hidden="true" />Heard here</span>
+      <span className="is-bar"><i className="dl-key is-none" aria-hidden="true" />Outside any band</span>
+      <span className="is-bar"><i className="dl-key is-heard" aria-hidden="true" />Heard here</span>
     </p>
   );
 }
@@ -347,7 +379,8 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
       )}
       <Scope spectrum={st.spectrum || null} centerMhz={st.center_mhz} spanMhz={st.span_mhz} view={null} tunedMhz={st.mhz} mode={st.mode}
              channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={st.band} markers={dialMarkers(heard, signals, steps.lo, steps.hi)}
-             onTune={(mhz) => t.tune(steps.keep({ mhz: +mhz.toFixed(5) }), true)} onStep={steps.step} />
+             onTune={(mhz) => t.tune(steps.keep({ mhz: +mhz.toFixed(5) }), true)} onStep={steps.step}
+             inWords="The table below lists what has been found in this band, strongest first." />
       <p className="m-hint">
         Receiver {name} hears {steps.lo.toFixed(2)} to {steps.hi.toFixed(2)} MHz. Click a signal, or anywhere, to listen there; the arrow
         keys step. Nothing heard here is kept until you add it as a station.
@@ -357,5 +390,17 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
         <TuneControls t={t} steps={steps} play={play} />
       </Advanced>
     </div>
+  );
+}
+
+/** A receiver on a band's row of the dial as a list: its lamp and letter, a button that brings
+ * it into view. */
+export function ReceiverChip({ r, chosen, onChoose }: { r: RxStatus; chosen: boolean; onChoose: (id: string) => void }) {
+  return (
+    <button type="button" className={cx("dl-chip", chosen && "is-chosen")} aria-pressed={chosen}
+            aria-label={`Receiver ${rxName(r.id)}, ${r.words}`} onClick={() => onChoose(r.id)}>
+      <Lamp state={r.lamp} onBand />
+      {rxName(r.id)}
+    </button>
   );
 }

@@ -43,6 +43,8 @@ export interface ScopeProps {
   onTune: (mhz: number) => void;
   /** Steps of the raster: the wheel and the arrow keys (ten with Shift). */
   onStep: (n: number) => void;
+  /** Where the same signals are in words, for a screen reader: the pictures' text alternative. */
+  inWords?: string;
 }
 
 /** The nearest channel: the band's channel list, else its raster from the band's start. */
@@ -58,11 +60,26 @@ const niceStep = (span: number) => [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1
 
 /** The spectrum and its waterfall, on the instrument's dark band. The orange line and shading
  * are the tuning and its channel; a click tunes, the wheel and arrow keys step. */
-export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, channelKhz, stepKhz, band, markers, onTune, onStep }: ScopeProps) {
+export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, channelKhz, stepKhz, band, markers, onTune, onStep, inWords }: ScopeProps) {
   const spec = useRef<HTMLCanvasElement>(null);
   const fall = useRef<HTMLCanvasElement>(null);
   const span = useRef<string>("");
   const [hover, setHover] = useState<number | null>(null);
+  // The spectrum is drawn at the size it is shown, so its numbers and names keep their shape on a
+  // phone; the waterfall is a picture of rows and may stretch.
+  const [size, setSize] = useState(0);
+  useEffect(() => {
+    const c = spec.current;
+    if (!c) return;
+    const ro = new ResizeObserver(() => {
+      const k = window.devicePixelRatio || 1;
+      c.width = Math.max(1, Math.round(c.clientWidth * k));
+      c.height = Math.max(1, Math.round(c.clientHeight * k));
+      setSize(c.width * 10000 + c.height);
+    });
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, []);
   const range = useMemo(() => (s ? [s.start_hz / 1e6, s.stop_hz / 1e6] : view || [centerMhz - spanMhz / 2, centerMhz + spanMhz / 2]), [s, view, centerMhz, spanMhz]);
   const at = (clientX: number) => {
     const r = spec.current!.getBoundingClientRect();
@@ -90,7 +107,7 @@ export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, c
     const css = getComputedStyle(document.documentElement);
     const tok = (n: string) => css.getPropertyValue(n).trim() || "#888";
     drawSpectrum(c, s, tunedMhz, channelKhz, markers, hover, tok);
-  }, [s, hover]);
+  }, [s, hover, size]);
   useEffect(() => {
     // the waterfall scrolls once per new spectrum, never on pointer moves
     if (!s || !fall.current) return;
@@ -100,15 +117,15 @@ export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, c
   }, [s]);
   return (
     <figure className="lv-scope">
-      <canvas ref={spec} className="lv-spectrum" width={1200} height={220} tabIndex={0} role="img"
-              aria-label={`Spectrum from ${range[0].toFixed(3)} to ${range[1].toFixed(3)} MHz, tuned to ${fmtMhz(tunedMhz, mode)} MHz. Arrow keys step the tuning.`}
+      <canvas ref={spec} className="lv-spectrum" tabIndex={0} role="img"
+              aria-label={`Spectrum from ${range[0].toFixed(3)} to ${range[1].toFixed(3)} MHz, tuned to ${fmtMhz(tunedMhz, mode)} MHz. Arrow keys step the tuning.${inWords ? ` ${inWords}` : ""}`}
               onPointerMove={(e) => setHover(at(e.clientX))} onPointerLeave={() => setHover(null)}
               onClick={(e) => onTune(snap(at(e.clientX), stepKhz, band))}
               onKeyDown={(e) => {
                 if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); onStep(e.shiftKey ? 10 : 1); }
                 if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); onStep(e.shiftKey ? -10 : -1); }
               }} />
-      <canvas ref={fall} className="lv-fall" width={1200} height={200} role="img" aria-label="Waterfall: the spectrum over the last minute" />
+      <canvas ref={fall} className="lv-fall" width={1200} height={200} role="img" aria-label={`Waterfall: the spectrum over the last minute.${inWords ? ` ${inWords}` : ""}`} />
       <figcaption className="m-hint lv-readout">
         {hover != null ? <>Pointer at <span className="mono">{fmtMhz(snap(hover, stepKhz, band), mode)}</span> MHz · click to tune</> : s ? <>Noise floor {s.noise_db.toFixed(0)} dB</> : "Waiting for the receiver…"}
       </figcaption>
@@ -118,27 +135,28 @@ export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, c
 
 function drawSpectrum(canvas: HTMLCanvasElement, s: Spectrum, tunedMhz: number, channelKhz: number, markers: Marker[], hover: number | null, tok: (n: string) => string) {
   const ctx = canvas.getContext("2d")!;
-  const W = canvas.width, H = canvas.height, AX = 24; // the frequency scale along the bottom
+  const k = window.devicePixelRatio || 1; // the canvas is in device pixels: sizes are CSS px times k
+  const W = canvas.width, H = canvas.height, AX = 20 * k; // the frequency scale along the bottom
   const f0 = s.start_hz / 1e6, f1 = s.stop_hz / 1e6;
   const x = (mhz: number) => ((mhz - f0) / (f1 - f0)) * W;
   const top = Math.ceil((Math.max(...s.db) + 5) / 10) * 10;
   const lo = Math.floor((s.noise_db - 8) / 10) * 10, hi = Math.max(lo + 40, Math.min(0, top));
   const y = (db: number) => (H - AX) - ((Math.max(lo, Math.min(hi, db)) - lo) / (hi - lo)) * (H - AX);
   ctx.clearRect(0, 0, W, H);
-  ctx.font = "18px system-ui, sans-serif";
-  ctx.lineWidth = 1;
+  ctx.font = `${13 * k}px system-ui, sans-serif`;
+  ctx.lineWidth = k;
   ctx.strokeStyle = tok("--band-tick");
   ctx.fillStyle = tok("--band-ink-2");
   for (let db = lo + 10; db < hi; db += 10) {
     ctx.beginPath(); ctx.moveTo(0, y(db)); ctx.lineTo(W, y(db)); ctx.stroke();
-    ctx.fillText(`${db}`, 6, y(db) - 4);
+    ctx.fillText(`${db}`, 5 * k, y(db) - 3 * k);
   }
   const tick = niceStep(f1 - f0);
   for (let f = Math.ceil(f0 / tick) * tick; f <= f1; f += tick) {
     const px = x(f);
-    ctx.beginPath(); ctx.moveTo(px, H - AX); ctx.lineTo(px, H - AX + 6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, H - AX); ctx.lineTo(px, H - AX + 5 * k); ctx.stroke();
     const label = f.toFixed(tick < 0.01 ? 4 : tick < 0.1 ? 3 : tick < 1 ? 2 : 1);
-    ctx.fillText(label, Math.min(W - ctx.measureText(label).width - 4, Math.max(2, px - ctx.measureText(label).width / 2)), H - 4);
+    ctx.fillText(label, Math.min(W - ctx.measureText(label).width - 3 * k, Math.max(2 * k, px - ctx.measureText(label).width / 2)), H - 4 * k);
   }
   // Lines that aren't transmissions run dotted down the scope; stations get a tick. Names are
   // placed stations first, and one that would overlap a name already placed is left out.
@@ -151,32 +169,32 @@ function drawSpectrum(canvas: HTMLCanvasElement, s: Spectrum, tunedMhz: number, 
     if (line) {
       ctx.save();
       ctx.strokeStyle = tok("--band-ink-2");
-      ctx.setLineDash([3, 5]);
-      ctx.beginPath(); ctx.moveTo(px, 22); ctx.lineTo(px, H - AX); ctx.stroke();
+      ctx.setLineDash([3 * k, 4 * k]);
+      ctx.beginPath(); ctx.moveTo(px, 20 * k); ctx.lineTo(px, H - AX); ctx.stroke();
       ctx.restore();
     } else {
-      ctx.fillRect(px - 0.5, 0, 1, 10);
+      ctx.fillRect(px - k / 2, 0, k, 8 * k);
     }
     const label = m.kind === "steady" ? (m.name ? `${m.name} · steady` : "steady") : m.kind === "own" ? "own line" : m.kind === "clock" ? "clock" : m.name;
     if (!label) continue;
     const w = ctx.measureText(label).width;
-    const at = Math.min(W - w - 2, px + 4);
-    if (taken.some(([a, b]) => at < b + 8 && at + w > a - 8)) continue;
+    const at = Math.min(W - w - 2 * k, px + 3 * k);
+    if (taken.some(([a, b]) => at < b + 6 * k && at + w > a - 6 * k)) continue;
     taken.push([at, at + w]);
-    ctx.fillText(label, at, 16);
+    ctx.fillText(label, at, 14 * k);
   }
   // the tuning: its channel shaded, its centre a line, in the pointer's orange
   const half = channelKhz / 2000;
   ctx.fillStyle = tok("--accent-tint");
   ctx.fillRect(x(tunedMhz - half), 0, Math.max(2, x(tunedMhz + half) - x(tunedMhz - half)), H - AX);
   ctx.fillStyle = tok("--accent");
-  ctx.fillRect(x(tunedMhz) - 1, 0, 2, H - AX);
+  ctx.fillRect(x(tunedMhz) - k, 0, 2 * k, H - AX);
   if (hover != null) {
     ctx.fillStyle = tok("--band-ink-2");
-    ctx.fillRect(x(hover) - 0.5, 0, 1, H - AX);
+    ctx.fillRect(x(hover) - k / 2, 0, k, H - AX);
   }
   ctx.strokeStyle = (s.clipped ?? 0) > 0.001 ? tok("--band-lamp-trouble") : tok("--band-ink");
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5 * k;
   ctx.beginPath();
   s.db.forEach((v: number, i: number) => {
     const px = ((i + 0.5) / s.db.length) * W;

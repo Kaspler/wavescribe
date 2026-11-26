@@ -8,7 +8,7 @@ import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, 
 import { langName } from "../lib/lang";
 import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
-import { BandCard, DialBar, DialLegend, LiveView, ReceiverMarks, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
+import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
@@ -224,6 +224,8 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   const rxs: RxStatus[] = v.receivers.map((r: Any) => rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob));
   const me = rxs.find((r) => r.id === device);
   const [moving, setMoving] = useState<{ id: string; mhz: number; mode: string | null; play: boolean } | null>(null);
+  const question = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (moving) question.current?.querySelector<HTMLElement>("button")?.focus(); }, [moving]); // a question takes the focus
   /** Tunes receiver `id` to `mhz`, with sound when `play`. One following stations asks first if
    * that moves it, saying which stations wait, and a free receiver is offered instead. */
   const send = (id: string, mhz: number, mode: string | null, play: boolean, pause = false) => {
@@ -310,7 +312,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
         </p>
       )}
       {moving && (
-        <div className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q">
+        <div ref={question} className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q">
           <p id="dl-move-q" className="m-line">
             Receiver {rxName(moving.id)} is following {and(rxs.find((r) => r.id === moving.id)?.holders || [])}. {moving.play ? "Listening to" : "Looking at"}{" "}
             {mhzText(moving.mhz, moving.mode)} pauses {rxs.find((r) => r.id === moving.id)?.holders.length === 1 ? "it" : "them"} until you let the receiver go.
@@ -347,6 +349,17 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
       )}
       <DialBar bands={v.bands} heard={v.heard} chosen={onTheDial ? band : null} onChoose={pick}
                says={(b) => rxs.filter((r) => bandOfWindow(v.bands, r.lo, r.hi)?.id === b.id).map((r) => `Receiver ${rxName(r.id)} is here`).join(", ")}
+               onBand={(b) => rxs.filter((r) => bandOfWindow(v.bands, r.lo, r.hi)?.id === b.id).map((r) => (
+                 <ReceiverChip key={r.id} r={r} chosen={r.id === device} onChoose={(id) => { setDevice(id); choose(b.id); }} />
+               ))}
+               after={rxs.some((r) => !bandOfWindow(v.bands, r.lo, r.hi)) && (
+                 <p className="dl-outside">
+                   Outside the bands:
+                   {rxs.filter((r) => !bandOfWindow(v.bands, r.lo, r.hi)).map((r) => (
+                     <span key={r.id}><ReceiverChip r={r} chosen={r.id === device} onChoose={setDevice} /> {mhzText((r.lo + r.hi) / 2)}</span>
+                   ))}
+                 </p>
+               )}
                overlay={(width, scale) => v.receivers.length > 0 && (
                  <ReceiverMarks width={width} scale={scale} rxs={rxs} chosen={device} bands={v.bands}
                                 onChoose={(id) => {
