@@ -21,7 +21,7 @@ from wavescribe.digest import (
     RequestError,
     Unavailable,
     fair_shares,
-    few,
+    in_turn,
     parse_choice,
     parse_points,
     pick,
@@ -244,6 +244,7 @@ def test_more_points_than_asked_are_taken_in_turn_from_each_station() -> None:
     def heard_on(p: Point) -> str:
         return p.text[0]
 
+    assert [p.text for p in in_turn(points, heard_on)] == ["a0", "b0", "a1", "b1", "a2", "a3"]
     assert [p.text for p in pick(points, 3, heard_on)] == ["a0", "a1", "b0"]
     assert [p.text for p in pick(points, 5, heard_on)] == ["a0", "a1", "a2", "b0", "b1"]
     assert pick(points, 9, heard_on) == points
@@ -312,7 +313,7 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         "- First note on a [1].\n- Second note on a [2].",
         "- A note on b [1].",
         "- A note on c [1].",
-        "The most important: 1+2+3, 4, 9, 4",
+        "The most important: 1+4, 3, 9, 3",
     )
 
     def submit(run) -> bool:
@@ -327,31 +328,32 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
     assert digest.calls == 4 and len(llm.prompts) == 4  # three prompts of notes, one choice
     assert [{p[p.index("[1] ") + 4]} for p in llm.prompts[:3]] == [{"a"}, {"b"}, {"c"}]
     choice = llm.prompts[3]
-    assert "[1] a: First note on a.\n[2] a: Second note on a.\n[3] b: A note on b.\n" in choice
-    assert "[4] c: A note on c." in choice and "Which 5 of them matter most" in choice
-    assert [p.text for p in digest.points] == ["First note on a.", "A note on c."]
-    # Joined with a's second note; b's is left out: a join across stations isn't trusted.
-    assert [digest.stations_of(p) for p in digest.points] == [["a"], ["c"]]
-    assert digest.text() == "- a: First note on a. [1, 2]\n- c: A note on c. [3]"
+    # A station at a time, so that the first station's notes don't come first.
+    shown = "[1] a: First note on a.\n[2] b: A note on b.\n[3] c: A note on c.\n[4] a: Second"
+    assert shown in choice and "Which 5 of them matter most" in choice
+    # The note joined to the first is left out, sources and all: a join isn't trusted. Two
+    # chosen of five asked for, the note left out makes up the rest.
+    assert (
+        digest.text() == "- a: First note on a. [1]\n- c: A note on c. [2]\n- b: A note on b. [3]"
+    )
     assert digest.read == sum(p.count("\n[") + 1 for p in llm.prompts[:3]) - 3
     store.close()
 
 
-def test_a_point_shows_a_few_of_its_sources_spread_over_the_story(tmp_path: Path) -> None:
-    assert few(range(12), 5) == (0, 2, 4, 7, 9)
-    assert few([3, 4], 5) == (3, 4)
+def test_a_point_rests_on_a_few_moments(tmp_path: Path) -> None:
     store = Store(tmp_path / "w.db")
     for i in range(12):
         add(store, "a", f"A ponte fecha amanhã, parte {i}", NOW - 30 * MIN + i * MIN)
-    d = digester(store, FakeLlm("- The bridge closes [" + ", ".join(map(str, range(1, 13))) + "]."))
+    cited = ", ".join(str(n) for n in (5, *range(1, 13)))
+    d = digester(store, FakeLlm(f"- The bridge closes [{cited}]."))
     [point] = d.run(d.request({"minutes": 60})).payload()["points"]
-    assert point["sources"] == [1, 2, 3, 4, 5]
+    assert len(point["sources"]) == 3  # the first three it cites: 1, 2 and 5
     store.close()
 
 
 def test_the_choice_is_read_from_numbers_and_falls_back_to_each_station_in_turn() -> None:
     assert parse_choice("3+9, 7, [1], 12, 5, 2", 10, 5) == [[3, 9], [7], [1], [5], [2]]
-    assert parse_choice("Notes:\n2 + 2, 3+2, 4", 4, 5) == [[2], [3], [4]]
+    assert parse_choice("Notes:\n2 + 2, 3+2, 2, 4", 4, 5) == [[2], [3], [4]]
     assert parse_choice("I can't choose.", 4, 5) == []
 
 
@@ -366,11 +368,15 @@ def test_an_unreadable_choice_keeps_notes_from_each_station(tmp_path: Path) -> N
     digest = d.run(d.request({"minutes": 60}))
     assert [(digest.stations_of(p), p.text) for p in digest.points] == [
         (["a"], "Note 1."),
-        (["a"], "Note 2."),
-        (["a"], "Note 3."),
         (["b"], "Note 1."),
+        (["a"], "Note 2."),
         (["b"], "Note 2."),
+        (["a"], "Note 3."),
     ]
+    # Eight notes "joined" are no story told eight times: none of them is left out.
+    lumped = FakeLlm(notes, notes, "1+2+3+4+5+6+7+8")
+    d = digester(store, lumped, stations=[station("a"), station("b")])
+    assert len(d.run(d.request({"minutes": 60})).points) == 5
     store.close()
 
 

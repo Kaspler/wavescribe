@@ -19,12 +19,12 @@ most one prompt (``STAGE_CHARS``), sampled evenly over the window when it said m
 shares are read in as many prompts as they fill, rounded: reading the prompt is most of a
 call's time, so a prompt more is worth it for half a prompt more to read. One prompt is the
 digest. Several are two stages: the stations are spread over the prompts, each of which
-gives notes with their sources, and a last, short call chooses the notes that matter most
-and joins those of a station that tell the same story. It answers with the notes' numbers
-rather than rewriting them: asked to rewrite many notes into a few, a small model repeats them
-all, in order; asked for numbers, it chooses. Its joins across stations are wrong too often
-to credit a story to a station on their word, so a point keeps the notes of its first
-station.
+gives notes with their sources, and a last, short call chooses the notes that matter most.
+It answers with the notes' numbers rather than rewriting them: asked to rewrite many notes
+into a few, a small model repeats them all, in order; asked for numbers, it chooses. It joins
+the notes of one story with "+", so the story is chosen once; the point is the first of them,
+with its own sources, as the joins are too often wrong to take the others' on their word.
+When it chooses fewer than asked, the notes it left out make up the rest, a station at a time.
 The stages split by station rather than by time because one station's programme reads
 coherently, its words can't be credited to another station within a prompt, and a quiet
 station keeps its share next to a chatty one. A single station is sampled rather than split:
@@ -73,16 +73,17 @@ DIGEST_PRIORITY = sys.float_info.max
 # One prompt's excerpts, as for Ask: about 3k tokens, which a recent Mac reads in about 10 s.
 STAGE_CHARS = 12_000
 DIGEST_CHARS = 36_000  # every station's excerpts together: at most three prompts of notes
-EXCERPT_CHARS = 360  # per utterance: one is rarely longer
+EXCERPT_CHARS = 600  # per utterance, rarely reached: a cut one invites the model to guess the rest
 HEADER_CHARS = 30  # "[12] Deutschlandfunk, 23:05" and the blank line before it
 MIN_WORDS = 3  # fewer are greetings and station idents ("Bom dia.", "TSF.")
 FETCH_PER_STATION = 600  # rows read per station, evenly spread, before the budget
 POINTS = {"digest": 5, "now": 2}
 NOTE_POINTS = 6  # asked for per prompt in the first of two stages; more are kept
 POINT_WORDS = 25
-SOURCES_PER_POINT = 5  # spread over the story; the model cites a dozen when it can
+CITED = 3  # excerpts a point may cite, as the prompt asks; when it cites more, the first
 ANSWER_TOKENS = 500
 CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
+MAX_JOIN = 3  # notes of one story in a choice; a longer "join" lumps unrelated notes together
 ALERT_ROWS = 500  # the newest alerts looked through for those in the window
 TIMEOUT_S = 240.0  # three prompts of notes and the choice, behind whatever backlog there is
 MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
@@ -96,7 +97,8 @@ SYSTEM = (
 )
 RULES = (
     "- Only what the excerpts say: no background knowledge and no guesses. Keep names, places "
-    "and numbers as they are, and say who did something only when the excerpts say who.\n"
+    "and numbers as they are, name people rather than writing he or she, and say who did "
+    "something only when the excerpts say who.\n"
     "- Write about what was said, never about the excerpts themselves.\n"
     '- If nothing of substance was said, reply with one line: "NONE: " and one sentence in '
     "{language} saying so."
@@ -447,7 +449,7 @@ class Digester:
             raise Failed(f"the digest couldn't be made{why}") from job.error
         digest.read = sum(len(p) for p in prompts)
         digest.calls = job.calls
-        digest.points = [Point(p.text, few(p.ids, SOURCES_PER_POINT)) for p in job.points]
+        digest.points = job.points
         digest.nothing = job.nothing
         if not job.points and not job.nothing:
             digest.note = "the model's reply cited none of the moments it was given"
@@ -550,19 +552,16 @@ class _Job:
                     return False
                 self.points = list(self.notes)  # nothing to choose from
                 return True
-            messages = choice_messages(r, self.notes, self.names, self._stations_of)
+            # A small model favours the first notes it reads: a station at a time, the first
+            # station would have the digest to itself.
+            notes = in_turn(self.notes, self._station)
+            messages = choice_messages(r, notes, self.names, self._stations_of)
             reply = llm.complete(messages, max_tokens=CHOICE_TOKENS)
-            groups = [
-                self._same_station(g)
-                for g in parse_choice(reply, len(self.notes), POINTS["digest"])
-            ]
-            self.points = [
-                Point(
-                    self.notes[g[0] - 1].text,
-                    _union((self.notes[n - 1].ids for n in g), self._lines),
-                )
-                for g in groups
-            ] or pick(self.notes, POINTS["digest"], self._station)
+            groups = parse_choice(reply, len(notes), POINTS["digest"])
+            chosen = [g[0] for g in groups]
+            told = {n for g in groups if len(g) <= MAX_JOIN for n in g}
+            rest = [n for n in range(1, len(notes) + 1) if n not in told and n not in chosen]
+            self.points = [notes[n - 1] for n in chosen + rest][: POINTS["digest"]]
             return True
         finally:
             self.calls += 1
@@ -573,11 +572,6 @@ class _Job:
 
     def _station(self, point: Point) -> str:
         return self._lines[point.ids[0]].station
-
-    def _same_station(self, group: list[int]) -> list[int]:
-        """The notes of a chosen group heard on the same station as its first."""
-        first = self._station(self.notes[group[0] - 1])
-        return [n for n in group if self._station(self.notes[n - 1]) == first]
 
 
 # -- choosing what the model reads -------------------------------------------------------------
@@ -644,30 +638,23 @@ def spread(lines: Sequence[Line], budget: int) -> list[Line]:
     return []
 
 
-def few(ids: Sequence[int], count: int) -> tuple[int, ...]:
-    """At most ``count`` of a point's sources (oldest first), spread evenly over them."""
-    if len(ids) <= count:
-        return tuple(ids)
-    step = len(ids) / count
-    return tuple(ids[int(i * step)] for i in range(count))
+def in_turn(points: Sequence[Point], station: Callable[[Point], str]) -> list[Point]:
+    """The points a station at a time, one each in turn, each station's in the order given."""
+    queues: dict[str, list[Point]] = {}
+    for p in points:
+        queues.setdefault(station(p), []).append(p)
+    out: list[Point] = []
+    while len(out) < len(points):
+        out += [queue.pop(0) for queue in queues.values() if queue]
+    return out
 
 
 def pick(points: Sequence[Point], count: int, station: Callable[[Point], str]) -> list[Point]:
     """At most ``count`` points, in the order given. When there are more (a small model lists
     every story, a station at a time, however few it is asked for), they are taken in turn
-    from each station, each station's in order, so that one station's list doesn't crowd out
-    the others."""
-    if len(points) <= count:
-        return list(points)
-    queues: dict[str, list[int]] = {}
-    for i, p in enumerate(points):
-        queues.setdefault(station(p), []).append(i)
-    chosen: set[int] = set()
-    while len(chosen) < count:
-        for queue in queues.values():
-            if queue and len(chosen) < count:
-                chosen.add(queue.pop(0))
-    return [p for i, p in enumerate(points) if i in chosen]
+    from each station, so that one station's list doesn't crowd out the others."""
+    chosen = {id(p) for p in in_turn(points, station)[:count]}
+    return [p for p in points if id(p) in chosen]
 
 
 def plan_prompts(
@@ -723,8 +710,8 @@ def excerpt_messages(
     rules = RULES.format(language=language)
     line = (
         f"a dash, one sentence of at most {POINT_WORDS} words, then the numbers of the excerpts "
-        'it rests on (three at most) in brackets, like "- … [3, 4]". Don\'t name the station: '
-        "the excerpts cited say which it was."
+        f'it rests on ({CITED} at most) in brackets, like "- … [3, 4]". Don\'t name the '
+        "station: the excerpts cited say which it was."
     )
     if request.kind == "now":
         task = (
@@ -761,17 +748,18 @@ def choice_messages(
     content = (
         f"Notes on what each station said {_span(request)} (local time), written from their "
         "transcripts:\n\n" + "\n".join(blocks) + f"\n\nWhich {count} of them matter most to "
-        "someone who missed it, whichever station said it? Warnings and dangers first, then "
-        "decisions and events that touch many people, then the rest. Notes that tell the "
-        'same story count as one: join their numbers with "+".\nReply with one line: the '
-        f'numbers, the most important first, like "3+9, 7, 1, 12, 5".'
+        "someone who missed it, with at least one from each station? Warnings and dangers "
+        "first, then decisions and events that touch many people, then the rest. Notes that "
+        'tell the same story count as one: join their numbers with "+".\nReply with one line: '
+        'the numbers, the most important first, like "3+9, 7, 1, 12, 5".'
     )
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
 
 
 def parse_choice(reply: str, count: int, limit: int) -> list[list[int]]:
-    """The notes chosen in a reply like "3+9, 7, 1": groups of numbers among the ``count``
-    given, each note once, ``limit`` groups at most; empty when the reply chose none."""
+    """The notes chosen in a reply like "3+9, 7, 1", as groups of numbers among the ``count``
+    given ("3+9" is a story told in note 3 and again in note 9), each note once, ``limit``
+    groups at most; empty when the reply chose none."""
     for line in reply.replace("[", "").replace("]", "").splitlines():
         groups: list[list[int]] = []
         used: set[int] = set()
@@ -790,7 +778,9 @@ def parse_points(reply: str, count: int) -> tuple[list[tuple[str, list[int]]], s
     """The points of a reply, each with the numbers it cites among the ``count`` it was given,
     and the reply's "nothing of substance" sentence when it gave no such point. A point that
     cites nothing it was given is dropped: every point shown rests on a moment that can be
-    checked. Numbers on a line of their own belong to the points above them that have none."""
+    checked. Numbers on a line of their own belong to the points above them that have none.
+    A point keeps the first ``CITED`` numbers it gives: a small model cites the moment a story
+    starts, then whatever follows it."""
     found: list[tuple[str, list[int]]] = []
     for line in reply.splitlines():
         m = _POINT.match(line)
@@ -807,7 +797,7 @@ def parse_points(reply: str, count: int) -> tuple[list[tuple[str, list[int]]], s
             continue
         if (m or cited) and not _NONE.match(text):
             found.append((text, cited))
-    points = [(text, cited) for text, cited in found if cited]
+    points = [(text, cited[:CITED]) for text, cited in found if cited]
     nothing = _NONE.search(reply)
     return points, (nothing.group(1) if nothing and not points else None)
 
@@ -820,11 +810,6 @@ def _reply(
 
 def _ids(lines: Sequence[Line], numbers: Iterable[int]) -> tuple[int, ...]:
     return tuple(line.id for line in sorted((lines[n - 1] for n in numbers), key=lambda x: x.t))
-
-
-def _union(groups: Iterable[Iterable[int]], lines: Mapping[int, Line]) -> tuple[int, ...]:
-    """The utterances of several notes, each once, oldest first."""
-    return tuple(sorted({i for g in groups for i in g}, key=lambda i: lines[i].t))
 
 
 def _names(ids: Iterable[str], names: Mapping[str, str]) -> str:
