@@ -616,7 +616,11 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   `wavescribe alerts replay --alerts <draft.toml>` runs every stored transcript through a draft
   rule file with the real `Alerter` (cooldown, folding, confirmation, one announcement per
   sentence), a clock that follows the recordings, and actions that do nothing. It prints what
-  would have been announced, so rules are tuned on what the stations actually say.
+  would have been announced, so rules are tuned on what the stations actually say. It sees only
+  what was stored: a loop the ASR checks dropped reached the rules live but was never written
+  down, so its low alert (never announced) isn't replayed, and where it folded into an open
+  alert live, that alert's cooldown ran longer live than in the replay, which can then announce
+  a later mention that live folded in.
 
 ## Data model (SQLite)
 
