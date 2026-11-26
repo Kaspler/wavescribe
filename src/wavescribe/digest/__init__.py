@@ -287,9 +287,10 @@ class Digester:
         return max(counts, key=lambda t: counts[t]) if counts else "en"
 
     def request(self, body: Mapping[str, Any], exports: Exports | None = None) -> Request:
-        """A request from JSON: ``kind`` ("digest" or "now"), ``stations``, ``minutes`` or
-        ``since`` (seconds since 1970), ``language``. A station that ``exports`` hides is
-        unknown, as it is everywhere else another machine looks."""
+        """A request from JSON: ``kind`` ("digest" or "now"), ``stations`` (by default those
+        heard in the window), ``minutes`` or ``since`` (seconds since 1970), ``language``. A
+        station that ``exports`` hides is unknown, as it is everywhere else another machine
+        looks."""
         now = self._clock()
         kind = body.get("kind") or "digest"
         if kind not in KINDS:
@@ -336,6 +337,10 @@ class Digester:
         language = body.get("language") or self.language()
         if not isinstance(language, str) or not LANGUAGE_TAG.fullmatch(language):
             raise RequestError("language must be a BCP-47 tag, e.g. en or pt-PT")
+        if kind == "digest" and not asked:
+            # Not every station set up is running: a digest names only those it is about.
+            said = self.store.count(station_ids=stations, since=since, until=now, exports=exports)
+            stations = [sid for sid in stations if said.get(sid)] or stations
         return Request(kind, tuple(stations), float(since), now, language)
 
     @staticmethod

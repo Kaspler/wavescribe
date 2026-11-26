@@ -80,7 +80,7 @@ def test_a_digest_is_read_as_its_alerts_then_its_points_with_stations(tmp_path: 
 
 def test_nothing_of_substance_is_read_as_the_models_sentence(tmp_path: Path) -> None:
     store, digest = made(tmp_path, "NONE: Only music and adverts.", minutes=15)
-    assert spoken(digest) == ["Water cut tomorrow", "Only music and adverts."]
+    assert spoken(digest) == ["Only music and adverts."]
     store.close()
 
 
@@ -239,10 +239,10 @@ def test_a_scheduled_digest_is_shown_and_read_aloud(tmp_path: Path) -> None:
     llm = FakeLlm(TWO_POINTS)
     run = scheduled(store, llm, Schedule(60, "en", speak=True, notify=True), actions)
     digest = run.tick()
-    assert digest is not None and digest.request.stations == ("a", "b", "c")
+    assert digest is not None and digest.request.stations == ("a", "b")
     assert actions.calls[0] == (
         "notify",
-        "Digest · a, b, c · 11:00-12:00",
+        "Digest · a, b · 11:00-12:00",
         "a: Water is cut tomorrow.\nb: Heavy rain this afternoon.",
     )
     assert said(actions) == ["a: Water is cut tomorrow.", "b: Heavy rain this afternoon."]

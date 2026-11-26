@@ -292,7 +292,7 @@ def test_every_point_cites_the_utterances_it_rests_on(tmp_path: Path) -> None:
         "read": 3,
         "skipped": 3,
         "calls": 1,
-        "stations": {"a": 3, "b": 3, "c": 0},
+        "stations": {"a": 3, "b": 3},  # c said nothing, so the digest isn't about it
     }
     assert out["window"] == {"since": round(NOW - 3600), "until": round(NOW), "minutes": 60.0}
     assert out["text"].splitlines() == [
@@ -474,7 +474,7 @@ def test_another_machine_gets_a_digest_only_of_what_may_leave(tmp_path: Path) ->
     with pytest.raises(RequestError, match="unknown station 'ham'"):
         d.request({"stations": ["ham"]}, leaving)
     out = d.run(d.request({"minutes": 60}, leaving), leaving).payload()
-    assert out["stations"] == ["a", "b", "c"]
+    assert out["stations"] == ["a", "b"]
     assert "ponte às dez" not in llm.prompts[0] and out["alerts"] == []
     # This machine reads everything, as the page does here.
     here = d.run(d.request({"minutes": 60})).payload()
@@ -537,8 +537,9 @@ def test_defaults_every_station_the_last_hour_and_the_stations_language(tmp_path
     store = stocked(tmp_path)
     d = digester(store, stations=[*STATIONS, station("d", translate_to=("uk",))])
     r = d.request({})
-    assert r.kind == "digest" and r.stations == ("a", "b", "c", "d") and r.language == "en"
+    assert r.kind == "digest" and r.stations == ("a", "b") and r.language == "en"  # heard
     assert r.minutes == 60 and r.until == NOW
+    assert d.request({"minutes": 5}).stations == ("a", "b", "c", "d")  # none was heard
     since = d.request({"since": NOW - 600})
     assert since.since == NOW - 600 and since.minutes == 10
     store.close()
