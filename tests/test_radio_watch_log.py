@@ -193,14 +193,16 @@ def test_radio_catches_prints_the_log_and_its_json(
     now = time.time()
     store.add_transcript(words("walkies", TWO_M, now + 0.5, "CQ CQ"))
     store.add_catch(catch(TWO_M, now))
+    store.add_catch(replace(catch(TWO_M + 25_000, now + 10), voice=None))  # listened to only
     store.close()
     Catalog(tmp_path / "data" / "radio").note(TWO_M, name="calling channel")
     watch_cli.cmd_catches(args)
     lines = capsys.readouterr().out.splitlines()
     assert "145.5" in lines[0] and '"calling channel"' in lines[0] and "voice" in lines[0]
     assert lines[1].split() == ["pt-PT", "CQ", "CQ"]
+    assert "145.525" in lines[2] and lines[2].endswith("not checked")
     watch_cli.cmd_catches(argparse.Namespace(**{**vars(args), "json": True}))
-    row = json.loads(capsys.readouterr().out)
+    row = json.loads(capsys.readouterr().out.splitlines()[1])
     assert row["name"] == "calling channel" and row["utterances"][0]["text"] == "CQ CQ"
 
 

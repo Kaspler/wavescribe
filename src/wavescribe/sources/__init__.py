@@ -49,9 +49,7 @@ def open_source(station: Station) -> AudioSource:
         from wavescribe.sources.watch import WatchSource
 
         spurs = Catalog().spurs(station.sdr.device.serial)  # learnt with no antenna
-        return WatchSource(
-            station.id, station.sdr, spurs=spurs, privacy=station.privacy, checks=station.transcribe
-        )
+        return WatchSource(station.id, station.sdr, spurs=spurs, privacy=station.privacy)
     if station.sdr is not None:
         from wavescribe.sources.sdr import SdrChannelSource
 

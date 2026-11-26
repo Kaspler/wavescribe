@@ -37,7 +37,7 @@ class CatchPrinter:
     def __call__(self, catch: Catch) -> None:
         stamp = time.strftime("%H:%M:%S", time.localtime(catch.t_start))
         name = (self._names.get(catch.freq_hz) or {}).get("name")
-        heard = {True: "voice", False: "no voice", None: ""}[catch.voice]
+        heard = {True: "voice", False: "no voice", None: "not checked"}[catch.voice]
         if catch.reason == "carrier":
             heard = "carrier, learnt as noise"
         parts = [f"[{stamp}] {mhz_text(catch.freq_hz / 1e6):<10}", catch.label or "?"]
@@ -159,7 +159,7 @@ def cmd_catches(args: argparse.Namespace) -> int:
         return 0
     for r in reversed(rows):
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["t_start"]))
-        heard = {True: "voice", False: "no voice", None: ""}[r["voice"]]
+        heard = {True: "voice", False: "no voice", None: "not checked"}[r["voice"]]
         name = f'  "{r["name"]}"' if r.get("name") else ""
         print(
             f"{stamp}  {mhz_text(r['mhz']):<10} {r['label'] or '?'}{name}  "

@@ -234,19 +234,15 @@ class WatchSource:
         device: RtlSdrDevice | None = None,
         spurs: list[int] | tuple[int, ...] = (),
         privacy: str = "private",
-        checks: bool = True,
         queue_catches: int = QUEUE_CATCHES,
     ) -> None:
-        """``privacy`` is the watch's class, kept with each catch. ``checks``: whether the
-        pipeline runs the VAD and the gate on the audio (a transcribed station), so a catch
-        nobody spoke in can say so."""
+        """``privacy`` is the watch's class, kept with each catch."""
         self.station_id = station_id
         self.tuning = tuning
         self._device = device or shared_device(tuning.device)
         self._spurs = tuple(spurs)
         self._catcher = self._new_catcher()
         self._privacy = privacy
-        self._checks = checks
         self._q: queue.Queue[Catch | None] = queue.Queue(maxsize=queue_catches)
         self._closed = threading.Event()
         self._error: Exception | None = None  # what catching raised, on the device thread
@@ -298,13 +294,20 @@ class WatchSource:
 
     def _audio(self, catch: Catch) -> Iterator[AudioChunk]:
         self._heard = catch
-        catch.voice = False if self._checks else None
+        catch.voice = None  # until the pipeline says it looked for speech in it
         closing = np.zeros(round(CLOSING_S * SAMPLE_RATE), dtype=np.float32)
         audio = np.concatenate([catch.audio, closing])
         for i in range(0, len(audio), CHUNK):
             part = audio[i : i + CHUNK]
             t_end = catch.audio_from + (i + len(part)) / SAMPLE_RATE
             yield AudioChunk(part, t_end, discontinuity=i == 0, freq_hz=catch.freq_hz)
+
+    def checked(self, chunk: AudioChunk) -> None:
+        """The pipeline's word that a chunk of this source went through the VAD: a catch whose
+        audio did, and none of whose utterances passed the gate, had nobody speaking in it."""
+        heard = self._heard
+        if heard is not None and heard.voice is None and chunk.freq_hz == heard.freq_hz:
+            heard.voice = False
 
     def speech(self, utterance: object) -> None:
         """The pipeline's word that an utterance of this source passed the VAD and the gate."""

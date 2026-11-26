@@ -374,3 +374,31 @@ def test_each_catch_is_transcribed_on_its_own_in_the_language_heard() -> None:
     assert {c.station_id for c in caught} == {"walkies"}
     assert {c.privacy for c in caught} == {"private"}
     assert caught[0].band == "pmr446" and caught[0].label == "PMR446 walkie-talkies, channel 2"
+
+
+def test_a_watch_only_listened_to_says_its_catches_werent_checked() -> None:
+    station = watch_station(transcribe=False)
+    blocks = list(air(4.0, [Burst(PMR[1], 1.0, 2.5, tone_hz=800)]))
+    caught: list[Catch] = []
+    stop_listening = watches.subscribe(caught.append)
+    pipeline = Pipeline(
+        [station],
+        Plan(vad=(ENTRY, Path()), asr={}, mt=None),
+        lambda _r: None,
+        source_factory=lambda st: WatchSource(
+            st.id, st.sdr, device=FakeDevice(blocks), privacy=st.privacy
+        ),
+        vad_factory=lambda _path: EnergyVad(),
+    )
+    runner = threading.Thread(target=pipeline.run, daemon=True)
+    runner.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not caught and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        pipeline.stop(drain=True)
+        runner.join(10)
+        stop_listening()
+    # Nobody's speech was looked for, so whether anyone spoke is unknown, not "no".
+    assert [(c.freq_hz, c.voice) for c in caught] == [(PMR[1], None)]

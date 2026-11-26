@@ -785,6 +785,8 @@ class Pipeline:
                     # One gate per station: LiteRT interpreters aren't thread-safe (~4 MB each).
                     if gate is None and self._plan.gate:
                         gate = self._gate_factory(self._plan.gate[1])
+                if (checked := getattr(live.source, "checked", None)) is not None:
+                    checked(chunk)  # a watch tells a catch nobody spoke in from one unchecked
                 for utt in live.segmenter.feed(chunk):
                     self._gate_and_enqueue(live, gate, utt)
                 if live.segmenter.in_speech:
