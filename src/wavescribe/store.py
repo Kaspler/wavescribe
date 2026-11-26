@@ -440,14 +440,18 @@ class Store:
         limit: int = 10000,
         exports: Exports | None = None,
     ) -> list[dict[str, Any]]:
-        """Utterances that started in [since, until], oldest first (exports)."""
+        """Utterances that started in [since, until], in the order they were stored (exports).
+
+        By segment id, not start time, so a page cut at ``limit`` holds every utterance up to
+        its last id, and ``after(that id)`` goes on with none skipped: a station a few seconds
+        behind the others stores an utterance after later-starting ones of other stations."""
         where, args = _window_sql(station_ids, since, until, exports)
         with self._lock:
             ids = [
                 r[0]
                 for r in self._db.execute(
                     "SELECT s.id FROM segments s JOIN transcripts t ON t.segment_id = s.id "
-                    f"WHERE 1 = 1{where} ORDER BY s.t_start LIMIT ?",
+                    f"WHERE 1 = 1{where} ORDER BY s.id LIMIT ?",
                     [*args, limit],
                 )
             ]

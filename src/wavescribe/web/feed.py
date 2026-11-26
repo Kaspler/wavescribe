@@ -5,7 +5,8 @@
                               with events=status); resumes after Last-Event-ID or ?since_id=,
                               or from ?since=<epoch> after a restart
     GET  /feed/v1/utterances  what was said, as JSON, NDJSON or CSV (?since_id=, ?since=,
-                              ?until=, ?stations=, ?langs=, ?limit=, ?format=)
+                              ?until=, ?stations=, ?langs=, ?limit=, ?format=), in the order
+                              stored: a page goes on with ?since_id=<its last id>
     GET  /feed/v1/alerts      recent alerts
     GET  /feed/v1/stations    stations, whether they run, lag
     GET  /feed/v1/node        this machine: name, URL, version, languages

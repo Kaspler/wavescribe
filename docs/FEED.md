@@ -79,7 +79,7 @@ A batch, used by pushes that batch utterances, is
 | Request | What it returns |
 |---|---|
 | `GET /feed/v1/events` | Server-Sent Events: `utterance` and `alert` by default. Filters: `?events=utterance,alert,status`, `?stations=a,b`, `?langs=en`. |
-| `GET /feed/v1/utterances` | What was said: `?since=<epoch>&until=<epoch>` or `?since_id=<id>`, `?stations=`, `?langs=`, `?limit=` (500 by default, up to 10,000; counts only what this machine may give), `?format=json\|ndjson\|csv`. |
+| `GET /feed/v1/utterances` | What was said, in the order it was stored (by `id`): `?since=<epoch>&until=<epoch>` or `?since_id=<id>`, `?stations=`, `?langs=`, `?limit=` (500 by default, up to 10,000; counts only what this machine may give), `?format=json\|ndjson\|csv`. A page cut at the limit goes on with `?since_id=<its last id>`, with nothing skipped. |
 | `GET /feed/v1/alerts` | Recent alerts (`?since=<epoch>`). |
 | `GET /feed/v1/stations` | Stations: language, translation languages, running, connected, last heard, lag. |
 | `GET /feed/v1/node` | This machine: name, URL, version, feed version, translation languages. |

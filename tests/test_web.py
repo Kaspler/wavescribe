@@ -433,6 +433,31 @@ def test_other_machines_get_only_so_many_recordings_decoded_at_once(
         store.close()
 
 
+def test_a_time_window_goes_on_by_since_id_and_misses_nothing(tmp_path: Path) -> None:
+    from tests.test_store import result
+
+    store = Store(tmp_path / "w.db")
+    now = time.time()
+    # Station b runs a few seconds behind: its utterance starts before a's second one, and is
+    # stored after it.
+    for sid, t in (("a", now - 30), ("a", now - 20), ("b", now - 25), ("a", now - 10)):
+        store.add_transcript(result(sid, f"{sid} at {t:.0f}", t))
+    config = StationsConfig((station("a"), station("b")), Path("t.toml"))
+    hub = WebHub(config, PLAN, {}, store=store)
+    server = WebServer(("127.0.0.1", 0), hub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        path, seen = f"/feed/v1/utterances?since={now - 60:.0f}&limit=2", []
+        while page := json.loads(request(server, "GET", path)[1]):
+            seen += [e["id"] for e in page]
+            path = f"/feed/v1/utterances?since_id={page[-1]['id']}&limit=2"
+        assert seen == [1, 2, 3, 4]
+    finally:
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
 def test_ids_in_urls_take_plain_digits_only(tmp_path: Path) -> None:
     import socket
 
