@@ -8,8 +8,8 @@ machine translation.
 
 Honesty about what we know: a keyword heard on the radio says nothing about how sure or how
 urgent the underlying event is, so certainty and urgency are always "Unknown". The CAP severity
-maps from the rule's configured severity. A station alert (a station gone silent) was seen on
-the station's status rather than heard, and its note says so.
+maps from the rule's configured severity. A station alert (a station gone silent, an RDS traffic
+announcement) was seen on the station's status rather than heard, and its note says so.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any
 
 NS = "urn:oasis:names:tc:emergency:cap:1.2"
 SEVERITY = {"critical": "Extreme", "high": "Severe", "medium": "Moderate", "low": "Minor"}
-CATEGORY = {"silence": "Infra"}  # station alerts; alerts on what was said are "Other"
+CATEGORY = {"silence": "Infra", "traffic": "Transport"}  # station alerts; words are "Other"
 
 
 def _seconds(epoch: float) -> int:

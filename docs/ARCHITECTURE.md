@@ -39,7 +39,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Transcriber` | utterance → text + language + confidence | `ParakeetMlx` (default for European languages), `MlxAudioTranscriber` (Whisper, Qwen3-ASR, Voxtral, Nemotron through mlx-audio) |
 | Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it. A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
 | `Translator` | text → text in a target language | `LlmTranslator` (Qwen3.5 through mlx-lm, the default; TranslateGemma opt-in), `MadladTranslator` (MADLAD-400 through CTranslate2, CPU, the fallback) |
-| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
+| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule` and `TrafficRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
 | `Actions` | Deliver an alert (`alerts/actions.py`) | `MacActions`: `notify` (a macOS notification through `osascript`), `speak:<lang>` (macOS `say`, one voice per language), `log`; `LogOnlyActions` elsewhere. Webhooks go through `Outputs` |
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six retries over about 2 minutes (network errors, 408/425/429, 5xx); an HMAC-SHA256 signature when a secret is set; one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
@@ -521,7 +521,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   group or possessive repeat is allowed). Each reads one utterance, at most 2,000 characters,
   and a pattern slower than 50 ms on one is named in the log. Overlapping alternatives inside a
   repeat (`(a|ab)+`) are not detected.
-- **Station alerts** (`kind = "silence"`, `alerts/watch.py`): no second monitor. Every 5 s the
+- **Station alerts** (`kind = "silence"` or `"traffic"`, `alerts/watch.py`): no second monitor. Every 5 s the
   watch reads `Pipeline.status()`, the snapshot the page shows, and a running, transcribed
   station is silent while its source is down or reconnecting, has sent nothing for 15 s, or its
   audio level (the RMS of the latest chunk) is below `level_db` (default −50 dBFS) at every
@@ -538,6 +538,12 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   own, in English like the page, with no words heard: delivery translates it for
   `notify_language` and each `speak:<lang>` like a quote, and speaks it without the voice's
   `intro`. With no station rules the status isn't read at all.
+- **Traffic announcements** (`kind = "traffic"`, opt-in): an FM station's RDS turning on TA with
+  TP (TA alone means it relays another station's announcement, by EON), as `dsp/rds.py` decodes
+  it into the station's health (`SourceHealth.rds`, in `Pipeline.status`) after seeing the flag
+  twice in a row. Only the change from off to on alerts ("Traffic announcement on …"), also on
+  a listen-only station, since RDS needs no model; announcements within the cooldown fold into
+  the rule's open alert, unannounced. `stations` limits it to some stations.
 - **Confirmation:** a rule with `min_mentions = N` holds its alert at `low` (stored, not
   announced) until N mentions within the cooldown, or one that names a `near` place. Mentions
   heard as another language don't count. Reaching N raises the alert, which is then announced
@@ -566,8 +572,9 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   CAP document: one `<info>` in the source language with the quote, and one per checked
   translation, marked `machine_translation`. Certainty and urgency are always `Unknown`: a keyword
   on the radio says nothing about either. Severity maps critical/high/medium/low to
-  Extreme/Severe/Moderate/Minor. A station alert's category is `Infra` (silence), and its note
-  says it was seen on the station's status, not in what was said.
+  Extreme/Severe/Moderate/Minor. A station alert's category is `Infra` (silence) or
+  `Transport` (traffic), and its note says it was seen on the station's status, not in what was
+  said.
 - **Views:** the page has an alert feed (recent alerts above `low`, in the viewer's language when
   a checked translation exists; tap to open the station, ▶ to replay) and highlights the words
   that matched in the original text, or underlines the utterance when a translation is shown.
@@ -592,7 +599,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 - `alerts(id, rule_id, severity, first_at, last_at, stations, language, quote, terms, mentions, segment_id, status, delivered_at, delivered_severity, actions)`: one per rule firing, repeats folded in; the quote keeps the source text after its transcript is pruned (schema 3)
 - `alert_mentions(alert_id, segment_id, severity, terms, spans)`: each utterance's hit, with character spans for highlighting; deleted with the utterance
 - `alert_summaries(alert_id, lang, text, model)`: checked translations of the quote, one row per language, so no language is hard-coded in the schema
-- `alerts.kind` (`keyword` or `llm`) and `alerts.reason` (the LLM's one-line reason), schema 4. A station alert has kind `silence`, Wavescribe's own words as its quote (language `en`), no mentions rows, and "audio is back …" as its reason once it ended
+- `alerts.kind` (`keyword` or `llm`) and `alerts.reason` (the LLM's one-line reason), schema 4. A station alert has kind `silence` or `traffic`, Wavescribe's own words as its quote (language `en`), no mentions rows, and "audio is back …" as its reason once it ended
 - `deliveries(id, output_id, event, ref, t, ok, status, error, attempts, ms)`: one row per output request, capped at 10,000 rows (schema 4)
 - `segments.privacy` (the class the row was heard under), `alerts.privacy` (the classes of the alert's stations when heard, comma-separated), index `segments_class`, schema 6; at start, older rows take their station's current class if it isn't broadcast
 

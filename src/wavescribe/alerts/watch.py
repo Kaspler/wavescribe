@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Alerts about stations rather than words: a station that went silent.
+"""Alerts about stations rather than words: a station that went silent, or an FM station's
+traffic announcement.
 
 There is no second monitor. Every few seconds the watch reads the pipeline's status snapshot,
-the one the page shows (``Pipeline.status``: connected, age of the last audio, audio level), and
-checks the station rules against it. What they raise goes through the ``Alerter`` like any alert
-(cooldown, actions, CAP, webhooks, store), worded by Wavescribe, since no words were heard.
+the one the page shows (``Pipeline.status``: connected, age of the last audio, audio level,
+RDS), and checks the station rules against it. What they raise goes through the ``Alerter``
+like any alert (cooldown, actions, CAP, webhooks, store), worded by Wavescribe, since no words
+were heard.
 
 **Silence** (``rules.SilenceRule``): a running, transcribed station whose source has delivered
 nothing for ``STALE_S`` or is reconnecting, or whose audio level stayed below ``level_db`` at
@@ -12,6 +14,12 @@ every reading, for ``after_minutes``. A listen-only, switched-off or stopped sta
 alerts. A narrowband channel is silent between transmissions by design, so only its outages
 count. Once the station has had audio again for ``BACK_AFTER_S``, the alert says so, once, and
 closes; the next silence is a new alert.
+
+**Traffic** (``rules.TrafficRule``, opt-in): an FM station's RDS turning on its traffic
+announcement flag (TA, with TP: TA alone means it relays another station's). The RDS decoder
+(``dsp/rds.py``) already wants the flag twice in a row. Only the change from off to on alerts,
+also on a listen-only station, since RDS needs no model; further announcements within the
+rule's cooldown fold into its open alert, unannounced.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from wavescribe.rules import SilenceRule
+from wavescribe.rules import SilenceRule, TrafficRule
 
 if TYPE_CHECKING:
     from wavescribe.alerts import Alert, Alerter
@@ -66,6 +74,12 @@ def quiet(status: dict[str, Any], level_db: float) -> str | None:
     return None
 
 
+def announcing(status: dict[str, Any]) -> bool:
+    """A traffic announcement is on, by the station's RDS: TP and TA both set."""
+    rds = status.get("rds") or {}
+    return bool(rds.get("tp")) and bool(rds.get("ta"))
+
+
 def watched(station: Station | None, rule: Any, status: dict[str, Any]) -> bool:
     """Whether a station is one a silence rule looks at now."""
     return (
@@ -98,6 +112,7 @@ class StationWatch:
         self._silent: dict[tuple[str, str], _Silence] = {}  # (rule id, station id) -> state
         self._began: dict[int, float] = {}  # id of an open silence alert -> when it began
         self._names: dict[str, str] = {}  # station id -> name, from the latest check
+        self._announcing: dict[str, bool] = {}  # station id -> TA on at the latest check
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -137,6 +152,18 @@ class StationWatch:
         if snapshot.get("ready", True):  # models still loading: sources aren't read yet
             for rule in silence.values():
                 self._check_silence(rule, live, stations, now)
+        on = {sid: announcing(status) for sid, status in live.items()}
+        started = [sid for sid, now_on in on.items() if now_on and not self._announcing.get(sid)]
+        self._announcing = on
+        for rule in rules:
+            if isinstance(rule, TrafficRule):
+                for sid in started:
+                    station = stations.get(sid)
+                    if station is None or station.disabled or live[sid].get("stopping"):
+                        continue
+                    if not rule.stations or sid in rule.stations:
+                        text = f"Traffic announcement on {self._names[sid]}."
+                        self.alerter.on_station(rule, station, text)
 
     def _check_silence(
         self,

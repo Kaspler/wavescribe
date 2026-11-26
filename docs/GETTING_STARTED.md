@@ -202,6 +202,11 @@ alert, and you get a notification when its audio is back. It's how you find out 
 stream, the receiver or the network went down. Stations you only listen to, and stations
 switched off, never raise it.
 
+**Traffic announcements:** FM stations flag their traffic news in their broadcast data (RDS).
+Add a rule with `kind = "traffic"` (an example is in `config/alerts.example.toml`) and you get
+an alert when one starts on a station you receive with an SDR, at most once per cooldown. It
+works on stations you only listen to as well, since nothing has to be transcribed.
+
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Station alerts: a station gone silent, read from the pipeline's status snapshot."""
+"""Station alerts read from the pipeline's status snapshot: a station gone silent, and an FM
+station's RDS traffic announcement (from synthetic RDS groups, never a receiver)."""
 
 import dataclasses
 import threading
@@ -13,6 +14,7 @@ import pytest
 
 from tests.test_alerts import CONFIG, Clock, FakeActions
 from tests.test_pipeline import PLAN, FakeTranscriber, FakeTranslator, station
+from tests.test_rds import bits_of, mpx, name_groups
 from tests.test_rules import pack
 from tests.test_segmenter import EnergyVad
 from wavescribe.alerts import Alerter, parse_alerts
@@ -20,6 +22,7 @@ from wavescribe.alerts.cap import NS, to_cap
 from wavescribe.alerts.watch import StationWatch
 from wavescribe.audio import SAMPLE_RATE, AudioChunk
 from wavescribe.config import ConfigError
+from wavescribe.dsp.rds import RdsDecoder
 from wavescribe.pipeline import Pipeline
 from wavescribe.sources import SourceHealth
 from wavescribe.store import Store
@@ -278,3 +281,122 @@ def test_the_watch_reads_the_real_pipeline_status(tmp_path: Path) -> None:
         pipeline.stop()
     assert rig.notes() == [("CRITICAL · station-silent · Rádio A",
                             "Rádio A has been silent for 1 minute.")]  # fmt: skip
+
+
+TRAFFIC = {"id": "traffic", "kind": "traffic", "severity": "medium"}
+
+
+def rds(tp: bool = True, ta: bool = False) -> dict:
+    return {"pi": "2F15", "ps": "RADIO A", "tp": tp, "ta": ta, "groups": 400}
+
+
+def test_a_traffic_announcement_alerts_when_it_starts_and_is_rate_limited(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, TRAFFIC)
+    rig.live["a"]["rds"] = rds()
+    rig.tick()
+    assert rig.actions.calls == []  # a station that carries traffic news, none on now
+    rig.live["a"]["rds"] = rds(ta=True)
+    rig.tick(5)
+    assert rig.notes() == [("MEDIUM · traffic · Rádio A", "Traffic announcement on Rádio A.")]
+    [alert] = rig.alerter._open.values()
+    assert (alert.kind, alert.quote, alert.language) == (
+        "traffic", "Traffic announcement on Rádio A.", "en")  # fmt: skip
+    rig.run(3 * 60)  # it goes on: one alert, not one per reading
+    rig.live["a"]["rds"] = rds()
+    rig.run(5 * 60)
+    rig.live["a"]["rds"] = rds(ta=True)  # the next one within the cooldown folds in
+    rig.run(60)
+    assert len(rig.notes()) == 1 and alert.mentions == 2
+    rig.live["a"]["rds"] = rds()
+    rig.run(20 * 60)
+    rig.live["a"]["rds"] = rds(ta=True)  # after it: a new alert
+    rig.tick(5)
+    assert len(rig.notes()) == 2 and rig.alerter._open["traffic"] is not alert
+
+
+def test_traffic_alerts_are_opt_in_per_rule_and_station(tmp_path: Path) -> None:
+    listen = dataclasses.replace(station("music"), name="Music FM", transcribe=False)
+    off = dataclasses.replace(station("off"), disabled=True)
+    rig = Rig(tmp_path, SILENCE, stations=[listen, off, station("a")])
+    rig.live = {sid: {**SOUNDING, "rds": rds()} for sid in ("music", "off", "a")}
+    rig.tick()
+    for s in rig.live.values():
+        s["rds"] = rds(ta=True)
+    rig.run(60)
+    assert rig.actions.calls == []  # no traffic rule, no traffic alerts
+
+    (tmp_path / "2").mkdir()
+    rig = Rig(tmp_path / "2", {**TRAFFIC, "stations": ["music", "off"]},
+              stations=[listen, off, station("a")])  # fmt: skip
+    rig.live = {sid: {**SOUNDING, "rds": rds()} for sid in ("music", "off", "a")}
+    rig.tick()
+    for s in rig.live.values():
+        s["rds"] = rds(ta=True)
+    rig.run(60)
+    # A listen-only station is decoded too (RDS needs no model); switched off and other
+    # stations aren't.
+    assert rig.notes() == [("MEDIUM · traffic · Music FM", "Traffic announcement on Music FM.")]
+
+
+def test_ta_without_tp_is_another_stations_announcement(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, TRAFFIC)
+    rig.live["a"]["rds"] = rds(tp=False)
+    rig.tick()
+    rig.live["a"]["rds"] = rds(tp=False, ta=True)  # it relays another station's, by EON
+    rig.run(60)
+    rig.live["b"]["rds"] = None  # and a station with no RDS at all
+    rig.run(60)
+    assert rig.actions.calls == []
+
+
+class RdsSource:
+    """A listen-only FM station whose health carries what an RDS decoder made of synthetic
+    groups, as SdrChannelSource's does."""
+
+    def __init__(self, station_id: str) -> None:
+        self.station_id = station_id
+        self.health = SourceHealth()
+        self.decoder = RdsDecoder()
+        self._closed = threading.Event()
+
+    def send(self, ta: int) -> None:
+        bits = bits_of(name_groups(0x2F15, "RADIO A", tp=1, ta=ta) * 3)
+        self.decoder(mpx(bits, len(bits) / 1187.5))
+        self.health.rds = self.decoder.info.to_dict()
+
+    def __iter__(self) -> Iterator[AudioChunk]:
+        while not self._closed.wait(0.05):
+            self.health.connected, self.health.last_data_at = True, time.time()
+            yield AudioChunk(np.full(SAMPLE_RATE // 20, 0.1, np.float32), t_end=time.time(),
+                             discontinuity=False)  # fmt: skip
+
+    def close(self) -> None:
+        self._closed.set()
+
+
+def test_a_traffic_announcement_decoded_from_rds_groups_alerts(tmp_path: Path) -> None:
+    listen = dataclasses.replace(station("a"), name="Rádio A", transcribe=False)
+    rig = Rig(tmp_path, TRAFFIC, stations=[listen])
+    source = RdsSource("a")
+    pipeline = Pipeline([listen], dataclasses.replace(PLAN, asr={}), lambda _r: None,
+                        source_factory=lambda _st: source)  # fmt: skip
+    rig.watch = StationWatch(rig.alerter, pipeline.status, lambda: rig.stations, clock=rig.clock)
+    pipeline.start()
+    try:
+        source.send(ta=0)
+        deadline = time.time() + 10
+        while "rds" not in pipeline.status()["stations"].get("a", {}):
+            assert time.time() < deadline, "the station never started"
+            time.sleep(0.05)
+        rig.tick()
+        assert rig.actions.calls == [] and source.health.rds["tp"]
+        source.send(ta=1)
+        rig.tick(5)
+    finally:
+        pipeline.stop()
+    assert source.health.rds["ta"]
+    assert rig.notes() == [("MEDIUM · traffic · Rádio A", "Traffic announcement on Rádio A.")]
+    [alert] = rig.alerter._open.values()
+    root = ET.fromstring(to_cap(alert.payload()))
+    [info] = root.findall(f"{{{NS}}}info")
+    assert info.find(f"{{{NS}}}category").text == "Transport"

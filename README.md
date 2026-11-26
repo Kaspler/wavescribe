@@ -64,8 +64,8 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 - **Translates** into your language as it is said, and into other languages for alerts or on
   demand.
 - **Alerts** from keywords, regular expressions or a plain-language description ("residents are
-  told to leave"), and when a station goes silent, as a notification, a spoken alert in your
-  language, or a webhook.
+  told to leave"), and when a station goes silent or an FM station starts a traffic
+  announcement, as a notification, a spoken alert in your language, or a webhook.
 - **Search and Ask**: everything heard is kept and searchable, and a question is answered with
   the moments it was said.
 - **Phones read along** on the same Wi-Fi, read-only.

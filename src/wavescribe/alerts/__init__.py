@@ -20,9 +20,9 @@ Delivery never depends on the database: every write to the store is best effort 
 and an alert whose delivery could not run is marked failed rather than left pending, so the
 rule's next mention announces it.
 
-Station alerts (a station gone silent, ``alerts/watch.py``) take the same path with text worded
-by Wavescribe instead of words heard (``on_station``), and say once when it is over
-(``station_back``).
+Station alerts (a station gone silent, a traffic announcement; ``alerts/watch.py``) take the
+same path with text worded by Wavescribe instead of words heard (``on_station``); a silence
+says once when it is over (``station_back``).
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ class Alert:
     wanted: str = "low"
     heard: int = 0  # mentions that count towards confirmation (not heard as another language)
     confirmed: bool = True
-    kind: str = "keyword"  # or "llm", or a station rule's kind ("silence")
+    kind: str = "keyword"  # or "llm", or a station rule's kind ("silence", "traffic")
     reason: str | None = None  # the LLM's reason, when an LLM rule or check was involved
     ended: bool = False  # a station alert whose cause is over (the station is back)
 
@@ -504,7 +504,7 @@ class Alerter:
     # -- station alerts (alerts/watch.py) -----------------------------------------------------
 
     def on_station(self, rule: Any, station: Any, text: str) -> Alert:
-        """A station rule fired (``rules.SilenceRule``): one alert through the usual path, with
+        """A station rule fired (``rules.StationRule``): one alert through the usual path, with
         ``text`` worded by Wavescribe and no words heard. While the rule's alert is open and
         within the cooldown, another station firing it folds in unannounced: when the network
         goes down every stream goes quiet at once, and that is one alert."""

@@ -141,7 +141,8 @@ mhz = 145.6            # any frequency; `fm_mhz` is for broadcast FM
 The demodulators are Wavescribe's own (numpy and scipy, `dsp/`):
 
 - **WFM** for broadcast FM: a channel about 200 kHz wide, de-emphasis, and the RDS decoder fed from the
-  multiplex.
+  multiplex. A rule with `kind = "traffic"` alerts when a station's RDS starts a traffic
+  announcement (ARCHITECTURE.md, *Alerts*).
 - **NFM** for walkie-talkies, marine and amateur radio: a 12.5 or 25 kHz channel, de-emphasis,
   CTCSS tones removed, a noise squelch that opens when someone transmits whatever their level
   and shuts with the carrier.

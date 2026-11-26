@@ -124,6 +124,15 @@ level_db = -50
 severity = "medium"
 # stations = ["station-id"]   # only these stations; all of them when left out
 
+# An FM station starting a traffic announcement, from its RDS (receiver stations only). Opt-in:
+# uncomment it. Only the start alerts; more within cooldown_minutes join the same alert. It
+# works on listen-only stations too: RDS needs no model.
+# [[rule]]
+# id = "traffic"
+# kind = "traffic"
+# severity = "medium"
+# stations = ["station-id"]   # only these stations; every FM station when left out
+
 [actions]
 # speak:<lang> speaks a checked translation into <lang> (or that language's fallback phrase).
 critical = ["notify", "speak:en", "log"]
