@@ -43,6 +43,21 @@ class MlxAudioTranscriber:
         )
         return Transcript(text=out.text.strip(), language=language, model=self.model_id)
 
+    def identify_language(self, samples: np.ndarray) -> dict[str, float] | None:
+        """Whisper's language identification without transcribing: one encoder pass over the
+        first 30 s and one decoder step. Probabilities by language subtag (BCP-47 where
+        Whisper's code differs); None if this model family can't tell."""
+        import mlx.core as mx
+        from mlx_audio.stt.models.whisper.audio import N_FRAMES, pad_or_trim
+
+        if self._family != "whisper":
+            return None
+        mel, _ = self._model._prepare_audio(mx.array(samples, dtype=mx.float32))
+        segment = pad_or_trim(mel, N_FRAMES, axis=-2).astype(self._model.dtype)
+        _, probs = self._model.detect_language(segment)
+        back = {v: k for k, v in _WHISPER_CODES.items()}
+        return {back.get(code, code): float(p) for code, p in probs.items()}
+
     def detect_language(self, samples: np.ndarray) -> Transcript | None:
         """Transcribe with the model's own language identification (Whisper only); the
         transcript's language is the one it heard, as Whisper's code. None if this model
