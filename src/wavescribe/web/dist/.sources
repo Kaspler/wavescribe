@@ -42,6 +42,7 @@ cdbad39e7a61fc08a14c0b4d6442fb14a685b3aa frontend/src/manage/Radio.tsx
 9f2141de10bc06e567e9fb1205d2d90f435ae6c6 frontend/src/manage/Status.tsx
 cbc4e89d76719e871cdba3a3fb83783e375c9c46 frontend/src/manage/api.ts
 abe9af83f752ac02ce47b81f46e2890553568d9e frontend/src/manage/bands.ts
+7b2f5caa73f379769499bd801e8904fff96ec720 frontend/src/manage/dial.ts
 35fd29c69797bd23f8c66fedf92a8cfa99ebef5b frontend/src/manage/manage.css
 cacd21dce7c7b89559a69e348f6a7bc173a3ad1d frontend/src/reading/Alerts.tsx
 c274c6f0ccc7ae37b8c61550332782590c28b15c frontend/src/reading/Ask.tsx
@@ -62,6 +63,7 @@ c58e4f0950da01a92e2b255dd995f46759877778 frontend/src/reading/StationMenu.tsx
 b72fa0e883100643d3252a59f3d9fd253d66d71e frontend/src/styles/base.css
 508c6f07cd6dd7588c0fbfdfe4209b7bcb2495a6 frontend/src/styles/tokens.css
 5d86c62f2c0fd8ff48e6317b003ec50aafa84501 frontend/tests/alertText.test.mjs
+eab4d12ad7bcd60a0ac6989de7e6278e66e659c1 frontend/tests/dial.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 d010ad380d164c82fb88fbb297e703e1e79e7805 frontend/tests/router.test.mjs
 74db4f79af17f30038dc8db92e26d1bd0832fb95 frontend/tests/time.test.mjs
