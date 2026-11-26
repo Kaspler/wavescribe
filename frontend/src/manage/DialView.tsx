@@ -15,6 +15,7 @@ import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps } from "./tu
 const NAME_FONT = 12; // px, as --t-sm
 const MIN_INNER_PX = 14; // a band inside another stays this wide
 const LIST_BELOW = 560; // px: narrower, the dial is a list of bands, one under another
+const CARD_ID = "dl-card";
 
 /** "87.5 to 108 MHz": a range said in words, for names a screen reader reads out. */
 export const rangeWords = (b: Pick<Band, "start_mhz" | "stop_mhz">) => `${+b.start_mhz.toFixed(3)} to ${+b.stop_mhz.toFixed(3)} MHz`;
@@ -84,7 +85,7 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
   const found: number[] = useMemo(() => heard.filter((e) => e.privacy !== "digital").map((e) => e.mhz), [heard]);
 
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
-    const order = segs.map((s) => s.band.id);
+    const order = (list ? rows.map((r) => r.s) : segs).map((s) => s.band.id);
     const i = order.indexOf(chosen || "");
     const next = e.key === "ArrowRight" || e.key === "ArrowDown" ? Math.min(order.length - 1, i + 1)
       : e.key === "ArrowLeft" || e.key === "ArrowUp" ? Math.max(0, i < 0 ? 0 : i - 1)
@@ -97,13 +98,27 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
   const roving = chosen && segs.some((s) => s.band.id === chosen) ? chosen : segs[0]?.band.id;
 
   const list = width > 0 && width < LIST_BELOW;
+  // As a list: in frequency order, a band before those inside it, and two bands of one name
+  // (the amateurs' 2 m and 70 cm) by their shorter, distinct labels.
+  const rows = useMemo(() => {
+    const byStart = segs.slice().sort((a, b) => a.band.start_mhz - b.band.start_mhz || b.band.stop_mhz - a.band.stop_mhz);
+    const named = new Map<string, number>();
+    for (const s of byStart) named.set(bandWords(s.band).name, (named.get(bandWords(s.band).name) || 0) + 1);
+    return byStart.map((s) => ({ s, shown: (named.get(bandWords(s.band).name) || 0) > 1 ? label(s.band) : bandWords(s.band).name }));
+  }, [segs]);
+  // On a phone the card is below a long list: a tap brings it into view (keys keep their place).
+  const tapped = (id: string) => {
+    onChoose(id);
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    requestAnimationFrame(() => document.getElementById(CARD_ID)?.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" }));
+  };
   return (
     <div className={cx("dl", list && "is-list")}>
      <div className="dl-in" ref={wrap}>
       {list && (
         <>
           <div className="dl-list" ref={track} role="toolbar" aria-label="Bands on the dial" aria-orientation="vertical" onKeyDown={keys}>
-            {segs.map((s) => {
+            {rows.map(({ s, shown }) => {
               const count = heardIn(heard, s.band).length;
               const w = bandWords(s.band);
               return (
@@ -112,9 +127,9 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
                           tabIndex={s.band.id === roving ? 0 : -1} aria-pressed={s.band.id === chosen}
                           aria-label={[w.name, rangeWords(s.band), s.kind === "text" ? "voices to text" : "digital, shown only",
                             count ? `${count} heard here` : null, says?.(s.band)].filter(Boolean).join(", ")}
-                          onClick={() => onChoose(s.band.id)}>
+                          onClick={(e) => (e.detail ? tapped(s.band.id) : onChoose(s.band.id))}>
                     <i className={cx("dl-key", `is-${s.kind}`)} aria-hidden="true" />
-                    <span className="dl-row-name">{w.name}</span>
+                    <span className="dl-row-name">{shown}</span>
                     <span className="dl-row-range">{+s.band.start_mhz.toFixed(3)}–{+s.band.stop_mhz.toFixed(3)}</span>
                     {count > 0 && <span className="dl-row-count">{count} heard</span>}
                   </button>
@@ -153,7 +168,9 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
               return (
                 <g key={f}>
                   <rect className="dl-tick" x={x} y={7} width={1} height={4} />
-                  <text className="dl-mhz" x={Math.min(width - 2, Math.max(2, x))} y={22} textAnchor={x < 16 ? "start" : x > width - 16 ? "end" : "middle"}>{f}</text>
+                  <text className="dl-mhz" x={Math.min(width - 2, Math.max(2, x))} y={22} textAnchor={x < 16 ? "start" : x > width - 16 ? "end" : "middle"}>
+                    {f === marks[0] ? `${f} MHz` : f}
+                  </text>
                 </g>
               );
             })}
@@ -198,13 +215,23 @@ export function DialLegend() {
   );
 }
 
+/** What each receiver is doing, in words beside its lamp: the dial's tabs carry only the lamp
+ * and the letter, and this is also where the lamps' meanings are learnt. */
+export function ReceiverWords({ rxs }: { rxs: RxStatus[] }) {
+  return (
+    <p className="dl-legend dl-rx-words">
+      {rxs.map((r) => <span key={r.id}><Lamp state={r.lamp} />Receiver {rxName(r.id)}: {r.words}</span>)}
+    </p>
+  );
+}
+
 /** A chosen band, explained: what it is, what you would hear and when, the antenna it wants, and
  * what Wavescribe does with it; then what can be done there (`children`). */
 export function BandCard({ band, kept, policies, heard, children }: { band: Band; kept: string; policies: Any; heard: number; children?: ReactNode }) {
   const w = bandWords(band);
   const ask = !!policies?.[band.privacy]?.needs_ack;
   return (
-    <div className="dl-card">
+    <div className="dl-card" id={CARD_ID}>
       <h4 className="dl-card-h">
         {w.name}
         <span className="dl-card-tech">{band.name} · {+band.start_mhz.toFixed(3)}–{+band.stop_mhz.toFixed(3)} MHz{band.mode ? ` · ${band.mode.toUpperCase()}` : ""}</span>
@@ -230,7 +257,7 @@ export interface RxStatus {
   hi: number;
   state: "idle" | "hand" | "stations" | "scanning" | "trouble";
   lamp: "off" | "dim" | "on" | "wait" | "trouble";
-  /** "following 2 stations: Valley and City News", "idle", … */
+  /** "following Valley and City News", "idle", … */
   words: string;
   /** Running stations a move would pause. */
   holders: string[];
@@ -260,7 +287,7 @@ export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStat
       words: `tuned by hand to ${mhzText(live.mhz, live.mode)}${waiting.length ? `; ${and(waiting)} ${waiting.length === 1 ? "waits" : "wait"} until it's let go` : running.length ? `, beside ${and(running)}` : ""}` };
   }
   if (running.length) {
-    return { ...base, state: "stations", lamp: "on", words: `following ${running.length === 1 ? "1 station" : `${running.length} stations`}: ${and(running)}` };
+    return { ...base, state: "stations", lamp: "on", words: `following ${and(running)}` };
   }
   return { ...base, state: "idle", lamp: "off", words: "idle" };
 }
@@ -311,7 +338,8 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
                     title={centre != null ? `Look at ${mhzText(centre)} with Receiver ${rxName(m.id)}` : `Receiver ${rxName(m.id)}: ${r.words}. Drag along the dial to move it.`}
                     onClick={() => { if (!dragging) onChoose(m.id); }}
                     onPointerDown={(e) => {
-                      if (e.button !== 0 || r.state === "scanning") return;
+                      // One pointer moves one receiver: a second finger doesn't take it over.
+                      if (e.button !== 0 || !e.isPrimary || drag || r.state === "scanning") return;
                       e.currentTarget.setPointerCapture(e.pointerId);
                       const x = e.clientX - (e.currentTarget.parentElement!.parentElement!.getBoundingClientRect().left);
                       setDrag({ id: m.id, from: x, x });
@@ -324,7 +352,8 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
                       if (drag?.id === m.id && centre != null) onDrop(m.id, centre);
                       setTimeout(() => setDrag(null)); // after the click this release also fires
                     }}
-                    onPointerCancel={() => setDrag(null)}>
+                    onPointerCancel={() => setDrag(null)}
+                    onKeyDown={(e) => { if (e.key === "Escape" && drag) { e.stopPropagation(); setDrag(null); } }}>
               <Lamp state={r.lamp} onBand />
               {rxName(m.id)}
             </button>
@@ -370,10 +399,10 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
         <Button icon="plus" onClick={() => onAdd({ mhz: st.mhz, mode: st.mode, name: st.rds?.ps?.trim() || "", privacy: st.privacy, device: t.dev, t: Date.now() })}>
           Add as a station
         </Button>
-        <ActButton variant="ghost" icon="stop" run={t.close}>Let Receiver {name} go</ActButton>
+        <ActButton variant="ghost" run={t.close}>Let Receiver {name} go</ActButton>
       </div>
       {t.blocked && <p className="m-trouble">The browser held the sound back: press Listen.</p>}
-      {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain under Advanced.</p>}
+      {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain under Tuning.</p>}
       {!st.connected && (st.error || st.reconnects > 0) && (
         <p className="m-trouble">{st.error ? `Receiver ${name} stopped: ${st.error}. Look here again to restart it.` : `Receiver ${name} has stopped sending: reconnecting…`}</p>
       )}

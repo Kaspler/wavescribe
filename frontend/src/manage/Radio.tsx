@@ -2,13 +2,13 @@
 // into a station (Find stations, On the air); what was found, to play (Listen, On the air here); set
 // up the receivers and the region, and decide what is kept of radio that isn't broadcast (Settings)
 // (src/wavescribe/radio/service.py).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { langName } from "../lib/lang";
 import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
-import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
+import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
@@ -225,7 +225,14 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   const me = rxs.find((r) => r.id === device);
   const [moving, setMoving] = useState<{ id: string; mhz: number; mode: string | null; play: boolean } | null>(null);
   const question = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (moving) question.current?.querySelector<HTMLElement>("button")?.focus(); }, [moving]); // a question takes the focus
+  // A question takes the focus while it is asked, and gives it back to where it was asked from.
+  const asked = !!moving;
+  useEffect(() => {
+    if (!asked) return;
+    const from = document.activeElement as HTMLElement | null;
+    question.current?.querySelector<HTMLElement>("button")?.focus();
+    return () => { if (from?.isConnected) from.focus(); };
+  }, [asked]);
   /** Tunes receiver `id` to `mhz`, with sound when `play`. One following stations asks first if
    * that moves it, saying which stations wait, and a free receiver is offered instead. */
   const send = (id: string, mhz: number, mode: string | null, play: boolean, pause = false) => {
@@ -300,6 +307,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
         {!running && !pause && chosen && kindOf(chosen) === "text" && (
           <span className="m-hint rd-inline">
             {minutes ? `Watches the band for ${minutes} minutes: these channels talk now and then.` : "One sweep, a minute or two."}
+            {onTheDial && me && me.state !== "scanning" && !liveHere && " Look here shows the band live, without sound."}
           </span>
         )}
         {pause && !running && (
@@ -312,7 +320,11 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
         </p>
       )}
       {moving && (
-        <div ref={question} className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q">
+        <div ref={question} className="m-panel rd-retune" role="alertdialog" aria-labelledby="dl-move-q"
+             onKeyDown={(e) => {
+               // Escape answers the question; the page's own Escape (back to reading) must not run too.
+               if (e.key === "Escape") { e.stopPropagation(); setMoving(null); }
+             }}>
           <p id="dl-move-q" className="m-line">
             Receiver {rxName(moving.id)} is following {and(rxs.find((r) => r.id === moving.id)?.holders || [])}. {moving.play ? "Listening to" : "Looking at"}{" "}
             {mhzText(moving.mhz, moving.mode)} pauses {rxs.find((r) => r.id === moving.id)?.holders.length === 1 ? "it" : "them"} until you let the receiver go.
@@ -375,6 +387,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
                                 }} />
                )} />
       <DialLegend />
+      {rxs.length > 0 && <ReceiverWords rxs={rxs} />}
       {onTheDial && chosen ? (
         <BandCard band={chosen} kept={policyLine(chosen.privacy, v.policies)} policies={v.policies} heard={heardIn(v.heard, chosen).length}>
           {actions}
@@ -427,7 +440,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
             <>
               {(shown.length > 0 || running) && (
                 <Table caption="Signals found" empty="Nothing yet…"
-                       cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise", num: true }, { label: "", width: "1%" }]}>
+                       cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise" }, { label: "", width: "1%" }]}>
                   {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} />)}
                 </Table>
               )}
@@ -483,10 +496,12 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
       {(failed || (sweeping?.phase === "done" && !rows.some(real))) && <NothingHeard v={v} result={sweeping} onTry={onTry} />}
       {(shown.length > 0 || running) && <h4 className="m-sub-h">Found in {name}, strongest first</h4>}
       {(shown.length > 0 || running) && (
+       <div className="dl-found">
         <Table caption={`Found in ${name}, strongest first${sweeping ? "" : ", from every scan so far"}`} empty="Nothing yet…"
-               cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise", num: true }, { label: "", width: "1%" }]}>
+               cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise" }, { label: "", width: "1%" }]}>
           {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} onListen={onListen} />)}
         </Table>
+       </div>
       )}
       {hidden.length > 0 && (
         <p className="m-hint">
@@ -980,6 +995,7 @@ function Heard({ v, onAdd, reload }: { v: Any; onAdd: (t: Any) => void; reload: 
                  Forget all
                </ConfirmButton>
              )}>
+      <HeardFold n={v.heard.length}>
       <Table caption="Heard here" empty="Nothing yet: scan a band above."
              cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Last heard" }, { label: "", width: "1%" }]}>
         {v.heard.map((e: Any) => (
@@ -1017,8 +1033,16 @@ function Heard({ v, onAdd, reload }: { v: Any; onAdd: (t: Any) => void; reload: 
           </tr>
         ))}
       </Table>
+      </HeardFold>
     </Section>
   );
+}
+
+/** Every frequency heard here, to rename or forget: folded, since each band's finds are already
+ * listed under the dial; with nothing heard yet, the table's own words say so. */
+function HeardFold({ n, children }: { n: number; children: ReactNode }) {
+  if (!n) return <>{children}</>;
+  return <Fold id="rd-heard-all" summary={`All ${n === 1 ? "1 frequency" : `${n} frequencies`} heard here`}>{() => children}</Fold>;
 }
 
 // -- each receiver's own signals ----------------------------------------------------------------

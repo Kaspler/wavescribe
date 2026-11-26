@@ -369,7 +369,7 @@ tr.is-off td { color: var(--ink-3); }
 .dl-key.is-none { height: 1px; border-radius: 0; background: var(--ink-3); }
 .dl-key.is-heard { width: 1px; height: 9px; border-radius: 0; background: var(--ink-2); }
 .dl-card { max-width: 76ch; margin-top: var(--s7); }
-.dl-card-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s4); font-size: var(--t-lg); font-weight: 650; }
+.dl-card-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s4); font-size: var(--t-md); font-weight: 650; }
 .dl-card-tech { font-size: var(--t-sm); font-weight: 400; color: var(--ink-3); }
 .dl-card-text { max-width: 66ch; margin-top: var(--s3); font-size: var(--t-md); line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .dl-card-who { margin-bottom: var(--s5); }
@@ -396,7 +396,8 @@ tr.is-off td { color: var(--ink-3); }
   transform: translateX(-50%);
   cursor: grab;
   touch-action: none;
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  user-select: none;
+  transition: border-color var(--fast) var(--ease);
 }
 .dl-rx-tab:hover { border-color: var(--band-ink); }
 .dl-rx.is-chosen .dl-rx-tab { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -444,15 +445,31 @@ tr.is-off td { color: var(--ink-3); }
   flex: none;
   align-items: center;
   gap: 5px;
-  height: 32px;
-  padding: 0 8px 0 7px;
+  height: 40px;
+  padding: 0 10px 0 9px;
   border: 1px solid var(--band-ink-2);
   border-radius: 4px;
   background: var(--band);
   color: var(--band-ink);
   font-size: var(--t-xs);
   font-weight: 700;
+  transition: border-color var(--fast) var(--ease);
 }
+.dl-chip:hover { border-color: var(--band-ink); }
 .dl-chip.is-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .dl-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dl-outside { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s3); padding: 0 var(--s3); font-size: var(--t-xs); color: var(--band-ink-2); }
+/* What each receiver is doing, in words: a second legend line, the lamps on the page's own colours. */
+.dl-rx-words { margin-top: var(--s2); }
+.dl-rx-words span { gap: var(--s2); }
+/* The card comes into view under the page's header when a band is tapped in the list. */
+.dl-card { scroll-margin-top: var(--s5); }
+/* A band's finds on a narrow screen: the frequency, the name and the two actions stay in view;
+   what it is and how strong are left to the wider screen, stacked actions take less room. */
+.dl-found { container-type: inline-size; }
+@container (max-width: 559px) {
+  .dl-found .table th:nth-child(3), .dl-found .table td:nth-child(3),
+  .dl-found .table th:nth-child(4), .dl-found .table td:nth-child(4) { display: none; }
+  .dl-found .rd-act { white-space: normal; }
+  .dl-found .rd-act .btn { margin: 0 0 var(--s2) var(--s2); }
+}
