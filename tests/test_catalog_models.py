@@ -658,16 +658,27 @@ def test_recommend_follows_the_packaged_asr_chain() -> None:
 # -- This machine -----------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="reads macOS sysctl and system_profiler")
+ON_A_MAC = pytest.mark.skipif(sys.platform != "darwin", reason="reads macOS sysctl")
+# A virtual Mac, as CI runs on, reports no efficiency cores and has little memory and no GPU of
+# its own: what a real one reports is checked on a real one, and CI lists it as skipped.
+VIRTUAL = catalog._sysctl("kern.hv_vmm_present").get("kern.hv_vmm_present") == "1"
+
+
+@ON_A_MAC
 def test_machine_on_this_mac() -> None:
     m = catalog.machine()
     assert m is catalog.machine()  # cached
-    assert m.chip and m.memory_gb > 0 and m.budget_gb > 0
-    assert m.macos
-    if platform.machine() == "arm64":
-        assert m.chip.startswith("Apple M")
-        assert m.performance_cores and m.efficiency_cores
-        assert m.gpu_limit_gb <= m.memory_gb
+    assert m.chip and m.memory_gb > 0 and m.macos
+
+
+@ON_A_MAC
+@pytest.mark.skipif(platform.machine() != "arm64", reason="Apple silicon only")
+@pytest.mark.skipif(VIRTUAL, reason="a virtual Mac (CI) reports no efficiency cores or GPU")
+def test_machine_on_a_real_apple_silicon_mac() -> None:
+    m = catalog.machine()
+    assert m.chip.startswith("Apple M") and m.budget_gb > 0
+    assert m.performance_cores and m.efficiency_cores
+    assert m.gpu_limit_gb <= m.memory_gb
 
 
 def test_a_catalogue_answer_that_is_too_large_or_too_deep_is_refused(monkeypatch) -> None:

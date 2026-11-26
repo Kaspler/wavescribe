@@ -46,11 +46,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # Tests marked `models` need about 8 GB of downloaded models and run on a developer's Mac
-      # only. test_machine_on_this_mac expects efficiency cores, which a virtual Mac doesn't
-      # report.
-      - run: >-
-          uv run pytest -m "not models"
-          --deselect tests/test_catalog_models.py::test_machine_on_this_mac
+      # only. Tests that need a real Mac (efficiency cores, a GPU) skip themselves on this
+      # virtual one; -rs lists every skipped test with its reason.
+      - run: uv run pytest -m "not models" -rs
 
   page:
     # The built page is committed with its sources, so running Wavescribe never needs Node.
