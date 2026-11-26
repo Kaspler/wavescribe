@@ -45,6 +45,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
 | `Asker` | Answers a question about what was said (`ask.py`) | The translation LLM plans a search (stations, time range, words in the translation and station languages), FTS5 finds excerpts, and the LLM answers in the question's language citing them as [n]. Runs on the translation thread through `Pipeline.request_llm` |
+| `Digester` | What mattered on some stations over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`; `Speaker` reads them aloud through the alerts' `Actions`, taking turns with alerts; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`) |
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md` | `ModelRegistry` (`registry.py`) |
 | Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes | — |
 
@@ -260,6 +261,32 @@ words), `sources` (the numbered excerpts), `text` (the answer as the model write
 
 The job waits behind alert translations and runs ahead of the continuous backlog, which pauses
 for the few seconds an answer takes. Alerts never wait for it: they don't use translation.
+
+**Digests.** `POST /api/digest` (`wavescribe digest`, the agent tools `digest` and `now`) takes
+stations, a time and a language, and answers once the digest is written; it isn't stored.
+Steps (`digest/__init__.py`):
+
+1. **Select.** What was said in the window, as its translation into the reader's language where
+   there is one, without songs (flagged as another language), utterances of under three words
+   (idents, greetings) and repeats. The stations share about 36,000 characters fairly, at most
+   a prompt each (a quiet station leaves what it doesn't need to the others), sampled evenly
+   over the window when one said more. Another machine's request sees only what may leave
+   this one.
+2. **Write.** The excerpts go to the translation LLM in prompts of about 12,000 characters
+   (about 10 s each on a recent Mac), each station whole in one of them. A prompt asks for a
+   few one-line points in the reader's language, the most important first, each citing the
+   excerpts it rests on as `[n]`; the stations a point names come from those excerpts, never
+   from the model's words. When the shares fill one and a half prompts or more, they are spread
+   over two or three, and a short second call picks the five points that matter most, by
+   number, from the notes shown a station at a time, since a small model favours what it reads
+   first.
+3. **Queue.** Each call is a job of its own at the lowest priority, behind every station's
+   translation, so live translation runs between them; an hour of two busy stations takes
+   about a minute while they are translated. At most two digests are made at once.
+
+Alerts of the window (medium and above) come with a digest as they were announced, never
+rewritten. Read aloud, a digest takes the alerts' voice for its language; an alert waits at
+most for the sentence being said, and the digest stops there.
 
 ### Settings, Find and Listen; feed and receivers
 

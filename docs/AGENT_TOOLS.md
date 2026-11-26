@@ -20,7 +20,8 @@ themselves.
   closure, a strike) and does something with it: tells you, checks it against other sources,
   writes a short note in your language. Alerts can be missed or wrong, so an agent must never
   present the absence of alerts as an all-clear, nor act on one where a mistake causes harm.
-- **Summarise.** It reads the last hour of a few stations and tells you what mattered.
+- **Summarise.** It reads the last hour of a few stations and tells you what mattered, or has
+  Wavescribe's own local model write a digest, with the moments each point rests on.
 - **Notice trouble.** A station that stopped, a model that isn't loaded, speech that lags
   minutes behind: the status tool says so, and why.
 - **Add and run stations, if you let it.** With `--allow-control` it can add an internet station
@@ -29,14 +30,15 @@ themselves.
 ## Before you start
 
 Wavescribe has to be running: `uv run wavescribe serve` in the Wavescribe folder
-([GETTING_STARTED.md](GETTING_STARTED.md)). The MCP tools and `follow` talk to it at
+([GETTING_STARTED.md](GETTING_STARTED.md)). The MCP tools, `follow` and `digest` talk to it at
 `http://localhost:8765`, and when nothing answers there they say so and tell you to start it.
-The `--json` commands read Wavescribe's files and work without it.
+The other `--json` commands read Wavescribe's files and work without it.
 
 ### Privacy: the agent reads everything
 
 - **The agent can read everything Wavescribe has heard, including radio that isn't
-  broadcast.** `search` and `ask` read all the history kept on this machine, as the page does:
+  broadcast.** `search`, `ask`, `digest` and `now` read all the history kept on this machine,
+  as the page does:
   broadcast radio, and also amateur, aircraft, marine or walkie-talkie traffic for as long as
   you keep it ([RADIO.md](RADIO.md), *What Wavescribe does with each kind of radio*). The
   tools that read the feed (`recent`, `alerts`, `wait_for_alert`, and `follow` on the command
@@ -73,8 +75,8 @@ settings; put the path of your Wavescribe folder in place of `/path/to/wavescrib
 ```
 
 If the client can't find `uv`, give its full path (`which uv` prints it). To let the agent add,
-start and stop stations, add `"--allow-control"` at the end of `args`. Its own messages go to
-stderr: stdout carries the protocol and nothing else.
+start and stop stations, and read digests aloud, add `"--allow-control"` at the end of `args`.
+Its own messages go to stderr: stdout carries the protocol and nothing else.
 
 It talks to the Wavescribe at `http://localhost:8765`. `--url` points it at another one, such as
 `serve --port 8790` (`"--url", "http://localhost:8790"` in `args`), and `--token` gives the feed
@@ -94,6 +96,8 @@ an error instead.
 | `wait_for_alert` | Waits for the next announced alert, `timeout_s` seconds (60, up to 300), optionally only from some `stations` or from a `min_severity` up. Further mentions of an alert already announced don't count. | `{alert}`, or `{alert: null, waited_s}` when none came. The alert's `change` says why it came: `new`, `escalated` (more serious now), `reminder` (still being mentioned, at most hourly) or `ended`. |
 | `catches` | What your band watches caught, newest first: each transmission that broke the silence on a channel, with the words heard in it. `hours` back (24; 0 for everything kept), optionally only around `mhz` (with `width_khz` either side) or from some `stations`. Only what may leave this machine: by default broadcast radio, so catches on amateur, walkie-talkie or other radio are left out until you let that kind of radio out ([RADIO.md](RADIO.md)). Your names, notes and tags for frequencies stay on the page. | `{catches}`: 50, or `limit` up to 200, each as `wavescribe radio catches --json` gives it without the notes: `id`, `station` (the watch), `freq_hz`, `mhz`, `t_start` and `t_end` (seconds since 1970), `duration`, `mode`, `band`, `label`, `snr_db`, `peak_db`, `voice` (true when someone spoke, false when nobody did, null when not checked), `reason` (`carrier` when it stayed on for minutes), `privacy` and `utterances` (`id`, `t`, `language`, `text`). |
 | `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It takes from a few seconds to about a minute, and needs a language model as the translator; otherwise it fails with the reason. | `{answer, sources, plan}`: `sources` are the cited utterances, each with the `n` the answer cites it by; `plan` is where it looked (`stations`, `since`, `until`, `terms`, and whether it read an `overview`, `widened` the search or `sampled`). |
+| `digest` | What mattered on some stations (default: those heard) over the last `minutes` (60, at most a day): a few points, the most important first, each with its stations and the utterances it rests on, written by Wavescribe's local model in `language`. It waits behind live translation, so it takes half a minute to a few minutes. With `--allow-control`, `speak` also reads it aloud on the Wavescribe machine. | `{text, points, window, counts, empty, language, sources, alerts}`, as `wavescribe digest --json` below. |
+| `now` | What one station (default: the one heard last) is on about: one or two sentences on its last few `minutes` (5, at most 60), in a few seconds. `speak` as for `digest`. | As `digest`. |
 | `status` | What Wavescribe is doing, and why a station isn't. | `{node, stations, status, ask, mt_model, noncommercial, store}`: `node` is this machine (`name`, `url`, `version`, `feed_version`, `translation_languages`); `stations` every station set up, with `available` and `reason` (why it can't run); `status` the running part (`ready`, `models`, each running station's `connected`, `error`, `retry_in_s`, `behind_s` (`text` and `translation`: seconds its oldest speech has waited for text and its oldest line for translation; null when nothing waits) and `dropped` (`asr`, `mt`, `rules`: speech never written down, lines left untranslated and LLM rule checks that couldn't run, over the last 10 minutes), queue depths, `lag`, and `load`: `state` `ok`, `behind` or `overloaded`, with a `reason` sentence, null when ok); `ask` is null when ask works, else why not; `mt_model` the translation model; `noncommercial` the restricted models in use; `store` whether history is kept. |
 | `start_station`, `stop_station` | Only with `--allow-control`. A start right after a stop waits for the stop to finish, up to 10 s, or fails saying so. | `{ok: true}`. |
 | `add_station` | Only with `--allow-control`: an internet station by its `http://` or `https://` stream address. A name another station already has (ignoring case) is refused; so is renaming a station to one on the page. | The new station as `status` lists it, with its `id`. |
@@ -136,10 +140,16 @@ non-zero:
 | `wavescribe doctor --json` | a check (`type` `check`: `group`, `check`, `status` `ok`, `warn`, `fail` or `skip`, `summary`, `fix` (null when there is nothing to do), `details`), then one with `type` `summary`: `status`, `problems`, `warnings`, `version`, `folder`, `options` and `from_service` (whether those are the background service's options); exits 1 when something is broken |
 | `wavescribe service status --json` | one line: `label`, `plist`, `installed`, `loaded`, `running`, `pid`, `state`, `runs`, `last_exit`, `last_signal`, `workdir`, `serve_args`, `keep_awake`, `log`, `log_bytes`, `full_log`; exits 3 when it isn't running |
 | `wavescribe follow` | a live utterance or alert, until you stop it |
+| `wavescribe digest --json` | one line: the digest, as below; it asks the running Wavescribe, like `follow` |
 
 `search` and `alerts` print utterances and alerts in the shapes of [FEED.md](FEED.md), without
-`audio_url` and `cap_url`: a command doesn't know the address the page is reached at. `follow`
-prints the feed's events as they come.
+`audio_url` and `cap_url`: a command doesn't know the address the page is reached at.
+`digest --json` prints `POST /api/digest`'s answer: `points` (each `{text, stations,
+sources}`, the sources being numbers `n` among `sources`), `sources` (the utterances cited, as
+stored), `alerts` of the window, `text` (the digest as plain lines), `window`, `counts`,
+`empty` and `language`. `--now`, `--minutes`, `--since`, `--stations`, `--language` and
+`--speak` are as in `wavescribe digest --help`. `follow` prints the feed's events as they
+come.
 
 ```sh
 $ uv run wavescribe search água --json | jq -r '.time + "  " + .station.name + "  " + .translations.en'

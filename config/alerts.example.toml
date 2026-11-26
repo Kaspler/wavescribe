@@ -143,3 +143,14 @@ critical = ["notify", "speak:en", "log"]
 high = ["notify", "speak:en", "log"]
 medium = ["notify", "log"]
 low = ["log"]
+
+# A digest of what was said since the last one, at whole periods of the clock: a notification,
+# read aloud in the [speak.<language>] voice, or both. It covers only radio that may leave this
+# machine, and nothing is shown or said when nothing of substance was said.
+# [digest]
+# every_minutes = 60            # 30 is on the hour and half past; 15, 120 and 180 work too
+# stations = ["tsf"]            # leave out for every station
+# language = "en"               # default: notify_language
+# speak = true
+# notify = true
+# quiet_hours = ["22:00", "07:00"]

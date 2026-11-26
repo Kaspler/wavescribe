@@ -168,6 +168,40 @@ Type in the field at the top (**Search or ask**):
 The answers come only from what your stations said. If they didn't cover something, Ask says
 so rather than guessing, but check the quoted moments before acting on an answer.
 
+**What did I miss?** When you've been away, a digest gives the few things that mattered, the
+most important first, each with the station that said it and the moments it rests on. With
+Wavescribe running, in another Terminal window:
+
+```sh
+uv run wavescribe digest                                    # stations heard in the last hour
+uv run wavescribe digest --stations tsf,antena1 --since 14:30 --language en
+uv run wavescribe digest --now --stations tsf               # what is TSF on about right now?
+```
+
+```
+TSF Rádio Notícias, RTP Antena 1, 14:30-16:00: 512 said, 140 read
+
+! high 15:12 TSF Rádio Notícias: Water cut tomorrow between nine and one o'clock
+
+- TSF Rádio Notícias: Water will be cut tomorrow morning in the town centre for repairs. [1, 2]
+- RTP Antena 1: The bus drivers' strike goes ahead on Thursday. [3, 4]
+
+[1] TSF Rádio Notícias 15:12  Water cut tomorrow between nine and one o'clock.
+…
+```
+
+The local model writes it in the language you ask for (by default, the one your stations are
+translated into) from what was said, leaving out songs, station idents and repeats; *read* is
+how much of it the model read, an even sample when there is more than it can take. Alerts of
+the time come first, as they were announced. It needs the Qwen3.5 model and waits behind live
+translation: an hour of two busy stations takes about a minute, `--now` a few seconds.
+`--speak` also reads it aloud, in the voice your spoken alerts use for that language
+([section 7](#7-get-alerts)).
+
+A digest comes from a small model reading speech recognition, so it can get a name or a number
+wrong: the numbers in brackets are the moments listed under it, worth reading before you act
+on a point.
+
 ## 7. Get alerts
 
 Alerts tell you when something that matters is said, so you don't have to read all day. Rules
@@ -226,6 +260,26 @@ into them.
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.
+
+**A digest every hour:** a `[digest]` table in `config/alerts.toml` brings a digest of what was
+said since the last one ([section 6](#6-search-and-ask)) on the hour, as a notification, read
+aloud or both:
+
+```toml
+[digest]
+every_minutes = 60                # 30 is on the hour and half past; 15, 120 and 180 work too
+stations = ["tsf", "antena1"]     # leave out for every station
+language = "en"                   # default: notify_language
+speak = true                      # in the [speak.en] voice
+notify = true
+quiet_hours = ["22:00", "07:00"]
+```
+
+When nothing was said there is no digest, and when nothing of substance was, nothing is shown
+or said. A scheduled digest covers only radio that may leave the Mac
+([section 10](#10-what-wavescribe-keeps-and-why)): nobody chose to hear it at that moment, and
+anyone in the room does. An alert is never held back by a digest: it waits at most for the
+sentence being read, and the digest stops there. Restart Wavescribe after changing the table.
 
 **Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
 home-automation system ([FEED.md](FEED.md)).
