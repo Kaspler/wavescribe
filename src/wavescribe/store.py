@@ -1054,6 +1054,25 @@ class Store:
                 ids = [ids[int(i * step)] for i in range(limit)]
             return self._payloads(ids, self._reader)
 
+    def count(
+        self,
+        *,
+        station_ids: list[str] | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        exports: Exports | None = None,
+    ) -> dict[str, int]:
+        """How many utterances each station has in a time range; stations with none are left
+        out."""
+        where, args = _window_sql(station_ids, since, until, exports)
+        with self._read_lock:
+            rows = self._reader.execute(
+                "SELECT s.station_id, COUNT(*) FROM segments s JOIN transcripts t "
+                f"ON t.segment_id = s.id WHERE 1 = 1{where} GROUP BY s.station_id",
+                args,
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
     def last_heard(self) -> dict[str, float]:
         """When each station last had something stored."""
         with self._lock:
