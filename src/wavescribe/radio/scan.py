@@ -38,7 +38,9 @@ from wavescribe.radio.bandplan import (
     Band,
     channel_width,
     lookup,
+    region_band,
     region_bands,
+    region_text,
 )
 from wavescribe.sources.sdr import claimed, device_arg, ppm_args
 
@@ -873,11 +875,15 @@ def _lines(sw: Sweep, min_snr_db: float) -> list[float]:
 def band_range(band_id: str, region: str) -> tuple[int, int]:
     """A band's edges for a scan, padded half a channel. The padding stops at the tuner's
     limits; the band itself doesn't, so that ``scan`` can say what it leaves out."""
-    for b in region_bands(region):
-        if b.id == band_id:
-            fit_range(b.start_hz, b.stop_hz)  # refuses a band the tuner doesn't reach at all
-            pad = int(channel_width(b) / 2)
-            lo, hi = SWEEP_LIMITS_HZ
-            start = max(min(b.start_hz, lo), b.start_hz - pad)
-            return start, min(max(b.stop_hz, hi), b.stop_hz + pad)
-    raise ScanError(f"no band {band_id!r} in region {region}")
+    b = region_band(band_id, region)
+    if b is None:
+        raise ScanError(
+            f"no band {band_id!r} in {region_text(region)}: `wavescribe radio bands` lists those "
+            'there, and [radio] region in the stations file (e.g. region = "2") or the page\'s '
+            "Radio tab sets the region"
+        )
+    fit_range(b.start_hz, b.stop_hz)  # refuses a band the tuner doesn't reach at all
+    pad = int(channel_width(b) / 2)
+    lo, hi = SWEEP_LIMITS_HZ
+    start = max(min(b.start_hz, lo), b.start_hz - pad)
+    return start, min(max(b.stop_hz, hi), b.stop_hz + pad)

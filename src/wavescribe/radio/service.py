@@ -29,6 +29,7 @@ from wavescribe.radio.bandplan import (
     default_region,
     lookup,
     mhz_text,
+    region_band,
     region_bands,
 )
 from wavescribe.radio.catalog import Catalog
@@ -255,7 +256,7 @@ class RadioService:
                 what = "the whole tuner range"
             elif band:
                 start, stop = scanner.band_range(str(band), region)
-                what = next(b.name for b in region_bands(region) if b.id == band)
+                what = region_band(str(band), region).name  # band_range found it
             else:
                 start = frequency_hz(raw["start_mhz"])
                 stop = frequency_hz(raw["stop_mhz"])

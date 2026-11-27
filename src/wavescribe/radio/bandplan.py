@@ -323,6 +323,36 @@ def region_bands(region: str) -> list[Band]:
     return [_as_in(b, region) for b in bands() if _in_region(b, region)]
 
 
+def region_band(band_id: str, region: str) -> Band | None:
+    """The band ``band_id`` names, as ``region`` uses it: that band where the region has it,
+    else the region's band of the same family (the id before its first "-"), so "airband" is
+    the Americas' "airband-25" and "fm" their "fm-americas"; None when the region has neither."""
+    here = region_bands(region)
+    family = band_id.split("-")[0]
+    return next((b for b in here if b.id == band_id), None) or next(
+        (b for b in here if b.id.split("-")[0] == family), None
+    )
+
+
+REGION_NAMES = {
+    "cept": "the CEPT countries (Europe)",
+    "1": "ITU Region 1 (Europe, Africa, the Middle East)",
+    "2": "ITU Region 2 (the Americas)",
+    "3": "ITU Region 3 (Asia and the Pacific)",
+    "jp": "Japan",
+}
+
+
+def region_text(region: str) -> str:
+    """A region as a person reads it; with none chosen, the one this computer's region setting
+    gives and that it was not chosen."""
+    if region != AUTO:
+        return REGION_NAMES.get(region, f"region {region}")
+    country = system_country()
+    whence = f"this computer's region setting ({country})" if country else "no region setting"
+    return f"{REGION_NAMES[default_region()]}, from {whence}"
+
+
 UNLISTED_CHANNEL_HZ = 25_000  # a channel where no plan says: as wide as narrowband FM gets
 
 

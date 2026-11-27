@@ -189,3 +189,29 @@ def test_radio_bands_marks_what_the_receiver_cannot_reach(capsys) -> None:
     rows = {r.split()[0]: r for r in capsys.readouterr().out.splitlines() if r[:1] != "#"}
     assert rows["mw"].endswith("(outside the receiver's range)")
     assert "outside" not in rows["fm"]
+
+
+def test_a_band_named_as_another_region_names_it_finds_this_regions(monkeypatch) -> None:
+    """On a computer set to the US, `radio scan a airband` said "no band 'airband' in region
+    auto": the Americas' airband, FM, medium wave and amateur bands have ids of their own."""
+    from wavescribe.radio import bandplan
+    from wavescribe.radio.bandplan import region_band, region_text
+    from wavescribe.radio.scan import ScanError, band_range
+
+    pairs = (("airband", "airband-25"), ("fm", "fm-americas"), ("mw", "mw-americas"),
+             ("2m", "2m-wide"), ("70cm", "70cm-wide"), ("marine", "marine"))  # fmt: skip
+    for asked, there in pairs:
+        assert region_band(asked, "2").id == there, asked
+        assert region_band(there, "2").id == there
+    assert region_band("airband-25", "cept").id == "airband"  # and the other way round
+    assert region_band("fm", "jp").id == "fm-japan"
+    assert region_band("pmr446", "2") is None and region_band("nonsense", "1") is None
+    monkeypatch.setattr(bandplan, "system_country", lambda: "US")
+    bandplan.default_region.cache_clear()
+    assert band_range("airband", bandplan.AUTO)[0] < 118_000_000  # padded half a channel
+    with pytest.raises(ScanError) as refused:
+        band_range("pmr446", bandplan.AUTO)
+    said = str(refused.value)
+    assert "ITU Region 2 (the Americas), from this computer's region setting (US)" in said
+    assert "region auto" not in said and "wavescribe radio bands" in said
+    assert region_text("cept") == "the CEPT countries (Europe)"

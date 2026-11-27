@@ -429,7 +429,9 @@ band says so: CB is narrowband FM in the CEPT countries and AM elsewhere. Region
 Until you choose a region, the band list follows this computer's region setting, but each
 frequency takes the strictest class any region gives it (FM broadcast excepted): a computer set
 to US English may well be in Europe, where 446 MHz is walkie-talkies rather than amateur radio.
-Set your region with `[radio] region = "2"` in the stations file, or on the page. To add a band,
+Set your region with `[radio] region = "2"` in the stations file, or on the page. Where a region
+has its own version of a band, the usual name finds it: `airband` is the Americas' `airband-25`
+(a 25 kHz raster), `fm` their `fm-americas`, `2m` their `2m-wide`. To add a band,
 add a `[[band]]` to `bands.toml`: it's data, not code. A frequency that no plan for your region
 lists counts as private. One that any region marks as digital counts as digital everywhere. A
 channel is as wide as its station's `channel_khz`, or the width chosen under Listen, or else its

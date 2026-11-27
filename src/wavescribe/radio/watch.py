@@ -30,7 +30,7 @@ from wavescribe.radio.bandplan import (
     lookup,
     mhz_text,
     privacy_of,
-    region_bands,
+    region_band,
 )
 
 log = logging.getLogger(__name__)
@@ -113,9 +113,7 @@ def _fits(watch: Watch, width: float, rate: int) -> bool:
 def _asked(watch: Watch, region: str) -> Band | None:
     """The band a window was asked as: the band of that id, or the band of a range's middle."""
     if isinstance(watch.spec, str):
-        return next((b for b in region_bands(region) if b.id == watch.spec), None) or find(
-            watch.spec
-        )
+        return region_band(watch.spec, region) or find(watch.spec)
     return lookup(watch.middle_hz, region)
 
 
@@ -223,7 +221,7 @@ def _plan(
                 "or give a range in MHz, e.g. 446.0:446.2"
             ) from None
         # As the region uses it, where it does (CB is FM in the CEPT countries, AM elsewhere).
-        band = next((b for b in region_bands(region) if b.id == spec), band)
+        band = region_band(spec, region) or band
         lo, hi, label, key = band.start_hz, band.stop_hz, band.name, spec
     else:
         pair = isinstance(spec, list | tuple) and len(spec) == 2

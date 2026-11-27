@@ -15,6 +15,7 @@ from wavescribe.radio.bandplan import (
     REGIONS,
     default_region,
     mhz_text,
+    region_band,
     region_bands,
 )
 from wavescribe.radio.words import masked_serial, receiver_name
@@ -137,7 +138,8 @@ def _parse_range(spec: str, region: str) -> tuple[int, int, str]:
         lo, hi = (float(x) for x in spec.split(":", 1))
         return round(lo * 1e6), round(hi * 1e6), f"{lo:g} to {hi:g} MHz"
     lo_hz, hi_hz = band_range(spec, region)
-    return lo_hz, hi_hz, next((b.name for b in region_bands(region) if b.id == spec), spec)
+    band = region_band(spec, region)
+    return lo_hz, hi_hz, band.name if band is not None else spec
 
 
 FIND = "Find → On the air, which pauses the receiver's stations for the scan"
