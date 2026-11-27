@@ -568,10 +568,10 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
                         : `A still picture: the strongest each frequency reached in ${scanner ? `Receiver ${rxName(scanner.id)}'s` : "that"} scan. Click a peak, or anywhere, to listen there with ${who}; Look here shows it live.`} />
       ) : null}
       {(failed || (sweeping?.phase === "done" && !rows.some(real))) && <NothingHeard v={v} result={sweeping} onTry={onTry} />}
-      {(shown.length > 0 || running) && <h4 className="m-sub-h">Found in {name}, strongest first</h4>}
+      {(shown.length > 0 || running) && <h4 id="dl-found-h" className="m-sub-h">Found in {name}, strongest first</h4>}
       {(shown.length > 0 || running) && (
        <div className="dl-found">
-        <Table caption={`Found in ${name}, strongest first${sweeping ? "" : ", from every scan so far"}`} empty="Nothing yet…"
+        <Table labelledBy="dl-found-h" empty="Nothing yet…"
                cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise" }, { label: "", width: "1%" }]}>
           {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} onListen={onListen} />)}
         </Table>

@@ -317,11 +317,13 @@ export interface Col {
   num?: boolean;
   width?: string;
 }
-export function Table({ cols, children, empty = "Nothing yet", caption }: { cols: Col[]; children: ReactNode; empty?: ReactNode; caption?: string }) {
+/** `caption` names the table for screen readers; `labelledBy` names it by a heading already on
+ * the page instead, so the name isn't said twice. */
+export function Table({ cols, children, empty = "Nothing yet", caption, labelledBy }: { cols: Col[]; children: ReactNode; empty?: ReactNode; caption?: string; labelledBy?: string }) {
   const rows = Array.isArray(children) ? children.flat().filter(Boolean) : children ? [children] : [];
   return (
     <div className="table-wrap">
-      <table className="table">
+      <table className="table" aria-labelledby={labelledBy}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
           <tr>{cols.map((c, i) => <th key={i} className={c.num ? "num" : undefined} style={c.width ? { width: c.width } : undefined}>{c.label}</th>)}</tr>
