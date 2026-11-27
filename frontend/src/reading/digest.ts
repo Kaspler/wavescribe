@@ -188,8 +188,15 @@ export interface Failure {
   retryAfter: number | null;
 }
 
+/** The server's words, set as a sentence of their own: it writes them to follow a colon. */
+export function asSentence(s: string): string {
+  const t = s.trim();
+  if (!t) return t;
+  return t[0].toUpperCase() + t.slice(1) + (/[.!?…]$/.test(t) ? "" : ".");
+}
+
 export function failureOf(status: number, error: unknown, o: { retryAfter?: string | null } = {}): Failure {
-  const text = typeof error === "string" && error ? error : `the server answered ${status}`;
+  const text = asSentence(typeof error === "string" && error ? error : `the server answered ${status}`);
   const after = Number.parseInt(o.retryAfter ?? "", 10);
   const retryAfter = Number.isFinite(after) && after > 0 ? after : null;
   const kind: Failure["kind"] = status === 401 ? "token"

@@ -71,15 +71,17 @@ export function SummaryButton() {
 }
 
 /** What can be done about summaries being off, by Ask's code for the same gate. */
-function offWhat(): { text: string; settings: boolean } | null {
-  const code = S.ask ? S.askCode : null;
+// What to do about summaries being off, from the Ask code (the same model answers both), or
+// `assumed` where the server refused one before the page heard why.
+function offWhat(assumed?: "no_llm"): { text: string; settings: boolean } | null {
+  const code = (S.ask ? S.askCode : null) ?? assumed;
   if (code === "remote_off") return { text: T.summaryOffWhat.remote_off, settings: false };
   if (code === "no_llm") return S.manage ? { text: T.summaryOffWhat.no_llm_here, settings: true } : { text: T.summaryOffWhat.no_llm, settings: false };
   return null;
 }
 
-function OffWhat() {
-  const what = offWhat();
+function OffWhat({ assumed }: { assumed?: "no_llm" }) {
+  const what = offWhat(assumed);
   if (!what) return null;
   return (
     <>
@@ -202,7 +204,7 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
           <span>{choiceLabel(job.choice)}</span>
           {a && <span className="num">{whenLabel(a.window.since)}–{hm(a.window.until)}</span>}
         </p>
-        <p className="sum-meta sum-stations" dir="auto">{names(job.stations).join(", ")}</p>
+        <p className="sum-meta sum-stations" dir="auto">{(a ? a.stations.map((id) => a.names[id] || id) : names(job.stations)).join(", ")}</p>
       </header>
       <div className="sum-body" aria-busy={job.state === "working"}>
         <Body job={job} />
@@ -264,7 +266,7 @@ function Failed({ f, again }: { f: Failure; again: () => void }) {
     <div className="sum-failed">
       <p className="sum-said" dir="auto">{f.text}</p>
       {f.kind === "off_here" && <p className="sum-cost">{T.summaryOffWhat.remote_off}</p>}
-      {f.kind === "unavailable" && <OffWhat />}
+      {f.kind === "unavailable" && <OffWhat assumed="no_llm" />}
       {f.retry && <Button size="sm" variant="secondary" icon="refresh" onClick={again}>{T.tryAgain}</Button>}
     </div>
   );
@@ -300,7 +302,7 @@ function PointView({ p, a }: { p: Point; a: Answer }) {
   const by = saidBy(p, a);
   return (
     <li className="sum-point">
-      {by && <p className="sum-who" dir="auto">{by}</p>}
+      {by && <p className="sum-who" dir="auto" title={by}>{by}</p>}
       <p className="sum-text" dir="auto" lang={a.language}>{p.text}</p>
       <Lines links={linksOf(p, a)} />
     </li>

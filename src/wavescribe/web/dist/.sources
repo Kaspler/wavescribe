@@ -73,13 +73,13 @@ aa57750ab020ab74f5ad52a75c8eca3a4877ac5a frontend/src/reading/Column.tsx
 bf38f81ec2aa75ca002b22ede6cd5d76a97e653e frontend/src/reading/Search.tsx
 26334172637c075356b12c7cf4ff56cb5c13e568 frontend/src/reading/Settings.tsx
 cbbc0addcd5737059150d62d922dca1a634a6905 frontend/src/reading/StationMenu.tsx
-efa8a48dd365bbb53fec02a7464d0fa71489670d frontend/src/reading/Summary.tsx
+3900aff90cdaf65eadaa59790bfda2c3d4edbca0 frontend/src/reading/Summary.tsx
 a9eee1bdcd799caa4deb2fe5bf5e37bfc641cb75 frontend/src/reading/TokenGate.tsx
 8f92e929fad369085e34fab30007703247e2f8bf frontend/src/reading/alertText.ts
 5a49aede1e5cd67fb29e22c3c22e3d8464f55795 frontend/src/reading/channels.ts
-de66099821c99c8ffbed7239c31d542c6694eb3c frontend/src/reading/digest.ts
+03a14268e08fc7901eec1e13db5bc5e6a2991d2d frontend/src/reading/digest.ts
 9333e45065edd9626cff5ec0d896d60e395d3c30 frontend/src/reading/held.ts
-8028412c86c8e807e2a2c8133649469dfa6676fc frontend/src/reading/reading.css
+3afc17e8ffa9ce10f6800de87058ff7d7aaea747 frontend/src/reading/reading.css
 78643b9076ead5a8fc39922a5d6d86a768550770 frontend/src/reading/strings.ts
 c092edf7c8b46dd0c8e49b6eec4cf61c827d1582 frontend/src/reading/summaries.ts
 e525eba01feec9afa78f202473013a94f6e268c7 frontend/src/reading/text.tsx
@@ -95,7 +95,7 @@ f831a62ed52e504643581254185be0e35e9645a1 frontend/tests/bands.test.mjs
 e92d3893e448ccf8bb74903a3d9c2ad9e0b5ca92 frontend/tests/catches.test.mjs
 818a90552758029a9920760c2cddddad19159e82 frontend/tests/channels.test.mjs
 0d29d7d0e54e76e4e1d9736187b2238a41b260fa frontend/tests/dial.test.mjs
-c4834cedf63aa9887b09af46d2dc7ee2cbd0d8fa frontend/tests/digest.test.mjs
+ee5b5f140e5bf338595189ce7215acf3bd05990f frontend/tests/digest.test.mjs
 da9bc5828af15a5dbef60f4f3807d178a9c3b821 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 20042eec724f4882d254fb7ff510ecddf205973d frontend/tests/langs.test.mjs

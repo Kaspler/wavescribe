@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ALERT_SPEECH_S, answerOf, cutAt, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, spokenSeconds,
+  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, spokenSeconds,
   windowProblem,
 } from "../src/reading/digest.ts";
 
@@ -99,14 +99,23 @@ test("who said a point is named in a summary of several stations, not of one", (
 
 test("a failure keeps the server's sentence and says whether trying again can help", () => {
   assert.deepEqual(failureOf(503, "2 digests are already being made; try again in a minute", { retryAfter: "60" }),
-    { kind: "busy", text: "2 digests are already being made; try again in a minute", retry: true, retryAfter: 60 });
+    { kind: "busy", text: "2 digests are already being made; try again in a minute.", retry: true, retryAfter: 60 });
   assert.equal(failureOf(403, "asking from another machine is off").kind, "off_here");
   assert.equal(failureOf(409, "a digest needs an LLM translator").kind, "unavailable");
   assert.equal(failureOf(409, "x").retry, false);
   assert.equal(failureOf(500, "the digest couldn't be made: boom").retry, true);
   assert.equal(failureOf(400, "minutes must be a number from 1 to 1440").kind, "refused");
   assert.equal(failureOf(401, undefined).kind, "token");
-  assert.equal(failureOf(502, null).text, "the server answered 502");
+  assert.equal(failureOf(502, null).text, "The server answered 502.");
+});
+
+test("the server's words stand as a sentence, otherwise unchanged", () => {
+  assert.equal(asSentence("a digest needs an LLM translator such as qwen3.5-9b (none is loaded)"),
+    "A digest needs an LLM translator such as qwen3.5-9b (none is loaded).");
+  assert.equal(asSentence(" Already one. "), "Already one.");
+  assert.equal(asSentence("why?"), "Why?");
+  assert.equal(asSentence("été coupé"), "Été coupé.");
+  assert.equal(asSentence(""), "");
 });
 
 test("only an answer with a known outcome, points, lines and a window is drawn", () => {

@@ -795,7 +795,7 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .sum-speech { padding: var(--s4) 0; border-bottom: 1px solid var(--rule); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-2); text-wrap: pretty; }
 .sum-pick .check { padding: var(--s1) 0 0 8px; font-size: var(--t-ui); }
 .sum-point { padding: var(--s5) 0; border-bottom: 1px solid var(--rule); }
-.sum-who { margin-bottom: 2px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+.sum-who { margin-bottom: 2px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sum-text { font-size: calc(var(--read) * 0.9); line-height: 1.5; color: var(--ink); text-wrap: pretty; overflow-wrap: break-word; }
 .sum-lines { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; margin-top: 4px; font-size: var(--t-sm); color: var(--ink-3); }
 .sum-line { padding: 3px 0; border: 0; background: none; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
@@ -821,7 +821,7 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
 .sum-alert-words { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink-2); font-size: var(--t-ui); line-height: 1.45; }
 .menu-pick { top: 32px; }
 /* What a station is talking about now, under its column's head. */
-.col-now { margin-top: 8px; padding: 8px 0 0 16px; border-top: 1px solid var(--rule); animation: pop-in var(--med) var(--ease); transform-origin: top left; }
+.col-now { margin-top: 8px; padding: 8px 0 0 16px; border-top: 1px solid var(--rule); animation: u-in var(--med) var(--ease); }
 .col-now-row { display: flex; align-items: flex-start; gap: 8px; }
 .col-now-row > .btn { flex: none; margin-top: -3px; }
 .col-now-body { flex: 1; min-width: 0; display: grid; gap: 6px; }
