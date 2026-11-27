@@ -745,3 +745,16 @@ def test_arguments_are_checked_against_the_tools_schema(value, schema, fits) -> 
     else:
         with pytest.raises(BadParams):
             check(value, schema)
+
+
+def test_a_number_out_of_range_is_told_the_range_it_has() -> None:
+    from wavescribe.agent.mcp import BadParams, check
+
+    for value, schema, said in (
+        (-1, {"type": "number", "minimum": 0}, "minutes must be 0 or more"),
+        (9, {"type": "integer", "maximum": 5}, "minutes must be 5 or less"),
+        (9, {"type": "integer", "minimum": 1, "maximum": 5}, "minutes must be from 1 to 5"),
+    ):
+        with pytest.raises(BadParams) as refused:
+            check(value, schema, "minutes")
+        assert str(refused.value) == said

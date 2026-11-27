@@ -694,9 +694,13 @@ def check(value: Any, schema: dict[str, Any], where: str = "arguments") -> None:
         if "pattern" in schema and not re.search(schema["pattern"], value):
             raise BadParams(f"{where} doesn't match {schema['pattern']}")
     elif kind in ("integer", "number"):
-        low, high = schema.get("minimum", value), schema.get("maximum", value)
-        if not low <= value <= high:
-            raise BadParams(f"{where} must be from {low} to {high}")
+        low, high = schema.get("minimum"), schema.get("maximum")
+        if low is not None and value < low:
+            raise BadParams(f"{where} must be {low} or more" if high is None else
+                            f"{where} must be from {low} to {high}")  # fmt: skip
+        if high is not None and value > high:
+            raise BadParams(f"{where} must be {high} or less" if low is None else
+                            f"{where} must be from {low} to {high}")  # fmt: skip
 
 
 def _error(rid: Any, code: int, message: str) -> dict[str, Any]:
