@@ -1165,3 +1165,20 @@ def test_a_station_a_stricter_region_switched_off_says_why(tmp_path: Path) -> No
     assert view()["reason"].startswith("switched off until you confirm")
     settings.update(lambda d: d.setdefault("overrides", {}).update(repeater={"disabled": True}))
     assert view()["reason"] == "switched off on the page"  # and the page switched it off too
+
+
+def test_a_new_output_with_a_name_in_use_is_refused_and_the_old_one_kept(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    first = app.save_output({"name": "Home hub", "url": "http://hub.test/in",
+                             "headers": {"Authorization": "Bearer abc"}})  # fmt: skip
+    assert first["id"] == "home-hub"
+    with pytest.raises(ChangeError, match="already an output called 'Home hub'"):
+        app.save_output({"name": "Home hub", "url": "http://other.test/in"})
+    kept = app.settings.get("output")
+    assert len(kept) == 1 and kept[0]["url"] == "http://hub.test/in"
+    assert kept[0]["headers"] == {"Authorization": "Bearer abc"}
+    # Editing it, by its id, still works, and a masked header keeps its value.
+    app.save_output({"id": "home-hub", "name": "Home hub", "url": "http://hub.test/v2",
+                     "headers": {"Authorization": "•••"}})  # fmt: skip
+    assert app.settings.get("output")[0]["headers"] == {"Authorization": "Bearer abc"}
+    assert app.settings.get("output")[0]["url"] == "http://hub.test/v2"

@@ -1150,9 +1150,14 @@ class App:
 
     def save_output(self, raw: dict[str, Any]) -> dict[str, Any]:
         raw = dict(raw)
-        raw.setdefault("id", slug(str(raw.get("name") or "output")))
+        new = not raw.get("id")  # the page sends the id only when it edits one
+        raw["id"] = raw.get("id") or slug(str(raw.get("name") or "output"))
         existing = next((o for o in self.settings.get("output") or []
                          if o.get("id") == raw["id"]), None)  # fmt: skip
+        if new and existing is not None:  # it would replace that one, and lose its secrets
+            name = existing.get("name") or raw["id"]
+            raise ChangeError(f"there is already an output called {name!r}: give this one "
+                              "another name, or edit that one")  # fmt: skip
         # The page never sees secrets: a masked or missing value keeps the stored one.
         if existing is not None:
             if raw.get("secret") in (None, True, "•••"):

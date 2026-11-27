@@ -211,7 +211,9 @@ and isn't gets a 400.
 Alerts can be missed, late or wrong: don't connect them to anything where a missed or a false
 alert causes harm.
 
-An output is a URL plus filters, set on the page (*Settings → Connections*) and saved in `config/ui.toml`:
+An output is a URL plus filters, set on the page (*Settings → Connections*) and saved in
+`config/ui.toml`. Its name gives its id; a new output with the name of one that exists is
+refused (400), so it never replaces that one and its secret or headers:
 
 | Field | Meaning |
 |---|---|
