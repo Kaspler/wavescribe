@@ -72,6 +72,15 @@ def test_a_carrier_a_drifting_line_a_blinking_line_and_clicks_are_no_transmissio
     assert detector.open.steady >= 3 and detector.open.lines_seen >= 2
 
 
+def test_two_lines_two_bins_apart_that_take_turns_at_being_the_stronger_are_no_transmission() -> (
+    None
+):
+    """One drifts toward the other, and the strongest bin goes from one to the other and
+    back: both are there in every FFT, which a carrier that moves is not."""
+    pair = [Line(50_126, SMALL.line(20)), Line(48_550, SMALL.line(20), drift_hz_s=20.0)]
+    assert watch(SMALL.detector(), SMALL.air(20.0, pair)) == []
+
+
 def test_a_carrier_that_stays_five_seconds_is_a_known_line_until_it_has_been_gone_thirty() -> None:
     detector = SMALL.detector()
     known = {}

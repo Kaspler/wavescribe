@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.synthetic_iq import Scene, Tx, watch
+from tests.synthetic_iq import Clicks, Line, Scene, Tx, watch
 from wavescribe.dsp.activity import Activity
 from wavescribe.dsp.openwatch import OpenBand
 
@@ -132,3 +132,19 @@ def test_what_narrow_means_is_the_callers_to_say_for_each_part_of_the_range() ->
     assert kinds(near(events, 250_000, 20_000)) == ["end", "start"]
     there = near(events, -250_000, 20_000)
     assert "noted" in kinds(there) and "end" not in kinds(there)
+
+
+@pytest.mark.parametrize("per_s", [8, 20])
+def test_clicks_are_no_wide_signal_beside_lines_or_alone(per_s: int) -> None:
+    """A click lifts the whole window for a frame, unevenly, and lines stay where they are:
+    neither is a signal that came, however often it clicks."""
+    scene = Scene(1_200_000, 446_000_000)
+    junk = [
+        Line(-420_000, scene.line(22), start_s=1.0),
+        Line(-419_300, scene.line(22), start_s=1.0),
+        Line(60_000, scene.line(25), drift_hz_s=300.0),
+        Clicks(per_s, 0.05),
+    ]
+    detector = scene.detector()
+    assert watch(detector, scene.air(15.0, junk)) == []
+    assert detector.open.noted == []
