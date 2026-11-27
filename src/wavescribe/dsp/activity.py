@@ -63,12 +63,18 @@ beginning in its own history of the IQ and demodulate it from there.
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import fft as sp_fft
 
 from wavescribe.dsp import NARROW_MARGIN_HZ
+
+if TYPE_CHECKING:
+    from wavescribe.dsp.openwatch import OpenBand
 
 FFT = 4096
 FRAME_S = 0.05
@@ -102,22 +108,26 @@ OFF_CHANNEL_DB = 6.0
 OFF_CHANNELS = -1  # an overload's transmitter, when it is on none of the channels
 CLIPPING = 0.01  # this share of the 8-bit samples at the converter's limits: clipping hard
 CLIP_LEVEL = 0.992  # |I| or |Q| this high is a sample at 0 or 255 (``iq_from_u8``)
+WIDTH_DB = 10.0  # a signal's width is that of its bins within this of its strongest
 
 
 @dataclass(frozen=True)
 class Activity:
-    """Something that happened on one channel. ``start`` and ``end`` are sample indices:
-    the transmission's first frame above the threshold, and the end of its last."""
+    """Something that happened on one channel, or at one place off the channels. ``start``
+    and ``end`` are sample indices: the transmission's first frame above the threshold, and
+    the end of its last."""
 
     kind: str  # "start", "end" or "short" (ended before MIN_S: not a catch)
-    channel: int  # index into the detector's channels
-    freq_hz: int
+    channel: int | None  # index into the detector's channels; None off the channels
+    freq_hz: int  # the channel's; off the channels, its measured centre
     start: int
     end: int | None = None
     snr_db: float = 0.0  # the strongest it was over its noise floor
     power_db: float = 0.0  # the channel's strongest power, dBFS
     reason: str | None = None  # an end that wasn't the signal going: "carrier"
     overload: bool = False  # the receiver was overloaded while it lasted, so far
+    track: int = 0  # one number for a transmission's start and its end
+    width_hz: float = 0.0  # how wide it has measured so far, within 10 dB of its strongest
 
 
 @dataclass
@@ -129,12 +139,21 @@ class _Channel:
     snr_db: float = 0.0
     power_db: float = -200.0
     overload: bool = False
+    track: int = 0
+    profile: np.ndarray | None = None  # its power over the floor, summed over its frames
 
 
 class ActivityDetector:
     """Watches ``channels`` (Hz) of a dongle tuned to ``center_hz`` at ``rate`` and reports
     transmissions on them as they start and end. ``feed`` takes IQ blocks of any length.
-    ``spurs`` are the dongle's own lines, as learnt at bins ``spur_bin_hz`` wide."""
+    ``spurs`` are the dongle's own lines, as learnt at bins ``spur_bin_hz`` wide.
+
+    With ``open_range`` (Hz, from and to), transmissions anywhere in that range are reported
+    too, between the channels and beyond them (``dsp/openwatch.py``), with ``channel`` None
+    and their measured centre; ``open_bands`` are the parts of it with rules of their own,
+    and ``open_clocks`` the clock frequencies (Hz) of other receivers beside this one, whose
+    multiples are lines it leaves out there. What the channels report is the same with it
+    and without."""
 
     def __init__(
         self,
@@ -151,6 +170,9 @@ class ActivityDetector:
         hang_s: float = HANG_S,
         min_s: float = MIN_S,
         carrier_s: float = CARRIER_S,
+        open_range: tuple[float, float] | None = None,
+        open_bands: Sequence[OpenBand] = (),
+        open_clocks: Sequence[float] = (),
     ) -> None:
         self.rate = rate
         self.center_hz = center_hz
@@ -177,6 +199,10 @@ class ActivityDetector:
         offsets = (np.arange(fft) - fft // 2) * bin_hz  # each bin's offset from the centre
         self._offsets = offsets
         self._half_bins = max(1, int(half / bin_hz))  # a channel's measured half, in bins
+        # Where each channel's width is measured: its own bins, clear of its neighbours'.
+        own = max(2, round(min(step, channel_hz) / 2 / bin_hz))
+        at = np.array([round((f - center_hz) / bin_hz) + fft // 2 for f in self.freqs], dtype=int)
+        self._own = np.array([np.clip(at - own, 0, fft), np.clip(at + own + 1, 0, fft)])
         # A signal this close to a channel is on it (a radio a little off frequency included).
         self._on_hz = channel_hz / 4
         self._busy = 10 ** (threshold_db / 10)  # a bin this far over its floor has a signal
@@ -260,6 +286,31 @@ class ActivityDetector:
         self.relearnt = 0  # times the floors were learnt afresh after the noise rose
         self.snr_db = np.zeros(len(self.freqs))  # each channel over its floor, last frame
         self.power_db = np.full(len(self.freqs), -200.0)  # each channel's power, last frame
+        self._ids = itertools.count(1)  # a number for each transmission
+        self._rows: list[np.ndarray] = []  # the FFTs of the frame being made, for ``open``
+        self.open = None  # what watches the open range, when there is one
+        if open_range is not None:
+            from wavescribe.dsp.openwatch import OpenWatch
+
+            self.open = OpenWatch(
+                rate,
+                center_hz,
+                fft,
+                open_range,
+                channels=self.freqs,
+                channel_hz=channel_hz,
+                step_hz=step,
+                half_bins=self._half_bins,
+                threshold_db=threshold_db,
+                excluded=excluded,
+                frame_samples=self._frame_samples,
+                hang=self._hang,
+                least=self._min,
+                carrier=self._carrier,
+                ids=lambda: next(self._ids),
+                bands=open_bands,
+                clocks=open_clocks,
+            )
 
     @property
     def busy(self) -> list[int]:
@@ -302,6 +353,8 @@ class ActivityDetector:
         while k < whole:
             take = min(whole - k, self._per_frame - self._acc_count)
             self._acc += power[k : k + take].sum(axis=0)
+            if self.open is not None:
+                self._rows.append(power[k : k + take])
             self._acc_clips += int(clips[k : k + take].sum())
             self._acc_count += take
             k += take
@@ -310,6 +363,18 @@ class ActivityDetector:
                 self._frame_clipped = self._acc_clips / (2 * self._frame_samples)
                 end = self._frame_start + self._frame_samples
                 out += self._frame(frame, self._frame_start, end)
+                if self.open is not None:
+                    out += self.open.frame(
+                        frame,
+                        self._rows,
+                        self._frame_start,
+                        end,
+                        self._frame_clipped >= CLIPPING,
+                        self._live,
+                        self._is_busy,
+                        self.snr_db,
+                    )
+                    self._rows = []
                 self._frame_start = end
                 self._acc[:] = 0.0
                 self._acc_count = self._acc_clips = 0
@@ -408,6 +473,7 @@ class ActivityDetector:
                 c.overload |= overloaded
                 if holding[i]:
                     c.last = end
+                    self._profile(i, power, floor)
                     c.snr_db = max(c.snr_db, float(self.snr_db[i]))
                     c.power_db = max(c.power_db, float(self.power_db[i]))
                     if end - c.first >= self._carrier:
@@ -427,6 +493,7 @@ class ActivityDetector:
                 self._live[i] = True
             c.overload |= overloaded
             c.frames += 1
+            self._profile(i, power, floor)
             c.snr_db = max(c.snr_db, float(self.snr_db[i]))
             c.power_db = max(c.power_db, float(self.power_db[i]))
             if c.frames < START_FRAMES:
@@ -434,8 +501,10 @@ class ActivityDetector:
             if self._shadowed(i, above, mirror_db):
                 c.frames = 0  # tried again next frame, from where it is then
                 c.first = end
+                c.profile = None
                 continue
             c.state, c.last = "busy", end
+            c.track = next(self._ids)
             self._is_busy[i] = True
             if overloaded and self._culprit is None:
                 self._culprit, self._overload_seen = int(i), True
@@ -449,6 +518,8 @@ class ActivityDetector:
                     snr_db=c.snr_db,
                     power_db=c.power_db,
                     overload=c.overload,
+                    track=c.track,
+                    width_hz=self._width(c),
                 )
             )
 
@@ -460,6 +531,17 @@ class ActivityDetector:
             floor[learn] += rate[learn] * (power[learn] - floor[learn])
             np.maximum(floor, 1e-20, out=floor)
         return out
+
+    def _profile(self, i: int, power: np.ndarray, floor: np.ndarray) -> None:
+        """One more frame of channel ``i``'s power over the floor, bin by bin."""
+        c, mine = self._channels[i], slice(*self._own[:, i])
+        over = np.where(self._keep[mine], power[mine] - floor[mine], 0.0)
+        c.profile = over if c.profile is None else c.profile + over
+
+    def _width(self, c: _Channel) -> float:
+        if c.profile is None:
+            return 0.0
+        return estimate(c.profile, self.rate / self._n)[1]
 
     def _running(self, per_bin: np.ndarray) -> np.ndarray:
         """The running sum of ``per_bin`` over the bins that are measured: what a run of
@@ -522,7 +604,7 @@ class ActivityDetector:
             return None, None
         near_peak = over[p : p + width]
         offset = float(near_peak @ self._offsets[p : p + width]) / total
-        if np.abs(self._channel_offsets - offset).min() <= self._on_hz:
+        if len(self.freqs) and np.abs(self._channel_offsets - offset).min() <= self._on_hz:
             return "on", None  # whether it stands over the rest is _on_top's
         copies = [(k * offset + self.rate / 2) % self.rate - self.rate / 2 for k in (1, -1, -3)]
         centres = self._offsets[self._half_bins : self._half_bins + len(windows)]
@@ -552,6 +634,8 @@ class ActivityDetector:
         it stands ``OVERLOAD_DB`` over every channel beyond its own splatter (three channels
         either side, and those overlapping it) and its copies (``_copies``), wherever they are
         in the window. None when no channel does: interference, or traffic on several channels."""
+        if not self.freqs:
+            return None
         snr = np.where(self._measured, self.snr_db, -np.inf)
         i = int(np.argmax(snr))
         if not above[i]:
@@ -584,7 +668,17 @@ class ActivityDetector:
         c = self._channels[i]
         kind = "short" if c.last - c.first < self._min and reason != "carrier" else "end"
         out = Activity(
-            kind, i, self.freqs[i], c.first, c.last, c.snr_db, c.power_db, reason, c.overload
+            kind,
+            i,
+            self.freqs[i],
+            c.first,
+            c.last,
+            c.snr_db,
+            c.power_db,
+            reason,
+            c.overload,
+            c.track,
+            self._width(c),
         )
         self._channels[i] = _Channel()
         self._live[i] = self._is_busy[i] = False
@@ -592,13 +686,50 @@ class ActivityDetector:
 
     def flush(self) -> list[Activity]:
         """End every transmission still running (the dongle stopped, or the watch did)."""
-        return [self._end(i, "stopped") for i in self.busy]
+        out = [self._end(i, "stopped") for i in self.busy]
+        return out + (self.open.flush() if self.open is not None else [])
 
 
 def _over(sums: np.ndarray, bins: np.ndarray) -> np.ndarray:
     """What each run of bins holds (``bins``: their first, and their last + 1), from the
     running sums."""
     return sums[bins[1]] - sums[bins[0]]
+
+
+def runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """The runs of True in ``mask``, each as its first and last index."""
+    if not mask.any():
+        return []
+    edges = np.diff(np.concatenate([[0], mask.view(np.int8), [0]]))
+    first, after = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+    return list(zip(first.tolist(), (after - 1).tolist(), strict=True))
+
+
+def estimate(profile: np.ndarray, bin_hz: float, first_bin: int = 0) -> tuple[float, float]:
+    """The centre (in bins, counted from ``first_bin``) and the occupied width (Hz) of a
+    signal from its power over the floor, bin by bin: the power-weighted middle and the extent
+    of the bins within ``WIDTH_DB`` of the strongest (smoothed over three), running on from
+    the strongest across gaps of up to three bins."""
+    over = np.maximum(profile, 0.0)
+    smooth = np.convolve(over, np.ones(3) / 3, mode="same")
+    p = int(np.argmax(smooth))
+    if smooth[p] <= 0:
+        return first_bin + len(profile) / 2, 0.0
+    within = smooth >= smooth[p] * 10 ** (-WIDTH_DB / 10)
+    ends = []
+    for step in (-1, 1):
+        k, at, gap = p, p + step, 0
+        while 0 <= at < len(within) and gap <= 3:
+            if within[at]:
+                k, gap = at, 0
+            else:
+                gap += 1
+            at += step
+        ends.append(k)
+    lo, hi = ends
+    weights = over[lo : hi + 1]
+    centre = lo + float((np.arange(len(weights)) * weights).sum() / max(weights.sum(), 1e-30))
+    return first_bin + centre, (hi - lo + 1) * bin_hz
 
 
 class IqHistory:
