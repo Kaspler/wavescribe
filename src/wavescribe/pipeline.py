@@ -41,6 +41,7 @@ from wavescribe.audio import AudioChunk
 from wavescribe.config import Station
 from wavescribe.gate import Gate, Verdict
 from wavescribe.gate.yamnet import YamnetGate
+from wavescribe.invocation import typed
 from wavescribe.languages import same_language
 from wavescribe.log import event
 from wavescribe.radio.bandplan import logged_text
@@ -442,8 +443,8 @@ def plan_available(
 MT_IDLE_UNLOAD_S = 900.0  # a station's own translator is dropped after 15 min unused
 
 NO_VAD = ("transcribing needs the speech detector (Silero VAD): download it under Settings → "
-          "Languages and models (or wavescribe models fetch); listening works without "
-          "it")  # fmt: skip
+          f"Languages and models (or {typed('models fetch silero-vad-v6')}); listening works "
+          "without it")  # fmt: skip
 
 
 def plan_station(

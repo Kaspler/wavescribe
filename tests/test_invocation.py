@@ -23,9 +23,6 @@ HELP_ARGS = {"help", "description", "epilog", "usage", "version"}
 ALLOWED = {
     # Help text that reaches argparse through a name rather than a help= argument.
     ("token_cli.py", "the running `wavescribe serve` on this machine (default: {})"),
-    # pipeline.py's, which still says the bare command.
-    ("pipeline.py", "transcribing needs the speech detector (Silero VAD): download it under "
-     "Settings → Languages and models (or wavescribe models fetch); listening works without it"),
 }  # fmt: skip
 
 
