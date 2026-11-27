@@ -30,8 +30,8 @@ The pull feed and the pushes carry the same JSON objects.
 
 Utterance fields:
 
-- `id`: the segment id on the machine that heard it. It grows in arrival order, and resuming
-  uses it.
+- `id`: the segment id on the machine that heard it. It grows in the order lines are
+  transcribed, which isn't always the order they finish (see *Resuming*).
 - `text`: what the speech recogniser wrote, in the station's language.
 - `translations`: the languages that machine translates this station into.
 - `flags`: notes from the ASR checks. For example, `lang:es` means it sounded like Spanish,
@@ -103,20 +103,31 @@ A batch, used by pushes that batch utterances, is
 | Request | What it returns |
 |---|---|
 | `GET /feed/v1/events` | Server-Sent Events: `utterance` and `alert` by default. Filters: `?events=utterance,alert,status`, `?stations=a,b`, `?langs=en`. |
-| `GET /feed/v1/utterances` | What was said, in the order it was stored (by `id`): `?since=<epoch>&until=<epoch>` or `?since_id=<id>`, `?stations=`, `?langs=`, `?limit=` (500 by default, up to 10,000; counts only what this machine may give), `?format=json\|ndjson\|csv`. A page cut at the limit goes on with `?since_id=<its last id>`, with nothing skipped. |
+| `GET /feed/v1/utterances` | What was said, in the order it was stored (by `id`): `?since=<epoch>&until=<epoch>` or `?since_id=<id>` (a segment id, or a live stream's event id), `?stations=`, `?langs=`, `?limit=` (500 by default, up to 10,000; counts only what this machine may give), `?format=json\|ndjson\|csv`. A page cut at the limit goes on with `?since_id=<its last id>`, with nothing skipped. A line still being translated is there without its translations. |
 | `GET /feed/v1/alerts` | Recent alerts (`?since=<epoch>`). |
 | `GET /feed/v1/stations` | Stations: language, translation languages, running, connected, last heard, lag. |
 | `GET /feed/v1/node` | This machine: name, URL, version, feed version, translation languages. |
 | `GET /healthz` | `{"ok": true}` once models are loaded (503 before). It needs no token. |
 | `GET /metrics` | Prometheus text: stations running and connected, utterances, queues, drops, lag, outputs, memory footprint, free disk, power draw. |
 
-**Resuming.** Each `utterance` event carries `id:`, the highest segment id this stream has
-sent so far (the event's own segment id is its `id` field). Utterances can finish out of order:
-one whose translation waited behind a busier station, or that Whisper re-checked, arrives after
-later ones, and the `id:` never goes back. EventSource sends the last one back as
-`Last-Event-ID` when it reconnects, and the feed replays what was stored since (up to 1,000
-utterances), then goes live. After a restart, a client that kept no id can ask for
-`?since=<epoch>`. Pass `?events=status` to get a status event every 10 s.
+**Resuming.** Utterances finish out of order: one whose translation waited behind a busier
+station, or that Whisper re-checked, finishes after later ones. So each `utterance` event's
+`id:` is a resume point rather than a segment id (the event's own segment id is its `id`
+field): `<low>` or `<low>,<id>,<id>…`. Every utterance up to segment id `low` that the stream
+may send has been sent, and so have the ids after it; `low` stays just below the oldest line
+still in flight on the stations you follow. Treat it as text and send it back as it came.
+
+EventSource sends the last one back as `Last-Event-ID` when it reconnects (a client that opens a
+new stream passes it as `?since_id=`). The feed then replays the lines that finished since (up
+to 1,000), sends those still being translated when they finish, never unfinished, and goes on
+live: each line once.
+
+A resume can still send a few lines again: the id lists at most 64 lines sent past `low` (more
+finish while an old one waits only on a very busy machine), and a replay cut at 1,000 sends the
+rest on the next resume. **Skip an utterance whose `id` you already have** (with the same
+text); `wavescribe follow` and remote stations do. Alerts carry no `id:` and aren't replayed:
+ask `/feed/v1/alerts?since=` for those raised meanwhile. After a restart, a client that kept no
+id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s.
 
 ```sh
 curl -N http://kitchen-mac.local:8765/feed/v1/events?stations=tsf
@@ -147,7 +158,7 @@ and isn't gets a 400.
   then `GET /feed/v1/events?ticket=wsk_…` opens the stream. A ticket works once, within 60 s,
   and only for reading, so one found in a log is spent. An EventSource reconnects with the URL
   it was given, which no longer works: close it, get a new ticket and open a new one with
-  `?since_id=<last id seen>`. `?token=<token>` still works but is logged as a warning (at most
+  `?since_id=<the last event id>` (EventSource keeps it as `lastEventId`). `?token=<token>` still works but is logged as a warning (at most
   once an hour): a token in a URL ends up in logs, here, in browsers and on any proxy.
 
   ```sh

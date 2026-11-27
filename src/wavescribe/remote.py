@@ -40,6 +40,7 @@ import numpy as np
 from wavescribe import __version__, jsonsafe
 from wavescribe.asr import Transcript
 from wavescribe.config import _BCP47, Station
+from wavescribe.events import Seen, resume_point
 from wavescribe.log import event
 from wavescribe.pipeline import Result
 from wavescribe.radio.bandplan import PRIVACY, STRICTNESS
@@ -265,7 +266,8 @@ class RemoteFollower:
         # A sender whose clock runs fast had those stored as they arrived, behind its own times,
         # so asking it from ``since`` replays them; they are skipped until it gives an id.
         self._stored = Counter((text, round(duration, 1)) for text, duration in stored)
-        self.repeated = 0  # replayed events skipped as already stored
+        self._seen = Seen()  # what a resume sends again is taken once
+        self.repeated = 0  # replayed events skipped as already stored or taken
         self._open = opener
         self._stop = threading.Event()
         self._sleep = sleep or self._stop.wait
@@ -353,9 +355,9 @@ class RemoteFollower:
         for name, data, last_id in sse_events(feed_lines(resp)):
             if self._stop.is_set():
                 return
-            # Ids are segment numbers. Anything else isn't sent back as Last-Event-ID: a
-            # header the HTTP client refuses would fail every reconnect from then on.
-            if last_id and last_id.isascii() and last_id.isdigit() and len(last_id) < 20:
+            # Ids are resume points (events.resume_point). Anything else isn't sent back as
+            # Last-Event-ID: a header the HTTP client refuses would fail every reconnect.
+            if last_id and resume_point(last_id) is not None:
                 self.last_id = last_id
             if name != "utterance":
                 continue
@@ -370,6 +372,9 @@ class RemoteFollower:
                     noted = True  # once a connection: every event may have the same fault
                     event(log, "remote_event_skipped", level=logging.WARNING,
                           station=self.station.id, error=str(e))  # fmt: skip
+                continue
+            if not self._seen.first(ev):
+                self.repeated += 1  # sent again on a resume
                 continue
             if by_time and self._already_stored(heard):
                 continue

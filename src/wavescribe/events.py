@@ -20,12 +20,60 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from wavescribe.asr.language import AUTO
 
 FEED_VERSION = 1
+# A live feed's event id is a resume point: "<low>" or "<low>,<id>,<id>…". Every utterance up to
+# segment id ``low`` that the stream may send was sent (or never will be), and the ids after it
+# were sent too: they finished before an older one still waiting for its translation. At most
+# this many follow; past it, a resume sends some again (docs/FEED.md, "Resuming").
+MAX_AHEAD = 64
+_RESUME = re.compile(rf"[0-9]{{1,18}}(?:,[0-9]{{1,18}}){{0,{MAX_AHEAD}}}")
+
+
+def resume_point(text: str | None) -> tuple[int, frozenset[int]] | None:
+    """A feed event id as a client sends it back (``Last-Event-ID``, ``since_id``): the low-water
+    mark and the ids above it the client has. A plain segment id is one with nothing above it.
+    None for anything else, which a client must never send back: a header the HTTP client
+    refuses would fail every reconnect."""
+    if not text or not _RESUME.fullmatch(text):
+        return None
+    low, *have = (int(part) for part in text.split(","))
+    return low, frozenset(i for i in have if i > low)
+
+
+def resume_id(low: int, have: Iterable[int]) -> str:
+    """The event id for a resume point (``resume_point`` reads it back)."""
+    return ",".join(str(i) for i in (low, *sorted(have)))
+
+
+class Seen:
+    """The utterance events a feed client took lately, by their own ``id`` and text: a resume
+    can send a few again (docs/FEED.md, "Resuming"), and those are skipped. Remembers at most
+    ``size``."""
+
+    def __init__(self, size: int = 4096) -> None:
+        self.size = size
+        self._keys: OrderedDict[tuple[int, int], None] = OrderedDict()
+
+    def first(self, ev: Mapping[str, Any]) -> bool:
+        """Whether this event wasn't taken before; from now on it was. One without a segment
+        id (a sender with no store) can't be told apart, and always counts as new."""
+        seg = ev.get("id")
+        if type(seg) is not int:
+            return True
+        key = (seg, hash(ev.get("text")))
+        if key in self._keys:
+            return False
+        self._keys[key] = None
+        if len(self._keys) > self.size:
+            self._keys.popitem(last=False)
+        return True
 
 
 def iso(epoch: float) -> str:

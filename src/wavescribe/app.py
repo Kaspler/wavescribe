@@ -239,7 +239,9 @@ class App:
             # alerter runs next, so the page gets the utterance with its keyword highlights.
             fan_out(store and store.add_translations, self.hub.on_result),
             on_transcript=fan_out(
-                store and store.add_transcript,
+                # The store gives the segment id; the hub notes it in flight in the same step,
+                # which the feed's resume points rely on (feed.Cursor).
+                store and self.hub.store_transcript,
                 self.alerter and self.alerter.on_transcript,
                 self._llm_rules_transcript,
                 self.hub.on_transcript,

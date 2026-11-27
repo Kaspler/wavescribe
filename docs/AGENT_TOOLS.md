@@ -146,7 +146,9 @@ $ uv run wavescribe search água --json | jq -r '.time + "  " + .station.name + 
 
 `follow` prints the live feed (`/feed/v1/events`). Like `tail -f`, it runs until you stop it or
 the program reading it goes away. A lost connection is tried again, waiting a little longer
-each time, and it resumes after the last utterance it printed.
+each time, and it resumes where the feed left off: lines that finished meanwhile come then,
+including one still being translated when the connection dropped, and each utterance is
+printed once.
 
 | Flag | |
 |---|---|

@@ -99,6 +99,16 @@ def stored(store: Store, sid: str, text: str, ago: float = 60.0, **translations:
     return segment_id
 
 
+def heard(hub, store: Store, sid: str, text: str, ago: float = 60.0, **translations: str) -> int:
+    """An utterance as the running app hears it: stored and noted in flight, then final."""
+    r = result(sid, text, time.time() - ago, **translations)
+    hub.store_transcript(r)
+    store.add_translations(r)
+    hub.on_result(r)
+    assert r.segment_id is not None
+    return r.segment_id
+
+
 def url_of(server) -> str:
     host, port = server.server_address
     return f"http://{host}:{port}"
@@ -262,11 +272,10 @@ def test_follow_prints_json_lines_and_stops_when_its_reader_goes(tmp_path: Path)
     store = Store(tmp_path / "w.db")
     server, hub = idle_server(store)
     try:
-        seg = stored(store, "a", "Bom dia", en="Good morning")
         proc = wavescribe("follow", "--url", url_of(server), cwd=tmp_path)
         out = Lines(proc.stdout)
         wait_for(lambda: len(hub._clients) == 1)
-        hub.publish("utterance", store.after(0)[0])
+        seg = heard(hub, store, "a", "Bom dia", en="Good morning")
         alert = alert_on(store, "a", "Bom dia", seg, ["broadcast"])
         hub.on_alert({**alert.payload(), "status": "delivered"})
         utterance, announced = json.loads(out.read()), json.loads(out.read())
@@ -275,8 +284,7 @@ def test_follow_prints_json_lines_and_stops_when_its_reader_goes(tmp_path: Path)
         assert announced["type"] == "alert" and announced["rule"] == "water"
 
         proc.stdout.close()  # as `| head -2` does once it has its lines
-        later = stored(store, "a", "Boa tarde", ago=1)
-        hub.publish("utterance", store.after(later - 1)[0])
+        heard(hub, store, "a", "Boa tarde", ago=1)
         assert proc.wait(10) == 0
         assert proc.stderr.read() == b""
     finally:
@@ -293,6 +301,38 @@ def test_follow_says_to_start_wavescribe_when_none_answers(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == "" and len(captured.err.splitlines()) == 1
     assert "no Wavescribe answers" in captured.err and "wavescribe serve" in captured.err
+
+
+def test_follow_sends_back_the_feeds_id_and_writes_a_repeated_line_once() -> None:
+    """The feed's id is a resume point ("low,sent,sent"); a resume may send a line again."""
+
+    def sse(seg: int, text: str, event_id: str) -> bytes:
+        ev = {"type": "utterance", "id": seg, "text": text, "station": {"id": "a"}}
+        return f"id: {event_id}\nevent: utterance\ndata: {json.dumps(ev)}\n\n".encode()
+
+    bodies = [sse(5, "cinco", "3,5"), sse(4, "quatro", "3,5") + sse(5, "cinco", "5")]
+    asked: list = []
+
+    class Scripted(Client):
+        def open(self, method, path, query=None, body=None, *, control=False, headers=None,
+                 timeout=0.0):  # fmt: skip
+            asked.append(headers)
+            return io.BytesIO(bodies.pop(0))
+
+    class Done(Exception):
+        pass
+
+    def sleep(_seconds: float) -> None:
+        if not bodies:
+            raise Done
+
+    out = io.StringIO()
+    with pytest.raises(Done):
+        follow(Scripted(), {}, out, sleep=sleep, err=io.StringIO())
+    assert [json.loads(line)["text"] for line in out.getvalue().splitlines()] == [
+        "cinco", "quatro",
+    ]  # fmt: skip
+    assert asked == [None, {"Last-Event-ID": "3,5"}]
 
 
 def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) -> None:
@@ -317,11 +357,10 @@ def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) 
             ended.append(e)
 
     try:
-        stored(store, "a", "Bom dia")
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
         wait_for(lambda: len(hub._clients) == 1)
-        hub.publish("utterance", store.after(0)[0])
+        heard(hub, store, "a", "Bom dia")
         wait_for(lambda: written)
         stored(store, "a", "Boa tarde", ago=1)  # heard while the connection is down
         hub.close()  # every stream ends, as when the server stops

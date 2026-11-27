@@ -21,7 +21,7 @@ from typing import IO, Any
 
 from wavescribe import __version__
 from wavescribe.agent import DEFAULT_URL
-from wavescribe.events import to_json
+from wavescribe.events import Seen, resume_point, to_json
 from wavescribe.remote import feed_lines, sse_events
 from wavescribe.web.server import CONTROL_HEADER
 
@@ -119,12 +119,6 @@ def _reason(e: urllib.error.HTTPError) -> str:
     return raw.decode("utf-8", errors="replace").strip()[:300] or str(e.reason)
 
 
-def _is_segment_id(text: str | None) -> bool:
-    """Whether an event id is a segment number. Nothing else is sent back as Last-Event-ID: a
-    header the HTTP client refuses would fail every reconnect from then on."""
-    return bool(text) and text.isascii() and text.isdigit() and len(text) < 20
-
-
 def follow(
     client: Client,
     query: dict[str, str],
@@ -137,8 +131,9 @@ def follow(
     line of JSON, in the feed's own shape, until interrupted.
 
     A lost connection is tried again, waiting 1 s and then twice as long each time up to 30 s.
-    It resumes after the last utterance written: the feed replays what was stored since
-    (``Last-Event-ID``). Alerts raised meanwhile aren't replayed; the store keeps them.
+    It resumes from the last event id (``Last-Event-ID``): the feed replays what was stored
+    since, and utterances still being translated come when done. One the feed sends again is
+    written once (by its ``id``). Alerts raised meanwhile aren't replayed; the store keeps them.
 
     Returns 1 when no server answers the first time, or when the server refuses (a missing
     token, a bad parameter): trying again wouldn't help. ``BrokenPipeError`` from ``out`` (the
@@ -146,6 +141,7 @@ def follow(
     """
     err = err or sys.stderr
     last_id: str | None = None
+    seen = Seen()
     backoff, connected = 1.0, False
     query = {**query, "events": live(query.get("events") or "utterance,alert")}
     while True:
@@ -175,10 +171,14 @@ def follow(
                             ev = json.loads(data)
                         except ValueError:
                             continue
+                        # Only a resume point goes back as Last-Event-ID: a header the HTTP
+                        # client refuses would fail every reconnect from then on.
+                        if event_id and resume_point(event_id) is not None:
+                            last_id = event_id
+                        if name == "utterance" and isinstance(ev, dict) and not seen.first(ev):
+                            continue  # sent again on a resume
                         out.write(to_json(ev) + "\n")
                         out.flush()
-                        if _is_segment_id(event_id):
-                            last_id = event_id
                         backoff = 1.0
             except BrokenPipeError:
                 raise  # only writing to ``out`` raises it here: the reader went away

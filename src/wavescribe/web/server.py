@@ -53,6 +53,10 @@ AROUND_DEFAULT = 50  # utterances in a /api/history?around_id= window unless lim
 RECENT_ALERTS = 30
 CLIENT_BACKLOG = 1000  # events per browser before we drop
 STATUS_INTERVAL_S = 1.0
+# Utterances transcribed and not final yet (waiting for a translation or a re-check), which the
+# feed's event ids wait for (feed.Mark). One waiting longer, or past the count, isn't waited for.
+INFLIGHT_MAX = 1024
+INFLIGHT_MAX_S = 900.0
 MAX_LISTENERS = 8  # audio listeners per station
 CONTROL_HEADER = "X-Wavescribe"  # required on changes: a cross-site form can't set it
 MAX_CATCHES = 500  # per request to /api/catches
@@ -116,9 +120,17 @@ class WebHub:
         self.decodes = threading.BoundedSemaphore(MAX_REMOTE_DECODES)
         self.tickets = feed.Tickets()  # one-time ?ticket= for clients that can't send headers
         self._lock = threading.Lock()
+        # Taken around giving a segment id and noting it in flight, around a final utterance
+        # leaving the in-flight set and being queued, and by a feed stream reading where things
+        # stand (``mark``): so every queue sees finals in the order they left, and a mark never
+        # misses an id the store has given.
+        self._order = threading.RLock()
+        self._inflight: OrderedDict[int, tuple[str, float]] = OrderedDict()  # id -> station, since
+        self._highest = store.last_id() if store is not None else 0  # highest segment id known
         self._recent: dict[str, OrderedDict[str, dict[str, Any]]] = {}
-        self._clients: set[queue.Queue[tuple[str, str] | None]] = set()
-        self._lan_clients: set[queue.Queue[tuple[str, str] | None]] = set()  # other machines
+        self._clients: set[queue.Queue[Any]] = set()
+        self._lan_clients: set[queue.Queue[Any]] = set()  # other machines
+        self._marked: set[queue.Queue[Any]] = set()  # feed streams: a final utterance has a Mark
         self._taps: dict[str, AudioTap] = {}
         self._alerts: OrderedDict[int, dict[str, Any]] = OrderedDict()  # without a store
         self._closed = threading.Event()
@@ -129,15 +141,34 @@ class WebHub:
 
     # -- pipeline callbacks -------------------------------------------------------------------
 
+    def store_transcript(self, result: Result) -> None:
+        """The store's ``add_transcript`` as a pipeline observer, with the id it gives noted as
+        in flight in the same step: a feed stream that reads where things stand meanwhile
+        (``mark``) can't take an id the store has given for one that is final."""
+        assert self.store is not None
+        with self._order:
+            self.store.add_transcript(result, prune=False)
+            self._note(result)
+        self.store.prune_due()
+
     def on_transcript(self, result: Result) -> None:
         if result.transcript.text:  # silence the ASR heard nothing in: nothing to show
+            with self._order:
+                self._note(result)
             self._remember(self._payload(result, final=False))
 
     def on_result(self, result: Result) -> None:
+        seg = result.segment_id
         if not result.transcript.text:
+            if seg is not None:  # a re-check that heard nothing: it won't come
+                with self._order:
+                    self._inflight.pop(seg, None)
             return
         payload = self._payload(result, final=True)
-        self._remember(payload)
+        with self._order:  # out of flight and queued in one step (``publish``)
+            if seg is not None:
+                self._inflight.pop(seg, None)
+            self._remember(payload)
         sid = result.station.id
         self.counts[sid] = self.counts.get(sid, 0) + 1
         for hook in list(self.final_hooks):
@@ -183,39 +214,75 @@ class WebHub:
                 recent.popitem(last=False)
         self.publish("utterance", payload)
 
+    def _note(self, result: Result) -> None:
+        """A transcribed utterance with a segment id is in flight until ``on_result``. Called
+        with ``_order`` held."""
+        seg = result.segment_id
+        if seg is None or not result.transcript.text:
+            return
+        if seg not in self._inflight:
+            self._inflight[seg] = (result.station.id, time.monotonic())
+        self._highest = max(self._highest, seg)
+        while len(self._inflight) > INFLIGHT_MAX:
+            self._inflight.popitem(last=False)
+
+    def mark(self, *, sync: bool = False) -> feed.Mark:
+        """Where the utterances stand now: the highest segment id given, and those in flight.
+        ``sync`` also asks the store, which knows of rows written past the hub (another program
+        on the same database): a stream starting replays those too."""
+        with self._order:
+            if sync and self.store is not None:
+                self._highest = max(self._highest, self.store.last_id())
+            cutoff = time.monotonic() - INFLIGHT_MAX_S
+            while self._inflight and next(iter(self._inflight.values()))[1] < cutoff:
+                self._inflight.popitem(last=False)
+            return feed.Mark(self._highest, tuple((i, s) for i, (s, _) in self._inflight.items()))
+
     # -- browsers -----------------------------------------------------------------------------
 
-    def subscribe(self, *, lan: bool = False) -> queue.Queue[tuple[str, str] | None]:
-        """A queue of live events. For another machine (``lan``) it raises TooManyViewers when
-        as many of them follow along as may."""
-        q: queue.Queue[tuple[str, str] | None] = queue.Queue(maxsize=CLIENT_BACKLOG)
+    def subscribe(self, *, lan: bool = False, marked: bool = False) -> queue.Queue[Any]:
+        """A queue of live events, ``(event, text)``; for a feed stream (``marked``), ``(event,
+        text, mark)``, the mark (``feed.Mark``) on a final utterance with a segment id. For
+        another machine (``lan``) it raises TooManyViewers when as many of them follow along as
+        may. None comes when the stream should end."""
+        q: queue.Queue[Any] = queue.Queue(maxsize=CLIENT_BACKLOG)
         with self._lock:
             if lan and len(self._lan_clients) >= MAX_REMOTE_SUBSCRIBERS:
                 raise TooManyViewers
             (self._lan_clients if lan else self._clients).add(q)
+            if marked:
+                self._marked.add(q)
         return q
 
-    def unsubscribe(self, q: queue.Queue[tuple[str, str] | None]) -> None:
+    def unsubscribe(self, q: queue.Queue[Any]) -> None:
         with self._lock:
             self._clients.discard(q)
             self._lan_clients.discard(q)
+            self._marked.discard(q)
 
     def publish(self, event: str, data: dict[str, Any]) -> None:
         text = to_json(data)
-        with self._lock:
-            clients, lan = list(self._clients), list(self._lan_clients)
-        for q in clients:
-            with contextlib.suppress(queue.Full):
-                q.put_nowait((event, text))
-        if not lan:
-            return
-        shown = self.for_lan(event, data)
-        if shown is None:
-            return
-        lan_text = text if shown is data else to_json(shown)
-        for q in lan:
-            with contextlib.suppress(queue.Full):
-                q.put_nowait((event, lan_text))
+        with self._order:  # queued in the order finals leave the in-flight set
+            mark = None
+            seg = data.get("id")
+            if event == "utterance" and data.get("final") and type(seg) is int:
+                self._highest = max(self._highest, seg)
+                mark = self.mark()
+            with self._lock:
+                clients, lan = list(self._clients), list(self._lan_clients)
+                marked = set(self._marked)
+            for q in clients:
+                with contextlib.suppress(queue.Full):
+                    q.put_nowait((event, text, mark) if q in marked else (event, text))
+            if not lan:
+                return
+            shown = self.for_lan(event, data)
+            if shown is None:
+                return
+            lan_text = text if shown is data else to_json(shown)
+            for q in lan:
+                with contextlib.suppress(queue.Full):
+                    q.put_nowait((event, lan_text, mark) if q in marked else (event, lan_text))
 
     # -- what other machines see --------------------------------------------------------------
 

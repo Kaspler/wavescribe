@@ -203,8 +203,11 @@ class Status(io.BytesIO):
     status = 200
 
 
-def sse(data: object, event_id: int | None = None) -> bytes:
+def sse(data: object, event_id: int | str | None = None) -> bytes:
+    """An utterance event as a feed writes it; a dict gets the segment id as its own ``id``."""
     head = f"id: {event_id}\n" if event_id is not None else ""
+    if isinstance(data, dict) and isinstance(event_id, int):
+        data = {**data, "id": event_id}
     payload = data if isinstance(data, str) else json.dumps(data)
     return f"{head}event: utterance\ndata: {payload}\n\n".encode()
 
@@ -229,6 +232,18 @@ def test_a_follower_skips_what_isnt_an_utterance_and_keeps_following() -> None:
     # The token goes in a header only: URLs end up in logs, here and on the way.
     assert all(r.get_header("Authorization") == "Bearer wst_s3cret" for r in feed.requests)
     assert not any("s3cret" in r.full_url for r in feed.requests)
+
+
+def test_a_follower_resumes_from_the_feeds_id_and_takes_each_line_once() -> None:
+    """The feed's id is a resume point ("low,sent,sent"): sent back as it came. A line sent
+    again on a resume (past the ids it lists) is taken once, by its own id."""
+    got: list[str] = []
+    first = sse({**said("cinco"), "id": 5}, "3,5")  # line 4 was still being translated
+    again = sse({**said("quatro"), "id": 4}, "3,5") + sse({**said("cinco"), "id": 5}, "5")
+    feed = Feed(Status(first), Status(again))
+    follower = feed.follow(lambda result: got.append(result.transcript.text))
+    assert got == ["cinco", "quatro"] and follower.repeated == 1
+    assert feed.requests[1].get_header("Last-event-id") == "3,5"
 
 
 def test_a_restarted_follower_skips_what_a_fast_clock_replays_of_what_is_stored() -> None:

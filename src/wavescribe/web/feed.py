@@ -33,12 +33,22 @@ import queue
 import secrets
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from wavescribe import __version__, jsonsafe
 from wavescribe.asr.language import AUTO
-from wavescribe.events import FEED_VERSION, alert_event, to_json, utterance_event
+from wavescribe.events import (
+    FEED_VERSION,
+    MAX_AHEAD,
+    alert_event,
+    resume_id,
+    resume_point,
+    to_json,
+    utterance_event,
+)
 
 if TYPE_CHECKING:
     from wavescribe.web.server import Handler
@@ -87,6 +97,55 @@ def _digest(ticket: str) -> str:
     return hashlib.sha256(ticket.encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class Mark:
+    """Where the utterances stood when a final one was queued (``WebHub.mark``): the highest
+    segment id given so far, and the ids transcribed but not final yet, with their stations.
+    Those finish later, out of order: a translation that waited, a line Whisper re-checked."""
+
+    highest: int
+    inflight: tuple[tuple[int, str], ...] = ()
+
+
+class Cursor:
+    """What one live stream has sent, as its event ids say it (``events.resume_point``): every
+    utterance up to ``low`` that this stream may send has gone or never will, and ``ahead`` holds
+    the ids above ``low`` that went too, at most ``MAX_AHEAD``. ``low`` sits just below the
+    oldest utterance still in flight on the stations the client follows, so a client resuming
+    from the last id it had gets each line it hadn't, once."""
+
+    def __init__(self, start: tuple[int, frozenset[int]] | None, follows: Callable[[str], bool]):
+        self.low = start[0] if start else 0
+        self.ahead: set[int] = set(start[1]) if start else set()
+        self.cap: int | None = None  # a replay cut at REPLAY_MAX: what lies past it wasn't sent
+        self._follows = follows
+
+    def sent(self, seg: int, mark: Mark | None) -> str:
+        """``seg`` went out, queued at ``mark``: the event id to send with it."""
+        if mark is not None:
+            waiting = [i for i, station in mark.inflight if self._follows(station)]
+            self.low = min(waiting) - 1 if waiting else mark.highest
+            if self.cap is not None:
+                self.low = min(self.low, self.cap)
+        self.ahead = {i for i in self.ahead if i > self.low}
+        if seg > self.low:
+            self.ahead.add(seg)
+        while len(self.ahead) > MAX_AHEAD:  # a resume sends these again: clients dedupe by id
+            self.ahead.remove(min(self.ahead))
+        return resume_id(self.low, self.ahead)
+
+
+def _start(h: Handler, query: dict[str, str]) -> tuple[int, frozenset[int]] | None:
+    """Where a stream resumes: ``Last-Event-ID`` (an EventSource sends back the last id it had),
+    else ``?since_id=``. A ``since_id`` that isn't an event id is a 400 (``ValueError``); a
+    header that isn't one is ignored, and the stream starts from now."""
+    raw = query.get("since_id")
+    asked = resume_point(raw) if raw else None
+    if raw and asked is None:
+        raise ValueError("since_id must be an event id or a segment id")
+    return resume_point(h.headers.get("Last-Event-ID")) or asked
+
+
 def _list(value: str | None) -> list[str]:
     return [v for v in (value or "").split(",") if v]
 
@@ -101,12 +160,6 @@ def _epoch(query: dict[str, str], key: str) -> float | None:
         return float(raw)
     except ValueError:
         raise ValueError(f"{key} must be a number of seconds since 1970") from None
-
-
-def _segment_id(text: str | None) -> int | None:
-    """A segment id as a client sends it back (Last-Event-ID, since_id); None for anything
-    else. ``str.isdigit`` alone also takes digits ``int`` refuses, such as "²"."""
-    return int(text) if text and text.isascii() and text.isdigit() and len(text) < 19 else None
 
 
 def _cell(value: Any) -> Any:
@@ -296,9 +349,13 @@ def _select(h: Handler, query: dict[str, str]) -> list[dict[str, Any]]:
         rows.sort(key=lambda r: r["t_start"])
         return rows[-limit:]
     if query.get("since_id"):
+        start = resume_point(query["since_id"])  # a segment id, or a live stream's event id
+        if start is None:
+            raise ValueError("since_id must be a segment id or an event id")
         until = float(query["until"]) if query.get("until") else None
-        return hub.store.after(int(query["since_id"]), station_ids=ids, until=until, limit=limit,
+        rows = hub.store.after(start[0], station_ids=ids, until=until, limit=limit,
                                exports=leaving)  # fmt: skip
+        return [r for r in rows if r["id"] not in start[1]]
     now = time.time()
     since = float(query.get("since") or now - 3600)
     until = float(query.get("until") or now + 60)
@@ -353,55 +410,59 @@ def alerts(h: Handler, query: dict[str, str]) -> None:
 
 
 def events(h: Handler, query: dict[str, str]) -> None:
-    """Live events. Subscribes first, then replays what the client missed, so nothing falls
-    in between; an utterance replayed is skipped when it also arrives live."""
+    """Live events. Subscribes first, then reads where things stand (``WebHub.mark``) and
+    replays what the client missed: the utterances final by then, up to that mark. Those still
+    in flight, and everything after the mark, come live, each once (docs/FEED.md, Resuming)."""
     hub = h.server.hub
     want = set(_list(query.get("events")) or ["utterance", "alert"])
     only = set(_list(query.get("stations")))
     langs = _list(query.get("langs"))
     try:
         since = _epoch(query, "since")
+        start = _start(h, query)
     except ValueError as e:
         h._json({"error": f"bad parameter: {e}"}, HTTPStatus.BAD_REQUEST)
         return
     from wavescribe.web.server import TooManyViewers
 
     try:  # followers on other machines count towards the same cap as the page's
-        q = hub.subscribe(lan=not h._is_local())
+        q = hub.subscribe(lan=not h._is_local(), marked=True)
     except TooManyViewers:
         h._busy("too many programs on other machines are following along; try again later")
         return
     leaving = hub.exports()
     try:
-        last = _segment_id(h.headers.get("Last-Event-ID") or query.get("since_id"))
+        mark = hub.mark(sync=True)
+        waiting = {i for i, _ in mark.inflight}
+        cursor = Cursor(start, lambda station: not only or station in only)
         replay: list[dict[str, Any]] = []
-        if "utterance" in want and hub.store is not None:
+        if "utterance" in want and hub.store is not None and (start or since is not None):
             ids = sorted(only) or None
-            if last is not None:
-                replay = hub.store.after(last, station_ids=ids, limit=REPLAY_MAX,
-                                         exports=leaving)  # fmt: skip
-            elif since is not None:
-                replay = hub.store.between(since, time.time() + 60, station_ids=ids,
-                                           limit=REPLAY_MAX, exports=leaving)  # fmt: skip
+            if start is not None:
+                rows = hub.store.after(start[0], station_ids=ids, limit=REPLAY_MAX,
+                                       exports=leaving)  # fmt: skip
+            else:
+                assert since is not None
+                rows = hub.store.between(since, time.time() + 60, station_ids=ids,
+                                         limit=REPLAY_MAX, exports=leaving)  # fmt: skip
+            if len(rows) >= REPLAY_MAX:
+                cursor.cap = rows[-1]["id"]  # the rest is replayed on the next resume
+            have = start[1] if start else frozenset()
+            # Final ones only: one in flight would go out unfinished, and comes live when done.
+            replay = [r for r in rows if r["id"] <= mark.highest and r["id"] not in waiting
+                      and r["id"] not in have and r.get("text")]  # fmt: skip
         h.send_response(HTTPStatus.OK)
         h.send_header("Content-Type", "text/event-stream")
         h.send_header("Cache-Control", "no-store")
         h.send_header("X-Accel-Buffering", "no")  # behind nginx: don't buffer the stream
         h.end_headers()
         h.wfile.write(b"retry: 3000\n\n")
-        sent_id = last or 0
-        # Utterances finish out of order (a translation queue by priority, a line Whisper
-        # re-checks), so a live one is skipped only when the replay sent it, and the event id
-        # never goes back: a client resuming from it misses nothing it hadn't seen.
-        replayed: set[int] = set()
         stations_, node_ = _context(h)
         for row in replay:
             if not leaving.utterance(row):
                 continue
             _write(h, "utterance", utterance_event(row, stations_, node_, languages=langs),
-                   row["id"])  # fmt: skip
-            sent_id = max(sent_id, row["id"] or 0)
-            replayed.add(row["id"])
+                   cursor.sent(row["id"], mark))  # fmt: skip
         h.wfile.flush()
         next_status = wrote = time.monotonic()
         while True:
@@ -424,7 +485,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 continue
             if item is None:
                 break
-            name, text = item
+            name, text, queued_at = item
             if name == "utterance" and "utterance" in want:
                 data = json.loads(text)
                 if not data.get("final") or not data.get("text"):
@@ -434,13 +495,11 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 if not hub.exports().utterance(data):
                     continue
                 seg = data.get("id")
-                if seg is not None and seg in replayed:
-                    continue  # already replayed
-                if seg is not None:
-                    sent_id = max(sent_id, seg)
+                if type(seg) is int and seg <= mark.highest and seg not in waiting:
+                    continue  # final before this stream began: replayed, or not asked for
                 stations_, node_ = _context(h)
                 _write(h, "utterance", utterance_event(data, stations_, node_, languages=langs),
-                       sent_id if seg is not None else None)  # fmt: skip
+                       cursor.sent(seg, queued_at) if type(seg) is int else None)  # fmt: skip
             elif name == "alert" and "alert" in want:
                 data = json.loads(text)
                 if only and not only & set(data.get("stations") or []):
@@ -458,7 +517,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
         hub.unsubscribe(q)
 
 
-def _write(h: Handler, name: str, data: dict[str, Any], event_id: int | None = None) -> None:
+def _write(h: Handler, name: str, data: dict[str, Any], event_id: str | None = None) -> None:
     head = f"id: {event_id}\n" if event_id is not None else ""
     payload = to_json(data)
     h.wfile.write(f"{head}event: {name}\ndata: {payload}\n\n".encode())

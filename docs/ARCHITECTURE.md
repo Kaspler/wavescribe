@@ -339,9 +339,14 @@ and ignores whatever licence the request carries.
 **Feed, outputs and remote stations** ([FEED.md](FEED.md) is the reference). One JSON shape
 per event (`events.py`, version 1: `utterance`, `alert`, `batch`) serves all three:
 
-- `/feed/v1` (`web/feed.py`) pulls it: Server-Sent Events that resume by segment id
-  (`Last-Event-ID`), JSON, NDJSON or CSV exports, stations, node info, `/healthz` and
-  Prometheus `/metrics`.
+- `/feed/v1` (`web/feed.py`) pulls it: Server-Sent Events, JSON, NDJSON or CSV exports,
+  stations, node info, `/healthz` and Prometheus `/metrics`. Lines finish out of order (a
+  translation that waited, a re-check), so a stream's event id is a resume point
+  (`feed.Cursor`): just below the oldest line still in flight, plus the ids sent past it. The
+  hub notes a segment id in flight in the same step as the store gives it
+  (`WebHub.store_transcript`) and queues each final line with where things stood
+  (`feed.Mark`); a resuming stream replays the lines final by then and gets the rest live, each
+  once. Clients skip a line a resume sends again by its id (`events.Seen`).
 - `Output`s push it to webhooks.
 - A remote station follows another Wavescribe's feed (`remote.py`), or is created by that
   machine's pushes to `/feed/v1/ingest`.

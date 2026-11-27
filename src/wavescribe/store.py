@@ -541,11 +541,12 @@ class Store:
                 (station.id, station.name, station.language),
             )
 
-    def add_transcript(self, result: Result) -> int | None:
+    def add_transcript(self, result: Result, *, prune: bool = True) -> int | None:
         """Store an utterance and its source-language text; sets ``result.segment_id``.
 
         Utterances the ASR heard nothing in are not stored. Pipeline observer: call it before any
-        observer that needs the segment id (the web view does).
+        observer that needs the segment id (the web view does). ``prune=False`` leaves what is due
+        to ``prune_due``, for a caller that holds a lock of its own around this write.
         """
         u, t = result.utterance, result.transcript
         if not t.text:
@@ -554,7 +555,8 @@ class Store:
 
         policy = policy_of(result.station)
         if policy is not None and policy.text_days == 0:
-            self._prune_due()
+            if prune:
+                self._prune_due()
             return None  # live only: shown on the page as it's heard, never written down
         with self._tx() as db:
             # The class goes on every row. How long the words are kept and whether they may
@@ -585,8 +587,13 @@ class Store:
         audio_ok = policy is None or policy.audio
         if self.archive is not None and self.archive.enabled and u.samples.size and audio_ok:
             self.archive.submit(segment_id, result.station.id, u.t_start, u.samples, self._saved)
-        self._prune_due()
+        if prune:
+            self._prune_due()
         return segment_id
+
+    def prune_due(self) -> None:
+        """What ``add_transcript`` prunes after a write, when it was told not to."""
+        self._prune_due()
 
     def _prune_due(self) -> None:
         """Everything whose time is up, at most once per ``prune_text_every_s``: text past the
