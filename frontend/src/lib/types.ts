@@ -85,6 +85,8 @@ export interface Alert {
   segment_id: number | null;
   status: string;
   actions?: Record<string, string | number> & { covered_by?: number };
+  /** When its delivery last reached someone, once its actions (a voice among them) were done. */
+  delivered_at?: number | null;
   kind: string;
   reason: string | null;
   summaries: Record<string, string>;

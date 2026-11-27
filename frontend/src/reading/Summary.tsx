@@ -10,12 +10,12 @@ import { useTopics } from "../lib/store";
 import { hm, hms, whenLabel } from "../lib/time";
 import { V } from "../lib/view";
 import { Icon } from "../components/Icon";
-import { Button, LinkButton, cx, useDismiss } from "../components/ui";
+import { Button, Check, LinkButton, cx, useDismiss } from "../components/ui";
 import { SEV_WORD, human } from "./Alerts";
 import { SourceRow } from "./Ask";
-import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, linksOf, saidBy, shown, sinceClock, windowProblem } from "./digest";
+import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, cutAt, linksOf, saidBy, shown, sinceClock, windowProblem } from "./digest";
 import { T } from "./strings";
-import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary } from "./summaries";
+import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary, speakNext } from "./summaries";
 
 const names = (ids: string[]) => ids.map((id) => S.byId[id]?.name || id);
 
@@ -164,6 +164,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
             </form>
           </div>
           {problem && <p className="sum-pick-why" id={`${uid}-p`} role="alert">{problem}</p>}
+          {S.canControl && <Check checked={Sm.speak} disabled={busy} onChange={speakNext}>{T.readAloud}</Check>}
           {busy && <p className="sum-pick-why">{T.oneAtATime}</p>}
         </>
       )}
@@ -233,7 +234,28 @@ function Body({ job }: { job: Job }) {
   }
   if (job.state === "cancelled") return <p className="sum-said">{T.cancelled}</p>;
   if (job.state === "failed" && job.failure) return <Failed f={job.failure} again={() => askSummary(job.choice, job.stations)} />;
-  return job.answer ? <AnswerView a={job.answer} took={job.took} /> : null;
+  return job.answer ? <AnswerView a={job.answer} took={job.took} speech={job.speak ? <Speech job={job} /> : null} /> : null;
+}
+
+/** Whether the summary is being read aloud on this machine, was, or was cut short by an alert's
+ * voice; or the server's reason it isn't read. */
+function Speech({ job }: { job: Job }) {
+  useTopics("alerts");
+  const [, tick] = useState(0);
+  const sp = job.spoken;
+  const ends = sp ? sp.at + sp.seconds : 0;
+  useEffect(() => {
+    const left = ends * 1000 - Date.now();
+    if (left <= 0) return;
+    const t = setTimeout(() => tick((n) => n + 1), left + 500);
+    return () => clearTimeout(t);
+  }, [ends]);
+  const why = job.answer?.speech?.error;
+  if (!sp) return why ? <p className="sum-speech" dir="auto">{T.notReadAloud(why)}</p> : null;
+  const cut = cutAt(sp, S.alerts.values());
+  const text = cut != null ? T.readAloudCut(hms(cut))
+    : Date.now() / 1000 < ends ? T.readingAloud(sp.seconds) : T.readAloudAt(hm(sp.at));
+  return <p className="sum-speech" role="status">{text}</p>;
 }
 
 /** The server's sentence as it is, then what can be done about it. */
@@ -248,13 +270,14 @@ function Failed({ f, again }: { f: Failure; again: () => void }) {
   );
 }
 
-function AnswerView({ a, took }: { a: Answer; took: number | null }) {
+function AnswerView({ a, took, speech }: { a: Answer; took: number | null; speech: React.ReactNode }) {
   const v = shown(a);
   const uid = useId();
   const foot = [took != null ? T.took(Math.max(1, Math.round(took / 1000))) : null, a.model].filter(Boolean).join(" · ");
   return (
     <>
       {v.notice && <p className="sum-notice">{v.notice}</p>}
+      {speech}
       {a.alerts.length > 0 && <WindowAlerts a={a} />}
       {v.points.length ? (
         <ol className="sum-points">{v.points.map((p, i) => <PointView key={i} p={p} a={a} />)}</ol>

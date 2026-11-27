@@ -792,6 +792,8 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .sum-stations { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .sum-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s5) var(--s7) var(--s10); }
 .sum-notice { padding-bottom: var(--s5); border-bottom: 1px solid var(--rule); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-3); text-wrap: pretty; }
+.sum-speech { padding: var(--s4) 0; border-bottom: 1px solid var(--rule); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-2); text-wrap: pretty; }
+.sum-pick .check { padding: var(--s1) 0 0 8px; font-size: var(--t-ui); }
 .sum-point { padding: var(--s5) 0; border-bottom: 1px solid var(--rule); }
 .sum-who { margin-bottom: 2px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
 .sum-text { font-size: calc(var(--read) * 0.9); line-height: 1.5; color: var(--ink); text-wrap: pretty; overflow-wrap: break-word; }

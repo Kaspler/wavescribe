@@ -12,7 +12,7 @@ import { P, visible } from "../lib/prefs";
 import { MAX_COLS, setCols } from "../lib/router";
 import { emit } from "../lib/store";
 import { V, showLine } from "../lib/view";
-import { type Answer, type Choice, type Failure, answerOf, digestBody, failureOf, nowBody } from "./digest";
+import { type Answer, type Choice, type Failure, answerOf, digestBody, failureOf, nowBody, spokenSeconds } from "./digest";
 import { T } from "./strings";
 
 export interface Job {
@@ -24,12 +24,18 @@ export interface Job {
   state: "working" | "done" | "failed" | "cancelled";
   answer: Answer | null;
   failure: Failure | null;
+  /** Asked to be read aloud on this machine; once it began, when (s) and for about how long. */
+  speak: boolean;
+  spoken: { at: number; seconds: number } | null;
 }
 
 export const Sm = {
   job: null as Job | null,
   /** The answer shows beside the columns (on a phone, on its own page: #/summary). */
   open: false,
+  /** Read the next one aloud on this machine: the server reads a summary aloud only as it is
+   * made, never one already shown. */
+  speak: false,
 };
 
 let ctl: AbortController | null = null;
@@ -100,13 +106,15 @@ async function fetchAnswer(job: Job | NowJob, body: Record<string, unknown>, sig
 /** Asks for a summary of `stations` over `choice`; the answer opens beside the columns. */
 export async function askSummary(choice: Choice, stations: string[]) {
   if (Sm.job?.state === "working") return;
-  const job: Job = { stations, choice, asked: Date.now(), took: null, state: "working", answer: null, failure: null };
+  const speak = Sm.speak && S.canControl;
+  const job: Job = { stations, choice, asked: Date.now(), took: null, state: "working", answer: null, failure: null, speak, spoken: null };
   const mine = new AbortController();
   ctl = mine;
   Sm.job = job;
   Sm.open = true;
   emit("summary");
-  await fetchAnswer(job, digestBody(choice, { stations, language: readerLanguage(stations) }), mine.signal);
+  await fetchAnswer(job, digestBody(choice, { stations, language: readerLanguage(stations), speak }), mine.signal);
+  if (job.answer?.speech?.started) job.spoken = { at: Date.now() / 1000, seconds: spokenSeconds(job.answer) };
   if (ctl === mine) ctl = null;
   keep();
   emit("summary");
@@ -150,6 +158,11 @@ export function dropNow(station: string) {
   job.ctl.abort();
   delete Now[station];
   emit(`now:${station}`);
+}
+
+export function speakNext(on: boolean) {
+  Sm.speak = on;
+  emit("summary");
 }
 
 export function showSummary(open: boolean) {

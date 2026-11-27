@@ -55,6 +55,8 @@ export interface Answer {
   text: string;
   model?: string | null;
   timings?: { model_ms?: number; total_ms?: number };
+  /** Asked with `speak`: whether reading it aloud began, and the server's reason when not. */
+  speech?: { started: boolean; error?: string };
 }
 
 // -- the window ------------------------------------------------------------------------------
@@ -93,12 +95,13 @@ export function windowProblem(since: number, now: number, longest: number): "soo
 }
 
 /** The request for a summary of `stations` over `choice`, in `language` (the server's default
- * when none). */
-export function digestBody(choice: Choice, o: { stations: string[]; language?: string }): Record<string, unknown> {
+ * when none), read aloud on the Wavescribe machine with `speak`. */
+export function digestBody(choice: Choice, o: { stations: string[]; language?: string; speak?: boolean }): Record<string, unknown> {
   const out: Record<string, unknown> = { kind: "digest", stations: o.stations };
   if (choice.kind === "minutes") out.minutes = choice.minutes;
   else out.since = Math.floor(choice.at);
   if (o.language) out.language = o.language;
+  if (o.speak) out.speak = true;
   return out;
 }
 
@@ -196,4 +199,59 @@ export function failureOf(status: number, error: unknown, o: { retryAfter?: stri
     : status >= 500 ? "failed"
     : "refused";
   return { kind, text, retry: kind === "busy" || kind === "failed", retryAfter };
+}
+
+// -- reading aloud ---------------------------------------------------------------------------
+
+// As the server reads a summary aloud (digest/speech.py): an opening sentence, the earlier alerts
+// by time and rule, then each point after the stations that said it, as many as fit in 45
+// seconds and at least one, at `say`'s usual rate.
+const SPOKEN_S = 45;
+const CHARS_PER_S = 14;
+const DENSE_CHARS_PER_S = 6;
+const SPOKEN_CHARS = 300;
+const OPENING_CHARS = 140; // "Wavescribe summary of …, 14:05 to 15:05. Written by the local model…"
+const EARLIER_LISTED = 5;
+const NO_SPACES = /[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+
+/** About how long reading `a` aloud takes, in seconds, rounded up to five: an estimate. */
+export function spokenSeconds(a: Answer): number {
+  const name = (id: string) => a.names[id] || id;
+  const opening = Math.min(SPOKEN_CHARS, OPENING_CHARS + a.stations.map(name).join(", ").length);
+  const earlier = a.alerts.length ? Math.min(SPOKEN_CHARS, 30 + 20 * Math.min(EARLIER_LISTED, a.alerts.length)) : 0;
+  let s = (opening + earlier) / CHARS_PER_S;
+  let left = SPOKEN_S;
+  let said = 0;
+  for (const p of a.points) {
+    const line = `${a.kind === "now" ? "" : `${p.stations.map(name).join(", ")}: `}${p.text}`.slice(0, SPOKEN_CHARS);
+    const t = line.length / (NO_SPACES.test(line) ? DENSE_CHARS_PER_S : CHARS_PER_S);
+    left -= t;
+    if (said && left < 0) break;
+    s += t;
+    said++;
+  }
+  return Math.ceil(s / 5) * 5;
+}
+
+/** An alert as the live stream sends it: when it reached someone, and how. */
+interface Delivered {
+  delivered_at?: number | null;
+  actions?: Record<string, string | number>;
+}
+
+/** An alert's voice stops a summary being read aloud at once (the server sees to that). An alert
+ * records its delivery once its own voice has finished, so one read aloud counts when that falls
+ * within the summary's reading or up to `ALERT_SPEECH_S` after it. When the first did, or null.
+ * `speech`: when the summary began to be read, and for about how long (seconds). */
+export const ALERT_SPEECH_S = 20;
+export function cutAt(speech: { at: number; seconds: number }, alerts: Iterable<Delivered>): number | null {
+  let first: number | null = null;
+  for (const a of alerts) {
+    const at = a.delivered_at;
+    if (at == null || !Number.isFinite(at)) continue;
+    const spoke = Object.entries(a.actions || {}).some(([k, v]) => k.startsWith("speak:") && v === "ok");
+    if (!spoke || at < speech.at || at > speech.at + speech.seconds + ALERT_SPEECH_S) continue;
+    if (first == null || at < first) first = at;
+  }
+  return first;
 }

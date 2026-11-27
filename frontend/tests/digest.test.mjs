@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  answerOf, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, windowProblem,
+  ALERT_SPEECH_S, answerOf, cutAt, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, spokenSeconds,
+  windowProblem,
 } from "../src/reading/digest.ts";
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
@@ -55,6 +56,7 @@ test("the request names the stations, the window and the language, and only thos
   assert.deepEqual(digestBody({ kind: "minutes", minutes: 15 }, { stations: ["tsf"] }), { kind: "digest", stations: ["tsf"], minutes: 15 });
   assert.deepEqual(digestBody({ kind: "since", at: 1234.9 }, { stations: ["tsf", "rr"], language: "es" }),
     { kind: "digest", stations: ["tsf", "rr"], since: 1234, language: "es" });
+  assert.deepEqual(digestBody({ kind: "away", at: 99 }, { stations: ["tsf"], speak: true }), { kind: "digest", stations: ["tsf"], since: 99, speak: true });
 });
 
 test("what a station is talking about now names the one station, and the language when given", () => {
@@ -113,4 +115,26 @@ test("only an answer with a known outcome, points, lines and a window is drawn",
   for (const bad of [null, "text", {}, answer({ outcome: "maybe" }), answer({ points: null }), answer({ window: {} })]) {
     assert.equal(answerOf(bad), null);
   }
+});
+
+test("reading aloud takes the opening and the points that fit in 45 seconds", () => {
+  const short = spokenSeconds(answer({ points: [answer().points[0]] }));
+  assert.equal(short % 5, 0);
+  assert.ok(short >= 10 && short <= 20, `${short}`);
+  const long = { text: "x".repeat(280), stations: ["tsf"], sources: [1] };
+  const many = spokenSeconds(answer({ points: Array.from({ length: 8 }, () => long) }));
+  // Two such points fill the 45 seconds; the rest aren't read.
+  assert.ok(many >= 45 && many <= 65, `${many}`);
+  assert.ok(spokenSeconds(answer({ points: [{ text: "東京で地震の情報が伝えられた".repeat(4), stations: ["tsf"], sources: [1] }] })) > short);
+});
+
+test("an alert read aloud during the reading, or just after it, cut it short", () => {
+  const speech = { at: 1000, seconds: 40 };
+  const spoke = (at) => ({ delivered_at: at, actions: { notify: "ok", "speak:en": "ok" } });
+  assert.equal(cutAt(speech, [spoke(1012)]), 1012);
+  assert.equal(cutAt(speech, [spoke(1040 + ALERT_SPEECH_S)]), 1040 + ALERT_SPEECH_S);
+  assert.equal(cutAt(speech, [spoke(990), spoke(1100)]), null); // before it, long after it
+  assert.equal(cutAt(speech, [{ delivered_at: 1010, actions: { notify: "ok" } }]), null); // not spoken
+  assert.equal(cutAt(speech, [{ delivered_at: 1010, actions: { "speak:en": "failed" } }]), null);
+  assert.equal(cutAt(speech, [spoke(1030), spoke(1015)]), 1015);
 });
