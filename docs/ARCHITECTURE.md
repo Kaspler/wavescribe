@@ -470,7 +470,9 @@ written by the program (mode 0600, replaced atomically) and laid over the hand-e
 stations and dongles; `[run] stations`, the stations to start next time; `[models]`, the chain
 order per capability; `[retention]`; `[node]` (name, public URL); `[[output]]`; `[[feed_token]]`
 (SHA-256 hashes only); `[alerts]` (delivery, actions, voices, rules added on the page, rules
-switched off, and `[alerts.digest]`, the digest schedule in place of the file's). A broken override is reported and skipped, never fatal: the station keeps its
+switched off, and `[alerts.digest]`, the digest schedule in place of the file's); `[radio]`
+(the band plan's region, and `[radio.policy.<class>]`, what is kept of each kind of radio);
+`[remote_privacy]` (the class another machine gave each remote station). A broken override is reported and skipped, never fatal: the station keeps its
 file settings. An override that leaves the station as the file has it (a language added and
 removed again, a form that sends unchanged fields) is not saved, and the page's "changed here"
 (`overridden`) lists only the keys that make the station differ from the file; confirmations

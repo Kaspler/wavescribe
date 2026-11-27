@@ -13,13 +13,12 @@ change. One file, one writer, atomic replaces. Sections:
     [device_overrides.<id>]  per SDR dongle: center_mhz, gain_db, sample_rate, ppm
     [[station]]          stations added from the page (same keys as stations.toml, plus remote)
     [[device]]           dongles added from the page
-    [[rule]]             alert rules from the page (keyword or llm)
+    [run]                stations: the ones to start next time
     [alerts]             laid over alerts.toml (alerts.merge_page): delivery, actions and
                          speak per key, the page's rules, disabled_rules, and [alerts.digest],
                          the digest schedule in place of the file's [digest] (off = true: none)
     [[output]]           webhooks and streams
     [[feed_token]]       access tokens for /feed/v1 from other machines
-    [catalog]            when the station catalogue snapshot was refreshed
     [radio]              region (the band plan), and [radio.policy.<class>]: what is kept of
                          radio that isn't broadcast (radio/bandplan.py, docs/RADIO.md)
     [remote_privacy]     per remote station: the privacy class the other machine gave it

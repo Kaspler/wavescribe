@@ -168,10 +168,10 @@ rewritten.
 - **The Aa button** (Display) sets the text size, light or dark theme, which language you
   **read in**, and whether the original is shown beside the translation. These are yours alone:
   another person reading the same Wavescribe can choose differently.
-- **In the Terminal, without the page:** `uv run wavescribe listen <station id> …` prints the
-  same lines as they come, each translation under its original, until you press Ctrl-C.
 - **The ⋯ button** beside a station has **Show only this station**, **Station settings** and
   **Stop the station**, which stops it for everyone reading this Wavescribe.
+- **In the Terminal, without the page:** `uv run wavescribe listen <station id> …` prints the
+  same lines as they come, each translation under its original, until you press Ctrl-C.
 
 **Keyboard shortcuts** (`?` lists them on the page):
 
