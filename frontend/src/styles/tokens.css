@@ -33,7 +33,6 @@
 
   /* the pointer: what the reader follows, focus, selection, fresh text */
   --accent: #d24e14;
-  --accent-ink: #ffffff;
   --accent-text: #b3420e; /* the pointer as small text: 5.5:1 on the surface */
   --accent-tint: rgb(210 78 20 / 0.13);
   --accent-wash: rgb(210 78 20 / 0.07);
@@ -118,7 +117,6 @@
     --band-tick: #3b3935;
     --band-hover: #1a1917;
     --accent: #f26b2d;
-    --accent-ink: #131312;
     --accent-text: #f26b2d;
     --accent-tint: rgb(242 107 45 / 0.2);
     --accent-wash: rgb(242 107 45 / 0.09);
@@ -155,7 +153,6 @@
   --band-tick: #3b3935;
   --band-hover: #1a1917;
   --accent: #f26b2d;
-  --accent-ink: #131312;
   --accent-text: #f26b2d;
   --accent-tint: rgb(242 107 45 / 0.2);
   --accent-wash: rgb(242 107 45 / 0.09);
