@@ -51,7 +51,9 @@ class _Pending:
     since: float = 0.0
 
 
-Submit = Callable[[Callable[[Any], None], str, float], bool]  # (run, name, priority) -> queued
+# (run, name, priority, station=...) -> queued. A rule check that isn't queued is counted and
+# logged by the pipeline (Pipeline.request_llm), against its station.
+Submit = Callable[..., bool]
 
 
 class LlmRuleChecker:
@@ -135,8 +137,7 @@ class LlmRuleChecker:
         def run(llm: Any) -> None:
             self._check(llm, results, rules)
 
-        if not self._submit(run, "llm-rules", RULES_PRIORITY):
-            event(log, "drop", level=logging.WARNING, stage="llm-rules", station=station_id)
+        self._submit(run, "llm-rules", RULES_PRIORITY, station=station_id)
 
     # -- checking (translation thread) ------------------------------------------------------
 

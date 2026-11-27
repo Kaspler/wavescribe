@@ -764,15 +764,164 @@ def test_a_drained_stop_ends_even_when_the_asr_worker_crashed(monkeypatch) -> No
                 raise RuntimeError("a bug in the ASR worker")
         return real(self, *args, **kwargs)
 
+    def load_after_the_crash(_e, _p) -> FakeTranslator:
+        # The first line still waits for translation when the ASR worker has ended: it must
+        # be translated and kept all the same, not lost behind an immediate stop marker.
+        wait_for(lambda: len(calls) == 2 and not pipeline._alive("asr"))
+        return FakeTranslator()
+
     monkeypatch.setattr(Pipeline, "_worked", crash_on_the_second_line)
     results: list[Result] = []
     audio = np.concatenate([tone(2), silence(1), tone(3), silence(1)])
     pipeline = fake_pipeline(
-        [station("a")], PLAN, results.append, lambda st: HeldSource(st.id, audio)
-    )
+        [station("a")], PLAN, results.append, lambda st: HeldSource(st.id, audio),
+        translator_factory=load_after_the_crash,
+    )  # fmt: skip
     pipeline.start()
     assert wait_for(lambda: len(calls) == 2)  # the first line went to translation, then a crash
     done = threading.Event()
     threading.Thread(target=lambda: (pipeline.stop(drain=True), done.set()), daemon=True).start()
     assert done.wait(15), "stop(drain=True) waited forever on the translation worker"
     assert [r.transcript.text for r in results] == ["2s"]
+
+
+# -- overload: what falls behind, what is dropped, and what is checked first --------------------
+
+
+class GatedTranslator(FakeTranslator):
+    """Translates once ``go`` is set, so the translation worker stays busy until then."""
+
+    def __init__(self, go: threading.Event, done: list) -> None:
+        self.go, self.done = go, done
+
+    def translate(self, text: str, source: str, target: str) -> str:
+        self.go.wait(10)
+        self.done.append(text)
+        return f"{target}:{text}"
+
+
+def line(st: Station, text: str, waited_s: float = 0.0) -> Result:
+    """A transcript as ``Pipeline.ingest`` takes it, its text ready ``waited_s`` ago."""
+    now = time.time()
+    u = Utterance(st.id, 1, np.zeros(1, np.float32), now - 2, now - 1, now - 1 - waited_s)
+    r = Result(st, u, Transcript(text, st.language, "remote-asr"))
+    r.asr_done_at = now - waited_s
+    return r
+
+
+def busy(monkeypatch, size: int, results: list, *stations: Station):
+    """A running pipeline with room for ``size`` jobs and a translator that waits for ``go``."""
+    monkeypatch.setattr("wavescribe.pipeline.MT_QUEUE_MAX", size)
+    go, done = threading.Event(), []
+    pipeline = fake_pipeline(
+        list(stations), PLAN, results.append, lambda st: HeldSource(st.id, silence(0.5)),
+        translator_factory=lambda _e, _p: GatedTranslator(go, done),
+    )  # fmt: skip
+    run_in_background(pipeline)
+    assert wait_for(lambda: pipeline.ready and set(pipeline.status()["stations"]) >= {
+        s.id for s in stations})  # fmt: skip
+    return pipeline, go, done
+
+
+def test_rule_checks_and_alert_translations_get_in_ahead_of_a_full_backlog(monkeypatch) -> None:
+    # Seen in testing: with five stations translated on a loaded machine the queue stayed full
+    # of station lines, and LLM rule checks were turned away: possibly missed alerts.
+    a = station("a")
+    results: list[Result] = []
+    pipeline, go, done = busy(monkeypatch, 4, results, a)
+    pipeline.ingest(line(a, "first"))
+    assert wait_for(lambda: pipeline.status()["mt_queue"] == 0)  # being translated, held
+    for i in range(5):
+        pipeline.ingest(line(a, f"queued {i}"))  # the fifth finds no room
+    order: list[str] = []
+    assert pipeline.request_llm(lambda _t: order.append("rules"), "llm-rules", 0.3, station="a")
+    got = threading.Event()
+    pipeline.request_translation("Olá", "pt-PT", ["en"],
+                                 lambda t, _m: (order.append(t["en"]), got.set()))  # fmt: skip
+    status = pipeline.status()
+    # Two station lines made room; with the one turned away, three went untranslated.
+    assert status["stations"]["a"]["dropped"] == {"asr": 0, "mt": 3, "rules": 0}
+    assert status["dropped"]["mt"] == 3 and status["dropped"]["rules"] == 0
+    assert status["load"]["state"] == "behind"
+    assert "untranslated" in status["load"]["reason"]
+    untranslated = [r.transcript.text for r in results if not r.translations]
+    assert untranslated == ["queued 4", "queued 3", "queued 2"]  # the newest go first
+    go.set()
+    assert got.wait(10) and wait_for(lambda: len(results) == 6)
+    pipeline.stop()
+    assert order == ["en:Olá", "rules"]  # the alert's translation first, then the rule check
+    assert done[:2] == ["first", "Olá"] and done[2:] == ["queued 0", "queued 1"]
+
+
+def test_rule_checks_that_cannot_run_are_counted_and_logged_once(monkeypatch, caplog) -> None:
+    a = station("a")
+    pipeline, go, _ = busy(monkeypatch, 2, [], a)
+    pipeline.ingest(line(a, "first"))
+    assert wait_for(lambda: pipeline.status()["mt_queue"] == 0)
+    with caplog.at_level("WARNING", logger="wavescribe.pipeline"):
+        queued = [pipeline.request_llm(lambda _t: None, "llm-rules", 0.3, station="a")
+                  for _ in range(12)]  # fmt: skip
+    assert queued == [True, True] + [False] * 10  # other rule checks fill the queue: no room
+    status = pipeline.status()
+    assert status["stations"]["a"]["dropped"]["rules"] == 10 and status["dropped"]["rules"] == 10
+    assert status["load"]["state"] == "overloaded"
+    assert "10 LLM rule checks" in status["load"]["reason"]
+    assert "alerts may be missed" in status["load"]["reason"]
+    # The first is logged at once, the next ones a minute later, all in one line. (Another
+    # test's pipeline may still be logging its own drops as it ends.)
+    drops = [r.fields for r in caplog.records
+             if r.getMessage() == "drop" and r.fields["stage"] == "rules"]  # fmt: skip
+    assert len(drops) == 1 and drops[0]["n"] == 1 and drops[0]["stations"] == "a:1"
+    go.set()
+    pipeline.stop()
+
+
+def test_translations_too_late_to_be_useful_are_skipped_and_counted(monkeypatch) -> None:
+    a, b = station("a", priority=1), station("b", priority=9)
+    results: list[Result] = []
+    pipeline, go, done = busy(monkeypatch, 10, results, a, b)
+    pipeline.ingest(line(a, "busy"))
+    assert wait_for(lambda: pipeline.status()["mt_queue"] == 0)
+    pipeline.ingest(line(b, "six minutes old", waited_s=360))
+    pipeline.ingest(line(b, "two minutes old", waited_s=130))
+    status = pipeline.status()
+    assert status["stations"]["b"]["behind_s"]["translation"] >= 360
+    assert status["stations"]["b"]["behind_s"]["text"] is None  # no speech waits for text
+    assert status["stations"]["a"]["behind_s"]["translation"] < 5  # the one being translated
+    assert status["load"]["state"] == "overloaded"
+    assert status["load"]["reason"].startswith("Too many stations for this ")
+    assert "translation is 6 minutes behind" in status["load"]["reason"]
+    go.set()
+    assert wait_for(lambda: len(results) == 3)
+    pipeline.stop()
+    assert "six minutes old" not in done and "two minutes old" in done
+    stale = next(r for r in results if r.transcript.text == "six minutes old")
+    assert stale.translations == {}  # stored and shown untranslated
+    assert pipeline.status()["dropped"]["mt"] == 1
+
+
+def test_text_that_falls_behind_shows_in_the_status(monkeypatch) -> None:
+    monkeypatch.setattr("wavescribe.pipeline.TEXT_BEHIND_S", 0.2)
+    go = threading.Event()
+
+    class Held(FakeTranscriber):
+        def transcribe(self, samples, language):
+            go.wait(10)
+            return super().transcribe(samples, language)
+
+    audio = np.concatenate([tone(2), silence(1), tone(2), silence(1)])
+    pipeline = fake_pipeline([station("a")], PLAN, lambda _r: None,
+                             lambda st: HeldSource(st.id, audio),
+                             transcriber_factory=lambda _e, _p: Held())  # fmt: skip
+    run_in_background(pipeline)
+    assert wait_for(lambda: pipeline.status()["asr_queue"] == 1)  # one held, one waiting
+    time.sleep(0.3)
+    status = pipeline.status()
+    assert status["stations"]["a"]["behind_s"]["text"] >= 0.3
+    assert status["load"] == {"state": "behind", "reason": status["load"]["reason"]}
+    assert status["load"]["reason"].startswith("Text is ") and "behind on a" in status["load"][
+        "reason"]  # fmt: skip
+    go.set()
+    assert wait_for(lambda: pipeline.status()["load"]["state"] == "ok")
+    assert pipeline.status()["stations"]["a"]["behind_s"] == {"text": None, "translation": None}
+    pipeline.stop()

@@ -59,8 +59,8 @@ class FakeLlm:
 def checker(llm: FakeLlm, rules: list[LlmRule], seen: list, clock=None):
     jobs: list = []
 
-    def submit(run, name, priority):
-        jobs.append((name, priority))
+    def submit(run, name, priority, station=None):
+        jobs.append((name, priority, station))
         run(llm)
         return True
 
@@ -88,7 +88,7 @@ def test_llm_rules_read_a_stations_text_in_batches(tmp_path: Path) -> None:
     assert jobs == []  # not enough text yet, and not due
     now[0] = 31.0
     c.tick()
-    assert jobs == [("llm-rules", 0.3)]
+    assert jobs == [("llm-rules", 0.3, "a")]  # counted against its station if it can't run
     prompt = llm.prompts[0][1]["content"]
     assert "- evacuation: they tell people to leave an area" in prompt
     assert "elsewhere" not in prompt  # that rule is for another station
@@ -106,7 +106,7 @@ def test_a_full_batch_is_checked_at_once_and_a_non_llm_is_reported() -> None:
 
     jobs: list = []
     c = LlmRuleChecker(lambda: [LlmRule("x", "y", "high")],
-                       lambda run, name, prio: (jobs.append(name), run(Madlad()), True)[2],
+                       lambda run, name, prio, **_: (jobs.append(name), run(Madlad()), True)[2],
                        lambda r, h: None, max_chars=20, timer=False)  # fmt: skip
     c.on_transcript(result("a", "Um texto bastante comprido para encher o lote.", 1.0))
     assert jobs == ["llm-rules"] and "need an LLM" in c.status()["error"]
@@ -216,7 +216,7 @@ def test_a_keyword_hit_is_announced_when_the_llm_cant_check_it(why: str) -> None
     if why == "crash":
         llm.complete = lambda *a, **k: 1 / 0  # type: ignore[method-assign]
 
-    def submit(run, name, priority):
+    def submit(run, name, priority, station=None):
         if why == "queue full":
             return False
         if why != "timeout":  # the LLM never gets to it

@@ -4,12 +4,20 @@
 Threads, not processes: ffmpeg runs in its own process already, and onnxruntime, MLX and
 CTranslate2 all release the GIL while they compute. Queues are bounded, so memory stays bounded
 when a stage falls behind; overflow is dropped and counted rather than blocking the sources.
+
+Overload is shown, not hidden. When a queue is full, more urgent work (an LLM rule check, an
+alert's translation, a more important station's speech) takes the place of the least urgent
+station work instead of being turned away; a station translation that waited longer than
+``MT_STALE_S`` is skipped, since it would only push everything else later. Every drop is counted
+per station over ten minutes and logged once a minute, and ``status()`` says how far behind each
+station's text and translation are and whether the machine keeps up (``load``).
 """
 
 from __future__ import annotations
 
 import contextlib
 import gc
+import heapq
 import itertools
 import logging
 import queue
@@ -17,7 +25,7 @@ import resource
 import sys
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -47,6 +55,20 @@ ASR_QUEUE_MAX = 200  # ~1 h of speech for one station; beyond this we are hopele
 MT_QUEUE_MAX = 200
 HEALTH_INTERVAL_S = 60.0
 LAG_WINDOW_S = 600.0  # lag percentiles cover the last ten minutes
+# Keeping up (``status()["load"]``). Text is behind when speech has waited this long for the ASR,
+# translation when a transcript has waited this long for the translator. A station translation
+# that waited MT_STALE_S is skipped: shown untranslated, counted, never translated late.
+TEXT_BEHIND_S = 30.0
+TEXT_OVERLOAD_S = 120.0
+MT_BEHIND_S = 120.0
+MT_STALE_S = 300.0
+RULES_OVERLOAD_S = 120.0  # an LLM rule check waiting this long: alerts come late
+DROP_WINDOW_S = 600.0  # drops are counted per station over the last ten minutes
+DROP_LOG_S = 60.0  # and logged at most this often, with how many
+# Why work was dropped: "full" (no room in its queue, or displaced by more urgent work) and
+# "stale" (a translation too late to be useful) are the machine not keeping up; "failed" is a
+# model that raised (its own log line says so), "no_llm" an LLM rule with no LLM to check it.
+CAPACITY = ("full", "stale")
 ASR_IDLE_UNLOAD_S = 300.0  # an ASR model no running station uses is unloaded after this
 # A model call that raises costs one utterance. After this many in a row for the same station or
 # target language the status reports the model as failing, next to the load errors.
@@ -129,6 +151,119 @@ class LlmJob:
 
     run: Callable[[Translator], None]
     name: str = "llm"
+    station: str | None = None  # whose text it reads (LLM rule checks), for the drop counts
+    queued_at: float = field(default_factory=time.time)
+
+
+class _WorkQueue:
+    """A bounded priority queue of ``(priority, tiebreak, item)`` entries, lowest first.
+
+    When it is full, a more urgent entry takes the place of the least urgent one that
+    ``evictable`` allows (station work; never jobs, model loads or stop markers) instead of
+    being turned away, and ``on_evict`` is told, outside the lock. Otherwise it is refused
+    (``queue.Full``), as is an entry no more urgent than everything there: among equals the
+    newest goes. An LLM rule check or an alert's translation must not be refused because the
+    station backlog filled the queue."""
+
+    def __init__(
+        self,
+        maxsize: int,
+        evictable: Callable[[object], bool],
+        on_evict: Callable[[tuple], None],
+    ) -> None:
+        self.maxsize = maxsize
+        self._heap: list[tuple] = []
+        self._cond = threading.Condition()
+        self._evictable = evictable
+        self._on_evict = on_evict
+
+    def qsize(self) -> int:
+        with self._cond:
+            return len(self._heap)
+
+    def put_nowait(self, entry: tuple) -> None:
+        evicted = None
+        with self._cond:
+            if len(self._heap) >= self.maxsize:
+                least = max((e for e in self._heap if self._evictable(e[2])),
+                            key=lambda e: e[:2], default=None)  # fmt: skip
+                if least is None or entry[:2] >= least[:2]:
+                    raise queue.Full
+                self._heap.remove(least)
+                heapq.heapify(self._heap)
+                evicted = least
+            heapq.heappush(self._heap, entry)
+            self._cond.notify_all()
+        if evicted is not None:
+            self._on_evict(evicted)
+
+    def put(self, entry: tuple, give_up: Callable[[], bool] = lambda: False) -> None:
+        """Wait for room (the drained stop marker: the worker is consuming), unless
+        ``give_up`` says to stop waiting (``queue.Full``)."""
+        with self._cond:
+            while len(self._heap) >= self.maxsize:
+                if give_up():
+                    raise queue.Full
+                self._cond.wait(0.2)
+            heapq.heappush(self._heap, entry)
+            self._cond.notify_all()
+
+    def get(self, timeout: float | None = None) -> tuple:
+        with self._cond:
+            end = None if timeout is None else time.monotonic() + timeout
+            while not self._heap:
+                left = None if end is None else end - time.monotonic()
+                if left is not None and left <= 0:
+                    raise queue.Empty
+                self._cond.wait(left)
+            entry = heapq.heappop(self._heap)
+            self._cond.notify_all()  # room for a waiting put
+            return entry
+
+    def snapshot(self) -> list[tuple]:
+        with self._cond:
+            return list(self._heap)
+
+    def take(self, which: Callable[[tuple], bool]) -> list[tuple]:
+        """Remove and return the entries ``which`` picks."""
+        with self._cond:
+            out = [e for e in self._heap if which(e)]
+            if out:
+                self._heap = [e for e in self._heap if not which(e)]
+                heapq.heapify(self._heap)
+                self._cond.notify_all()
+            return out
+
+
+class _Recent:
+    """Counts per key over the last ``window_s``, in one-minute buckets: bounded memory."""
+
+    def __init__(self, window_s: float = DROP_WINDOW_S, bucket_s: float = 60.0) -> None:
+        self.window_s, self.bucket_s = window_s, bucket_s
+        self._counts: dict[tuple, deque[list[float]]] = {}
+        self._lock = threading.Lock()
+
+    def add(self, key: tuple, now: float, n: int = 1) -> None:
+        bucket = now // self.bucket_s
+        keep = int(self.window_s // self.bucket_s) + 1
+        with self._lock:
+            rows = self._counts.setdefault(key, deque(maxlen=keep))
+            if rows and rows[-1][0] == bucket:
+                rows[-1][1] += n
+            else:
+                rows.append([bucket, n])
+
+    def totals(self, now: float) -> dict[tuple, int]:
+        oldest = (now - self.window_s) // self.bucket_s
+        out: dict[tuple, int] = {}
+        with self._lock:
+            for key, rows in list(self._counts.items()):
+                n = sum(int(c) for b, c in rows if b > oldest)
+                if n:
+                    out[key] = n
+                elif not rows or rows[-1][0] <= oldest:
+                    del self._counts[key]  # nothing recent: forget it
+        return out
 
 
 LLM_JOB_PRIORITY = 0.5  # alert translations are 0, stations start at 1
@@ -334,13 +469,28 @@ class Pipeline:
             lambda entry, path: load_translator(entry, path, threads=mt_threads)
         )
         self._stop = threading.Event()
-        self._asr_q: queue.PriorityQueue = queue.PriorityQueue(maxsize=ASR_QUEUE_MAX)
-        self._mt_q: queue.PriorityQueue = queue.PriorityQueue(maxsize=MT_QUEUE_MAX)
+        # A station's speech, or its transcript waiting for translation, can make way for more
+        # urgent work; jobs (rule checks, alert translations, questions, re-checks), model
+        # loads and the stop markers never do.
+        self._asr_q = _WorkQueue(
+            ASR_QUEUE_MAX,
+            lambda item: isinstance(item, tuple),  # (station, utterance)
+            lambda e: self._drop("asr", e[2][0].id, "full"),
+        )
+        self._mt_q = _WorkQueue(MT_QUEUE_MAX, lambda item: isinstance(item, Result),
+                                lambda e: self._untranslated(e[2], "full"))  # fmt: skip
         self._tiebreak = itertools.count()
         self._lock = threading.Lock()
         self._live: dict[str, _Live] = {}
         self._threads: list[threading.Thread] = []
-        self._dropped = {"asr": 0, "mt": 0, "filter": 0}
+        self._dropped = {"asr": 0, "mt": 0, "rules": 0, "filter": 0}  # since the start
+        self._recent_drops = _Recent()  # (stage, why, station) over DROP_WINDOW_S
+        self._drop_lock = threading.Lock()
+        self._unlogged: Counter[tuple[str, str, str]] = Counter()  # drops since the last log
+        self._drops_logged_at = float("-inf")
+        self._asr_doing: tuple[str, float] | None = None  # (station, ready_at) being heard
+        self._mt_doing: tuple[str, float] | None = None  # (station, asr_done_at) translating
+        self._mt_swept_at = 0.0
         self._busy: dict[str, deque[tuple[float, float]]] = {
             "asr": deque(maxlen=2000),
             "mt": deque(maxlen=2000),
@@ -476,9 +626,9 @@ class Pipeline:
             self._start_mt()
             try:
                 self._mt_q.put_nowait((result.station.priority, next(self._tiebreak), result))
-                return
             except queue.Full:
-                self._dropped["mt"] += 1
+                self._untranslated(result, "full")
+            return
         self._finish(result)
 
     def request_asr(
@@ -496,7 +646,7 @@ class Pipeline:
             return False
         return True
 
-    def _control(self, q: queue.PriorityQueue, item: object) -> None:
+    def _control(self, q: _WorkQueue, item: object) -> None:
         with contextlib.suppress(queue.Full):
             q.put_nowait((_CONTROL, next(self._tiebreak), item))
 
@@ -523,12 +673,14 @@ class Pipeline:
                 if until_idle and not self._live:
                     drain = True
                     break
+                self._log_drops()
                 if time.monotonic() >= next_health:
                     self._log_health()
                     next_health += HEALTH_INTERVAL_S
                 time.sleep(0.2)
         finally:
             self.stop(drain=drain)
+            self._log_drops(force=True)
 
     def stop(self, *, drain: bool = False) -> None:
         """Stop the sources; with ``drain``, finish the queued utterances first."""
@@ -547,8 +699,12 @@ class Pipeline:
         self._stop.set()
 
     def status(self) -> dict:
-        """A snapshot for health views: per-station state, queue depths, how busy each stage is."""
+        """A snapshot for health views: per-station state, queue depths, how busy each stage is,
+        how far behind each station is and what was dropped (``behind_s``, ``dropped``), and
+        whether the machine keeps up (``load``)."""
         now = time.time()
+        text_since, mt_since, rules_since = self._waiting()
+        drops = self._recent_drops.totals(now)
         stations = {}
         for sid, live in list(self._live.items()):
             h = live.source.health
@@ -572,6 +728,18 @@ class Pipeline:
                 "quiet_s": round(now - (live.last_talk_at or live.started_at)),
                 "level": round(live.level, 4),
                 "stopping": live.stopping,
+                # How long its oldest unfinished speech has waited for text, and its oldest
+                # transcript for translation (None: nothing waits).
+                "behind_s": {
+                    "text": _age(now, text_since.get(sid)),
+                    "translation": _age(now, mt_since.get(sid)),
+                },
+                # Work of this station dropped in the last ten minutes: speech never written
+                # down, lines left untranslated, LLM rule checks that couldn't run.
+                "dropped": {
+                    stage: sum(n for (st, _, s), n in drops.items() if st == stage and s == sid)
+                    for stage in ("asr", "mt", "rules")
+                },
             }
             if error is not None:  # why its capture failed, and when it is tried again
                 stations[sid]["error"] = error
@@ -603,7 +771,136 @@ class Pipeline:
                 "errors": dict(self._model_errors),
             },
             "lag": self.lag(now),
+            "load": self._load(now, text_since, mt_since, rules_since, drops),
         }
+
+    def _waiting(self) -> tuple[dict[str, float], dict[str, float], float | None]:
+        """Since when the oldest unfinished work of each station has waited: speech for text
+        (from when it was cut), transcripts for translation (from when their text was ready),
+        and the oldest LLM rule check waiting for the LLM."""
+        text: dict[str, float] = {}
+        mt: dict[str, float] = {}
+        rules: float | None = None
+
+        def oldest(into: dict[str, float], sid: str, t: float) -> None:
+            into[sid] = min(t, into.get(sid, t))
+
+        for _, _, item in self._asr_q.snapshot():
+            if isinstance(item, tuple):
+                oldest(text, item[0].id, item[1].ready_at)
+        for _, _, item in self._mt_q.snapshot():
+            if isinstance(item, Result):
+                oldest(mt, item.station.id, item.asr_done_at)
+            elif isinstance(item, LlmJob) and item.name == "llm-rules":
+                rules = item.queued_at if rules is None else min(rules, item.queued_at)
+        for into, doing in ((text, self._asr_doing), (mt, self._mt_doing)):
+            if doing is not None:
+                oldest(into, *doing)
+        return text, mt, rules
+
+    def _load(
+        self,
+        now: float,
+        text_since: dict[str, float],
+        mt_since: dict[str, float],
+        rules_since: float | None,
+        drops: dict[tuple[str, str, str], int],
+    ) -> dict[str, str | None]:
+        """Whether the machine keeps up: ``ok``, ``behind`` (text or translation late) or
+        ``overloaded`` (speech or rule checks lost, text or rule checks minutes late, or
+        translations too late to be made), with a plain sentence saying the worst of it."""
+
+        def lost(stage: str, whys: tuple[str, ...] = CAPACITY) -> int:
+            return sum(n for (st, why, _), n in drops.items() if st == stage and why in whys)
+
+        def worst(since: dict[str, float]) -> tuple[float, str]:
+            if not since:
+                return 0.0, ""
+            sid = min(since, key=since.__getitem__)
+            live = self._live.get(sid)
+            return now - since[sid], live.station.name if live else sid
+
+        text_s, text_where = worst(text_since)
+        mt_s, _ = worst(mt_since)
+        rules_s = now - rules_since if rules_since is not None else 0.0
+        machine = "this Mac" if sys.platform == "darwin" else "this computer"
+        many = f"Too many stations for {machine}: "
+        if n := lost("rules"):
+            return _state("overloaded", f"{many}{_count(n, 'LLM rule check')} couldn't run in "
+                          "the last 10 minutes, so alerts may be missed")  # fmt: skip
+        if n := lost("asr"):
+            return _state("overloaded", f"{many}{_count(n, 'utterance')} went unwritten in the "
+                          "last 10 minutes")  # fmt: skip
+        if text_s >= TEXT_OVERLOAD_S:
+            return _state("overloaded", f"{many}text is {_span(text_s)} behind on {text_where}")
+        if rules_s >= RULES_OVERLOAD_S:
+            return _state("overloaded", f"{many}LLM rule checks are {_span(rules_s)} behind, so "
+                          "alerts come late")  # fmt: skip
+        if mt_s >= MT_STALE_S:
+            return _state("overloaded", f"{many}translation is {_span(mt_s)} behind")
+        if n := lost("mt", ("stale",)):
+            return _state("overloaded", f"{many}{_count(n, 'line')} waited over "
+                          f"{_span(MT_STALE_S)} for translation in the last 10 minutes and "
+                          "stayed untranslated")  # fmt: skip
+        if text_s >= TEXT_BEHIND_S:
+            return _state("behind", f"Text is {_span(text_s)} behind on {text_where}")
+        if mt_s >= MT_BEHIND_S:
+            return _state("behind", f"Translation is {_span(mt_s)} behind")
+        if n := lost("mt", ("full",)):
+            return _state("behind", f"{_count(n, 'line')} stayed untranslated in the last 10 "
+                          "minutes: the translation queue was full")  # fmt: skip
+        return _state("ok", None)
+
+    # -- drops ------------------------------------------------------------------------------
+
+    def _drop(self, stage: str, station_id: str | None, why: str) -> None:
+        """Count work that was dropped: in the totals, per station over the last ten minutes,
+        and in the log once a minute (``_log_drops``), never once per item."""
+        now = time.time()
+        with self._drop_lock:
+            self._dropped[stage] = self._dropped.get(stage, 0) + 1
+            if why != "failed":  # a model that raised has logged it already
+                self._unlogged[stage, why, station_id or "-"] += 1
+        if station_id is not None:
+            self._recent_drops.add((stage, why, station_id), now)
+        self._log_drops()
+
+    def _untranslated(self, result: Result, why: str) -> None:
+        """A transcript that won't be translated (no room, or too late): counted, and finished
+        with the text alone, so it is stored and shown all the same."""
+        self._drop("mt", result.station.id, why)
+        self._finish(result)
+
+    def _skip_stale(self) -> None:
+        """Take every station transcript that waited ``MT_STALE_S`` for translation out of the
+        queue, at most every few seconds (translation thread): it is shown untranslated now
+        rather than translated late, after more important stations' lines."""
+        now = time.time()
+        if now - self._mt_swept_at < 5:
+            return
+        self._mt_swept_at = now
+        stale = self._mt_q.take(
+            lambda e: isinstance(e[2], Result) and now - e[2].asr_done_at >= MT_STALE_S
+        )
+        for _, _, result in stale:
+            self._untranslated(result, "stale")
+
+    def _log_drops(self, force: bool = False) -> None:
+        """One warning per stage and reason for the drops since the last one, at most every
+        ``DROP_LOG_S``: the first drop after a quiet spell is logged at once."""
+        now = time.monotonic()
+        with self._drop_lock:
+            if not self._unlogged or (not force and now - self._drops_logged_at < DROP_LOG_S):
+                return
+            pending, self._unlogged = self._unlogged, Counter()
+            self._drops_logged_at = now
+        grouped: dict[tuple[str, str], Counter[str]] = {}
+        for (stage, why, sid), n in pending.items():
+            grouped.setdefault((stage, why), Counter())[sid] += n
+        for (stage, why), per in grouped.items():
+            event(log, "drop", level=logging.WARNING, stage=stage, why=why,
+                  n=sum(per.values()), stations=",".join(f"{s}:{n}" for s, n in per.items()),
+                  next_log_in_s=DROP_LOG_S)  # fmt: skip
 
     def child_pids(self) -> dict[str, int]:
         """The helper processes our sources run (ffmpeg, rtl_sdr), by station."""
@@ -663,8 +960,8 @@ class Pipeline:
             self._mt_q.put_nowait(
                 (0, next(self._tiebreak), TranslationJob(text, source, wanted, callback))
             )
-        except queue.Full:
-            event(log, "drop", level=logging.WARNING, stage="mt", station="alert")
+        except queue.Full:  # only jobs in the queue, none of them station lines
+            self._drop("mt", None, "full")
             callback({}, None)
 
     def request_llm(
@@ -672,16 +969,25 @@ class Pipeline:
         run: Callable[[Translator], None],
         name: str = "llm",
         priority: float = LLM_JOB_PRIORITY,
+        station: str | None = None,
     ) -> bool:
         """Queue ``run(translator)`` on the translation thread. False if there is no translator
-        or its queue is full."""
+        or its queue is full of other jobs (station lines make way for it). An LLM rule check
+        (``name`` "llm-rules") that can't be queued is counted against its ``station``: it is
+        a possibly missed alert."""
+        rules = name == "llm-rules"
         if self._plan.mt is None:
+            if rules:
+                self._drop("rules", station, "no_llm")
             return False
         self._start_mt()
         try:
-            self._mt_q.put_nowait((priority, next(self._tiebreak), LlmJob(run, name)))
+            self._mt_q.put_nowait((priority, next(self._tiebreak), LlmJob(run, name, station)))
         except queue.Full:
-            event(log, "drop", level=logging.WARNING, stage="mt", station=name)
+            if rules:
+                self._drop("rules", station, "full")
+            else:
+                event(log, "drop", level=logging.WARNING, stage="mt", station=name)
             return False
         return True
 
@@ -691,9 +997,14 @@ class Pipeline:
     def _alive(self, name: str) -> bool:
         return any(t.name == name and t.is_alive() for t in list(self._threads))
 
-    def _put_sentinel(self, q: queue.PriorityQueue, wait: bool = True) -> None:
-        if self._drain and wait:
-            q.put((_STOP_DRAINED, 0, None))  # the worker is consuming, so room will appear
+    def _put_sentinel(self, q: _WorkQueue, wait: bool = True, drained: bool | None = None) -> None:
+        """Tell a worker to finish: after its queued work (``drained``, by default when the
+        stop drains) or at once."""
+        if (self._drain if drained is None else drained) and wait:
+            # The worker is consuming, so room will appear; unless a stop that doesn't drain
+            # comes meanwhile and the worker ends without taking it.
+            with contextlib.suppress(queue.Full):
+                q.put((_STOP_DRAINED, 0, None), give_up=self._stop.is_set)
         else:
             with contextlib.suppress(queue.Full):  # a busy worker sees _stop after this item
                 q.put_nowait((_STOP_NOW, 0, None))
@@ -858,8 +1169,7 @@ class Pipeline:
         try:
             self._asr_q.put_nowait((station.priority, next(self._tiebreak), (station, utt)))
         except queue.Full:
-            self._dropped["asr"] += 1
-            event(log, "drop", level=logging.WARNING, stage="asr", station=station.id)
+            self._drop("asr", station.id, "full")
 
     def _models_for(self, station: Station) -> list[tuple[ModelEntry, Path]]:
         """The speech models a station needs loaded: its own, and the Whisper that re-checks
@@ -910,9 +1220,12 @@ class Pipeline:
         finally:
             # However it ended, a crash included: the translation worker is told to finish,
             # and nothing waits for this one to be ready. A drained stop joins every worker
-            # without a timeout, so it would otherwise wait forever.
+            # without a timeout, so it would otherwise wait forever. Unless the run is stopping
+            # at once, it finishes the lines already waiting for translation first: a crash
+            # here must not lose what was heard before it.
             self._asr_ready.set()
-            self._put_sentinel(self._mt_q, wait=self._alive("mt"))
+            self._put_sentinel(self._mt_q, wait=self._alive("mt"),
+                               drained=not self._stop.is_set())  # fmt: skip
 
     def _asr_work(self) -> None:
         # Models load in this thread (MLX arrays are thread-bound): the starting stations'
@@ -954,56 +1267,70 @@ class Pipeline:
             planned = self._plan.asr.get(station.id)
             if planned is None:  # the station was deleted while this waited
                 continue
-            if planned[0].id not in loaded:
-                try:
-                    self._load_asr(loaded, *planned)
-                except Exception as e:
-                    log.exception("loading %s failed", planned[0].id)
-                    self._model_errors[planned[0].id] = str(e)[:300]
-                    self._dropped["asr"] += 1
-                    continue
-            self._asr_models[planned[0].id] = time.time()
-            started = time.time()
-            t0 = time.perf_counter()
-            transcriber = loaded[planned[0].id]
+            self._asr_doing = (station.id, utt.ready_at)
             try:
-                if station.language == AUTO:
-                    transcript = transcribe_any(transcriber, utt.samples, station.languages)
-                    # From here on, the utterance is one of a station in the language heard.
-                    station = replace(station, language=transcript.language)
-                else:
-                    transcript = transcriber.transcribe(utt.samples, station.language)
-                asr_ms = _ms(t0)
-                check = check_transcript(transcript.text, utt.duration, station.language)
+                self._hear(loaded, station, utt, planned)
+            finally:
+                self._asr_doing = None
+
+    def _hear(
+        self,
+        loaded: dict[str, Transcriber],
+        station: Station,
+        utt: Utterance,
+        planned: tuple[ModelEntry, Path],
+    ) -> None:
+        """Transcribe one utterance and hand it on (ASR thread)."""
+        if planned[0].id not in loaded:
+            try:
+                self._load_asr(loaded, *planned)
             except Exception as e:
-                self._dropped["asr"] += 1
-                self._failed("asr", planned[0].id, f"station {station.id}", e)
-                continue
-            self._worked(planned[0].id, f"station {station.id}")
-            if check.drop:
-                self._dropped["filter"] += 1
-                event(log, "filtered", station=station.id, reason=check.drop,
-                      chars=len(transcript.text), s=round(utt.duration, 1),
-                      text=logged_text(station, transcript.text, 80))  # fmt: skip
-                self._notify(self._on_filtered, Result(station, utt, transcript), check.drop)
-                continue
-            result = Result(station, utt, transcript, flags=check.flags)
-            result.timings.update(
-                segment_wait_ms=(utt.ready_at - utt.t_end) * 1000,
-                asr_queue_ms=(started - utt.ready_at) * 1000,
-                asr_ms=asr_ms,
-                asr_rtf=asr_ms / (utt.duration * 1000),
+                log.exception("loading %s failed", planned[0].id)
+                self._model_errors[planned[0].id] = str(e)[:300]
+                self._drop("asr", station.id, "failed")
+                return
+        self._asr_models[planned[0].id] = time.time()
+        started = time.time()
+        t0 = time.perf_counter()
+        transcriber = loaded[planned[0].id]
+        try:
+            if station.language == AUTO:
+                transcript = transcribe_any(transcriber, utt.samples, station.languages)
+                # From here on, the utterance is one of a station in the language heard.
+                station = replace(station, language=transcript.language)
+            else:
+                transcript = transcriber.transcribe(utt.samples, station.language)
+            asr_ms = _ms(t0)
+            check = check_transcript(transcript.text, utt.duration, station.language)
+        except Exception as e:
+            self._drop("asr", station.id, "failed")
+            self._failed("asr", planned[0].id, f"station {station.id}", e)
+            return
+        self._worked(planned[0].id, f"station {station.id}")
+        if check.drop:
+            self._dropped["filter"] += 1
+            event(log, "filtered", station=station.id, reason=check.drop,
+                  chars=len(transcript.text), s=round(utt.duration, 1),
+                  text=logged_text(station, transcript.text, 80))  # fmt: skip
+            self._notify(self._on_filtered, Result(station, utt, transcript), check.drop)
+            return
+        result = Result(station, utt, transcript, flags=check.flags)
+        result.timings.update(
+            segment_wait_ms=(utt.ready_at - utt.t_end) * 1000,
+            asr_queue_ms=(started - utt.ready_at) * 1000,
+            asr_ms=asr_ms,
+            asr_rtf=asr_ms / (utt.duration * 1000),
+        )
+        result.asr_done_at = time.time()
+        self._busy["asr"].append((result.asr_done_at, asr_ms / 1000))
+        if check.flags and self._plan.recheck and self._on_rechecked:
+            result.rechecking = self._plan.recheck.offer(
+                result, planned[0], self.request_asr, self._rechecked
             )
-            result.asr_done_at = time.time()
-            self._busy["asr"].append((result.asr_done_at, asr_ms / 1000))
-            if check.flags and self._plan.recheck and self._on_rechecked:
-                result.rechecking = self._plan.recheck.offer(
-                    result, planned[0], self.request_asr, self._rechecked
-                )
-            if transcript.text:
-                self._notify(self._on_transcript, result)
-            if not result.rechecking:
-                self._translate_or_finish(result)
+        if transcript.text:
+            self._notify(self._on_transcript, result)
+        if not result.rechecking:
+            self._translate_or_finish(result)
 
     def _rechecked(self, result: Result) -> None:
         """Whisper has listened to a flagged line again (asr/recheck.py), on the ASR thread:
@@ -1021,9 +1348,7 @@ class Pipeline:
             try:
                 self._mt_q.put_nowait((station.priority, next(self._tiebreak), result))
             except queue.Full:
-                self._dropped["mt"] += 1
-                event(log, "drop", level=logging.WARNING, stage="mt", station=station.id)
-                self._finish(result)
+                self._untranslated(result, "full")
         else:
             self._finish(result)
 
@@ -1091,6 +1416,10 @@ class Pipeline:
                 continue
             if result is None or self._stop.is_set():
                 break
+            self._skip_stale()
+            if isinstance(result, Result) and time.time() - result.asr_done_at >= MT_STALE_S:
+                self._untranslated(result, "stale")
+                continue
             if isinstance(result, _SwapMt):
                 loaded.clear()
                 last_used.clear()
@@ -1120,14 +1449,18 @@ class Pipeline:
                 continue
             queued_ms = (time.time() - result.asr_done_at) * 1000
             t0 = time.perf_counter()
-            for target in result.station.translation_targets:
-                if target in result.translations:  # it came with this one (another node's)
-                    continue
-                text = self._translate(
-                    translator, result.transcript.text, result.station.language, target
-                )
-                if text is not None:
-                    result.translations[target] = text
+            self._mt_doing = (result.station.id, result.asr_done_at)
+            try:
+                for target in result.station.translation_targets:
+                    if target in result.translations:  # it came with this one (another node's)
+                        continue
+                    text = self._translate(
+                        translator, result.transcript.text, result.station.language, target
+                    )
+                    if text is not None:
+                        result.translations[target] = text
+            finally:
+                self._mt_doing = None
             mt_ms = _ms(t0)
             result.translations_model = translator.model_id
             result.timings.update(mt_queue_ms=queued_ms, mt_ms=mt_ms)
@@ -1141,7 +1474,8 @@ class Pipeline:
         try:
             out = translator.translate(text, source, target)
         except Exception as e:
-            self._dropped["mt"] += 1
+            with self._drop_lock:
+                self._dropped["mt"] += 1
             self._failed("mt", translator.model_id, f"into {target}", e)
             return None
         self._worked(translator.model_id, f"into {target}")
@@ -1220,3 +1554,24 @@ def _peak_rss_bytes() -> int:
 
 def _ms(t0: float) -> float:
     return (time.perf_counter() - t0) * 1000
+
+
+def _age(now: float, since: float | None) -> float | None:
+    return None if since is None else round(max(0.0, now - since), 1)
+
+
+def _state(state: str, reason: str | None) -> dict[str, str | None]:
+    return {"state": state, "reason": reason}
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def _span(seconds: float) -> str:
+    """A wait in words: "40 s", "6 minutes", "1.5 hours"."""
+    if seconds < 90:
+        return f"{max(1, round(seconds))} s"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} minutes"
+    return f"{seconds / 3600:.1f} hours"

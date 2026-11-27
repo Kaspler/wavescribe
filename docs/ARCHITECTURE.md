@@ -107,8 +107,38 @@ utterance (counted under `dropped`), never the worker. A station whose capture r
 its VAD, or loading its VAD or gate) is restarted on its own after a delay that doubles from 1 s
 to 60 s, while the other stations go on; until it hears audio again, `status()` shows it as not
 connected, with the `error` and `retry_in_s`. onnxruntime, MLX and CTranslate2 release the GIL while they compute. The queues are priority
-queues capped at 200 utterances; overflow is dropped and logged as `drop`, so memory stays bounded
-and a slow stage never blocks the stream readers. Every process runs with `HF_HUB_OFFLINE=1`
+queues capped at 200 entries, so memory stays bounded and a slow stage never blocks the stream
+readers.
+
+**Overload.** Keyword rules run on the ASR thread as soon as a line is written down, so they are
+never behind translation. On the shared LLM thread the order is: model changes, alert translations
+(0), LLM rule checks and verifications (0.3), questions (0.5), then station lines by station
+priority. When a queue is full, more urgent work takes the place of the least urgent station
+entry (on the ASR queue: the least important station's newest utterance; on the translation
+queue: the least important station's newest line, which is stored untranslated) instead of being
+turned away; jobs are never displaced, and a station entry that is no more urgent than everything
+queued is the one dropped. A station line that has waited 5 minutes (`MT_STALE_S`) for
+translation is skipped: stored and shown untranslated now rather than translated late, since a
+late translation only pushes every other line later. A crash of the ASR worker lets the
+translation worker finish what is queued before it ends. Every drop is counted: in `dropped`
+(totals since start: `asr`, `mt`, `rules`, `filter`), per station over the last ten minutes, and
+in the log as one `drop` line per stage and reason at most once a minute (with the count and the
+stations), never one per item. `status()` shows it:
+
+- per station, `behind_s: {"text": s|null, "translation": s|null}`: how long its oldest speech
+  has waited for text (from when it was cut) and its oldest line for translation (from when its
+  text was ready), including the one being worked on; null when nothing waits;
+- per station, `dropped: {"asr": n, "mt": n, "rules": n}`: utterances never written down, lines
+  left untranslated and LLM rule checks that couldn't run, over the last ten minutes (any reason,
+  a model that raised included);
+- overall, `load: {"state": "ok"|"behind"|"overloaded", "reason": sentence|null}`. `overloaded`
+  when an LLM rule check or an utterance was lost for lack of room in the last ten minutes, text
+  is 2 minutes behind, an LLM rule check has waited 2 minutes, translation is 5 minutes behind,
+  or lines were skipped as too late; `behind` when text is 30 s behind, translation 2 minutes
+  behind, or lines went untranslated because the queue was full. The reason names the worst one,
+  for example "Too many stations for this Mac: translation is 6 minutes behind".
+
+Thresholds are constants at the top of `pipeline.py`. Every process runs with `HF_HUB_OFFLINE=1`
 except `wavescribe models fetch`; the page's network use is listed under "Network use" below.
 
 **SDR sources.** A `[[device]]` in the stations file names a dongle by USB
@@ -332,7 +362,9 @@ checked by the LLM" as its reason, and counted in the status (`unchecked`): a ru
 silent because its check couldn't run. An LLM rule (`kind = "llm"`, `rules/llm.py`) is a sentence ("people are told to
 leave their homes"). Each station's source text is collected and checked against every LLM
 rule about every 45 s (or at 1,500 characters), as one prompt at priority 0.3, behind alert
-translations and ahead of Ask. A match comes back with a one-line reason and the utterance it
+translations and ahead of Ask; a backlog of station lines makes way for it (see Overload). A
+check that still can't be queued is counted against its station (`dropped.rules`) and makes the
+load `overloaded`: alerts may be missed. A match comes back with a one-line reason and the utterance it
 rests on, and goes through the same Alerter as keyword hits (cooldown, `min_mentions`,
 actions). The LLM reads the source text, never a translation, and its reply never becomes the
 announced text. Page rules with the id of a file rule replace it; file rules can be switched off
@@ -796,6 +828,7 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams. LAN viewers can't make the machine reach out | — |
 | **The feed is text and metadata only; audio stays where it was recorded** | Broadcast audio is copyrighted, and text is ~1,000× smaller over a constrained uplink | — |
 | **LLM rules batch per station every ~45 s, on source text** | One prompt per batch rather than per utterance keeps the LLM's share of the GPU small (not yet measured on a soak), and the alert path stays independent of translation | Missed or late events in the soak |
+| **Overload is shown and shed, never hidden: urgent work displaces station backlog, translations over 5 minutes late are skipped** | Seen in testing with five translated stations on a loaded machine: the translation queue stayed full of station lines, LLM rule checks were turned away and logged once each, and nothing on the page said so. Displacing the least urgent station entry keeps rule checks and alert translations running whatever the backlog; skipping stale translations stops one slow model from pushing every line later; `behind_s`, `dropped` and `load` say what is happening, counted per station over ten minutes and logged once a minute | Pausing translation while text is behind, if displacement and skipping aren't enough on a soak |
 | **The page is React + TypeScript + Vite, and the built page is committed** | A framework with a build was chosen over keeping plain JS or vendoring Preact + htm, and React because most contributors already know it; at this size its overhead doesn't matter if the transcript list is virtualised. Committing `src/wavescribe/web/dist/` keeps Node off the running machine. The build works offline from `package-lock.json` and a cache, bundles every asset (no CDN or web fonts), and every dependency is in LICENSING.md first. `scripts/commit_checks.py` enforces the built page and the licence entries on every commit | — |
 | **Own NFM/AM demodulators and RDS decoder** (`dsp/`), not rtl_airband and redsea | A dongle opens in one process at a time: rtl_airband would own a whole dongle, while our channels share one `rtl_sdr` pipe with the FM stations. redsea has no Homebrew formula and pulls in liquid-dsp and LGPL libsndfile. Each part is a few hundred lines of numpy/scipy, tested on synthetic IQ; broadcast FM and RDS also on air, NFM and AM not yet | A band needs a demodulator we don't have (digital voice is out of scope) |
 | **`rtl_power` for scans**, as a subprocess | GPL-2.0 like the other rtl tools, already installed with librtlsdr, and fast: the FM band in 3 s, the tuner's whole range in about 30 s | A device without rtl tools (Airspy) |
