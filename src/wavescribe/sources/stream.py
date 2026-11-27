@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import select
 import shutil
 import subprocess
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import IO
 
 import numpy as np
@@ -31,6 +32,16 @@ from wavescribe.sources import SourceHealth
 WEB_PROTOCOLS = "http,https,tcp,tls,crypto"
 
 log = logging.getLogger(__name__)
+
+# What to check when a stream doesn't open. ffmpeg's own words for it are often just
+# "Input/output error"; a stream that plays only in a web browser hides behind a page that hands
+# its player the real address, sometimes for a while only.
+CHECK = "check the address, the network, and whether the stream only plays in a web browser"
+NOT_AUDIO = "the address answers, but not with audio: it may be a web page, not the stream itself"
+# ffmpeg's closing lines that only repeat that the input didn't open; the line before says why.
+_ONLY_FAILED = re.compile(r"^(Error opening input( files?)?( file)?\b.*|Input/output error)$")
+_CONTEXT = re.compile(r"^\[[^\]]* @ 0x[0-9a-f]+\]\s*")  # "[tcp @ 0x6000...]"
+STDERR_LINES = 20  # kept of each ffmpeg run, for the station's error
 
 _BYTES_PER_SAMPLE = 2  # s16le
 # A connection counts as recovered once it has delivered this much audio. A server that sends
@@ -169,16 +180,23 @@ class StreamSource:
             delay = self._delay(failures)
             failures += 1
             self._health.reconnects += 1
-            event(
+            self._health.retry_at = time.monotonic() + delay
+            event(  # the one warning per attempt: ffmpeg's lines are in it, and at debug level
                 log,
                 "source_reconnect",
                 level=logging.WARNING,
                 station=self.station_id,
                 delay_s=delay,
                 reconnects=self._health.reconnects,
+                error=self._health.error,
             )
             if delay and self._closed.wait(delay):
                 break
+
+    @property
+    def error(self) -> str | None:
+        """Why the stream is down, while it is: ffmpeg's own words for it, and what to check."""
+        return self._health.error
 
     def _delay(self, failures: int) -> float:
         """Seconds before the next try. The exponent is capped: a station down for a day makes
@@ -208,12 +226,14 @@ class StreamSource:
         )
         self._proc = proc
         assert proc.stdout is not None and proc.stderr is not None
-        threading.Thread(
+        said: deque[str] = deque(maxlen=STDERR_LINES)
+        drain = threading.Thread(
             target=_drain_stderr,
-            args=(proc.stderr, self.station_id),
+            args=(proc.stderr, self.station_id, said),
             daemon=True,
             name=f"ffmpeg-stderr-{self.station_id}",
-        ).start()
+        )
+        drain.start()
         event(log, "source_connect", station=self.station_id, url=self.url, pid=proc.pid)
         fd = proc.stdout.fileno()
         buf = bytearray()
@@ -279,6 +299,14 @@ class StreamSource:
             proc.wait()
             proc.stdout.close()
             self._proc = None
+            drain.join(timeout=2)  # ffmpeg has gone: its last words follow at once
+            if reason == "stall":
+                self._health.error = f"no audio for {self._stall_timeout:g} s"
+            elif reason == "eof":
+                self._health.error = ffmpeg_error(said, self.url, opened=not first) or (
+                    "the server ended the stream" if proc.returncode == 0
+                    else f"ffmpeg exited with {proc.returncode}"
+                )  # fmt: skip
             event(
                 log,
                 "source_disconnect",
@@ -292,15 +320,41 @@ class StreamSource:
         now = self._clock()
         h = self._health
         h.connected = True
+        h.error = h.retry_at = None
         h.last_data_at = now
         h.samples_total += len(samples)
         return AudioChunk(samples=samples, t_end=now, discontinuity=first)
 
 
-def _drain_stderr(stream: IO[bytes], station_id: str) -> None:
-    # Keeps ffmpeg from blocking on a full stderr pipe, and surfaces its errors in our log.
+def _drain_stderr(stream: IO[bytes], station_id: str, said: deque[str]) -> None:
+    """Keeps ffmpeg from blocking on a full stderr pipe, and keeps its last lines for the
+    station's error. Each line is logged at debug level: the reconnect warning carries why."""
     with stream:
         for line in stream:
             text = line.decode("utf-8", "replace").strip()
             if text:
-                event(log, "ffmpeg", level=logging.WARNING, station=station_id, stderr=text)
+                said.append(text)
+                event(log, "ffmpeg", level=logging.DEBUG, station=station_id, stderr=text)
+
+
+def ffmpeg_error(
+    stderr: str | bytes | Iterable[str], url: str = "", *, opened: bool = False
+) -> str:
+    """Why ffmpeg or ffprobe failed, in one line: the last line it wrote that says more than
+    that the input didn't open, without its "[tcp @ 0x...]" and the address. Unless audio came
+    first (``opened``), what to check follows. Empty when it wrote nothing."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", "replace")
+    lines = []
+    for line in stderr.splitlines() if isinstance(stderr, str) else stderr:
+        text = _CONTEXT.sub("", line.strip())
+        if url and text.startswith(f"{url}:"):
+            text = text[len(url) + 1 :].strip()
+        if text:
+            lines.append(text.rstrip("."))
+    if not lines:
+        return ""
+    said = ([x for x in lines if not _ONLY_FAILED.match(x)] or lines)[-1]
+    if opened:
+        return said
+    return f"{said}; {NOT_AUDIO if 'Invalid data found' in said else CHECK}"

@@ -46,7 +46,7 @@ from wavescribe import __version__, jsonsafe
 from wavescribe.audio import SAMPLE_RATE
 from wavescribe.languages import language_name, primary_subtag, same_language
 from wavescribe.log import event
-from wavescribe.sources.stream import WEB_PROTOCOLS
+from wavescribe.sources.stream import WEB_PROTOCOLS, ffmpeg_error
 
 log = logging.getLogger(__name__)
 
@@ -862,7 +862,7 @@ def probe_stream(url: str, *, timeout: float = 12, ffprobe: str = "ffprobe") -> 
     except subprocess.TimeoutExpired:
         return StreamProbe(ok=False, error=f"no answer within {timeout:g} s")
     if proc.returncode != 0:
-        reason = _last_line(proc.stderr) or f"ffprobe exited with {proc.returncode}"
+        reason = ffmpeg_error(proc.stderr, url) or f"ffprobe exited with {proc.returncode}"
         return StreamProbe(ok=False, error=reason)
     probe = parse_ffprobe(proc.stdout)
     event(
@@ -931,7 +931,7 @@ def sample_audio(
         raw, err, returncode = e.stdout or b"", e.stderr or b"", None
     raw = raw[: len(raw) - len(raw) % 2]
     if not raw:
-        reason = _last_line(err) or (
+        reason = ffmpeg_error(err or b"", url) or (
             f"no audio within {timeout:g} s" if returncode is None else f"exit {returncode}"
         )
         raise CatalogError(f"no audio from {url}: {reason}")
@@ -940,13 +940,6 @@ def sample_audio(
 
 def _is_web(url: str) -> bool:
     return url.startswith(("http://", "https://"))
-
-
-def _last_line(stderr: bytes | str | None) -> str:
-    if isinstance(stderr, bytes):
-        stderr = stderr.decode("utf-8", "replace")
-    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
-    return lines[-1] if lines else ""
 
 
 # -- Station ids ---------------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import logging
 import os
 import threading
 import time
@@ -43,6 +44,20 @@ def test_bad_url_gives_up_after_max_reconnects(tmp_path: Path) -> None:
     src = StreamSource("t", str(tmp_path / "missing.mp3"), max_reconnects=2, backoff_initial=0)
     assert list(src) == []
     assert src.health.reconnects == 2
+
+
+def test_each_failed_try_is_one_warning_that_says_why(tmp_path: Path, caplog) -> None:
+    from wavescribe.sources.stream import CHECK
+
+    src = StreamSource("t", str(tmp_path / "missing.mp3"), max_reconnects=2, backoff_initial=0)
+    with caplog.at_level("DEBUG", logger="wavescribe.sources.stream"):
+        assert list(src) == []
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [r.getMessage() for r in warnings] == ["source_reconnect"] * 2  # ffmpeg's: debug
+    assert "No such file or directory" in warnings[0].fields["error"]
+    assert "No such file or directory" in src.error and src.error.endswith(CHECK)
+    assert "missing.mp3:" not in src.error  # the address isn't said again
+    assert any(r.getMessage() == "ffmpeg" for r in caplog.records)
 
 
 def test_stall_is_detected(tmp_path: Path) -> None:
@@ -228,3 +243,46 @@ def test_a_web_stream_is_paced_and_nothing_is_dropped(tmp_path: Path) -> None:
     before = np.cumsum([0, *sizes[:-1]]) / SAMPLE_RATE
     assert all(t - times[0] >= b - CHUNK_S - 0.05 for t, b in zip(times, before, strict=True))
     assert times[-1] - times[0] > 1.0
+
+
+# What ffmpeg and ffprobe wrote for a host that doesn't exist and a port nobody listens on.
+DEAD_HOST = (
+    "[tcp @ 0x7b8ec40080] Failed to resolve hostname dead.invalid: nodename nor servname "
+    "provided, or not known\n[in#0 @ 0x7b8f03c000] Error opening input: Input/output error\n"
+    "Error opening input file http://dead.invalid/live.mp3.\n"
+    "Error opening input files: Input/output error\n"
+)
+REFUSED_PROBE = (
+    "[tcp @ 0x7653080080] Connection to tcp://127.0.0.1:9 failed: Connection refused\n"
+    "http://127.0.0.1:9/x.mp3: Connection refused\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("stderr", "url", "said"),
+    [
+        (DEAD_HOST, "http://dead.invalid/live.mp3", "Failed to resolve hostname dead.invalid: "
+         "nodename nor servname provided, or not known; check the address, the network, and "
+         "whether the stream only plays in a web browser"),
+        (REFUSED_PROBE, "http://127.0.0.1:9/x.mp3", "Connection refused; check the address, the "
+         "network, and whether the stream only plays in a web browser"),
+        (b"http://x.test/: Input/output error\n", "http://x.test/", "Input/output error; check "
+         "the address, the network, and whether the stream only plays in a web browser"),
+        ("https://x.test/page: Invalid data found when processing input\n", "https://x.test/page",
+         "Invalid data found when processing input; the address answers, but not with audio: "
+         "it may be a web page, not the stream itself"),
+        ("", "http://x.test/", ""),
+    ],
+)  # fmt: skip
+def test_a_stream_that_will_not_open_says_why_and_what_to_check(stderr, url, said) -> None:
+    from wavescribe.sources.stream import ffmpeg_error
+
+    assert ffmpeg_error(stderr, url) == said
+
+
+def test_a_stream_that_played_and_dropped_gives_only_ffmpegs_reason() -> None:
+    from wavescribe.sources.stream import ffmpeg_error
+
+    said = ffmpeg_error(["[http @ 0x1] Stream ends prematurely at 1234, should be 99999"],
+                        opened=True)  # fmt: skip
+    assert said == "Stream ends prematurely at 1234, should be 99999"

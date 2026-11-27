@@ -33,7 +33,7 @@ Each interface is a Python protocol with one or more implementations:
 
 | Interface | Responsibility | Implementations |
 |---|---|---|
-| `AudioSource` | PCM 16 kHz mono chunks with timestamps for one station, and its health (connected, reconnects, last data; for radio also signal level and ADC clipping) | `StreamSource` (an ffmpeg subprocess; it reconnects http(s) streams with a backoff that resets after 30 s of audio, paces them to real time, and reads a file once), `SdrChannelSource` (fed by a shared `RtlSdrDevice`, demodulated in `dsp/`); `open_source()` picks the station's dongle when it has one, else its stream |
+| `AudioSource` | PCM 16 kHz mono chunks with timestamps for one station, and its health (connected, reconnects, last data; for radio also signal level and ADC clipping) | `StreamSource` (an ffmpeg subprocess; it reconnects http(s) streams with a backoff that resets after 30 s of audio, logging one warning per try with ffmpeg's reason, which its health keeps as `error` with what to check until audio comes; it paces streams to real time and reads a file once), `SdrChannelSource` (fed by a shared `RtlSdrDevice`, demodulated in `dsp/`); `open_source()` picks the station's dongle when it has one, else its stream |
 | SDR device | Owns one dongle: tuning, manual gain, sample rate; fans IQ out to its channels | `RtlSdrDevice` (an `rtl_sdr` subprocess pipe, shared per serial), `SpectrumMonitor` (a dongle running with no station, for its spectrum) |
 | `Gate` | Whether a finished utterance is speech worth transcribing or music | `YamnetGate` (YAMNet on LiteRT, CPU) |
 | `Segmenter` | Turns speech into utterances of about 2–20 s | `VadSegmenter` driven by `SileroVad` (Silero's ONNX model on onnxruntime; no torch) |

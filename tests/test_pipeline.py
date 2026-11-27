@@ -589,6 +589,26 @@ def test_a_station_that_keeps_failing_is_retried_while_the_others_go_on(monkeypa
     assert not b["connected"] and b["reconnects"] >= 3
 
 
+def test_a_source_that_retries_on_its_own_says_why_it_is_down() -> None:
+    class Retrying(HeldSource):
+        """Connects to nothing: a stream retrying in its own loop, as StreamSource does."""
+
+        def __iter__(self) -> Iterator[AudioChunk]:
+            self.health.error = "Connection refused; check the address"
+            self.health.retry_at = time.monotonic() + 30
+            self._closed.wait()
+            yield from ()
+
+    pipeline = fake_pipeline([station("a")], PLAN, lambda _r: None,
+                             lambda st: Retrying(st.id, silence(1)))  # fmt: skip
+    crashed = run_in_background(pipeline)
+    assert wait_for(lambda: "error" in pipeline.status()["stations"].get("a", {}))
+    a = pipeline.status()["stations"]["a"]
+    pipeline.stop()
+    assert crashed == [] and not a["connected"]
+    assert a["error"] == "Connection refused; check the address" and 25 < a["retry_in_s"] <= 30
+
+
 class BrokenVad(EnergyVad):
     def __call__(self, frame: np.ndarray) -> float:
         raise IndexError("index 512 is out of bounds for axis 0 with size 448")

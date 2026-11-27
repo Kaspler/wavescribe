@@ -552,7 +552,8 @@ class Pipeline:
         stations = {}
         for sid, live in list(self._live.items()):
             h = live.source.health
-            error = live.error
+            # Why its capture failed, else why its source is down and retrying on its own.
+            error = live.error or getattr(h, "error", None)
             in_speech = bool(live.segmenter and live.segmenter.in_speech)
             music = (
                 live.last_music_at is not None
@@ -574,7 +575,8 @@ class Pipeline:
             }
             if error is not None:  # why its capture failed, and when it is tried again
                 stations[sid]["error"] = error
-                stations[sid]["retry_in_s"] = round(max(0.0, live.retry_at - time.monotonic()), 1)
+                retry_at = live.retry_at if live.error is not None else h.retry_at or 0.0
+                stations[sid]["retry_in_s"] = round(max(0.0, retry_at - time.monotonic()), 1)
             if h.signal_db is not None:  # SDR sources: signal strength and overload
                 stations[sid]["signal_db"] = round(h.signal_db, 1)
                 stations[sid]["clipped"] = h.clipped
