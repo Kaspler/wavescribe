@@ -102,7 +102,7 @@ Alert fields:
 - `reason`: the LLM's one-line reason, when it was involved.
 - `text`: what was announced, in the source language.
 - `translations`: only translations checked to be in their target language.
-- `context`: the utterances just before it on the same station.
+- `context`: the two utterances just before it on the same station (an output sends as many as its `context` setting says), leaving out what may not leave this machine.
 - `cap_url`: the same alert as a CAP 1.2 document.
 
 A batch, used by pushes that batch utterances, is

@@ -319,3 +319,38 @@ def test_a_resume_point_lists_at_most_so_many_ids_and_a_client_skips_repeats() -
     assert seen.first({"id": None, "text": "a"}) and seen.first({"id": None, "text": "a"})
     seen.first({"id": 12, "text": "c"})
     assert seen.first({"id": 11, "text": "a"})  # forgotten: it remembers only so many
+
+
+def test_the_feeds_alerts_carry_the_utterances_just_before(tmp_path: Path) -> None:
+    from tests.test_app import alert_on
+
+    server, hub, store = feed_server(tmp_path)
+    stream = FeedStream(server, path="/feed/v1/events?events=alert")
+    try:
+        said = []
+        for text in ("Boa tarde.", "Há uma avaria na rede.", "Corte de água amanhã."):
+            r = transcribed(hub, "a", text)
+            finish(hub, store, r)
+            said.append(r.segment_id)
+        alert = alert_on(store, "a", "Corte de água amanhã.", said[-1], ["broadcast"])
+        hub.on_alert({**alert.payload(), "status": "delivered"})
+        while (line := stream.resp.readline().decode()) != "event: alert\n":
+            assert line, "the stream ended"
+        live = json.loads(stream.resp.readline().decode()[len("data: ") :])
+        assert [c["id"] for c in live["context"]] == said[:2]
+        assert live["context"][1]["text"] == "Há uma avaria na rede."
+        [listed] = json.loads(http_get(server, "/feed/v1/alerts"))
+        assert [c["id"] for c in listed["context"]] == said[:2]
+    finally:
+        stream.close()
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
+def http_get(server: WebServer, path: str) -> bytes:
+    conn = http.client.HTTPConnection(*server.server_address, timeout=10)
+    conn.request("GET", path)
+    body = conn.getresponse().read()
+    conn.close()
+    return body

@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 REPLAY_MAX = 1000  # utterances replayed on (re)connect
+CONTEXT = 2  # utterances before an alert's, in its feed event (as an output's default)
 MAX_INGEST = 2 * 1024 * 1024
 KEEPALIVE_S = 15.0  # a comment line on a live stream after this long without a write
 TICKET_TTL_S = 60.0  # a ticket is for the request it was got for, made straight away
@@ -455,8 +456,20 @@ def alerts(h: Handler, query: dict[str, str]) -> None:
     except ValueError as e:
         h._json({"error": f"bad parameter: {e}"}, HTTPStatus.BAD_REQUEST)
         return
-    rows = [a for a in hub.alerts(hub.exports()) if (a.get("last_at") or 0) >= since]
-    h._json([alert_event(a, stations_, node_, languages=_list(query.get("langs"))) for a in rows])
+    leaving = hub.exports()
+    rows = [a for a in hub.alerts(leaving) if (a.get("last_at") or 0) >= since]
+    langs = _list(query.get("langs"))
+    h._json([alert_event(a, stations_, node_, languages=langs,
+                         context=_before(hub, a, leaving)) for a in rows])  # fmt: skip
+
+
+def _before(hub: Any, alert: dict[str, Any], leaving: Any) -> list[dict[str, Any]]:
+    """The utterances just before an alert's on its station, as far as they may leave."""
+    seg = alert.get("segment_id")
+    if hub.store is None or seg is None:
+        return []
+    rows = hub.store.context(seg, before=CONTEXT, after=0, exports=leaving)
+    return [r for r in rows if r["id"] != seg]
 
 
 def events(h: Handler, query: dict[str, str]) -> None:
@@ -562,9 +575,13 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 data = json.loads(text)
                 if only and not only & set(data.get("stations") or []):
                     continue
-                data = hub.exports().alert(data)
+                leaving_now = hub.exports()
+                data = leaving_now.alert(data)
                 stations_, node_ = _context(h)
-                _write(h, "alert", alert_event(data, stations_, node_, languages=langs))
+                before = _before(hub, data, leaving_now)
+                _write(
+                    h, "alert", alert_event(data, stations_, node_, languages=langs, context=before)
+                )
             else:
                 continue
             h.wfile.flush()
