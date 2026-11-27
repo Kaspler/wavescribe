@@ -2,6 +2,7 @@
 import dataclasses
 import itertools
 import json
+import logging
 import re
 import threading
 from datetime import datetime
@@ -718,7 +719,7 @@ def test_a_choice_of_fewer_notes_than_asked_is_a_shorter_digest(tmp_path: Path) 
     store.close()
 
 
-def test_a_part_keeps_twice_the_notes_asked_for_spread_over_its_list(tmp_path) -> None:
+def test_a_part_keeps_twice_the_notes_asked_for_spread_over_its_list(tmp_path, caplog) -> None:
     store = Store(tmp_path / "w.db")
     for i in range(240):
         add(store, "a", f"a frase {i} " + "palavras " * 12, NOW - 3500 + i * 14)
@@ -727,13 +728,52 @@ def test_a_part_keeps_twice_the_notes_asked_for_spread_over_its_list(tmp_path) -
     listed = "\n".join(f"- Note {c} [{n}]." for n, c in enumerate(letters, 1))
     llm = FakeLlm(listed, "- A middle note [1].", "- A late note [1].", "2, 8")
     d = digester(store, llm, stations=[station("a")])
-    digest = d.run(d.request({"minutes": 60, "language": "en"}))
+    with caplog.at_level(logging.INFO, logger="wavescribe.digest"):
+        digest = d.run(d.request({"minutes": 60, "language": "en"}))
+    records = caplog.records
     assert len(llm.prompts) == 4 and min(p.count("\n[") for p in llm.prompts[:3]) >= 12
     choice = llm.prompts[3]
     # Six of the twelve, spread over its list with the first and the last, not the first six.
     assert re.findall(r"Note ([A-L])\.", choice) == list("ACEHJL")
     assert len(re.findall(r"^\[\d+\] ", choice, re.M)) == 8
     assert [p.text for p in digest.points] == ["A middle note.", "Note L."]
+
+    # A line in the log for each call: what the model gave and what was kept of it, no words.
+    calls = [r.fields for r in records if r.getMessage() == "digest_call"]
+    assert [c["stage"] for c in calls] == ["part 1 of 3", "part 2 of 3", "part 3 of 3", "choice"]
+    assert all(c["id"] == digest.request.id and c["seconds"] >= 0 for c in calls)
+    assert (calls[0]["given"], calls[0]["kept"], calls[0]["over"]) == (12, 6, 6)
+    dropped = ("uncited", "no_word", "no_name", "no_number", "same_sources")
+    assert [calls[0][k] for k in dropped] == [0, 0, 0, 0, 0]
+    assert NOW - 3600 <= calls[0]["cited_since"] < calls[0]["cited_until"] < NOW - 2000
+    assert (calls[3]["given"], calls[3]["kept"], calls[3]["readable"]) == (8, 2, True)
+    assert calls[3]["cited_since"] < calls[3]["cited_until"]
+    assert not any("Note" in str(v) or "frase" in str(v) for c in calls for v in c.values())
+    store.close()
+
+
+def test_the_log_counts_the_points_a_call_dropped_by_why(tmp_path: Path, caplog) -> None:
+    store = stocked(tmp_path)
+    llm = FakeLlm(
+        "- Water is cut tomorrow in the centre [1].\n"
+        "- The mayor resigned [1].\n"  # shares no word with what it cites
+        "- Water is cut in Northtown tomorrow [1].\n"  # a name its line doesn't say
+        "- Water is cut for 3 days in the centre [1].\n"  # a number its line doesn't say
+        "- Rain is forecast [9].\n"  # cites nothing it was given
+        "- Water is cut in the town centre [1]."  # the same source as the first
+    )
+    d = digester(store, llm)
+    with caplog.at_level(logging.INFO, logger="wavescribe.digest"):
+        digest = d.run(d.request({"minutes": 60, "language": "en"}))
+    records = caplog.records
+    (call,) = [r.fields for r in records if r.getMessage() == "digest_call"]
+    assert call["stage"] == "part 1 of 1" and (call["given"], call["kept"]) == (6, 1)
+    assert {k: call[k] for k in ("uncited", "no_word", "no_name", "no_number")} == {
+        "uncited": 1, "no_word": 1, "no_name": 1, "no_number": 1,
+    }  # fmt: skip
+    assert call["same_sources"] == 1 and call["over"] == 0 and call["none"] is False
+    assert call["cited_since"] == call["cited_until"] == round(NOW - 50 * MIN)
+    assert digest.uncited == 4
     store.close()
 
 

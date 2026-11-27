@@ -369,7 +369,13 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    bounds the choice's prompt when a model lists every excerpt, and filters nothing. When a
    model lists more points than asked in a digest of one call, each station's share is spread
    over its list, first and last, never its first few. When the model read a sample, the
-   notice says it was spread evenly.
+   notice says it was spread evenly. Each call logs a line, `digest_call`, with the request's
+   id, its `stage` ("part 2 of 3", "choice"), the points the model gave (`given`) and those
+   kept (`kept`), those dropped by why (`uncited`: citing nothing given; `no_word`, `no_name`,
+   `no_number`: nothing cited says it; `same_sources`: the sources of a point before it;
+   `over`: beyond the bound), the span of time the kept ones cite (`cited_since`,
+   `cited_until`) and the `seconds` it took; never a word of what was said. It is how a digest
+   whose points all come from one end of its window is traced to the model or to the checks.
 3. **Queue.** Each call is a job of its own at the lowest priority, behind every station's
    translation, so live translation runs between them; an hour of two busy stations takes
    a minute or two while they are translated. While a call generates, it checks between tokens

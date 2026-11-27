@@ -49,6 +49,11 @@ station's trailers). Only when its reply names no note do the notes stand in, in
 shown. A part's notes are bounded (``NOTE_KEPT``), spread over the model's list, so that a
 model that lists every excerpt doesn't make the choice's prompt long.
 
+Each call logs one line (``digest_call``): its part or the choice, how many points the model
+gave, how many were kept and why the others weren't, the span of time the kept ones cite, and
+how long it took. No words of what was said: enough to tell, of a digest whose points all come
+from one end of its window, whether the model wrote it so or the points were lost here.
+
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
 once the previous call is done: live translation runs between the calls, and a digest waits
@@ -900,6 +905,7 @@ class _Job:
         self.model: str | None = None
         self.calls = 0
         self.model_s = 0.0
+        self._told: dict[str, Any] = {}  # what the call being made says of itself in the log
 
     def next(self) -> None:
         if not self._submit(self._step, self._given_up):
@@ -953,15 +959,31 @@ class _Job:
             self.next()
 
     def _call(self, llm: Llm) -> bool:
-        """One call to the model; True when it was the last."""
+        """One call to the model; True when it was the last. It logs one line of what came of
+        it (``digest_call``), with no word of what was said."""
         self.model = llm.model_id
+        self._told = {}
         t0 = time.perf_counter()
         try:
             finished = self._stage(llm)
         finally:
-            self.model_s += time.perf_counter() - t0
+            taken = time.perf_counter() - t0
+            self.model_s += taken
         self.calls += 1  # not for a call that gave way: it is made again
+        event(log, "digest_call", id=self.request.id, **self._told, seconds=round(taken, 2))
         return finished
+
+    def _tell(self, stage: str, kept: Sequence[Point], **counts: Any) -> None:
+        """What the log says of the call being made: its stage, the points kept of those the
+        model gave, and the span of time (seconds since 1970) of the lines they cite."""
+        times = [self._lines[i].t for p in kept for i in p.ids]
+        self._told.update(
+            stage=stage,
+            kept=len(kept),
+            **counts,
+            cited_since=round(min(times)) if times else None,
+            cited_until=round(max(times)) if times else None,
+        )
 
     def _stage(self, llm: Llm) -> bool:
         r = self.request
@@ -970,6 +992,7 @@ class _Job:
             messages = excerpt_messages(r, lines, self.names, points=POINTS[r.kind])
             points = self._reply(llm, messages, lines)
             self.points = pick(points, POINTS[r.kind], self._station)
+            self._tell("part 1 of 1", self.points, over=len(points) - len(self.points))
             return True
         if self.calls < len(self.prompts):  # the first stage: notes on one part of the window
             lines = self.prompts[self.calls]
@@ -978,6 +1001,8 @@ class _Job:
             # A model that lists every excerpt gives a dozen: some of them, from the first to
             # the last, keep the choice's prompt short. Which matter is the choice's to say.
             self.notes.append(_ends(given, NOTE_KEPT))
+            stage = f"part {self.calls + 1} of {len(self.prompts)}"
+            self._tell(stage, self.notes[-1], over=len(given) - len(self.notes[-1]))
             noted = [note for notes in self.notes for note in notes]
             if self.calls + 1 < len(self.prompts) or len(noted) > 1:
                 return False
@@ -995,6 +1020,7 @@ class _Job:
         lumped = [n for g in groups if len(g) > MAX_JOIN for n in g[1:]]
         numbers = chosen + lumped if groups else list(range(1, len(notes) + 1))
         self.points = [notes[n - 1] for n in numbers][: POINTS["digest"]]
+        self._tell("choice", self.points, given=len(notes), readable=bool(groups))
         return True
 
     def _reply(
@@ -1004,10 +1030,21 @@ class _Job:
         once; those dropped for citing nothing given, or nothing that backs them, counted."""
         reply = llm.complete(messages, max_tokens=ANSWER_TOKENS, on_text=self._give_way)
         parsed = parse_points(reply, len(lines))
-        points, unsourced = sourced(parsed.points, lines, names=self.names)
+        why: Counter[str] = Counter()
+        points, unsourced = sourced(parsed.points, lines, names=self.names, why=why)
         self.nones += parsed.none
         self.uncited += parsed.uncited + unsourced
-        return merged(points)
+        kept = merged(points)
+        self._told.update(
+            given=len(parsed.points) + parsed.uncited,
+            none=parsed.none,
+            uncited=parsed.uncited,
+            no_word=why["no_word"],
+            no_name=why["no_name"],
+            no_number=why["no_number"],
+            same_sources=len(points) - len(kept),
+        )
+        return kept
 
     def _to_choose(self) -> list[Point]:
         """The notes to choose from: one from each part of the window in turn, the latest part
@@ -1323,6 +1360,7 @@ def sourced(
     lines: Sequence[Line],
     *,
     names: Mapping[str, str] | None = None,
+    why: Counter[str] | None = None,
 ) -> tuple[list[Point], int]:
     """The points of a reply that its excerpts (``lines``, numbered from 1) can back, each on
     at most ``CITED`` of those it cites, and how many were dropped for sharing no word with
@@ -1349,8 +1387,12 @@ def sourced(
 
     When a point cites more lines than it keeps, those that say what it states go first, as
     few as say it all; then those that share a word with it, spread evenly over the order it
-    cited them in; the others, spread too, make up the rest."""
+    cited them in; the others, spread too, make up the rest.
+
+    ``why``, when given, counts the points dropped by what they lacked: ``no_word``,
+    ``no_name`` (a name, whatever else) or ``no_number``."""
     points = list(points)
+    why = Counter() if why is None else why
     # Whether a capital makes a name in the language the points are written in.
     nouns = _capitalises_nouns([ln.text for ln in lines if ln.readers] + [t for t, _ in points])
     known: dict[int, tuple[frozenset[str], frozenset[float]]] = {}
@@ -1368,12 +1410,15 @@ def sourced(
         readers = any(line.readers for line in cited)
         if not backing and readers:
             unsourced += 1
+            why["no_word"] += 1
             continue
         claims = stated(text, names=readers, nouns=nouns)
         if len(cited) > CITED:
             cited = _kept(cited, backing, claims, said_in)
-        if not all(any(_found(c, said_in(line)) for line in cited) for c in claims):
+        unsaid = [c for c in claims if not any(_found(c, said_in(line)) for line in cited)]
+        if unsaid:
             unsourced += 1
+            why["no_name" if any(isinstance(c, str) for c in unsaid) else "no_number"] += 1
             continue
         out.append(Point(text, tuple(line.id for line in sorted(cited, key=lambda x: x.t))))
     return out, unsourced
