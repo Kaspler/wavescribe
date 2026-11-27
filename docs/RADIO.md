@@ -117,9 +117,8 @@ antenna, then run `uv run wavescribe radio spurs a --learn` (or *Learn* under
 *Each receiver's own signals* on the Receivers page). It sweeps in steps of about 5 kHz, fine
 enough to see narrow lines, in about a minute for the whole range. Lines seen in
 both of two sweeps are kept for that receiver's serial (`data/radio/spurs.json`), and later
-scans mark them and leave them out. Spurs learnt before the sweep was this fine were learnt in
-steps of about 87 kHz, which hide narrow lines. Their entries in `spurs.json` have no `bin_hz`,
-and `radio spurs a` says so: learn them again. A signal that disappears when only the antenna is
+scans mark them and leave them out. Entries in `spurs.json` without a `bin_hz` were learnt in
+steps of about 87 kHz, which hide narrow lines, and `radio spurs a` says so: learn them again. A signal that disappears when only the antenna is
 disconnected comes in through the antenna: it is either real or interference near it. Narrow
 lines that sit on multiples of 2.4 MHz are another receiver's clock; the scan marks them and
 keeps them under Show more, and `radio scan` lists them marked but counts them, and spurs,
@@ -393,15 +392,10 @@ Limits:
   stays on for ten seconds is taken as the new floor, as interference is, and the watch hears
   through it.
 - **Tried on the air only briefly**, with an indoor whip on 2 m, where short transmissions on an
-  amateur channel were caught and logged; before that on synthetic signals and with no antenna
-  (no false catches in 10 minutes on PMR446 and on 2 m). A first try with a walkie-talkie a few
-  metres from the antenna overloaded the receiver, and the watch, taking it for interference,
-  caught nothing; it now catches such a transmission, as tried on synthetic signals, and says
-  the receiver was overloaded. A second try, with a handheld keyed close by on a frequency near
-  the receiver's centre (on none of the channels), was caught on a channel its products landed
-  on, and a second key-up a minute later was in no log line; it is now said and not caught, as
-  tried on synthetic signals. Speech from a walkie-talkie at a sensible distance hasn't been
-  tried.
+  amateur channel were caught and logged; also on synthetic signals and with no antenna (no
+  false catches in 10 minutes on PMR446 and on 2 m). How the watch handles a transmitter close by,
+  on a channel or on none of them, is tried on synthetic signals only. Speech from a
+  walkie-talkie at a sensible distance hasn't been tried.
 
 ### Testing with a walkie-talkie
 
