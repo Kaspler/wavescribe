@@ -708,7 +708,11 @@ frequency no receiver tunes, or one this receiver can't be tuned to hear), `bad_
 change that would tune a station where its receiver doesn't hear it), and for a watch
 `unknown_band`, `bad_window` (not two frequencies, or the start not below the stop),
 `no_channels` (none on the band's raster in the range), `bad_threshold`, and `too_wide` with
-`slice_mhz: [start, stop]`, the slice that fits that the sentence offers.
+`slice_mhz: [start, stop]`, the slice that fits that the sentence offers. A station in language
+`auto` given a speech model that can't tell languages apart is refused with `cannot_detect`;
+`GET /api/manage/models` marks each model that can (`detects_languages`: an ASR model on disk
+that passes the test `plan_detecting` makes, so false for one not downloaded yet), for the
+station editor to offer.
 
 **Stations a receiver doesn't hear.** Whether a receiver hears a station is one rule for every
 kind (`config.heard_by`): one of its frequencies inside the window and, for a narrow channel,

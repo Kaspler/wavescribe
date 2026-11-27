@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from wavescribe.asr import Transcriber, Transcript
+from wavescribe.registry import ModelError
 
 if TYPE_CHECKING:
     from wavescribe.config import Station
@@ -35,6 +36,13 @@ NEEDS = (
 )
 
 
+class CannotDetect(ModelError):
+    """The model chosen for a station in language ``auto`` can't tell languages apart; the
+    page reads it as code ``cannot_detect`` (wavescribe/refusal.py)."""
+
+    code = "cannot_detect"
+
+
 def can_detect(entry: ModelEntry, path: Path) -> bool:
     """Whether a model can say which language is spoken (``identify_language``), as its wrapper
     tells from the model on disk: an English-only Whisper can't."""
@@ -43,14 +51,20 @@ def can_detect(entry: ModelEntry, path: Path) -> bool:
     return entry.backend == "mlx-audio" and MlxAudioTranscriber.tells_languages(path)
 
 
+def detects_languages(entry: ModelEntry, path: Path | None) -> bool:
+    """Whether a speech model, at ``path`` on disk (None: not downloaded), can be the model of a
+    station in language ``auto``: the test ``plan_detecting`` makes of each model. What a model
+    not downloaded can tell isn't known, so it can't."""
+    return entry.capability == "asr" and path is not None and can_detect(entry, path)
+
+
 def plan_detecting(
     registry: ModelRegistry, station: Station, asr_model: str | None = None
 ) -> tuple[ModelEntry, Path]:
     """The ASR model for a station in language ``auto``: the one named on the command line or
     chosen on the page, else the first installed model of the chain that can tell languages
-    apart and knows every one of the station's ``languages``."""
-    from wavescribe.registry import ModelError
-
+    apart and knows every one of the station's ``languages``. A chosen model that can't tell
+    them is refused with ``CannotDetect``."""
     chosen = asr_model or station.asr_model
     entries = [registry.get(chosen)] if chosen else registry.chain("asr")
     for entry in entries:
@@ -62,10 +76,12 @@ def plan_detecting(
                     f"{entry.id} is not installed; run: wavescribe models fetch {entry.id}"
                 )
             continue
-        if path is None or not can_detect(entry, path) or unknown:
+        detects = detects_languages(entry, path)
+        if not detects or unknown:
+            if chosen and not detects:
+                raise CannotDetect(f"{entry.id} can't tell languages; {NEEDS}")
             if chosen:
-                why = f"doesn't know {', '.join(unknown)}" if unknown else "can't tell languages"
-                raise ModelError(f"{entry.id} {why}; {NEEDS}")
+                raise ModelError(f"{entry.id} doesn't know {', '.join(unknown)}; {NEEDS}")
             continue
         try:
             registry.check_license(entry)

@@ -650,8 +650,9 @@ class App:
                 raise ChangeError(NO_VAD)
             try:
                 plan_station(self.registry, s, self.asr_model)
-            except ModelError as e:
-                raise ChangeError(f"{s.name} can't be transcribed yet: {e}") from e
+            except ModelError as e:  # a model that can't tell languages: code cannot_detect
+                raise ChangeError(f"{s.name} can't be transcribed yet: {e}",
+                                  getattr(e, "code", None)) from e  # fmt: skip
         if changes.get("mt_model"):
             try:
                 entry, _ = self.registry.installed(str(changes["mt_model"]))

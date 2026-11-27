@@ -326,3 +326,43 @@ def test_each_receiver_says_in_a_word_what_holds_it(
     finally:
         r.app._live = None
         r.close()
+
+
+def test_the_models_say_which_can_tell_languages_apart(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from wavescribe.registry import ModelEntry
+
+    anything = {"id": "anything", "name": "Anything", "stream": "http://example.test/x",
+                "language": "auto"}  # fmt: skip
+    raw = stations(98.0, anything)
+    raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]
+    r = running(tmp_path, raw)
+    whisper = ModelEntry("whisper-x", "asr", "mlx-audio", "url:x", "u", "MIT", "u", "default",
+                         False, ("*",), "")  # fmt: skip
+    english = replace(whisper, id="whisper-en", source="url:en")
+    models = tmp_path / "node" / "models"
+    for entry, vocab in ((whisper, 51_866), (english, 51_864), (replace(whisper, id="y"), None)):
+        r.app.registry.add(entry)
+        if vocab is None:
+            continue  # not downloaded: what it can tell isn't known yet
+        (models / entry.id).mkdir()
+        (models / entry.id / entry.location).write_bytes(b"")
+        config = {"model_type": "whisper", "n_vocab": vocab}
+        (models / entry.id / "config.json").write_text(json.dumps(config))
+    try:
+        status, view = r.call("GET", "/api/manage/models")
+        assert status == 200
+        detects = {m["id"]: m["detects_languages"] for m in view["models"]}
+        # Only a multilingual Whisper on disk can be the model of a station in language auto;
+        # the speech detector and the translator ("m" plays all three here) can't.
+        assert detects == {"m": False, "whisper-x": True, "whisper-en": False, "y": False}
+        status, err = r.call("POST", "/api/manage/stations/anything", {"asr_model": "whisper-en"})
+        assert status == 400 and err["code"] == "cannot_detect", err
+        assert err["error"].startswith("Anything can't be transcribed yet: whisper-en can't tell")
+        status, err = r.call("POST", "/api/manage/stations/anything", {"asr_model": "m"})
+        assert status == 400 and err["code"] == "cannot_detect", err
+        status, ok = r.call("POST", "/api/manage/stations/anything", {"asr_model": "whisper-x"})
+        assert status == 200 and ok["asr_choice"] == "whisper-x", ok
+    finally:
+        r.close()

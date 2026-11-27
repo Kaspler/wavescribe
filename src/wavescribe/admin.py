@@ -36,6 +36,7 @@ class AdminError(ValueError):
 
 
 def models_view(app: App) -> dict[str, Any]:
+    from wavescribe.asr.language import detects_languages
     from wavescribe.catalog import models as cat
 
     reg = app.registry
@@ -66,6 +67,8 @@ def models_view(app: App) -> dict[str, Any]:
             "origin": e.origin, "upstream": e.upstream, "revision": e.revision,
             "gated": e.gated, "unsafe_targets": list(e.unsafe_targets),
             "installed": path is not None, "size_gb": size,
+            # Whether it can be the speech model of a station in language "auto" (asr only).
+            "detects_languages": detects_languages(e, path),
             "accepted": reg.licenses.accepted(e),
             "fit": dataclasses.asdict(f),
             "speed": cat.speed_hint(e.capability, size, m, backend=e.backend) if size else None,
