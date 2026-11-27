@@ -463,6 +463,11 @@ def test_mcp_control_tools_only_with_allow_control(tmp_path: Path) -> None:
             "add_station", name="Rádio Nova", url="http://example.test/nova", language="es-ES"
         )
         assert not failed and added["id"] == "radio-nova"
+        failed, why = mcp.call(  # a name in use, whatever its case: refused, as documented
+            "add_station", name=" rádio NOVA", url="http://example.test/two", language="es-ES"
+        )
+        assert failed and "there is already a station called 'rádio NOVA'" in why
+        assert [s["id"] for s in node.app.stations_view()].count("radio-nova-2") == 0
         assert mcp.call("start_station", station="a") == (False, {"ok": True})
 
         def running() -> list[str]:  # remembered for the next start, as the page's are

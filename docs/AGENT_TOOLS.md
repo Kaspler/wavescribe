@@ -85,7 +85,7 @@ stderr: stdout carries the protocol and nothing else.
 | `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It needs a language model as the translator; otherwise it fails with the reason. |
 | `status` | Models loaded, stations running and why not, queue depths, whether `ask` works, version. |
 | `start_station`, `stop_station` | Only with `--allow-control`. |
-| `add_station` | Only with `--allow-control`: an internet station by its `http://` or `https://` stream address. |
+| `add_station` | Only with `--allow-control`: an internet station by its `http://` or `https://` stream address. A name another station already has (ignoring case) is refused; so is renaming a station to one on the page. |
 
 Utterances and alerts come back in the feed's shapes. To see the protocol at work, send it a
 few lines by hand:

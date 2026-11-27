@@ -456,6 +456,7 @@ class App:
         if any(s.id == sid for s in self.config.stations):
             raise ChangeError(f"there is already a station called {sid!r}")
         raw.setdefault("name", sid)
+        self._check_name_free(str(raw["name"]))
         self._check_draft(lambda d: d.setdefault("station", []).append(raw), sid)
         self.settings.update(lambda d: d.setdefault("station", []).append(raw))
         self._reload()
@@ -472,6 +473,8 @@ class App:
                                                     "mw_khz"} if page else set())  # fmt: skip
         if unknown:
             raise ChangeError(f"can't change {', '.join(sorted(unknown))} here")
+        if changes.get("name"):
+            self._check_name_free(str(changes["name"]), sid)
         if changes.get("acknowledge"):  # confirmed where it is: a class kept stricter goes too
             changes = {**changes, "privacy_floor": None}
 
@@ -583,6 +586,14 @@ class App:
             run["stations"] = [*ids, sid] if on else ids
 
         self.settings.update(mutate)
+
+    def _check_name_free(self, name: str, sid: str | None = None) -> None:
+        """Refuse a name another station has (ignoring case and spaces at its ends): alerts, the
+        page and the agent tools tell stations apart by name."""
+        key = name.strip().casefold()
+        if any(s.name.strip().casefold() == key for s in self.config.stations if s.id != sid):
+            raise ChangeError(f"there is already a station called {name.strip()!r}: give this "
+                              "one another name")  # fmt: skip
 
     def _free_id(self, base: str) -> str:
         ids = {s.id for s in self.config.stations}

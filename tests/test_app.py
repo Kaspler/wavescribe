@@ -169,6 +169,10 @@ def test_stations_added_and_changed_from_the_page_persist(node: Running, tmp_pat
 
     status, err = node.call("POST", "/api/manage/stations/a", {"language": "nonsense!"})
     assert status == 400 and "BCP-47" in err["error"]
+    for taken in ({"name": "RÁDIO NOVA"}, {"name": "rádio nova", "stream": "http://x.test/2"}):
+        path = "/api/manage/stations" + ("" if "stream" in taken else "/a")
+        status, err = node.call("POST", path, {"language": "es-ES", **taken})
+        assert status == 400 and "there is already a station called" in err["error"]
     status, err = node.call("DELETE", "/api/manage/stations/a")
     assert status == 400 and "stations.toml" in err["error"]
     status, _ = node.call("DELETE", "/api/manage/stations/radio-nova")
