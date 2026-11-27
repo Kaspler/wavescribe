@@ -223,7 +223,9 @@ It needs the Qwen3.5 model and waits behind live translation: an hour of two bus
 takes about a minute, `--now` a few seconds. When two digests are already being made, it is
 refused at once; try again in a minute. `--speak` also reads its points aloud, in the voice
 your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by saying that
-this is a Wavescribe summary written by the local model, and an alert stops it at once.
+this is a Wavescribe summary written by the local model, and an alert stops it at once. One
+that comes while an alert is being spoken waits for it to end (a minute at most; after that it
+is only shown).
 
 Like alerts, a digest is a help, not a warning system: it comes from a small model reading
 speech recognition, so it can miss things or get a name or a number wrong, and one without
@@ -320,10 +322,10 @@ otherwise look like a quiet radio. It covers only radio that may leave the Mac
 anyone in the room does.
 
 Read aloud, a digest opens by saying what it is, names the earlier alerts only by time and
-rule, then reads its points; an alert stops it at once. For a language other than English,
-give its `[speak.<lang>]` a `summary` and an `earlier` sentence, as `alerts.example.toml`
-shows. Digests keep to the clock on the days it changes too. Restart Wavescribe after changing
-the table.
+rule, then reads its points; an alert stops it at once, and one being spoken is waited for.
+For a language other than English, give its `[speak.<lang>]` a `summary` and an `earlier`
+sentence, as `alerts.example.toml` shows. Digests keep to the clock on the days it changes too.
+Restart Wavescribe after changing the table.
 
 **Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
 home-automation system ([FEED.md](FEED.md)).

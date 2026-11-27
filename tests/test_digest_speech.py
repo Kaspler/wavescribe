@@ -226,13 +226,27 @@ def test_a_digest_starts_once_an_alert_being_said_has_ended() -> None:
     reader = in_background(
         lambda: count.append(speech.read("Lesya", ["first", "second"], threading.Event()))
     )
-    wait_for(lambda: not reader.is_alive())
-    assert count == [0]  # it came while an alert was being said: that alert is the news
+    time.sleep(0.3)
+    assert reader.is_alive() and said(actions) == []  # it waits for the alert to end
     actions.go.set()
     alert.join(5)
+    reader.join(5)
+    assert count == [2] and said(actions) == ["Evacuate the riverside", "first", "second"]
+    assert speech.claim()  # the turn was given back
+
+
+def test_a_digest_waits_for_alerts_a_while_then_isnt_read(caplog) -> None:
+    actions = HeldActions("Evacuate")
+    speech = Speech(actions, wait_s=0.3)
+    alert = in_background(lambda: speech.speak("Lesya", "Evacuate the riverside"))
+    assert actions.speaking.wait(5)
     assert speech.claim()
-    assert speech.read("Lesya", ["first", "second"], threading.Event()) == 2
-    assert said(actions) == ["Evacuate the riverside", "first", "second"]
+    with caplog.at_level("INFO", logger="wavescribe.digest.speech"):
+        assert speech.read("Lesya", ["first"], threading.Event()) == 0
+    assert "digest not read aloud: alerts were being said" in caplog.text
+    actions.go.set()
+    alert.join(5)
+    assert said(actions) == ["Evacuate the riverside"] and speech.claim()
 
 
 def test_closing_stops_a_digest_mid_sentence() -> None:

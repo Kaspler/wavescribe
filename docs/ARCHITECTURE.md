@@ -327,8 +327,9 @@ it opens with a fixed sentence (`summary` in `[speak.<lang>]`, built in for Engl
 is a Wavescribe summary, of which stations and hours, written by the local model from how many
 lines; names the earlier alerts about what was said only by time and rule (`earlier`); then
 reads its points. A digest without points is shown, never read. Each sentence is a `say` of
-its own, which an alert being spoken or the app closing stops at once; a reminder, never
-spoken, leaves it.
+its own, which an alert or the app closing stops at once; a reminder, never spoken, leaves
+it. A digest that comes while an alert is being spoken waits for the voice, a minute at most
+(`ALERT_WAIT_S`); then it isn't read, and the log says so.
 
 Scheduled digests run at the first real minute whose local time is on a period, so a change of
 the clocks neither skips nor repeats one, at least a minute apart; each covers the time since

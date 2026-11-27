@@ -4,7 +4,8 @@
 Alerts and digests share the machine's one voice (``say``, which would talk over itself).
 ``Speech`` stands in for the alerts' actions and takes the turns: an alert stops a digest
 being read at once, mid-sentence, and the rest of the digest isn't read, as the alert is the
-news then; a digest waits while an alert speaks. Closing stops it too.
+news then; a digest that comes while an alert speaks waits for it to end, ``ALERT_WAIT_S`` at
+most, and isn't read (the log says why) when alerts keep the voice longer. Closing stops it.
 
 A digest never sounds like an alert: it opens with a fixed sentence in the listener's
 language that says what it is, who wrote it and from how much (``summary`` in
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING
 
@@ -38,6 +40,9 @@ SPOKEN_CHARS = 300  # one utterance at most, cut at a sentence's end: about 20 s
 STATIONS_CHARS = 80  # of the opening, so that the sentence after it is still said
 EARLIER_LISTED = 5  # earlier alerts named; the count says how many there were
 CLOSE_WAIT_S = 2.0
+# A digest waits this long for alerts being said to end: a few spoken alerts, one after the
+# other. Then it isn't read: it would be old news after them, and the screen shows it anyway.
+ALERT_WAIT_S = 60.0
 # The words a digest is introduced with, for English; other languages give their own in
 # [speak.<lang>], as they do the alerts' fallback.
 SUMMARY = (
@@ -54,8 +59,9 @@ FIELDS = {
 class Speech:
     """The alerts' actions, with digests taking their turn behind alerts."""
 
-    def __init__(self, actions: Actions) -> None:
+    def __init__(self, actions: Actions, *, wait_s: float = ALERT_WAIT_S) -> None:
         self.actions = actions
+        self._wait_s = wait_s  # for alerts being said to end, before a digest is read
         self._voice = threading.Lock()  # held while anything is being said
         self._turns = threading.Condition()
         self._alerts = 0  # alerts waiting to speak, or speaking
@@ -84,6 +90,7 @@ class Speech:
         finally:
             with self._turns:
                 self._alerts -= 1
+                self._turns.notify_all()
 
     def claim(self) -> bool:
         """The turn of one digest; False while another is being read aloud. ``read`` gives it
@@ -92,12 +99,23 @@ class Speech:
 
     def read(self, voice: str, sentences: Iterable[str], stop: threading.Event) -> int:
         """A digest whose turn was claimed, a sentence at a time, never over an alert: it
-        starts once an alert being said has ended, and stops at once when another alert comes
-        or ``stop`` is set. Returns how many sentences were said to the end."""
-        said = 0
+        starts once the alerts being said have ended (none for ``wait_s``: it isn't read), and
+        stops at once when another alert comes or ``stop`` is set. Returns how many sentences
+        were said to the end; the log says why a digest wasn't read to its end."""
+        said, sentences = 0, list(sentences)
         try:
             with self._turns:
-                if self._alerts or self._closing:
+                deadline = time.monotonic() + self._wait_s
+                while self._alerts and not self._closing and not stop.is_set():
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        log.info(
+                            "digest not read aloud: alerts were being said for %.0f s",
+                            self._wait_s,
+                        )
+                        return 0
+                    self._turns.wait(min(left, 0.25))
+                if self._closing or stop.is_set():
                     return 0
                 self._cut.clear()  # an alert said before this digest began isn't one after it
             for sentence in sentences:
@@ -112,6 +130,9 @@ class Speech:
                 said += 1
         finally:
             self._digest.release()
+        if said < len(sentences):
+            why = "Wavescribe is closing" if self._closing or stop.is_set() else "an alert came"
+            log.info("digest read aloud in part (%d of %d): %s", said, len(sentences), why)
         return said
 
     def close(self) -> None:
@@ -120,6 +141,7 @@ class Speech:
         with self._turns:
             self._closing = True
             self._cut.set()
+            self._turns.notify_all()
         if self._voice.acquire(timeout=CLOSE_WAIT_S):
             self._voice.release()
 
@@ -254,11 +276,6 @@ class Speaker:
 
     def _read(self, voice: str, sentences: list[str]) -> None:
         try:
-            said = self.speech.read(voice, sentences, self._closed)
+            self.speech.read(voice, sentences, self._closed)  # it logs why it stopped short
         except Exception:
             log.exception("reading a digest aloud failed")
-            return
-        if said < len(sentences):
-            log.info(
-                "digest read aloud in part (%d of %d): stopped for an alert", said, len(sentences)
-            )
