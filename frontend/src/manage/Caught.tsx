@@ -4,9 +4,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { fetchRead } from "../lib/auth";
 import { sameLang, langNameEn } from "../lib/lang";
-import { S } from "../lib/live";
 import { P } from "../lib/prefs";
-import { useTopics } from "../lib/store";
 import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { addedToast } from "./added";
@@ -318,7 +316,6 @@ function SpotRow({ s, band, onAdd, onNoted }: { s: Spot; band: string | null; on
 const REASONS: Record<string, string> = { carrier: "on for minutes, then taken as the channel's noise" };
 
 function CatchRow({ c }: { c: Catch }) {
-  useTopics(`utt:${c.station}`); // a translation comes with the live line, if it is still loaded
   return (
     <li className="cg-catch">
       <p className="cg-when num">
@@ -326,8 +323,8 @@ function CatchRow({ c }: { c: Catch }) {
         {[secs(c.duration), `${c.snr_db.toFixed(0)} dB above noise`, voiceWord(c.voice), c.reason && (REASONS[c.reason] || c.reason)].filter(Boolean).map((x) => ` · ${x}`)}
       </p>
       {c.utterances.map((u) => {
-        const live = (S.utts[c.station] || []).find((x) => x.id === u.id);
-        const tr = P.lang && !sameLang(u.language, P.lang) ? Object.entries(live?.translations || {}).find(([l]) => sameLang(l, P.lang))?.[1] : null;
+        // In the reader's language where the store has it; nothing otherwise.
+        const tr = P.lang && !sameLang(u.language, P.lang) ? Object.entries(u.translations || {}).find(([l]) => sameLang(l, P.lang))?.[1] : null;
         return (
           <div key={u.id} className="cg-said">
             <p dir="auto" lang={u.language}><span className="u-lang">{langNameEn(u.language)}</span>{u.text}</p>

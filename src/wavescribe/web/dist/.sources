@@ -32,7 +32,7 @@ e00621249cbda3ff7637b3c1c1d640379057b5b5 frontend/src/lib/lang.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
-9f4e6b09d991357c5f656192957690ba0661cea7 frontend/src/manage/Caught.tsx
+e52d45f769aa3390c41590485760ddf9efaf3f3f frontend/src/manage/Caught.tsx
 7f2671dbbca3f95bd458ad913c77e923bd43c4ef frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 bd888117fb0d9575aef81e607e54dcce4446a872 frontend/src/manage/Internet.tsx
@@ -53,7 +53,7 @@ f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 56466eeb98a7b202f73560e19d20314f44168a10 frontend/src/manage/bands.ts
-7f539cdc5ec75cade1d2d1110489c4f1989f64ae frontend/src/manage/catches.ts
+aa23eae456bb29606efb372403e7ee0921a972f3 frontend/src/manage/catches.ts
 d81863a3f529a6fc902277d4350f901d619b4e57 frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
 ce63599971e621a20fb0bcd3ad41a3004884b99a frontend/src/manage/manage.css

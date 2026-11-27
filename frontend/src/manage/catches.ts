@@ -8,6 +8,8 @@ export interface Said {
   t: number;
   language: string;
   text: string;
+  /** Its translations the store keeps, by language. */
+  translations?: Record<string, string>;
 }
 
 /** One transmission a watch caught (radio/watch.py, store.py). */
