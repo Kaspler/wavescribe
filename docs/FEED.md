@@ -239,6 +239,7 @@ an EventSource on such a page.
 
   ```sh
   uv run wavescribe token make --label "kitchen screen"   # prints the token once
+  uv run wavescribe token make --scope push --label "valley node"   # one that may send events here
   uv run wavescribe token list                            # ids, scopes, labels
   uv run wavescribe token revoke 3f9c0a1b                 # by the id the list shows
   ```
@@ -363,7 +364,9 @@ privacy = "amateur"         # optional: handle its text at least this strictly
 - On a lost connection it reconnects, backing off from 2 s to 60 s.
 
 **The places push.** Use this when they sit behind NAT. On the central server, make a token
-with the `push` scope. On each place, add an output:
+with the `push` scope. On each place, add an output (Settings → **Connections** → **Webhooks
+and live pushes** → **Push to a central Wavescribe** starts one, for you to give the address
+and the token):
 
 - URL: `http://central:8765/feed/v1/ingest`
 - events: `utterance` (the central server runs its own rules; pushed alerts are ignored)

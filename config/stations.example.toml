@@ -2,6 +2,10 @@
 # Copy to config/stations.toml (gitignored) and adapt it to where you are.
 # Stream URLs were verified 2026-11-09. FM frequencies depend on your nearest transmitter: look
 # them up (e.g. radiomap.eu or the broadcaster's site) and verify them with your receiver.
+#
+# [defaults] takes language, translate_to, alert_languages, priority and deemphasis_us; a
+# station's own value wins. priority: when the Mac falls behind, 1 is written down first; 5
+# when left out. A station with both stream and stream_hls is heard from stream.
 
 [defaults]
 language = "pt-PT"
@@ -45,6 +49,9 @@ stream = "https://playerservices.streamtheworld.com/api/livestream-redirect/OBSE
 # serial = "00001234"
 # center_mhz = 98.6
 # gain_db = 20
-# ppm = 0           # crystal error in parts per million (rtl_test -p); 0 for a TCXO dongle
+# ppm = 0           # crystal error in parts per million (rtl_test -p), -500 to 500; 0 for a
+#                   # TCXO dongle
+# sample_rate = 2400000   # samples per second (the default): 240000, or a multiple of 240000
+#                         # from 960000 to 3120000
 #
 # ...then add `device = "a"` to the antena1 station above.

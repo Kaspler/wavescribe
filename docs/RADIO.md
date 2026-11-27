@@ -204,12 +204,15 @@ language = "de-DE"
 device = "a"
 mhz = 145.6            # any frequency; `fm_mhz` is for broadcast FM
 # mode = "nfm"         # wfm, nfm or am; by default from the band plan
-# channel_khz = 12.5   # the channel width; 12.5 for NFM and 8.33 for AM unless set
+# channel_khz = 12.5   # the channel width, 2.5 to 30; 12.5 for NFM and 8.33 for AM unless set
 # squelch_db = -40     # a fixed squelch level; by default it opens on a carrier by itself
 ```
 
-`ppm = 52` on a `[[device]]` corrects a dongle's crystal error (`rtl_test -p` measures it);
-`--ppm` does the same for the `radio` commands and `?ppm=` in an `sdr:` source.
+`ppm = 52` on a `[[device]]` corrects a dongle's crystal error (`rtl_test -p` measures it; a
+whole number from -500 to 500); `--ppm` does the same for the `radio` commands and `?ppm=` in
+an `sdr:` source ([COMMANDS.md](COMMANDS.md#wavescribe-listen) lists what such a source takes).
+A `[[device]]` also takes `sample_rate` (2400000 by default: 240000, or a multiple of 240000
+from 960000 to 3120000), which sets how wide a window the receiver hears.
 
 The demodulators are Wavescribe's own (numpy and scipy, `dsp/`):
 
@@ -266,7 +269,7 @@ watch = "pmr446"         # a band id from `radio bands`, or a range: [446.0, 446
 language = "auto"
 languages = ["es-ES", "en"]   # optional: the languages it may be
 acknowledge = true
-# threshold_db = 8       # how far above a channel's noise counts as a transmission
+# threshold_db = 8       # dB above a channel's noise that counts as a transmission, 3 to 40
 ```
 
 A watch doesn't hold its receiver where it is. If the receiver is tuned where it doesn't hear
@@ -512,7 +515,8 @@ band says so: CB is narrowband FM in the CEPT countries and AM elsewhere. Region
 Until you choose a region, the band list follows this computer's region setting, but each
 frequency takes the strictest class any region gives it (FM broadcast excepted): a computer set
 to US English may well be in Europe, where 446 MHz is walkie-talkies rather than amateur radio.
-Set your region with `[radio] region = "2"` in the stations file, or on the page. Where a region
+Set your region with `[radio] region = "2"` in the stations file, or on the page (Settings →
+**Receivers** → **Your region** → **Band plan**). Where a region
 has its own version of a band, the usual name finds it: `airband` is the Americas' `airband-25`
 (a 25 kHz raster), `fm` their `fm-americas`, `2m` their `2m-wide`. To add a band,
 add a `[[band]]` to `bands.toml`: it's data, not code. A frequency that no plan for your region

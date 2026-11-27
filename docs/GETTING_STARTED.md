@@ -21,6 +21,8 @@ is needed. Allow about half an hour, plus the time to download the models.
 - [Troubleshooting](#troubleshooting)
 - [Questions](#questions)
 
+Every command used here, with all its options, is in [COMMANDS.md](COMMANDS.md).
+
 ## What you need
 
 - **A Mac with Apple Silicon** (M1 or later). Intel Macs, Windows and Linux aren't supported.
@@ -128,6 +130,15 @@ than a station in one known language. The modes:
 
 A station that already speaks your language isn't translated.
 
+Two more settings, both under Settings:
+
+- **Stations** → a station → *Advanced* → **Transcribe first when busy** (`priority` in the
+  stations file): a number from 1, 5 when you set none. When the Mac falls behind, stations
+  with lower numbers are written down first.
+- **Languages and models** → **Translation languages** lists the languages your stations are
+  translated into, with how many stations use each, and takes one away from every station at
+  once. Every further language costs time on each line.
+
 **A ready-made world list:** 18 public broadcasters' news stations in eight languages, chosen
 for slow connections:
 
@@ -159,6 +170,20 @@ rewritten.
   another person reading the same Wavescribe can choose differently.
 - **In the Terminal, without the page:** `uv run wavescribe listen <station id> …` prints the
   same lines as they come, each translation under its original, until you press Ctrl-C.
+- **The ⋯ button** beside a station has **Show only this station**, **Station settings** and
+  **Stop the station**, which stops it for everyone reading this Wavescribe.
+
+**Keyboard shortcuts** (`?` lists them on the page):
+
+| Key | What it does |
+|---|---|
+| `/` | Search or ask |
+| `1`–`9` | Read a live station, in the list's order |
+| `Shift` + `1`–`9` | Add it as a further column, or take its column away |
+| `0` | All live stations |
+| `A` | Show or hide the alerts |
+| `Esc` | Close the alerts, search, Ask, Listen, Find or Settings |
+| `?` | The list of shortcuts |
 
 ## 6. Search and ask
 
@@ -480,7 +505,9 @@ left alone.
 2. **Find** → **On the air**. It says a dongle is plugged in and not in use yet: **Use it and
    find stations here** makes it a receiver (Receiver A) and scans the FM band with it, in one
    press. With several dongles plugged in, **Choose by serial** leads to Settings →
-   **Receivers**, which lists them, each with its own **Use it**.
+   **Receivers**, which lists them, each with its own **Use it**. **Add by serial**, under
+   *Advanced* there, is for a dongle the list doesn't show, or to choose its id and centre
+   yourself; **Look for dongles** reads the list again.
 3. In about two minutes you get the stations it hears, on the dial and in a list, named from
    their own broadcast data (RDS) when the signal is good enough. A receiver made under
    Settings → **Receivers** hasn't scanned yet: **Find FM stations with Receiver A**, above the
@@ -526,6 +553,8 @@ from radio that stays on the Mac reach them without the words that were said.
 
 These are cautious defaults. You can change them under Settings → **Storage and privacy**: the
 broadcast limits under *How long it's kept*, the rest under *What's kept of each kind of radio*.
+**Last 24 h as NDJSON**, on the same page, saves the last day's text as a file, one JSON
+object per line.
 To delete everything heard, stop Wavescribe and delete the `data` folder. Models live in the `models` folder and in
 `~/.cache/huggingface`.
 

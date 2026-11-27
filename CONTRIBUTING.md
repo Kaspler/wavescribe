@@ -51,20 +51,37 @@ radio, and the radio code is tested on synthetic signals.
 
 - **Sources:** `sources/stream.py` (internet streams through ffmpeg), `sources/sdr.py` (an
   `rtl_sdr` pipe) with our numpy/scipy demodulators: `dsp/wfm.py` (broadcast FM),
-  `dsp/channel.py` (NFM and AM with squelch), `dsp/rds.py` (RDS)
+  `dsp/channel.py` (NFM and AM with squelch), `dsp/rds.py` (RDS); `sources/watch.py` (a
+  watch: every channel of a dongle's window at once, each transmission a catch of its own, with
+  `dsp/activity.py` noticing them)
 - **Radio:** `radio/` (band plans in `bands.toml` and `bandplan.py` with the privacy classes,
   `scan.py` sweeps with `rtl_power`, `catalog.py` what was heard here, `service.py` the page's
-  scans and heard stations, `holders.py` which other program holds a dongle, from macOS's USB
-  registry, `cli.py` `wavescribe radio`); see [docs/RADIO.md](docs/RADIO.md)
+  scans and heard stations, `live.py` the receiver tuned by hand under Listen, `stills.py` the
+  dial's pictures cut from past scans, `watch.py` the watch as a station and what it keeps,
+  `holders.py` which other program holds a dongle,
+  from macOS's USB registry, `words.py` how messages name receivers, `cli.py` `wavescribe
+  radio` and `watch_cli.py` its `watch`, `catches` and `note`); see
+  [docs/RADIO.md](docs/RADIO.md)
 - **Gate and segmenter:** `segment/vad.py` (Silero VAD), `gate/yamnet.py` (drops music)
-- **Speech recognition:** `asr/parakeet.py`, `asr/mlx_audio.py`, and `asr/checks.py` (the
-  hallucination filter)
+- **Speech recognition:** `asr/parakeet.py`, `asr/mlx_audio.py`, `asr/checks.py` (the
+  hallucination filter), `asr/recheck.py` (Whisper's second opinion on a line heard in another
+  language) and `asr/language.py` (language `auto`)
 - **Translation:** `translate/llm.py`, `translate/madlad.py`
 - **Rules and alerts:** `rules/` (keyword and LLM rules), `alerts/` (notifications, spoken
-  alerts, CAP 1.2)
-- **Storage and questions:** `store.py` (SQLite with FTS5), `ask.py`
+  alerts, CAP 1.2 in `cap.py`, `watch.py` for a silent station and traffic announcements,
+  `replay.py` behind `alerts replay`)
+- **Storage, search and questions:** `store.py` (SQLite with FTS5), `search.py` (how a query
+  matches), `ask.py`
+- **Digests:** `digest/` (the points the local model picks out of what was said;
+  `schedule.py` the `[digest]` schedule, `speech.py` reading one aloud without holding an alert
+  back, `cli.py` how a terminal shows one)
 - **Outputs and federation:** `outputs.py` (webhooks and pushes), `events.py` (the shared JSON
   shape), `remote.py` (follows another Wavescribe's feed)
+- **Other programs and agents:** `agent/` (`client.py` a running Wavescribe from another
+  program's side and `wavescribe follow`, `mcp.py` the MCP server, `cli.py` the `follow`,
+  `digest` and `mcp` commands), `token_cli.py` (`wavescribe token`) with `control.py` (the key
+  a command on this machine reaches the page's controls with); see
+  [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md)
 - **The web page:** `frontend/` holds the page's sources (`src/reading/` the reading view,
   `src/manage/` Listen, Find and Settings, `src/components/` and `src/styles/` the shared
   components and the design tokens in `src/styles/tokens.css`), built into `web/dist/`. `web/`
@@ -73,7 +90,12 @@ radio, and the radio code is tested on synthetic signals.
   `config/ui.toml`
 - **Models and system:** `models.toml` (the model registry, with pinned revisions and licences)
   read by `registry.py`; `catalog/` (station and model catalogues), `admin.py`, `downloads.py`,
-  `system.py` (the resource monitor)
+  `system.py` (the resource monitor), `doctor.py` (`wavescribe doctor`, the offline self-check),
+  `service.py` (`wavescribe service`, the background service on macOS) and `bakeoff.py` (speech
+  models compared on recorded clips)
+- **The commands:** `cli.py` builds every command; [docs/COMMANDS.md](docs/COMMANDS.md) lists
+  them with their options, and `tests/test_docs_commands.py` fails when a command or an option
+  is missing from it
 
 ## Conventions
 
