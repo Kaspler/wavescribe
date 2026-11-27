@@ -297,7 +297,19 @@ div.m-trouble > p { margin: 0; }
 .lv-fall { height: 200px; border-radius: 0 0 8px 8px; image-rendering: pixelated; }
 .lv-readout { min-height: 1.45em; }
 .lv-under { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4) var(--s6); margin-top: var(--s4); }
-.lv-chips { display: flex; flex-wrap: wrap; gap: var(--s3); }
+/* The bands where you are: a row each, the whole row the button; two columns where there's room,
+   one on a phone, so the list stays within a screen. */
+.lv-bands { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); column-gap: var(--s8); border-top: 1px solid var(--rule); }
+.lv-band {
+  display: grid; gap: 2px; width: 100%; min-height: 48px; padding: 7px var(--s3);
+  border: 0; border-bottom: 1px solid var(--rule); background: transparent; color: var(--ink); text-align: left;
+}
+.lv-band:hover { background: color-mix(in oklab, var(--ink) 5%, transparent); }
+.lv-band-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s4); }
+.lv-band-top strong { font-weight: 600; }
+.lv-band-kind, .lv-band-line { font-size: var(--t-sm); color: var(--ink-3); }
+.lv-band-top .tag { align-self: center; }
+.lv-band-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-ask { border-left: 0; }
 .lv-scan-state { display: flex; align-items: center; gap: var(--s4); max-width: none; }
 .lv-bar { display: block; width: 120px; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }

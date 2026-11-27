@@ -5,10 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
 import { overloadOf } from "../lib/overload";
 import { OverloadNote } from "../components/Overload";
-import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
+import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, Tag, act, cx, toast } from "../components/ui";
 import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
 import { addedToast } from "./added";
-import { and, bandLabel, fmtMhz } from "./bands";
+import { and, bandLabel, bandLine, bandWords, fmtMhz, kindWords } from "./bands";
 import { type LiveReceiver, bandAt, hears, usable } from "./dial";
 import { OnAirHere, RegionLine, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
@@ -116,19 +116,28 @@ function Start({ receivers, dev, onRx, tune }: { receivers: Any[]; dev: string; 
   );
 }
 
-/** The bands where you are, one press to the start of each: before listening and while. */
+/** The bands where you are, one press to the start of each: before listening and while. Each
+ * says what is heard there, the kind of radio it is, and whether it asks first. */
 function BandChips({ radio, onBand }: { radio: Any; onBand: (mhz: number, mode: string) => unknown }) {
   const bands: Any[] = (radio?.bands || []).filter((b: Any) => b.mode && b.tunable && b.privacy !== "digital");
   if (!bands.length) return null;
   return (
     <Section id="lv-bands" title="Bands where you are" description="Start at a band, then seek or scan through it.">
-      <div className="lv-chips">
+      <ul className="lv-bands">
         {bands.map((b) => (
-          <Button key={b.id} size="sm" variant="secondary" onClick={() => onBand(b.channels_mhz?.[0] ?? +(b.mode === "wfm" ? b.start_mhz + 0.1 : b.start_mhz).toFixed(5), b.mode)}>
-            {bandLabel(b)}
-          </Button>
+          <li key={b.id}>
+            <button type="button" className="lv-band"
+                    onClick={() => onBand(b.channels_mhz?.[0] ?? +(b.mode === "wfm" ? b.start_mhz + 0.1 : b.start_mhz).toFixed(5), b.mode)}>
+              <span className="lv-band-top">
+                <strong>{bandLabel(b)}</strong>
+                <span className="lv-band-kind">{kindWords(b.privacy)}</span>
+                {radio.policies?.[b.privacy]?.needs_ack && <Tag tone="muted">asks first</Tag>}
+              </span>
+              <span className="lv-band-line">{bandLine(b.id) || bandWords(b).what}</span>
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
       <RegionLine v={radio} />
     </Section>
   );

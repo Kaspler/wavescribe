@@ -54,6 +54,17 @@ const LINES: Record<string, string> = {
 /** The band's line, or "" for a band this page has no words for yet. */
 export const bandLine = (id: string | null | undefined): string => (id && LINES[id]) || "";
 
+/** The kind of radio a band plan gives a band (its `privacy`), as a list of bands says it: it
+ * decides what is kept of it and whether it asks first. */
+const KINDS: Record<string, string> = {
+  broadcast: "broadcast radio",
+  amateur: "amateur radio",
+  utility: "utility radio",
+  private: "private radio",
+  digital: "digital",
+};
+export const kindWords = (privacy: string): string => KINDS[privacy] || privacy;
+
 /** A band as the dial explains it to someone new to radio: its everyday name (and a shorter one
  * to print on the dial, when it differs), what is heard there, when, and the antenna it wants.
  * The band plan's own name stays the technical one. */
