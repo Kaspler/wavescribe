@@ -273,7 +273,9 @@ function Answer({ text, onCite }: { text: string; onCite: (n: number) => void })
   );
 }
 
-function SourceRow({ s, id, flash }: { s: Source; id: string; flash: boolean }) {
+/** One line an answer rests on; its time opens it in the transcript (`open`: how, for a summary
+ * that keeps its place beside the columns). */
+export function SourceRow({ s, id, flash, open = goToLine }: { s: Source; id: string; flash: boolean; open?: (station: string, id: number) => void }) {
   const st: Station = S.byId[s.station] || ({ id: s.station, name: s.name, language: s.language, translate_to: [] } as unknown as Station);
   const shown = shownLang(st, P.lang);
   const translated = !sameLang(shown, s.language) ? s.translations[shown] : null;
@@ -283,7 +285,7 @@ function SourceRow({ s, id, flash }: { s: Source; id: string; flash: boolean }) 
         <span className="cite is-static">{s.n}</span>
         <span className="hit-station" dir="auto">{st.name}</span>
         {S.byId[s.station] && s.t_start != null ? (
-          <button type="button" className="hit-time num" onClick={() => goToLine(s.station, s.id)} title={T.showInTranscript}>{whenLabel(s.t_start)}</button>
+          <button type="button" className="hit-time num" onClick={() => open(s.station, s.id)} title={T.showInTranscript}>{whenLabel(s.t_start)}</button>
         ) : (
           <time className="num">{whenLabel(s.t_start)}</time>
         )}

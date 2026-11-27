@@ -5,7 +5,7 @@ import {
   ALargeSmall, Activity, ArrowDown, ArrowLeft, ArrowUp, Bell, Box, Check, ChevronDown, ChevronLeft,
   ChevronRight, ChevronUp, Code, Columns3, Copy, Download, Ellipsis, ExternalLink, Eye, EyeOff, Globe, HardDrive, History, Info,
   Keyboard, Languages, MessageCircleQuestionMark, PanelRight, Pencil, Play, Plus, Minus, Power, Radio,
-  RadioTower, RefreshCw, ScanSearch, Search, Send, Settings, ShieldCheck, Square, Trash2, TriangleAlert, Volume2, VolumeX, X,
+  RadioTower, RefreshCw, ScanSearch, ScrollText, Search, Send, Settings, ShieldCheck, Square, Trash2, TriangleAlert, Volume2, VolumeX, X,
 } from "lucide-react";
 
 const I = {
@@ -56,6 +56,7 @@ const I = {
   languages: Languages,
   storage: HardDrive,
   shield: ShieldCheck,
+  summary: ScrollText,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof I;

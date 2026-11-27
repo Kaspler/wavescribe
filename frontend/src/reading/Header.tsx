@@ -1,5 +1,6 @@
 // The header: the mark, the three places (reading, listening, finding stations), one field to
-// search or ask, the connection, what's playing, display settings and the gear for Settings.
+// search or ask, the connection, what's playing, summaries, display settings and the gear for
+// Settings.
 import { useEffect, useRef, useState } from "react";
 import { A, stopAudio } from "../lib/audio";
 import { wanted } from "../lib/auth";
@@ -14,6 +15,7 @@ import { recentAlerts } from "./Alerts";
 import { sendQuestion } from "./Ask";
 import { DisplayButton } from "./Settings";
 import { T } from "./strings";
+import { SummaryButton } from "./Summary";
 
 /** Read goes back to what was being read: the same columns, search or question. */
 let lastRead = "#/";
@@ -43,6 +45,7 @@ export function Header({ area }: { area: Area | null }) {
       <span className="hdr-end">
         {!gated && <Conn />}
         <NowPlaying />
+        {!area && !gated && S.hasStore && <SummaryButton />}
         {!area && !V.narrow && !gated && <AlertsToggle />}
         {!area && <DisplayButton />}
         {S.manage && (

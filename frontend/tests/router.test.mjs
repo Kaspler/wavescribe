@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isReading, movedHash, parse } from "../src/lib/router.ts";
 
-test("reading views are the live columns, chosen columns, a search and a question", () => {
-  for (const h of ["", "#/", "#/s/a,b", "#/find/storm", "#/ask"]) assert.equal(isReading(h), true, h);
+test("reading views are the live columns, chosen columns, a search, a question and a summary", () => {
+  for (const h of ["", "#/", "#/s/a,b", "#/find/storm", "#/ask", "#/summary"]) assert.equal(isReading(h), true, h);
+  assert.deepEqual(parse("#/summary"), { kind: "summary" });
 });
 
 test("Listen, Find, Settings and the older links to them are not reading views", () => {

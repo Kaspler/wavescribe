@@ -71,8 +71,8 @@ export function AlertList({ max, compact }: { max?: number; compact?: boolean })
   );
 }
 
-const SEV_WORD = { critical: "Critical", high: "High", medium: "Medium", low: "Low" } as const;
-const human = (rule: string) => rule.replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
+export const SEV_WORD = { critical: "Critical", high: "High", medium: "Medium", low: "Low" } as const;
+export const human = (rule: string) => rule.replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolean }) {
   const [open, setOpen] = useState(false);

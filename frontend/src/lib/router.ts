@@ -3,6 +3,7 @@
 //   #/s/a,b           exactly these stations as columns
 //   #/find/<q>        search everything heard
 //   #/ask             questions answered from what was said
+//   #/summary         the last summary: on phones a page of its own, elsewhere beside the columns
 //   #/listen          every station to play, and the receiver tuned by hand
 //   #/add/<page>      Find stations: on the air, on the internet
 //   #/settings/<page> stations, alerts, languages, receivers, storage, connections, health
@@ -16,6 +17,7 @@ export type Route =
   | { kind: "cols"; ids: string[] }
   | { kind: "find"; q: string }
   | { kind: "ask" }
+  | { kind: "summary" }
   | { kind: Area; page: string };
 
 export const MAX_COLS = 4;
@@ -53,6 +55,7 @@ export function parse(hash: string): Route {
     return { kind: "find", q };
   }
   if (hash === "#/ask") return { kind: "ask" };
+  if (hash === "#/summary") return { kind: "summary" };
   m = hash.match(/^#\/(listen|add|settings)(?:\/([a-z]+))?/);
   if (m) return { kind: m[1] as Area, page: m[2] || "" };
   m = hash.match(/^#\/(manage|radio)(?:\/([a-z]+))?/);
@@ -63,12 +66,12 @@ export function parse(hash: string): Route {
   return { kind: "live" };
 }
 
-/** Whether `hash` shows reading: the live columns, chosen columns, a search or a question. Only
- * these are where the header's Read link may lead back to. */
+/** Whether `hash` shows reading: the live columns, chosen columns, a search, a question or a
+ * summary. Only these are where the header's Read link may lead back to. */
 export function isReading(hash: string): boolean {
   if (movedHash(hash)) return false;
   const { kind } = parse(hash);
-  return kind === "live" || kind === "cols" || kind === "find" || kind === "ask";
+  return kind === "live" || kind === "cols" || kind === "find" || kind === "ask" || kind === "summary";
 }
 
 /** The hash an older link should be replaced with, or null if it is current. */
