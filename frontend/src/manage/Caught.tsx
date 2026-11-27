@@ -9,6 +9,7 @@ import { P } from "../lib/prefs";
 import { useTopics } from "../lib/store";
 import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
+import { addedToast } from "./added";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, and, bandWords, fmtMhz } from "./bands";
 import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, groupCatches, voiceWord, windowWords } from "./catches";
@@ -130,8 +131,9 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
       return;
     }
     if (made?.live_closed) liveClosed(dev);
-    if (made?.start_error) toast(`${made.name} was added and didn't start: ${made.start_error}`, true);
-    else toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
+    const ok = `Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`;
+    const said = made ? addedToast(made, ok) : { text: ok, bad: false };
+    toast(said.text, said.bad);
     await onDone();
   };
   const other = free || others[0] || null;

@@ -16,6 +16,7 @@ import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, R
 import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
+import { addedToast } from "./added";
 import { type AddResult, addOnAir } from "./onair";
 import { MoveThere } from "./MoveThere";
 import { Refusal } from "./Refusal";
@@ -959,8 +960,8 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
       if (playing && st.running) playLive(st.id);
     }
     await refreshPage();
-    if (r.trouble) toast(`${st.name} was added and didn't start: ${r.trouble}`, true);
-    else toast(does === "listen" ? `${st.name} added: play it under Listen` : `Transcribing ${st.name}: it's on the reading page`);
+    const said = addedToast(st, does === "listen" ? `${st.name} added: play it under Listen` : `Transcribing ${st.name}: it's on the reading page`);
+    toast(said.text, said.bad);
     await onDone();
   };
   const other = v.receivers.find((r: Any) => r.id !== device)?.id as string | undefined;

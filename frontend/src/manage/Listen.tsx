@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
 import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
 import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
+import { addedToast } from "./added";
 import { and, fmtMhz } from "./bands";
 import { bandAt } from "./dial";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
@@ -287,7 +288,8 @@ function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; on
     if (does !== "listen" && !lang.trim()) { document.getElementById("lv-lang")?.focus(); return; }
     try {
       const v = await post(`/live/${dev}/station`, { does, ...spokenFields(lang), name: name.trim() || st.rds?.ps?.trim() || undefined, translate_to: radio?.defaults?.translate_to, retune: force });
-      toast(`${v.name} is a station now${does === "listen" ? "" : ": it's on the reading page"}`);
+      const said = addedToast(v, `${v.name} is a station now${does === "listen" ? "" : ": it's on the reading page"}`);
+      toast(said.text, said.bad);
       setRetune(null);
       await onKept();
       // Listening ended with it: the focus goes where the next frequency is typed.

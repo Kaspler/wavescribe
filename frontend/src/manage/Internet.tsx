@@ -5,6 +5,7 @@ import { langNameEn } from "../lib/lang";
 import { day } from "../lib/time";
 import { ActButton, Advanced, Button, Check, Field, Input, LangChips, LangPicker, Section, Segmented, Table, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
+import { addedToast } from "./added";
 import { SpokenField } from "./SpokenField";
 import { spokenFields } from "./spokenLang";
 import { MODE_HINT, primaryTargets } from "./Stations";
@@ -99,7 +100,8 @@ function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: 
                        ...pre.raw, name: name.trim(), ...spokenFields(lang, langs), translate_to: targets, priority: +prio, start,
                        ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
                      });
-                     toast(`${added.name} added${start ? " and starting" : ""}`);
+                     const said = addedToast(added, `${added.name} added${start ? " and starting" : ""}`);
+                     toast(said.text, said.bad);
                      await onDone();
                    }}>
           Add as a station
