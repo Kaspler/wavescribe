@@ -40,14 +40,14 @@ bc4745619c3c4c68660dde6f41a1967b23ddb91d frontend/src/manage/Caught.tsx
 271e49466eeaf420f4dce5a427dfcefd715f5391 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 dd8b9b2d3cba4c54cea6f144e724fbdba7fe82e8 frontend/src/manage/Internet.tsx
-15d7cdfe91b8a9db0ae0acf3b6d90a76e1cc2e71 frontend/src/manage/Listen.tsx
+63cf2f047cad7c2885a342b28fddc184445fa913 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 dc4f8cf17da31768e9d65b42775df30addf1b571 frontend/src/manage/MoveStation.tsx
 4386a911e5b3ed5ba6a7677268645a00132698e2 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-0586b0ce3cb3eb7f1be3f173a6432b3c1946fe8d frontend/src/manage/Radio.tsx
+c0fef78413fb4088b7a22e78b62803b457a7d837 frontend/src/manage/Radio.tsx
 e8bf0386ccb363ae2e1df628660b7d150bb2002b frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 d6b4328d5ad20a75a99f0a145baebcce8d9a3e39 frontend/src/manage/Scope.tsx
@@ -62,7 +62,7 @@ cabf7ed2b330aee022d52d57ba8ffd0144165c18 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 f88889a0f0bab37d17d7448614e098d3a78e9c5d frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
-b7687812e8dd2cc139dd073cde464b23123f5730 frontend/src/manage/manage.css
+ac2b494fc867e251879cce1cebf877da25fce725 frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts

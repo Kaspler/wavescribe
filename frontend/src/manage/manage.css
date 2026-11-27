@@ -196,6 +196,7 @@
 .rd-act { white-space: nowrap; text-align: right; }
 .rd-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); cursor: pointer; }
 .rd-link:hover { color: var(--ink); }
+.rd-region-line { margin-top: var(--s4); }
 .rd-missing td { color: var(--ink-3); }
 .rd-name-cell { display: inline-flex; align-items: center; gap: 4px; }
 .rd-name-cell .btn { opacity: 0; transition: opacity var(--fast) var(--ease); }

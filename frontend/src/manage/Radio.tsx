@@ -38,6 +38,28 @@ const REGION_SOURCE: Record<string, string> = {
   config: "from the stations file",
   locale: "guessed from this computer's language settings: until you choose, each frequency counts as the strictest kind any region gives it",
 };
+/** Where the region came from, said after it on the pages that list bands. */
+const REGION_FROM: Record<string, string> = {
+  config: ", from the stations file",
+  locale: ", from this Mac's region",
+};
+// Set by a region line's "Change": Settings → Receivers then puts the focus on the region.
+let toRegion = false;
+
+/** The region whose band plan names the bands listed, in one quiet line, and the way to its
+ * setting under Settings → Receivers. */
+export function RegionLine({ v }: { v: { region: string; region_source: string } | null | undefined }) {
+  if (!v?.region) return null;
+  const name = (REGION_NAMES[v.region] || v.region).replace(/^The /, "the ");
+  return (
+    <p className="m-hint rd-region-line">
+      Bands for {name}{REGION_FROM[v.region_source] || ""}.{" "}
+      <a className="rd-link" href="#/settings/receivers" onClick={() => { toRegion = true; }}
+         aria-label="Change the region, under Settings → Receivers">Change</a>
+    </p>
+  );
+}
+
 const CLASS_WORD: Record<string, string> = {
   broadcast: "broadcast",
   amateur: "amateur",
@@ -82,6 +104,10 @@ const bandAt = (bands: Any[], mhz: number): Any | null => narrowestAt(bands as B
 export interface RadioView {
   receivers: Receiver[];
   bands: Band[];
+  /** The region whose band plan applies (the Mac's own where none was chosen), and where it came
+   * from: "page", "config" or "locale". */
+  region: string;
+  region_source: string;
   [field: string]: Any;
 }
 
@@ -537,6 +563,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
                                 }} />
                )} />
       <DialLegend />
+      <RegionLine v={v} />
       {rxs.length > 0 && <ReceiverWords rxs={rxs} />}
       {onTheDial && chosen ? (
         <BandCard band={chosen} kept={policyLine(chosen.privacy, v.policies)} policies={v.policies} heard={heardIn(v.heard, chosen).length}>
@@ -666,6 +693,20 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
 /** `held`: radio stations the region change would make less strict, waiting for the operator's
  * word in Settings, Stations, where each station is managed. */
 function Region({ v, reload, held }: { v: Any; reload: () => Promise<void>; held: number }) {
+  useEffect(() => {
+    if (!toRegion) return;
+    toRegion = false;
+    const el = document.getElementById("rd-region");
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    // The receivers above load on their own and push it down: it stays in view while they do.
+    const centre = () => { if (document.activeElement === el) el.scrollIntoView({ block: "center" }); };
+    centre();
+    const grows = new ResizeObserver(centre);
+    for (const part of el.closest("main")?.children ?? [document.body]) grows.observe(part);
+    const done = setTimeout(() => grows.disconnect(), 2000);
+    return () => { clearTimeout(done); grows.disconnect(); };
+  }, []);
   return (
     <Section id="rd-region-h" title="Your region"
              description="Decides which band plan names each frequency and what kind of radio it counts as, so what is kept of it and whether it asks first.">

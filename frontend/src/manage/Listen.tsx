@@ -10,7 +10,7 @@ import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from 
 import { addedToast } from "./added";
 import { and, bandLabel, fmtMhz } from "./bands";
 import { type LiveReceiver, bandAt, hears, usable } from "./dial";
-import { OnAirHere, Responsibility, useRadio } from "./Radio";
+import { OnAirHere, RegionLine, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
 import { Scope } from "./Scope";
 import { SpokenField } from "./SpokenField";
@@ -129,6 +129,7 @@ function BandChips({ radio, onBand }: { radio: Any; onBand: (mhz: number, mode: 
           </Button>
         ))}
       </div>
+      <RegionLine v={radio} />
     </Section>
   );
 }
