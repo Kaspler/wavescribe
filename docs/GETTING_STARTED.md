@@ -199,13 +199,16 @@ The local model writes it in the language you ask for (by default, the one your 
 translated into) from what was said, leaving out songs, station idents and repeats. When there
 is more than it can take it reads an even sample, and the second line says so ("a sample: 252
 of 259,200 lines"). The alerts announced in that time come first, each once, in the words they
-were announced in. A point the model gave without the moments it rests on isn't shown. A watch
+were announced in. A point the model gave without the moments it rests on isn't shown, nor one
+that shares no word with the moments it cites (a cheap check: it catches a point that cites
+another story, not one that gets a detail wrong). A point shows three of its moments at most,
+those that share words with it first, spread over all it cited. A watch
 ([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a digest only when
 you name it with `--stations`: its lines are short, from many speakers on many channels.
 
 With no points, the digest says why in Wavescribe's own words: nothing was said; a station
 keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines
-it read; or the model's reply cited nothing it read.
+it read; or the model's reply cited nothing it read, or nothing that backs its points.
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
 takes about a minute, `--now` a few seconds. When two digests are already being made, it is

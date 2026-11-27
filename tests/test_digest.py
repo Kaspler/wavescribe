@@ -26,10 +26,12 @@ from wavescribe.digest import (
     Unavailable,
     fair_shares,
     in_turn,
+    merged,
     parse_choice,
     parse_points,
     pick,
     plan_prompts,
+    sourced,
     spread,
 )
 from wavescribe.radio.bandplan import exports
@@ -239,6 +241,10 @@ def test_a_range_of_sources_cites_each_of_them() -> None:
     parsed = parse_points("- Water is cut tomorrow [1-3].\n- Rain [2\u20134, 9].\n- Wind [5-1].", 6)
     assert parsed.points == [("Water is cut tomorrow.", [1, 2, 3]), ("Rain.", [2, 3, 4])]
     assert parsed.uncited == 1  # a range backwards is no citation
+    # Read whole, however long, up to the excerpts given; one beyond them all is no citation.
+    parsed = parse_points("- A report [1-23].\n- Another [4, 20-99].\n- Wind [30-40].", 23)
+    assert parsed.points == [("A report.", list(range(1, 24))), ("Another.", [4, 20, 21, 22, 23])]
+    assert parsed.uncited == 1
 
 
 def test_a_point_is_one_sentence_however_long_the_reply() -> None:
@@ -340,7 +346,8 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         return True
 
     d = digester(store, llm, stations=[station("a"), station("b"), station("c")], submit=submit)
-    digest = d.run(d.request({"minutes": 60, "language": "pt"}))
+    # In English, which the lines are neither in nor translated into: no note's words checked.
+    digest = d.run(d.request({"minutes": 60, "language": "en"}))
 
     assert digest.calls == 4 and len(llm.prompts) == 4  # three prompts of notes, one choice
     assert [{p[p.index("[1] ") + 4]} for p in llm.prompts[:3]] == [{"a"}, {"b"}, {"c"}]
@@ -359,12 +366,102 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
 
 def test_a_point_rests_on_a_few_moments(tmp_path: Path) -> None:
     store = Store(tmp_path / "w.db")
-    for i in range(12):
+    ids = [
         add(store, "a", f"A ponte fecha amanhã, parte {i}", NOW - 30 * MIN + i * MIN)
+        for i in range(12)
+    ]
     cited = ", ".join(str(n) for n in (5, *range(1, 13)))
     d = digester(store, FakeLlm(f"- The bridge closes [{cited}]."))
-    [point] = d.run(d.request({"minutes": 60})).payload()["points"]
-    assert len(point["sources"]) == 3  # the first three it cites: 1, 2 and 5
+    out = d.run(d.request({"minutes": 60})).payload()
+    [point] = out["points"]
+    # Three, spread over what it cited (5, 1, 2, ... 12), not the first three: lines that
+    # back it would go first, but in English no word of these is checked.
+    assert len(point["sources"]) == 3
+    assert [s["id"] for s in out["sources"]] == [ids[1], ids[6], ids[10]]  # 2, 7 and 11
+    store.close()
+
+
+def test_a_long_range_keeps_the_lines_that_back_the_point(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    ids = []
+    for i in range(1, 24):
+        said, en = (
+            (f"Item {i}: o jogo foi clonado por IA", f"Item {i}: the game was cloned by AI")
+            if i in (16, 18, 20, 22)
+            else (f"Item {i}: a câmara reuniu sobre o orçamento", f"Item {i}: the council met")
+        )
+        ids.append(add(store, "a", said, NOW - 30 * MIN + i * MIN, en=en))
+    # "now" in the evidence that set this test: two points citing the first three lines, of
+    # another story, as the range was cut to its first few.
+    llm = FakeLlm("- A report on the council [1-23].\n- An unreleased game was cloned [1-23].")
+    d = digester(store, llm)
+    out = d.run(d.request({"kind": "now", "stations": ["a"], "minutes": 60})).payload()
+    sources = {s["n"]: s["id"] for s in out["sources"]}
+    council, game = ([sources[n] for n in p["sources"]] for p in out["points"])
+    assert game == [ids[15], ids[19], ids[21]]  # three of the four that tell it, spread
+    assert len(council) == 3 and not set(council) & set(game)
+    assert out["counts"]["uncited"] == 0
+    store.close()
+
+
+def test_a_point_sharing_no_word_with_what_it_cites_is_left_out(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    # In English, read from translations: the words of a translation back a point.
+    reply = (
+        "- Water is cut tomorrow in the town centre [1].\n"
+        "- The president resigned this morning [2].\n"  # [2] is the rain forecast
+        "- The day is set [1].\n"  # no word long enough to tie it to anything
+        "- Rains this afternoon [2]."  # "rain" and "rains", one the start of the other
+    )
+    d = digester(store, FakeLlm(reply))
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert [p["text"] for p in out["points"]] == [
+        "Water is cut tomorrow in the town centre.",
+        "Rains this afternoon.",
+    ]
+    assert out["counts"]["uncited"] == 2
+    # In Portuguese, read as said: case and accents don't matter ("agua", "Água").
+    reply = "- CORTE DE AGUA AMANHA [1].\n- O presidente demitiu-se [2]."
+    d = digester(store, FakeLlm(reply))
+    out = d.run(d.request({"minutes": 60, "language": "pt-PT"})).payload()
+    assert [p["text"] for p in out["points"]] == ["CORTE DE AGUA AMANHA."]
+    assert out["counts"]["uncited"] == 1
+    # In German, which no line is in or translated into: a point written from another
+    # language may share no word with it, so nothing is checked.
+    d = digester(store, FakeLlm("- Morgen wird das Wasser abgestellt [1]."))
+    out = d.run(d.request({"minutes": 60, "language": "de"})).payload()
+    assert len(out["points"]) == 1 and out["counts"]["uncited"] == 0
+    # When no point is left, the digest says why, in words of its own.
+    d = digester(store, FakeLlm("- The president resigned this morning [2]."))
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert out["outcome"] == "unsourced" and out["counts"]["uncited"] == 1
+    store.close()
+
+
+def test_words_tie_a_point_to_its_lines_in_scripts_written_without_spaces(tmp_path) -> None:
+    store = Store(tmp_path / "w.db")
+    add(store, "z", "明天市中心停水请提前储水", NOW - 5 * MIN, lang="zh")  # water cut
+    reply = "- 明天停水 [1].\n- 总统辞职了 [1]."  # water cut tomorrow; the president resigned
+    d = digester(store, FakeLlm(reply), stations=[station("z", language="zh")])
+    out = d.run(d.request({"minutes": 60, "language": "zh"})).payload()
+    assert [p["text"] for p in out["points"]] == ["明天停水."]
+    assert out["counts"]["uncited"] == 1
+    store.close()
+
+
+def test_points_that_cite_the_same_moments_are_one(tmp_path: Path) -> None:
+    lines = [dataclasses.replace(line(i), text=f"Water cut, part {i}") for i in (1, 2, 3)]
+    points, unsourced = sourced([("Water cut.", [1, 2]), ("The water again.", [2, 1])], lines)
+    assert unsourced == 0 and points[0].ids == points[1].ids == (1, 2)
+    assert merged([*points, Point("Other.", (3,))]) == [points[0], Point("Other.", (3,))]
+    store = stocked(tmp_path)
+    reply = "- Water is cut tomorrow [1].\n- A water cut in the town centre [1].\n- Rain [2]."
+    d = digester(store, FakeLlm(reply))
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert [(p["text"], p["sources"]) for p in out["points"]] == [
+        ("Water is cut tomorrow.", [1]),
+        ("Rain.", [2]),
+    ]
     store.close()
 
 
@@ -516,8 +613,8 @@ def test_a_reply_that_cites_nothing_it_was_given_shows_no_points(tmp_path: Path)
     out = d.run(d.request({"minutes": 60})).payload()
     assert out["outcome"] == "unsourced" and out["points"] == [] and out["counts"]["uncited"] == 2
     assert out["text"] == (
-        "The model's reply cited none of the lines it read, so it isn't shown: it may have "
-        "missed things. Try again, or read the transcript."
+        "The model's reply cited none of the lines it read, or none that backs what it wrote, "
+        "so it isn't shown: it may have missed things. Try again, or read the transcript."
     )
     store.close()
 
@@ -750,18 +847,18 @@ def test_defaults_every_station_the_last_hour_and_the_stations_language(tmp_path
 
 def test_now_is_about_the_station_heard_last_over_five_minutes(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    llm = FakeLlm("- A report on the old bridge [1].\n- It reopens on Monday [1].\n- Third [1].")
+    llm = FakeLlm("- A report on heavy rain [1].\n- The old bridge closes [2].\n- More rain [1].")
     d = digester(store, llm)
     r = d.request({"kind": "now", "minutes": 15})
     assert r.stations == ("b",) and r.minutes == 15
     assert d.request({"kind": "now"}).minutes == 5
-    out = d.run(r).payload()
+    out = d.run(d.request({"kind": "now", "minutes": 35})).payload()
     assert "say what b is on about right now" in llm.prompts[0]
     assert out["points"] == [  # two at most, however many the model gives
-        {"text": "A report on the old bridge.", "stations": ["b"], "sources": [1]},
-        {"text": "It reopens on Monday.", "stations": ["b"], "sources": [1]},
+        {"text": "A report on heavy rain.", "stations": ["b"], "sources": [1]},
+        {"text": "The old bridge closes.", "stations": ["b"], "sources": [2]},
     ]
-    assert out["text"].splitlines()[0] == "- A report on the old bridge. [1]"  # one station
+    assert out["text"].splitlines()[0] == "- A report on heavy rain. [1]"  # one station
     store.close()
 
 

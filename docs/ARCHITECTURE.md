@@ -280,8 +280,13 @@ Steps (`digest/__init__.py`):
    (about 10 s each on a recent Mac), each station whole in one of them. A prompt asks for a
    few one-line points in the reader's language, the most important first, each citing the
    excerpts it rests on as `[n]`; the stations a point names come from those excerpts, never
-   from the model's words. A point that cites none of them is dropped and counted, a point is
-   cut at a sentence's end to 300 characters, and a reply of `NONE` is never shown: only when
+   from the model's words. A range (`[1-23]`) is read whole. A point that cites none of them is
+   dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
+   folded words of four letters or more, compared by their first six, numbers, and pairs of
+   characters in scripts written without spaces; checked only when one of the lines has text in
+   the reader's language). A point keeps three of its excerpts at most, those that share a word
+   with it first, spread over all it cited; two points citing the same excerpts are one. A point
+   is cut at a sentence's end to 300 characters, and a reply of `NONE` is never shown: only when
    every prompt said so does the digest say, in Wavescribe's words, that nothing stood out in
    the lines read. When the shares fill one and a half prompts or more, they are spread
    over two or three, and a short second call picks the five points that matter most, by

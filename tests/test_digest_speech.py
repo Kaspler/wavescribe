@@ -118,7 +118,8 @@ def test_a_station_alert_or_one_still_pending_is_not_named(tmp_path: Path) -> No
 
 def test_every_utterance_is_a_sentence_or_two_however_long_the_point(tmp_path: Path) -> None:
     rambling = "The station reported that water will be cut tomorrow " + "and so on " * 300
-    store, digest = made(tmp_path, f"- {rambling}[1].\n- {rambling.upper()}[2].")
+    raining = rambling.replace("water will be cut", "HEAVY RAIN IS FORECAST").upper()
+    store, digest = made(tmp_path, f"- {rambling}[1].\n- {raining}[2].")
     long_names = {**digest.names, "a": "A station with a very long name " * 5}
     lines = spoken(dataclasses.replace(digest, names=long_names), EN)
     assert len(lines) == 4 and all(len(line) <= SPOKEN_CHARS for line in lines)

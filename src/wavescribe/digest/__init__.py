@@ -8,8 +8,9 @@ of time, in the reader's language, each point with the moments it rests on.
 Both read what the store kept: of each utterance, its translation into the reader's language
 where there is one, else the words as said (or another translation), quoted to the model as
 numbered excerpts the way Ask quotes them. The model writes a few points and cites the
-excerpts each rests on; a point that cites nothing it was given is dropped (and counted), so
-every point shown can be checked against what was said, and the stations a point names are
+excerpts each rests on; a point that cites nothing it was given, or nothing that shares a word
+with it (``sourced``), is dropped (and counted), and two that cite the same excerpts are one,
+so every point shown can be checked against what was said, and the stations a point names are
 those of its sources, never the model's word for them. Nothing else the model writes is shown:
 when it finds nothing of substance, the digest says so in words of its own, with how much was
 read, as a sentence of the model's backed by no source could say anything at all, including
@@ -56,7 +57,7 @@ from wavescribe.events import local_time
 from wavescribe.languages import language_name, same_language
 from wavescribe.log import event
 from wavescribe.radio.bandplan import policy_of
-from wavescribe.rules.text import NO_SPACES
+from wavescribe.rules.text import _WORD, NO_SPACES, fold
 
 if TYPE_CHECKING:
     from wavescribe.ask import Llm
@@ -70,8 +71,8 @@ KINDS = ("digest", "now")
 # What became of a digest. "points": there are some. "nothing_said": nothing was kept from the
 # stations read in the window. "not_read": none of them could be read (radio whose text is
 # never kept, or a station not running). "nothing_stood_out": what was read held nothing of
-# substance, as the model or the selection found. "unsourced": the model's reply cited none of
-# what it read, so nothing of it is shown.
+# substance, as the model or the selection found. "unsourced": none of the model's points cited
+# what it read, or anything there that shares a word with them, so nothing of it is shown.
 OUTCOMES = ("points", "nothing_said", "not_read", "nothing_stood_out", "unsourced")
 SAMPLE = 10  # reading fewer than one line in this many, a digest says it read a sample
 DEFAULT_MINUTES = 60.0
@@ -100,7 +101,11 @@ POINTS = {"digest": 5, "now": 2}
 NOTE_POINTS = 6  # asked for per prompt in the first of two stages; more are kept
 POINT_WORDS = 25
 POINT_CHARS = 300  # what is kept of a point: a reply in prose is cut at a sentence's end
-CITED = 3  # excerpts a point may cite, as the prompt asks; when it cites more, the first
+# The lines a point keeps of those it cites: what the prompt asks for, and a check a reader
+# makes. A point is one sentence; three moments back it, and five points then list fifteen.
+CITED = 3
+GROUND_LETTERS = 4  # a point's words that tie it to its lines: this long at least (sourced)
+STEM_CHARS = 6  # words compared by their start: "outage" is "outages", "inunda" "inundação"
 ANSWER_TOKENS = 500
 CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
 MAX_JOIN = 3  # notes of one story in a choice; a longer "join" lumps unrelated notes together
@@ -171,12 +176,16 @@ class Request:
 
 @dataclass(frozen=True)
 class Line:
-    """One utterance as the model reads it."""
+    """One utterance as the model reads it, with what a point citing it is checked against:
+    its other texts (the words as said, its translations) and whether any of them is in the
+    reader's language."""
 
     id: int
     station: str
     t: float
     text: str
+    also: tuple[str, ...] = ()
+    readers: bool = True  # ``text`` or one of ``also`` is in the reader's language
 
     @property
     def size(self) -> int:
@@ -483,7 +492,20 @@ class Digester:
                     out.skipped += 1
                     continue
                 seen.add(key)
-                lines.append(Line(u["id"], sid, u["t_start"], text))
+                translations = u.get("translations") or {}
+                lines.append(
+                    Line(
+                        u["id"],
+                        sid,
+                        u["t_start"],
+                        text,
+                        (u["text"], *translations.values()),
+                        any(
+                            same_language(lang, request.language)
+                            for lang in (u.get("language") or "", *translations)
+                        ),
+                    )
+                )
                 out.rows[u["id"]] = u
             out.lines[sid] = lines
         return out
@@ -588,8 +610,9 @@ class Digester:
         digest.nothing = not job.points and job.nones == len(prompts)
         if not job.points and not digest.nothing:
             digest.note = (
-                "The model's reply cited none of the lines it read, so it isn't shown: it may "
-                "have missed things. Try again, or read the transcript."
+                "The model's reply cited none of the lines it read, or none that backs what it "
+                "wrote, so it isn't shown: it may have missed things. Try again, or read the "
+                "transcript."
             )
         digest.model = job.model
         digest.timings = {
@@ -704,13 +727,13 @@ class _Job:
         if len(self.prompts) == 1:
             lines = self.prompts[0]
             messages = excerpt_messages(r, lines, self.names, points=POINTS[r.kind])
-            points = [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
+            points = self._reply(llm, messages, lines)
             self.points = pick(points, POINTS[r.kind], self._station)
             return True
         if self.calls < len(self.prompts):  # the first stage: notes from one prompt
             lines = self.prompts[self.calls]
             messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
-            self.notes += [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
+            self.notes += self._reply(llm, messages, lines)
             if self.calls + 1 < len(self.prompts) or len(self.notes) > 1:
                 return False
             self.points = list(self.notes)  # nothing to choose from
@@ -729,12 +752,15 @@ class _Job:
 
     def _reply(
         self, llm: Llm, messages: list[dict[str, str]], lines: Sequence[Line]
-    ) -> list[tuple[str, list[int]]]:
+    ) -> list[Point]:
+        """The points of the model's reply that what they cite can back, each set of sources
+        once; those dropped for citing nothing given, or nothing that backs them, counted."""
         reply = llm.complete(messages, max_tokens=ANSWER_TOKENS, on_text=self._give_way)
         parsed = parse_points(reply, len(lines))
+        points, unsourced = sourced(parsed.points, lines)
         self.nones += parsed.none
-        self.uncited += parsed.uncited
-        return parsed.points
+        self.uncited += parsed.uncited + unsourced
+        return merged(points)
 
     def _give_way(self, _text: str) -> None:
         if self._ahead():
@@ -948,14 +974,15 @@ def parse_choice(reply: str, count: int, limit: int) -> list[list[int]]:
 
 
 def parse_points(reply: str, count: int) -> Parsed:
-    """The points of a reply, each with the numbers it cites among the ``count`` it was given.
-    A point that cites nothing it was given is dropped and counted: every point shown rests on
-    a moment that can be checked. Numbers apart from a point, on a line of their own or after a
-    label ("Sources: [1, 2]"), are no source of anything: they would credit the points above
-    with moments that may not back them. A point keeps the first ``CITED`` numbers it gives (a
-    small model cites the moment a story starts, then whatever follows it) and, when the model
-    wrote prose, its sentences up to ``POINT_CHARS``. The model's "NONE:" line counts only as
-    saying that nothing stood out; its words are never kept."""
+    """The points of a reply, each with every number it cites among the ``count`` it was given,
+    in the order given, a range ("[1-23]") read whole. A point that cites nothing it was given
+    is dropped and counted: every point shown rests on a moment that can be checked. Numbers
+    apart from a point, on a line of their own or after a label ("Sources: [1, 2]"), are no
+    source of anything: they would credit the points above with moments that may not back
+    them. When the model wrote prose, a point keeps its sentences up to ``POINT_CHARS``. The
+    model's "NONE:" line counts only as saying that nothing stood out; its words are never
+    kept. Which of the numbers a point keeps, and whether it is kept at all, is ``sourced``'s
+    to say."""
     found: list[tuple[str, list[int]]] = []
     uncited, none = 0, False
     for line in reply.splitlines():
@@ -964,7 +991,7 @@ def parse_points(reply: str, count: int) -> Parsed:
         if _NONE.match(body):
             none = True
             continue
-        cited = [n for group in _CITATION.findall(body) for n in _numbers(group)]
+        cited = [n for group in _CITATION.findall(body) for n in _numbers(group, count)]
         cited = [n for n in dict.fromkeys(cited) if 1 <= n <= count]
         bare = _CITATION.sub("", body)
         # "said so: [3]" and "said so — [3]" lose what stood before the numbers too.
@@ -975,20 +1002,109 @@ def parse_points(reply: str, count: int) -> Parsed:
         if not cited:
             uncited += m is not None  # a line of prose without numbers is no point
             continue
-        found.append((within(text, POINT_CHARS), cited[:CITED]))
+        found.append((within(text, POINT_CHARS), cited))
     return Parsed(found, uncited, none and not found)
 
 
-def _numbers(group: str) -> list[int]:
-    """The numbers a citation gives: "1, 4", or a range, "1-3"; a range backwards gives none."""
+def _numbers(group: str, count: int) -> list[int]:
+    """The numbers a citation gives: "1, 4", or a range, "1-3", up to ``count`` (the excerpts
+    given); a range backwards gives none."""
     out: list[int] = []
     for part in re.split(r"\s*[,;]\s*", group.strip()):
         ends = [int(n) for n in re.split(r"\s*[-\u2013]\s*", part)]
         if len(ends) == 1:
             out.append(ends[0])
         elif len(ends) == 2 and ends[0] <= ends[1]:
-            out += range(ends[0], min(ends[1], ends[0] + CITED) + 1)
+            out += range(ends[0], min(ends[1], count) + 1)
     return out
+
+
+def sourced(
+    points: Iterable[tuple[str, Sequence[int]]], lines: Sequence[Line]
+) -> tuple[list[Point], int]:
+    """The points of a reply that its excerpts (``lines``, numbered from 1) can back, each on
+    at most ``CITED`` of those it cites, and how many were dropped for sharing no word with any
+    of them.
+
+    The check is cheap and knows no language: a point must share a word (``words``) with one
+    of the lines it cites, in what the model read or in any other text of the line (the words
+    as said, a translation). It catches a point that cites another story than its own, or
+    lines a number or two off; a little word shared by chance (that, with, para) lets one
+    through. Words common to many lines aren't left out: in "now", that is what the station is
+    on about. It is made only when one of those lines has text in the reader's language, which
+    the point is written in: a point written from another language may share no word with it.
+
+    When a point cites more lines than it keeps, those that share a word with it go first,
+    spread evenly over the order it cited them in; the others, spread too, make up the rest."""
+    out, unsourced = [], 0
+    for text, numbers in points:
+        cited = [lines[n - 1] for n in numbers]
+        said = words(text)
+        backing = [line for line in cited if _shares(said, _heard(line))]
+        if not backing and any(line.readers for line in cited):
+            unsourced += 1
+            continue
+        if len(cited) > CITED:
+            rest = [line for line in cited if line not in backing]
+            cited = _evenly(backing, CITED) + _evenly(rest, CITED - len(backing))
+        out.append(Point(text, tuple(line.id for line in sorted(cited, key=lambda x: x.t))))
+    return out, unsourced
+
+
+def merged(points: Iterable[Point]) -> list[Point]:
+    """``points`` with each set of sources once: a point citing the same moments as one before
+    it is that point again, or rests on moments that tell another story."""
+    seen: set[tuple[int, ...]] = set()
+    out = []
+    for p in points:
+        if p.ids not in seen:
+            seen.add(p.ids)
+            out.append(p)
+    return out
+
+
+def words(text: str) -> frozenset[str]:
+    """The words of ``text`` that can tie a point to what it cites, in any language: folded
+    (case and accents) and cut to their first ``STEM_CHARS`` letters, those of
+    ``GROUND_LETTERS`` letters or more (shorter ones are mostly little words: the, und, les,
+    que), and numbers of two digits or more. In scripts written without spaces between words,
+    every two characters."""
+    out: set[str] = set()
+    for w in _WORD.findall(fold(text)):
+        if NO_SPACES.search(w):
+            out.update(w[i : i + 2] for i in range(len(w) - 1))
+        elif any(c.isdigit() for c in w):
+            if len(w) >= 2:
+                out.add(w)
+        elif len(w) >= GROUND_LETTERS:
+            out.add(w[:STEM_CHARS])
+    return frozenset(out)
+
+
+def _shares(said: frozenset[str], heard: frozenset[str]) -> bool:
+    """Whether a point's words meet a line's: the same, or one the start of the other
+    ("game", "games"), which spares listing each language's endings."""
+    if said & heard:
+        return True
+    letters = [w for w in heard if w.isalpha() and len(w) >= GROUND_LETTERS]
+    return any(
+        v.startswith(w) or w.startswith(v)
+        for w in said
+        if w.isalpha() and len(w) >= GROUND_LETTERS
+        for v in letters
+    )
+
+
+def _heard(line: Line) -> frozenset[str]:
+    """The words of every text of ``line``."""
+    return frozenset().union(*map(words, (line.text, *line.also)))
+
+
+def _evenly(items: Sequence[Line], k: int) -> list[Line]:
+    """``k`` of ``items`` at most, one from the middle of each equal stretch of them."""
+    if len(items) <= k:
+        return list(items)
+    return [items[int((i + 0.5) * len(items) / k)] for i in range(k)]
 
 
 def _watch(station: Station) -> bool:
@@ -1020,10 +1136,6 @@ def within(text: str, limit: int) -> str:
     if ends:
         return text[: ends[-1]]
     return text[: limit - 1].rsplit(" ", 1)[0] + "\u2026"
-
-
-def _ids(lines: Sequence[Line], numbers: Iterable[int]) -> tuple[int, ...]:
-    return tuple(line.id for line in sorted((lines[n - 1] for n in numbers), key=lambda x: x.t))
 
 
 def _lines(n: int) -> str:
