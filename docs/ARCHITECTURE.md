@@ -209,7 +209,8 @@ ends the connection, so a stuck or hostile device can't hold the server's thread
 A request that a proxy forwarded (`Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `Via`), or any
 request under `serve --behind-proxy`, counts as another machine's, for those limits too (a
 proxy on this machine connects from its address). Such a request reads the page's data (what was
-said, alerts, audio, live events) only with a feed token with the `read` scope, or a ticket
+said, alerts, catches, audio, live events: every GET under `/api/` but `/api/manage/`, and
+`/audio/`) only with a feed token with the `read` scope, or a ticket
 made from one (`feed.page_grant`), unless `serve --public-read`; the LAN reads it without one.
 Asking the local model (`POST /api/ask`) from another machine needs `serve --allow-remote-ask`:
 it spends the one LLM everything else waits for. `serve` prints one line at start saying which

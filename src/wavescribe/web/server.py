@@ -81,10 +81,10 @@ LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 ASK_TIMEOUT_S = 180.0  # a question waits at most this long for its answer
 REMOTE_ASK_OFF = ("asking from another machine is off: it spends this machine's model, so the "
                   "Wavescribe machine turns it on with serve --allow-remote-ask")  # fmt: skip
-# The page's own reads: what was said, alerts, audio, the live events. Through a proxy they need
-# a feed token, as /feed/v1 does (feed.page_grant).
-PAGE_READS = ("/api/state", "/api/events", "/api/history", "/api/search", "/api/alerts")
-PAGE_READ_PREFIXES = ("/api/segments/", "/api/alerts/", "/audio/")
+# The page's own reads: every GET under these (what was said, alerts, catches, audio, the live
+# events), so a new one is covered without being listed. Through a proxy they need a feed token,
+# as /feed/v1 does (feed.page_grant). /api/manage/ is this machine's alone, before this.
+PAGE_READ_PREFIXES = ("/api/", "/audio/")
 MAX_ASKS = 3  # questions queued or being answered at once
 MAX_BODY = 16_384
 LOAD_FAILED = "could not be loaded; the log on the Wavescribe machine says why"
@@ -798,7 +798,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_read(self, path: str, query: dict[str, str]) -> bool:
         """For the page's data: whether this request was refused (and answered 401)."""
-        if path not in PAGE_READS and not path.startswith(PAGE_READ_PREFIXES):
+        if not path.startswith(PAGE_READ_PREFIXES) or path.startswith("/api/manage/"):
             return False
         return not self._let_in(feed.page_grant(self, query))
 

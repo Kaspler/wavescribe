@@ -156,9 +156,11 @@ def open_stream(server: WebServer, path: str, headers: dict[str, str] | None = N
     return resp, conn
 
 
-PAGE_READS = ["/api/state", "/api/history?station=a", "/api/search?q=x", "/api/alerts",
-              "/api/alerts/1.cap", "/api/segments/1/audio.wav", "/api/segments/1/audio.pcm",
-              "/audio/a.pcm"]  # fmt: skip
+PAGE_READS = ["/api/state", "/api/history?station=a", "/api/history?station=a&around_id=1",
+              "/api/search?q=x", "/api/alerts", "/api/alerts/1.cap", "/api/catches",
+              "/api/catches?mhz=100&hours=1", "/api/segments/1/audio.wav",
+              "/api/segments/1/audio.pcm", "/audio/a.pcm",
+              "/api/a-read-yet-to-be-added"]  # fmt: skip
 
 
 def test_through_a_proxy_the_pages_reads_need_a_token(tmp_path: Path, monkeypatch) -> None:
@@ -190,9 +192,13 @@ def test_through_a_proxy_the_pages_reads_need_a_token(tmp_path: Path, monkeypatc
         conn.close()
         # The page itself, its health and its files need nothing.
         assert node.call("GET", "/")[0] == 200 and node.call("GET", "/healthz")[0] == 200
+        # The page's controls stay this machine's alone, token or not.
+        assert node.call("GET", "/api/manage/radio/notes", headers=bearer)[0] == 403
 
         node.server.public_read = True  # serve --behind-proxy --public-read
         assert node.call("GET", "/api/state")[0] == 200
+        assert node.call("GET", "/api/catches")[0] == 200
+        assert node.call("GET", "/api/manage/radio/notes")[0] == 403
         assert node.call("GET", "/feed/v1/node")[0] == 401  # the feed still needs a token
 
         # The LAN reads as before, tokens or not; a proxy's header makes it a proxy's request.

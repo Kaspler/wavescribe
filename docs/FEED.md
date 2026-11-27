@@ -142,7 +142,7 @@ and isn't gets a 400.
 
 `serve` prints one line when it starts saying which of these holds.
 
-| Who | The page's data: what was said, alerts, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
+| Who | The page's data: what was said, alerts, catches, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
 |---|---|---|---|---|
 | This machine | yes | yes, no token | yes | yes |
 | The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
@@ -152,11 +152,12 @@ and isn't gets a 400.
   Pushing to `/feed/v1/ingest` always needs a `push` token, even from this machine, as JSON
   (`Content-Type: application/json`): otherwise any web page open on the machine could post
   events and set off alerts.
-- **The page's data** is what the page reads: `/api/state`, `/api/events`, `/api/history`,
-  `/api/search`, `/api/alerts`, `/api/alerts/<id>.cap`, `/api/segments/<id>/audio.wav` (the
-  feed's `audio_url`) and `…/audio.pcm`, and `/audio/<station>.pcm`. Without a token where one is
-  needed, the answer is 401 with `{"error": …, "token_required": true}` and
-  `WWW-Authenticate: Bearer`.
+- **The page's data** is every `GET` under `/api/` but the controls, and `/audio/`: among them
+  `/api/state`, `/api/events`, `/api/history`, `/api/search`, `/api/alerts`,
+  `/api/alerts/<id>.cap`, `/api/catches` (what radio watches caught: frequencies, times, words),
+  `/api/segments/<id>/audio.wav` (the feed's `audio_url`) and `…/audio.pcm`, and
+  `/audio/<station>.pcm`. Without a token where one is needed, the answer is 401 with
+  `{"error": …, "token_required": true}` and `WWW-Authenticate: Bearer`.
 - **On the LAN** there is no login: anyone on your network reads the page, what it heard and its
   recordings, as they could listen to the radio in the room. Use `--lan` only on a network you
   trust. Feed tokens guard the feed there, not the page.
