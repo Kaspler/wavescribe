@@ -172,11 +172,19 @@ Type in the field at the top (**Search or ask**):
 The answers come only from what your stations said. If they didn't cover something, Ask says
 so rather than guessing, but check the quoted moments before acting on an answer.
 
-**What did I miss?** When you've been away, a digest gives a few points the local model picked
-out of what was said, each with the station that said it and the moments it rests on.
-Digests are experimental: a point can still run two stories together, add a detail no one said
-or cite the wrong moment, so read its moments before you rely on it. With Wavescribe running,
-in another Terminal window:
+**What did I miss?** When you've been away, a summary (a *digest*) gives a few points the local
+model picked out of what was said, each with the station that said it and the moments it rests
+on. Digests are experimental: a point can still run two stories together, add a detail no one
+said or cite the wrong moment, so read its moments before you rely on it.
+
+On the page, press **Summary** at the top of Read and choose how far back: the last 15 minutes,
+the last hour, since a time, or since you last looked when this browser knows. It covers the
+stations you are reading; a column's **⋯** menu asks for that station alone, or *What are they
+talking about now?* in a line under its name. The points come beside the columns (on a phone,
+in their place); press a point's time to read that line in the transcript. On the Wavescribe
+machine, *Read it aloud on this Mac* has it read as soon as it is written.
+
+From the command line, with Wavescribe running, in another Terminal window:
 
 ```sh
 uv run wavescribe digest                                    # stations heard in the last hour
