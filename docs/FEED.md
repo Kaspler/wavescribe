@@ -102,7 +102,13 @@ Alert fields:
 - `reason`: the LLM's one-line reason, when it was involved.
 - `text`: what was announced, in the source language.
 - `translations`: only translations checked to be in their target language.
-- `context`: the two utterances just before it on the same station (an output sends as many as its `context` setting says), leaving out what may not leave this machine.
+- `context`: the two utterances just before it on the same station (an output sends as many
+  as its `context` setting says), leaving out what may not leave this machine.
+- `status`: where the alert stands on this machine. `pending` while it is checked or its
+  translations awaited; once announced, `delivered` (every action worked), `partial` (some
+  reached someone), `failed` (none did) or `logged` (it had no action but the log);
+  `covered` when another alert announced the same sentence. An alert seen as `pending` comes
+  again with its new status; only the feed sends those (`change`: `update`).
 - `cap_url`: the same alert as a CAP 1.2 document.
 
 A batch, used by pushes that batch utterances, is
@@ -144,13 +150,23 @@ ask `/feed/v1/alerts?since=` for those raised meanwhile. After a restart, a clie
 id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s.
 
 ```sh
-curl -N http://kitchen-mac.local:8765/feed/v1/events?stations=tsf
+curl -N "http://kitchen-mac.local:8765/feed/v1/events?stations=tsf"
 curl "http://kitchen-mac.local:8765/feed/v1/utterances?since=$(date -v-1H +%s)&format=csv" > hour.csv
 ```
 
 In CSV, a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading
-apostrophe, so a spreadsheet doesn't run it as a formula. A parameter that should be a number
-and isn't gets a 400.
+apostrophe, so a spreadsheet doesn't run it as a formula.
+
+`since`, `until` and `limit` that aren't numbers, and a `since_id` that is neither a segment id
+nor an event id, get a 400 that names the parameter: `{"error": "bad parameter: …"}`. A
+`limit` out of range is held to 1–10,000. A `Last-Event-ID` header that isn't an event id is
+ignored, and the stream starts live. Unknown parameters and `events` values are ignored.
+
+**From a web page.** The feed sends no CORS headers, so a browser lets only a page from the
+same origin read it: one Wavescribe serves itself, or one served through the same proxy.
+A page elsewhere gets nothing, ticket or not; read the feed from your server, or have your
+proxy add the CORS headers you want. Tickets are for clients that can't set a header, such as
+an EventSource on such a page.
 
 ## Who can read what
 
@@ -235,7 +251,7 @@ refused (400), so it never replaces that one and its secret or headers:
 | `rules`, `min_severity`, `stations` | which alerts go out (all rules, medium and up, all stations, by default) |
 | `languages` | translations to include (all, by default) |
 | `format` | `json` (the events above), `cap` (CAP 1.2 XML, alerts only), `text` (a readable line or two, for chat bots and ntfy) |
-| `batch_s` | utterances: 0 sends each one; more sends one batch per window. Alerts always go at once |
+| `batch_s` | utterances: 0 sends each one; more sends one batch per window. Alerts are never batched: each goes when it is announced, which waits up to `translation_wait_s` (10 s by default, `[delivery]` in `alerts.toml`) for its translations: up to about 12 s after it was heard when the translator is busy |
 | `headers` | extra headers, e.g. `Authorization` for the receiving end |
 | `secret` | signs each request, see below |
 | `context` | how many utterances before an alert's to include (2) |
@@ -267,6 +283,12 @@ refused (400), so it never replaces that one and its secret or headers:
   `"rule": "test"` and `"status": "test"`; in CAP it is `<status>Test</status>` and
   `<scope>Restricted</scope>` with a `<restriction>` saying it is a test, so a CAP consumer
   never shows it to the public.
+
+**Headers.** Each request is a `POST` with `Content-Type` (`application/json`,
+`application/xml; charset=utf-8` for CAP, `text/plain; charset=utf-8` for text),
+`User-Agent: wavescribe/<version>`, `X-Wavescribe-Event` (`alert`, `utterance` or `batch`),
+the output's own `headers` (which can replace the three before), and the signature headers
+below when a secret is set.
 
 **Signatures.** With a secret, each request carries `X-Wavescribe-Timestamp` (Unix seconds)
 and `X-Wavescribe-Signature: sha256=<hex>`, the HMAC-SHA256 of `"<timestamp>.<body>"` keyed
