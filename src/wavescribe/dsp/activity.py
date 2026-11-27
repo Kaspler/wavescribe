@@ -117,7 +117,10 @@ class Activity:
     and ``end`` are sample indices: the transmission's first frame above the threshold, and
     the end of its last."""
 
-    kind: str  # "start", "end" or "short" (ended before MIN_S: not a catch)
+    # "start", "end" or "short" (ended before MIN_S: not a catch); off the channels also
+    # "noted" and "gone" (a wide signal, there and gone again: never a catch) and "absorbed"
+    # (what had started was part of a wide signal: not a catch)
+    kind: str
     channel: int | None  # index into the detector's channels; None off the channels
     freq_hz: int  # the channel's; off the channels, its measured centre
     start: int
@@ -152,8 +155,10 @@ class ActivityDetector:
     too, between the channels and beyond them (``dsp/openwatch.py``), with ``channel`` None
     and their measured centre; ``open_bands`` are the parts of it with rules of their own,
     and ``open_clocks`` the clock frequencies (Hz) of other receivers beside this one, whose
-    multiples are lines it leaves out there. What the channels report is the same with it
-    and without."""
+    multiples are lines it leaves out there. A wide signal in the range (a broadcast station)
+    is reported when it is there (``noted``) and when it has gone (``gone``), and what had
+    started inside one is taken back (``absorbed``). What the channels report is the same
+    with an open range and without."""
 
     def __init__(
         self,
@@ -308,6 +313,7 @@ class ActivityDetector:
                 least=self._min,
                 carrier=self._carrier,
                 ids=lambda: next(self._ids),
+                norm=self._norm,
                 bands=open_bands,
                 clocks=open_clocks,
             )

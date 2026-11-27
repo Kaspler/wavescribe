@@ -221,30 +221,34 @@ def test_another_receivers_clock_is_left_out_of_the_open_range() -> None:
 def test_the_channels_report_the_same_with_an_open_range_as_without() -> None:
     """Speech and carriers that blink on the channels, speech between them (weak, and strong
     enough for the channels either side to hear it), lines, a drifting line and clicks."""
+    scene = Scene(600_000, 446_100_000)  # the centre between channels 8 and 9
+
+    def on(freq_hz: float) -> float:
+        return off(freq_hz, scene)
 
     def things() -> list:
         return [
-            Tx(off(PMR[1]), 1.0, 3.0, S.amp(7), seed=1),
-            Tx(off(PMR[3]), 1.2, 4.0, S.amp(12), seed=2),
-            Tx(off(PMR[4]), 2.0, 5.0, S.amp(30), seed=3),
-            Tx(off(PMR[8]) + 1_500, 3.0, 6.0, S.amp(10), seed=4),
-            Tx(off(PMR[12]), 6.0, 6.2, S.amp(15), seed=5),  # too short to be a catch
-            Line(off(PMR[14]), S.line(25), period_s=2.5, on_s=0.8),
-            Line(off(PMR[6]) + 700, S.line(20), start_s=4.0, stop_s=8.0),
-            Tx(off(PMR[10]) + 6_250, 2.0, 5.0, S.amp(9), seed=6),
-            Tx(off(PMR[0]) - 6_250, 5.0, 8.0, S.amp(32), seed=7),
-            Tx(off(PMR[13]) + 5_000, 6.5, 9.0, S.amp(25), seed=8),
-            Tx(-250_000, 1.0, 9.0, S.amp(20), seed=9),
-            Line(-100_000, S.line(30)),
-            Line(350_000, S.line(25), drift_hz_s=400.0),
-            Line(off(PMR[15]) + 9_000, S.line(28), period_s=3.0, on_s=1.0),
+            Tx(on(PMR[1]), 1.0, 3.0, scene.amp(7), seed=1),
+            Tx(on(PMR[3]), 1.2, 4.0, scene.amp(12), seed=2),
+            Tx(on(PMR[4]), 2.0, 5.0, scene.amp(30), seed=3),
+            Tx(on(PMR[8]) + 1_500, 3.0, 6.0, scene.amp(10), seed=4),
+            Tx(on(PMR[12]), 6.0, 6.2, scene.amp(15), seed=5),  # too short to be a catch
+            Line(on(PMR[14]), scene.line(25), period_s=2.5, on_s=0.8),
+            Line(on(PMR[6]) + 700, scene.line(20), start_s=4.0, stop_s=8.0),
+            Tx(on(PMR[10]) + 6_250, 2.0, 5.0, scene.amp(9), seed=6),
+            Tx(on(PMR[0]) - 6_250, 5.0, 8.0, scene.amp(32), seed=7),
+            Tx(on(PMR[13]) + 5_000, 6.5, 9.0, scene.amp(25), seed=8),
+            Tx(-200_000, 1.0, 9.0, scene.amp(20), seed=9),
+            Line(150_000, scene.line(30)),
+            Line(200_000, scene.line(25), drift_hz_s=400.0),
+            Line(on(PMR[15]) + 9_000, scene.line(28), period_s=3.0, on_s=1.0),
             Clicks(6, 0.05),
         ]
 
-    alone = watch(S.detector(PMR, open_range=None), S.air(10.0, things()))
-    both = watch(S.detector(PMR), S.air(10.0, things()))
+    alone = watch(scene.detector(PMR, open_range=None), scene.air(10.0, things()))
+    both = watch(scene.detector(PMR), scene.air(10.0, things()))
     on_channels = [replace(e, track=0) for e in both if e.channel is not None]
     assert on_channels == [replace(e, track=0) for e in alone]
     assert len([e for e in alone if e.kind == "end"]) >= 6  # the scene does exercise them
     assert all(e.channel is not None for e in alone)
-    assert catches(both, S.hz(-250_000)) and catches(both, PMR[10] + 6_250)
+    assert catches(both, scene.hz(-200_000)) and catches(both, PMR[10] + 6_250)

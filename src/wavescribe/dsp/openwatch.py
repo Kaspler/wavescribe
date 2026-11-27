@@ -8,6 +8,7 @@ channels of a watch (``dsp/activity.py`` runs this beside its channels, on the s
          placed at the power-weighted middle of what stands over the floor there
       ─► a candidate that lasts two frames and moves is a transmission: a track, from its
          start to a hang time after it has gone
+      ─► what is too wide for a narrowband transmission is noted, and never a track
 
 Everything a receiver makes by itself is a line: one frequency, no modulation. A voice moves
 an FM carrier, so its strongest bin is somewhere else from one FFT to the next (there are
@@ -27,6 +28,11 @@ still for ``LINE_S``.
 Where a carrier is the signal (``OpenBand.carrier``: an AM band), nothing has to move, and no
 line is kept: a candidate that lasts two frames is a transmission, as on a channel.
 
+A wide signal (``dsp/widesignal.py`` tells which) is held from its first bin to its last
+while it lasts: nothing starts inside it, and what had started there before it showed itself
+is taken back (``absorbed``). It is reported once it has been there half a second (``noted``)
+and once more when it has gone (``gone``).
+
 The channels of the watch are not touched by any of this. Within a quarter of a channel's
 width of a channel's centre only the channel's own rule applies, and what a channel is
 measuring is the channel's. This side has floors of its own, so nothing it holds or learns
@@ -44,7 +50,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.ndimage import percentile_filter
 
-from wavescribe.dsp import NARROW_MARGIN_HZ
+from wavescribe.dsp import NARROW_MARGIN_HZ, widesignal
 from wavescribe.dsp.activity import (
     BLIND_S,
     BROADBAND,
@@ -62,6 +68,7 @@ from wavescribe.dsp.activity import (
     estimate,
     runs,
 )
+from wavescribe.dsp.widesignal import NARROW_HZ, RANGED_OF, WIDE_HZ, Wide, ranging
 
 # How far a carrier's strongest bin must move between a frame's FFTs to be spoken into: half
 # the spread between the 16th and 84th percentiles of its place (interpolated between bins).
@@ -100,11 +107,14 @@ CLOCK_PPM = 5.0  # how far off its nominal frequency another receiver's clock ma
 @dataclass(frozen=True)
 class OpenBand:
     """A part of an open range with rules of its own. ``carrier``: a bare carrier is the
-    signal there (an AM band)."""
+    signal there (an AM band). ``narrow_hz``: the most a narrowband transmission occupies
+    there, and twice as far as its carrier goes from its centre; what is wider is a wide
+    signal."""
 
     lo_hz: float
     hi_hz: float
     carrier: bool = False
+    narrow_hz: float = NARROW_HZ
 
 
 @dataclass(eq=False)
@@ -125,8 +135,10 @@ class _Track:
     freq_hz: int = 0  # fixed at its start
     line: bool = False  # it was a known line: a line again once it stops moving
     spoke: int = 0  # the end of the last frame it moved in
-    # this frame: how far it moved, whether its power was steady, the middle of its places
-    move: tuple[float, bool, float] = (0.0, False, 0.0)
+    # this frame: how far it moved, whether its power was steady, the middle of its places,
+    # and whether its carrier ranged as only a wide signal's does
+    move: tuple[float, bool, float, bool] = (0.0, False, 0.0, False)
+    ranged: deque = field(default_factory=lambda: deque(maxlen=RANGED_OF[1]))
 
 
 @dataclass(eq=False)
@@ -139,7 +151,8 @@ class _Line:
     fine: float | None = None  # where it is between bins, from the frames it was still in
     rest: float | None = None  # where the middle of its FFTs' strongest bins is when still
     # this frame, as a track's; None: not listened to
-    move: tuple[float, bool, float] | None = None
+    move: tuple[float, bool, float, bool] | None = None
+    ranged: deque = field(default_factory=lambda: deque(maxlen=RANGED_OF[1]))
 
 
 class OpenWatch:
@@ -164,12 +177,13 @@ class OpenWatch:
         least: int,
         carrier: int,
         ids: Callable[[], int],
+        norm: float = 1.0,
         bands: Sequence[OpenBand] = (),
         clocks: Sequence[float] = (),
         step_hz: float | None = None,
     ) -> None:
         self.rate, self.center_hz, self._n = rate, center_hz, fft
-        self._ids = ids
+        self._ids, self._norm = ids, norm
         self._frame_samples = frame_samples
         frame_s = frame_samples / rate
         self._hang, self._min, self._carrier = hang, least, carrier
@@ -211,15 +225,22 @@ class OpenWatch:
         for c in channels:
             self._channel_zone |= np.abs(offsets - (c - center_hz)) <= channel_hz / 4
         self._carrier_ok = np.zeros(fft, dtype=bool)  # where a bare carrier is the signal
+        self._narrow = np.full(fft, NARROW_HZ)  # the most a narrowband transmission occupies
         for band in bands:
             inside = (at >= band.lo_hz) & (at <= band.hi_hz)
             self._carrier_ok[inside] = band.carrier
+            self._narrow[inside] = band.narrow_hz
+        self._bound = np.maximum(1, np.round(self._narrow / 2 / bin_hz)).astype(np.intp)
+        self._wide_bins = round(WIDE_HZ / bin_hz)
+        self._said = max(1, round(widesignal.SAID_S / frame_s))
+        self._wide_gone = round(widesignal.GONE_S * rate)
 
         self._floor: np.ndarray | None = None
         self._first_frames: list[np.ndarray] = []
         self._rows: list[np.ndarray] = []
         self._tracks: list[_Track] = []
         self._lines: list[_Line] = []
+        self._wides: list[Wide] = []
         self._deaf_since: int | None = None
         self._blind_since: int | None = None
         self._interfered = 0
@@ -234,6 +255,11 @@ class OpenWatch:
     def steady(self) -> int:
         """How many known lines are being left out."""
         return len(self._lines)
+
+    @property
+    def noted(self) -> list[tuple[int, float]]:
+        """The wide signals there now: each one's middle (Hz) and how wide it is (Hz)."""
+        return [(w.freq_hz, w.width_hz) for w in self._wides if w.said]
 
     @property
     def deaf_s(self) -> float | None:
@@ -266,7 +292,7 @@ class OpenWatch:
             if len(self._first_frames) >= self._init_frames:
                 self._floor = np.median(np.array(self._first_frames), axis=0) + 1e-20
                 self._first_frames = []
-                self._first_lines(end)
+                self._first_lines(start, end)
             return []
         floor, self._rows = self._floor, rows
         measuring = self._ch_bins[live & self._ch_ok]
@@ -276,6 +302,7 @@ class OpenWatch:
         ratio = self._sliding(power, floor)
         hot = ratio >= self._busy
         excess = np.where(self._mask, 0.0, power - floor)
+        out += self._wide_signals(power, floor, hot, end)
         sig, claimed = self._claims(taken)
         deaf, top, overloading = self._hearing(ratio, hot, claimed, clipping, busy, start, end)
         if self._floor is None:  # the noise rose and stayed: learnt afresh
@@ -291,6 +318,9 @@ class OpenWatch:
         elif not deaf:
             sig, claimed = self._claims(taken)
             for a, b in runs(hot & self._in_range & ~claimed):
+                if b - a + 1 - 2 * self._h >= self._wide_bins:
+                    self._wide_at(a + self._h, b - self._h, start, end)
+                    continue
                 pos = self._candidate(a, b, excess, sig)
                 if pos is not None:
                     self._new(pos, excess, ratio, power, start, end, overloading)
@@ -326,15 +356,17 @@ class OpenWatch:
         return np.array(mine, dtype=np.intp)
 
     def _claims(self, taken: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """The bins a track's or a measuring channel's signal is in, and those where the
-        sliding measurement is of that signal: no candidate is taken from them."""
+        """The bins a track's, a wide signal's or a measuring channel's signal is in, and
+        those where the sliding measurement is of that signal: no candidate is taken from
+        them."""
         sig = np.zeros(self._n, dtype=bool)
         claimed = np.zeros(self._n, dtype=bool)
         reach = self._h + 2
         centres = [round(t.pos) for t in self._tracks] + taken.tolist()
-        for c in centres:
-            sig[max(0, c - self._half) : c + self._half + 1] = True
-            claimed[max(0, c - self._half - reach) : c + self._half + reach + 1] = True
+        held = [(c - self._half, c + self._half) for c in centres]
+        for lo, hi in held + [(w.lo, w.hi) for w in self._wides]:
+            sig[max(0, lo) : hi + 1] = True
+            claimed[max(0, lo - reach) : hi + reach + 1] = True
         return sig, claimed
 
     def _learn(self, power: np.ndarray, floor: np.ndarray, taken: np.ndarray) -> None:
@@ -343,6 +375,8 @@ class OpenWatch:
         hold = np.zeros(self._n, dtype=bool)
         for c in [round(t.pos) for t in self._tracks] + taken.tolist():
             hold[max(0, c - self._half - 2) : c + self._half + 3] = True
+        for w in self._wides:
+            hold[max(0, w.lo - 2) : w.hi + 3] = True
         for ln in self._lines:
             hold[max(0, ln.pos - self._guard - 2) : ln.pos + self._guard + 3] = True
         learn = ~hold
@@ -524,11 +558,14 @@ class OpenWatch:
         here = float(ratio[max(0, c - 2) : c + 3].max())
         above, holding = here >= self._busy, here >= self._hold
         allowed = not deaf or (top is not None and abs(t.pos - top) <= 2 * self._h)
-        wander, steady, _ = t.move
+        wander, steady, _, ranged = t.move
         moved = wander >= self._wander
         if t.state != "busy" and len(taken) and np.abs(taken - t.pos).min() <= self._half:
             self._tracks.remove(t)  # a channel is measuring it: the channel's
             return []
+        t.ranged.append(ranged)
+        if sum(t.ranged) >= RANGED_OF[0] or self._too_wide(t, c):
+            return self._widen(t, end)
         if t.state == "rising":
             if not above or not allowed:
                 self._tracks.remove(t)
@@ -546,7 +583,7 @@ class OpenWatch:
                 t.profile[:] = 0.0
                 t.moved.clear()
                 return []
-            if self._carrier_ok[c] or sum(t.moved) >= MOVED_OF[0]:
+            if (self._carrier_ok[c] or sum(t.moved) >= MOVED_OF[0]) and not any(t.ranged):
                 return [self._start(t)]
             t.state = "pending"
             return []
@@ -604,7 +641,8 @@ class OpenWatch:
             t.calm = min(t.calm + 1, self._calm_most) if still else t.calm
         else:
             t.moved.append(False)
-        if allowed and above and sum(t.moved) >= MOVED_OF[0]:
+        ready = sum(t.moved) >= MOVED_OF[0] or bool(self._carrier_ok[c])
+        if allowed and above and ready and not any(t.ranged):
             return [self._start(t)]
         if end - t.last >= self._hang:
             self._tracks.remove(t)
@@ -656,7 +694,7 @@ class OpenWatch:
     def _moves(self) -> None:
         """How far the strongest bin about each track and each known line moved between this
         frame's FFTs, and whether the power about it was steady: its ``move``."""
-        tracks = [t for t in self._tracks if t.state != "busy" or t.line]
+        tracks = list(self._tracks)
         lines = [ln for ln in self._lines if not self._channel_zone[ln.pos]]
         for ln in self._lines:
             ln.move = None
@@ -664,30 +702,36 @@ class OpenWatch:
             return
         centres = np.array([round(t.pos) for t in tracks] + [ln.pos for ln in lines])
         own = np.array([-2] * len(tracks) + [ln.pos for ln in lines])
-        wander, steady, middle = self._moving(centres, own)
-        for one, w, s, m in zip(tracks + lines, wander, steady, middle, strict=True):
-            one.move = (float(w), bool(s), float(m))
+        moves = zip(tracks + lines, *self._moving(centres, own), strict=True)
+        for one, wander, steady, middle, ranged in moves:
+            one.move = (float(wander), bool(steady), float(middle), bool(ranged))
 
     def _moving(
         self, centres: np.ndarray, own: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """For each of ``centres`` (bins): how far its strongest bin moved between the
-        frame's FFTs (``_spread``), whether the power about it was steady, and where the
-        middle of its places was (in bins from the centre). The bins left to a known line
-        count for nothing, but for the line itself (``own``: its bin). The spread is the
-        greater of two: over the whole reach, and close in, where a second signal beside it
-        does not take the strongest bin away."""
-        r, w = self._look, PEAK_BINS
-        reach = np.arange(-r - w, r + w + 1)
-        at = np.clip(centres[:, None] + reach[None, :], 0, self._n - 1)
+        frame's FFTs (``_spread``), whether the power about it was steady, where the middle
+        of its places was (in bins from the centre), and whether its carrier ranged as a wide
+        signal's does (``widesignal.ranging``). The bins left to a known line count for
+        nothing, but for the line itself (``own``: its bin). The spread is the greater of
+        two: over the whole reach, and close in, where a second signal beside it does not
+        take the strongest bin away."""
+        ap = self._ap
+        at = np.clip(centres[:, None] + np.arange(-ap, ap + 1)[None, :], 0, self._n - 1)
         left_to = self._line_at[at]
         keep = ((left_to < 0) | (left_to == own[:, None])) & ~self._static[at]
         cols = (at - self._n // 2) % self._n
         rows = np.concatenate([part[:, cols] for part in self._rows]) * keep
-        far, steady, far_middle = _spread(rows)
-        k = r - self._look_near
-        near, _, near_middle = _spread(rows[:, :, k : len(reach) - k])
-        return np.maximum(far, near), steady, np.where(far >= near, far_middle, near_middle)
+        k = ap - self._look - PEAK_BINS
+        far, steady, far_middle = _spread(rows[:, :, k : 2 * ap + 1 - k])
+        k = ap - self._look_near - PEAK_BINS
+        near, _, near_middle = _spread(rows[:, :, k : 2 * ap + 1 - k])
+        middle = np.where(far >= near, far_middle, near_middle)
+        assert self._floor is not None
+        total = np.concatenate([part.sum(axis=1) for part in self._rows])
+        usual = total <= widesignal.CLICK * np.median(total)
+        ranged = ranging(rows, self._floor[at] * self._norm, self._bound[centres], usual)
+        return np.maximum(far, near), steady, middle, ranged
 
     def _known(self, c: int, excess: np.ndarray, end: int, calm: int) -> None:
         e = excess[c - self._guard : c + self._guard + 1]
@@ -749,7 +793,14 @@ class OpenWatch:
             move = ln.move
             if move is None or (len(taken) and np.abs(taken - ln.pos).min() <= self._half):
                 continue  # a channel's, or a channel is measuring a signal over it
-            wander, steady, middle = move
+            wander, steady, middle, ranged = move
+            ln.ranged.append(ranged)
+            if sum(ln.ranged) >= RANGED_OF[0]:  # a wide signal's carrier, at rest until now
+                self._lines.remove(ln)
+                changed = True
+                b = int(self._bound[ln.pos])
+                self._wide_at(ln.pos - b, ln.pos + b, start, end)
+                continue
             here = was + middle
             # A voice moves a carrier about where it rests. What moves about another place
             # is a second line that came up beside this one.
@@ -764,7 +815,8 @@ class OpenWatch:
                 ln.fine = ln.pos + _between_bins(power[ln.pos - 1 : ln.pos + 2])
             elif not moved:
                 ln.calm = max(ln.calm - 1, 0)
-            if sum(ln.moved) >= MOVED_OF[0] and ln.calm >= self._calm and self._deaf_since is None:
+            spoken = sum(ln.moved) >= MOVED_OF[0] and ln.calm >= self._calm
+            if spoken and not any(ln.ranged) and self._deaf_since is None:
                 self._lines.remove(ln)
                 changed = True
                 out += self._spoken(ln, power, around, end)
@@ -794,17 +846,26 @@ class OpenWatch:
         return [Activity("start", None, t.freq_hz, t.first, None, t.snr_db, t.power_db,
                          track=t.id, width_hz=width)]  # fmt: skip
 
-    def _first_lines(self, start: int) -> None:
-        """Lines that were there when the floors were learnt (a spur, a carrier already keyed)
-        are known lines from the first frame, with the floor under them put back to what is
-        about them. Not where a carrier is the signal, nor where a channel has its own rule."""
+    def _first_lines(self, first: int, start: int) -> None:
+        """What was there when the floors were learnt. Wide signals (a broadcast station) are
+        held from the first frame. Lines (a spur, a carrier already keyed) are known lines
+        from the first frame, with the floor under them put back to what is about them: not
+        inside a wide signal, where a carrier is the signal, or where a channel has its own
+        rule."""
         floor = self._floor
         assert floor is not None
         self._lines = []
+        found = widesignal.humps(floor, self._in_range, self._h, self._wide_bins, self.bin_hz)
+        for a, b, level in found:
+            w = self._wide_at(a, b, first, start)
+            w.base, w.frames = min(w.base, level), max(w.frames, self._said - 1)
+        inside = np.zeros(self._n, dtype=bool)
+        for w in self._wides:
+            inside[max(0, w.lo - self._guard) : w.hi + self._guard + 1] = True
         around = percentile_filter(floor, 50, size=49, mode="nearest")
         peak = (floor[1:-1] >= 8 * around[1:-1]) & (floor[1:-1] >= floor[:-2])
         peak &= floor[1:-1] > floor[2:]
-        ok = self._in_range & ~self._static & ~self._carrier_ok & ~self._channel_zone
+        ok = self._in_range & ~self._static & ~self._carrier_ok & ~self._channel_zone & ~inside
         peaks = np.flatnonzero(peak & ok[1:-1]) + 1
         for pk in sorted(peaks, key=lambda k: -floor[k])[:MAX_LINES]:
             if any(abs(ln.pos - pk) <= self._guard for ln in self._lines):
@@ -812,6 +873,113 @@ class OpenWatch:
             self._lines.append(_Line(int(pk), start))
             floor[max(0, pk - self._guard) : pk + self._guard + 1] = around[pk]
         self._remask()
+
+    # -- wide signals ----------------------------------------------------------------------------
+
+    def _too_wide(self, t: _Track, c: int) -> bool:
+        """Whether what the track has put over the floor so far is wider than a narrowband
+        transmission is there."""
+        if t.frames < START_FRAMES:
+            return False
+        _, width = estimate(t.profile, self.bin_hz)
+        return width > self._narrow[c]
+
+    def _widen(self, t: _Track, end: int) -> list[Activity]:
+        """The track is a wide signal's: held as one from here on, and taken back if it had
+        been said to be a transmission."""
+        self._tracks.remove(t)
+        b = int(self._bound[round(t.pos)])
+        self._wide_at(round(t.pos) - b, round(t.pos) + b, t.first, end)
+        if t.state != "busy":
+            return []
+        return [self._activity("absorbed", t, end)]
+
+    def _wide_at(self, lo: int, hi: int, first: int, end: int) -> Wide:
+        """The wide signal over bins ``lo`` to ``hi``: one that is there already and reaches
+        them, grown to hold them, or a new one."""
+        lo, hi = max(0, lo), min(self._n - 1, hi)
+        floor = self._floor
+        assert floor is not None
+        base = float(floor[lo : hi + 1].mean())
+        for w in self._wides:
+            if lo <= w.hi + self._ap and hi >= w.lo - self._ap:
+                w.lo, w.hi, w.base = min(w.lo, lo), max(w.hi, hi), min(w.base, base)
+                return w
+        w = Wide(self._ids(), lo, hi, first, end, base)
+        self._wides.append(w)
+        return w
+
+    def _wide_signals(
+        self, power: np.ndarray, floor: np.ndarray, hot: np.ndarray, end: int
+    ) -> list[Activity]:
+        """Each wide signal as it is in this frame: grown as far as the bins about it stand
+        over their floors, with what was taken for a narrowband signal inside it taken back,
+        noted once it has lasted, and gone when it has not been there for a while."""
+        out: list[Activity] = []
+        risen = runs(hot) if self._wides else []
+        for w in list(self._wides):
+            if all(w is not o for o in self._wides):
+                continue  # another took it in this frame
+            level = float(power[w.lo : w.hi + 1].mean())
+            if level < widesignal.OVER * w.base:
+                since = end - w.last
+                if since >= (self._wide_gone if w.said else self._hang):
+                    self._wides.remove(w)
+                    if w.said:
+                        out.append(self._wide_activity("gone", w, w.last))
+                continue
+            w.last, w.frames = end, w.frames + 1
+            for a, b in risen:
+                if a - self._h <= w.hi and b + self._h >= w.lo and b - a > 2 * self._h:
+                    w.lo, w.hi = min(w.lo, a + self._h), max(w.hi, b - self._h)
+            w.base = min(w.base, float(floor[w.lo : w.hi + 1].mean()))
+            w.snr_db = max(w.snr_db, 10 * float(np.log10(level / w.base)))
+            w.power_db = max(w.power_db, 10 * float(np.log10(level * (w.hi - w.lo + 1) + 1e-20)))
+            out += self._take_in(w, end)
+            w.width_hz = max(w.width_hz, (w.hi - w.lo + 1) * self.bin_hz)
+            if not w.said and w.frames >= self._said:
+                w.said = True
+                w.freq_hz = self._freq((w.lo + w.hi) / 2)
+                out.append(self._wide_activity("noted", w, None))
+        return out
+
+    def _take_in(self, w: Wide, end: int) -> list[Activity]:
+        """What is inside a wide signal is the signal's: tracks (a station is a bare carrier
+        until someone speaks), known lines, and a younger wide signal it has grown into."""
+        out: list[Activity] = []
+        for t in list(self._tracks):
+            if w.lo - self._h <= t.pos <= w.hi + self._h:
+                self._tracks.remove(t)
+                if t.state == "busy":
+                    out.append(self._activity("absorbed", t, end))
+        inside = [ln for ln in self._lines if w.lo - self._guard <= ln.pos <= w.hi + self._guard]
+        if inside:
+            self._lines = [ln for ln in self._lines if all(ln is not o for o in inside)]
+            self._remask()
+        for o in list(self._wides):
+            if o is w or o.lo > w.hi + self._h or o.hi < w.lo - self._h:
+                continue
+            self._wides.remove(o)
+            w.lo, w.hi = min(w.lo, o.lo), max(w.hi, o.hi)
+            w.first, w.frames = min(w.first, o.first), max(w.frames, o.frames)
+            if o.said and w.said:  # two that were noted are one from here on
+                out.append(self._wide_activity("gone", o, end))
+            elif o.said:
+                w.id, w.said, w.freq_hz, w.width_hz = o.id, True, o.freq_hz, o.width_hz
+        return out
+
+    def _activity(self, kind: str, t: _Track, end: int) -> Activity:
+        _, width = estimate(t.profile, self.bin_hz)
+        return Activity(
+            kind, None, t.freq_hz, t.first, end, t.snr_db, t.power_db, None, t.overload,
+            t.id, width,
+        )  # fmt: skip
+
+    def _wide_activity(self, kind: str, w: Wide, end: int | None) -> Activity:
+        return Activity(
+            kind, None, w.freq_hz, w.first, end, w.snr_db, w.power_db, track=w.id,
+            width_hz=w.width_hz,
+        )  # fmt: skip
 
     def flush(self) -> list[Activity]:
         """End every transmission still running off the channels."""

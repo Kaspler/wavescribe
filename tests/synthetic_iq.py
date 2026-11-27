@@ -75,6 +75,30 @@ def radio_audio(seconds: float, seed: int = 0, limit: float = 99.0) -> np.ndarra
     return np.clip(resample_poly(a, MOD // AUDIO, 1), -1.0, 1.0)
 
 
+def _span(t: np.ndarray, start_s: float, stop_s: float) -> slice:
+    """The part of a block of sample times that is from ``start_s`` to before ``stop_s``."""
+    return slice(int(np.searchsorted(t, start_s)), int(np.searchsorted(t, stop_s)))
+
+
+def _turning(phase: np.ndarray) -> np.ndarray:
+    """A carrier of amplitude 1 with this phase, sample by sample."""
+    p = np.mod(phase, 2 * np.pi).astype(np.float32)
+    out = np.empty(len(p), dtype=np.complex64)
+    out.real, out.imag = np.cos(p), np.sin(p)
+    return out
+
+
+@lru_cache(maxsize=64)
+def _one_block(offset_hz: float, n: int, rate: int) -> np.ndarray:
+    return _turning(2 * np.pi * offset_hz * np.arange(n) / rate)
+
+
+def _carrier(offset_hz: float, t: np.ndarray) -> np.ndarray:
+    """A steady carrier over a whole block: one block of it, turned to where this one begins."""
+    rate = round((len(t) - 1) / (t[-1] - t[0]))
+    return np.complex64(np.exp(2j * np.pi * offset_hz * t[0])) * _one_block(offset_hz, len(t), rate)
+
+
 @dataclass
 class Tx:
     """A transmission ``offset_hz`` from the centre, keyed from ``start_s`` to ``stop_s``:
@@ -107,18 +131,22 @@ class Tx:
         self._phase = 2 * np.pi * self.deviation_hz * np.cumsum(m) / MOD
 
     def add(self, x: np.ndarray, t: np.ndarray) -> None:
-        on = (t >= self.start_s) & (t < self.stop_s)
-        if not on.any():
+        on = _span(t, self.start_s, self.stop_s)
+        if on.start == on.stop:
             return
-        k = np.minimum((t[on] - self.start_s) * MOD, len(self._mod) - 1)
+        quiet = not self.speaks or t[-1] < self.start_s + self.silent_s
+        if quiet and on == slice(0, len(t)) and self.mode != "am":  # a bare carrier: cheap
+            x += np.float32(self.amp) * _carrier(self.offset_hz, t)
+            return
+        k = np.minimum((t[on] - self.start_s) * MOD, len(self._mod) - 1.001)
+        i = k.astype(np.intp)
         carrier = 2 * np.pi * self.offset_hz * t[on]
-        grid = np.arange(len(self._mod))
         if self.mode == "am":
-            level = self.amp * (1.0 + 0.8 * np.interp(k, grid, self._mod))
-            x[on] += (level * np.exp(1j * carrier)).astype(np.complex64)
+            level = 1.0 + 0.8 * (self._mod[i] + (k - i) * (self._mod[i + 1] - self._mod[i]))
+            x[on] += self.amp * level.astype(np.float32) * _turning(carrier)
         else:
-            phase = carrier + np.interp(k, grid, self._phase)
-            x[on] += (self.amp * np.exp(1j * phase)).astype(np.complex64)
+            phase = self._phase[i] + (k - i) * (self._phase[i + 1] - self._phase[i])
+            x[on] += np.float32(self.amp) * _turning(carrier + phase)
 
 
 @dataclass
@@ -136,13 +164,16 @@ class Line:
     on_s: float = 0.0
 
     def add(self, x: np.ndarray, t: np.ndarray) -> None:
-        on = (t >= self.start_s) & (t < self.stop_s)
-        if self.period_s:
-            on &= ((t - self.start_s) % self.period_s) < self.on_s
-        if not on.any():
+        on = _span(t, self.start_s, self.stop_s)
+        if on.start == on.stop:
             return
-        phase = 2 * np.pi * (self.offset_hz + 0.5 * self.drift_hz_s * t[on]) * t[on]
-        x[on] += (self.amp * np.exp(1j * phase)).astype(np.complex64)
+        if on == slice(0, len(t)) and not self.drift_hz_s and not self.period_s:
+            x += np.float32(self.amp) * _carrier(self.offset_hz, t)
+            return
+        wave = _turning(2 * np.pi * (self.offset_hz + 0.5 * self.drift_hz_s * t[on]) * t[on])
+        if self.period_s:
+            wave *= ((t[on] - self.start_s) % self.period_s) < self.on_s
+        x[on] += np.float32(self.amp) * wave
 
 
 @dataclass
