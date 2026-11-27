@@ -164,10 +164,11 @@ low = ["log"]
 # local model picked out, each with the lines it rests on. It can miss things or get them wrong,
 # and it is no warning. It is always shown as a quiet notification, whatever became of it
 # (nothing stood out, nothing was said, or why none could be made); speak = true also reads its
-# points aloud in the [speak.<language>] voice, and an alert stops it at once. It covers only
-# radio that may leave this machine.
+# points aloud in the [speak.<language>] voice, and an alert stops it at once (one being spoken
+# is waited for). It covers only radio that may leave this machine.
 # [digest]
-# every_minutes = 60            # 30 is on the hour and half past; 15, 120 and 180 work too
+# every_minutes = 60            # 30 is on the hour and half past; any number from 5 to 1440
+#                               # that divides a day evenly (10, 15, 45, 90, 120, 180...)
 # stations = ["tsf"]            # leave out for every station
 # language = "en"               # default: notify_language
 # speak = true

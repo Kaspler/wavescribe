@@ -220,12 +220,12 @@ Wavescribe was started, it says that too ("Wavescribe started at 14:55: before t
 was heard unless an earlier run was listening").
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
-takes about a minute, `--now` a few seconds. When two digests are already being made, it is
-refused at once; try again in a minute. `--speak` also reads its points aloud, in the voice
-your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by saying that
-this is a Wavescribe summary written by the local model, and an alert stops it at once. One
-that comes while an alert is being spoken waits for it to end (a minute at most; after that it
-is only shown).
+takes about a minute, `--now` from a few seconds to a minute. When two digests are already being
+made, it is refused at once; try again in a minute. `--speak` also reads its points aloud, in
+the voice your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by
+saying that this is a Wavescribe summary written by the local model, and an alert stops it at
+once. One that comes while an alert is being spoken waits for it to end (a minute at most;
+after that it is only shown).
 
 Like alerts, a digest is a help, not a warning system: it comes from a small model reading
 speech recognition, so it can miss things or get a name or a number wrong, and one without
@@ -307,14 +307,17 @@ notification titled "Wavescribe summary", and read aloud too if you like:
 
 ```toml
 [digest]
-every_minutes = 60                # 30 is on the hour and half past; 15, 120 and 180 work too
+every_minutes = 60                # 30 is on the hour and half past; any number from 5 to 1440
+                                  # that divides a day evenly (10, 15, 45, 90, 120, 180...)
 stations = ["tsf", "antena1"]     # leave out for every station
 language = "en"                   # default: notify_language
 speak = true                      # also read its points aloud, in the [speak.en] voice
 quiet_hours = ["22:00", "07:00"]
 ```
 
-Every digest is shown, whatever became of it: its points, with who wrote them from how much;
+`every_minutes` takes a whole number of minutes that divides a day evenly: 5, 6, 8, 9, 10, 12,
+15, 16, 18, 20, 24, 30, 32, 36, 40, 45, 48, 60, 72, 80, 90, 96, 120, 144, 160, 180, 240, 288,
+360, 480, 720 or 1440 (once a day, at midnight). Every digest is shown, whatever became of it: its points, with who wrote them from how much;
 that nothing stood out, or that nothing was said; or why none could be made (the model was
 busy, say: the next one then covers that time too). A quiet notification centre would
 otherwise look like a quiet radio. It covers only radio that may leave the Mac
