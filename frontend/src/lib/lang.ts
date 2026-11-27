@@ -55,6 +55,18 @@ export function pick(u: Utterance, st: Station, shown: string): [string, string,
 export const otherLang = (u: Utterance) =>
   (u.flags || []).find((f) => f.startsWith("lang:"))?.slice(5) || null;
 
+/** Why the translation into `shown` was left out, when the translation checks left it out (the
+ * flag untranslated:<language>:<why>): "declined", "remark", "too_long", "empty", "failed", or
+ * a word a later version sends ("" for none); null when it wasn't. */
+export function leftOut(u: Pick<Utterance, "flags">, shown: string): string | null {
+  for (const f of u.flags || []) {
+    if (!f.startsWith("untranslated:")) continue;
+    const [, lang, why = ""] = f.split(":");
+    if (sameLang(lang, shown)) return why;
+  }
+  return null;
+}
+
 // -- choosing a language ------------------------------------------------------------------------
 
 /** The languages a speech model can usually write down (Whisper's list), with the regional forms

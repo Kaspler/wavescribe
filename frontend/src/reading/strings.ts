@@ -4,6 +4,14 @@
 const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
 /** ", about 1.5 GB", ", a few megabytes", or nothing while the size isn't known. */
 const about = (gb: number | null) => (gb == null ? "" : gb >= 0.1 ? `, about ${gb.toFixed(1)} GB` : ", a few megabytes");
+/** Why a line has no translation, by the reason its flag gives (T.noTranslationWhy). */
+const NO_TRANSLATION: Record<string, string> = {
+  declined: "No translation: the model couldn't translate this line.",
+  remark: "No translation: the model couldn't translate this line.",
+  too_long: "No translation: the model's reply was far longer than the line, so it was left out.",
+  empty: "No translation: the model's reply was empty.",
+  failed: "No translation: translating this line failed.",
+};
 
 export const T = {
   search: "Search or ask",
@@ -111,6 +119,12 @@ export const T = {
   heardAs: (lang: string) => `heard as ${lang}`,
   heardAsWhy: (lang: string, station: string | null) =>
     `Speech recognition wrote this in ${lang}, not ${station ?? "the station's language"}. Either ${lang} was spoken here (a guest, a clip, a song), or it misheard, and these words may be wrong.`,
+  // A line whose translation into the reader's language was left out (lib/lang's leftOut): the
+  // model said it can't translate it or wrote about it instead, or its reply was far too long or
+  // empty, or translating failed. The line keeps its words as heard.
+  noTranslation: "no translation",
+  noTranslationWhy: (why: string, lang: string) =>
+    `${NO_TRANSLATION[why] ?? "No translation."} These are the words as heard, in ${lang}.`,
   thinking: "Thinking… usually under a minute",
   thinkingHere: "Thinking… usually under a minute on this Mac",
   lastText: (ago: string) => `last text ${ago} ago`,

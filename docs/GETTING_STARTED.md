@@ -182,7 +182,9 @@ rewritten.
   speech recognised so badly that the model said so, or answered with a comment about the text
   ("the meaning is unclear…") instead of a translation. Such a reply is never shown as what the
   station said; the line is kept with a note of why, which the feed carries as the flag
-  `untranslated:<language>:<why>` (`declined`, `remark`, `too_long`, `empty` or `failed`). A
+  `untranslated:<language>:<why>` (`declined`, `remark`, `too_long`, `empty` or `failed`). On
+  the page such a line starts with the label **"no translation"**, like "heard as …"; hovering
+  over, focusing or tapping it says why. A
   note the model added in brackets ("[missing word]", "(possibly a recognition error)") is taken
   out of a translation that is otherwise kept. Comments are recognised by their shape in any
   language, and by their wording only in German, English, Spanish, French, Portuguese and

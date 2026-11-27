@@ -3,7 +3,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, u
 import { createPortal } from "react-dom";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
-import { dirOf, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
+import { dirOf, langNameEn, leftOut, otherLang, pick, sameLang, shownLang } from "../lib/lang";
 import { S, linesAround, loadEarlier, post, running, setNotice, startStation, stationsChanged } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
@@ -479,11 +479,12 @@ const ParaView = memo(function ParaView({ para, st, shown, src, channel }: { par
   a.para.utts.length === b.para.utts.length && a.para.utts.every((u, i) => u === b.para.utts[i]));
 
 /** Why an utterance isn't in the reader's language, if it isn't, or for a station whose speech
- * model tells each line's language, the language it told: the chip a run of them shares. */
+ * model tells each line's language, the language it told: the chip a run of them shares. A line
+ * whose translation was left out says so, as "heard as" says its own reason. */
 function labelOf(u: Utterance, st: Station, shown: string): string {
   const [, lang, state] = pick(u, st, shown);
   const other = otherLang(u);
-  if (state === "untranslated") return langNameEn(lang);
+  if (state === "untranslated") return leftOut(u, shown) != null ? T.noTranslation : langNameEn(lang);
   if (other) return T.heardAs(langNameEn(other));
   return st.language === "auto" && sameLang(shown, st.language) && u.language ? langNameEn(u.language) : "";
 }
@@ -535,6 +536,7 @@ function HintChip({ label, hint }: { label: string; hint: string }) {
 function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; shown: string; linked: boolean; label: boolean }) {
   const [text, lang, state] = pick(u, st, shown);
   const other = otherLang(u);
+  const why = state === "untranslated" ? leftOut(u, shown) : null; // its translation was left out
   const hits = u.hits || [];
   const fresh = S.fresh.has(u.key);
   if (state === "pending") {
@@ -547,17 +549,19 @@ function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; s
       </span>
     );
   }
-  // What "heard as" means is the chip's own hint, on hover, focus or a tap.
+  // What "heard as" and "no translation" mean is the chip's own hint, on hover, focus or a tap.
   const title = [
     hits.length ? `Alert rule: ${[...new Set(hits.map((h) => h.rule))].join(", ")}` : "",
-    state === "untranslated" ? `Not translated into ${langNameEn(shown)}` : "",
+    state === "untranslated" && why == null ? `Not translated into ${langNameEn(shown)}` : "",
   ].filter(Boolean).join(" · ");
   const sev = hits.length ? topSeverity(hits.map((h) => h.severity)) : null;
   return (
     <span data-k={u.key} data-u={u.id ?? undefined} lang={lang} dir="auto" title={title || undefined}
           className={cx("u", fresh && "u-fresh", state === "untranslated" && "u-untranslated", other && "u-other",
                         sev && text !== u.text && `u-hit kw-${sev}`, linked && "is-linked")}>
-      {label && (other
+      {label && (why != null
+        ? <HintChip label={T.noTranslation} hint={T.noTranslationWhy(why, langNameEn(lang))} />
+        : other
         ? <HintChip label={labelOf(u, st, shown)} hint={T.heardAsWhy(langNameEn(other), st.language === "auto" ? null : langNameEn(st.language))} />
         : <span className="u-lang">{labelOf(u, st, shown)}</span>)}
       {utteranceWords(u, text)}{" "}
