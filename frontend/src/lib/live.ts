@@ -1,5 +1,6 @@
 // The page's live data: /api/state once per connection, then /api/events, shared by the tabs
 // open in this browser (tabs.ts).
+import { takeAlert } from "./alerts";
 import { fetchRead, onWanted, streamWantsToken, ticketed, wanted } from "./auth";
 import { sameLang } from "./lang";
 import { P, setPrefs } from "./prefs";
@@ -34,6 +35,8 @@ export const S = {
   index: new Map<string, Utterance>(),
   alerts: new Map<number, Alert>(),
   freshAlert: null as number | null,
+  /** Counts the alerts that rang (new, or more serious), so the same alert can ring again. */
+  rang: 0,
   fresh: new Set<string>(), // utterance keys that just arrived, for a brief highlight
   reading: new Set<string>(), // stations whose column is scrolled back: don't trim them
   notice: "" as string, // one line of trouble shown under the header
@@ -95,7 +98,8 @@ export async function loadState() {
     const lang = firstLanguage(state.stations);
     if (lang) setPrefs({ lang });
   }
-  S.alerts = new Map((state.alerts || []).map((a) => [a.id, a]));
+  // Stored alerts don't say what changed lately; what this page heard of that is kept.
+  S.alerts = new Map((state.alerts || []).map((a) => [a.id, { ...a, lately: S.alerts.get(a.id)?.lately }]));
   S.utts = {};
   S.index.clear();
   for (const u of state.recent) {
@@ -155,9 +159,12 @@ function upsert(u: Utterance) {
 }
 
 function upsertAlert(a: Alert) {
-  const isNew = !S.alerts.has(a.id);
-  S.alerts.set(a.id, a);
-  if (isNew) S.freshAlert = a.id;
+  const { alert, rings } = takeAlert(S.alerts.get(a.id), a);
+  S.alerts.set(a.id, alert);
+  if (rings) {
+    S.freshAlert = a.id;
+    S.rang++;
+  }
   if (S.alerts.size > MAX_ALERTS) {
     // a page left open for weeks: keep the newest (ids grow in arrival order)
     const ids = [...S.alerts.keys()].sort((x, y) => x - y);

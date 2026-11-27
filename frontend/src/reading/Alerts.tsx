@@ -135,6 +135,7 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
         <span className="alert-meta">
           {names.map((n, i) => <span key={n}>{i > 0 && ", "}<bdi>{n}</bdi></span>)}
           {a.mentions > 1 && ` · ${T.mentions(a.mentions)}`}
+          {a.lately && ` · ${T.lately[a.lately]}`}
           {untranslated && ` · ${T.notTranslated(langNameEn(a.language))}`}
           {trouble && <span className="is-trouble"> · {trouble}</span>}
         </span>
@@ -178,11 +179,11 @@ export function AlertAnnouncer() {
   useTopics("alerts");
   const [polite, setPolite] = useState("");
   const [urgent, setUrgent] = useState("");
-  const seen = useRef<number | null>(null);
+  const seen = useRef(S.rang);
   useEffect(() => {
     const id = S.freshAlert;
-    if (id == null || id === seen.current) return;
-    seen.current = id;
+    if (id == null || S.rang === seen.current) return;
+    seen.current = S.rang;
     const a = S.alerts.get(id);
     if (!a || a.severity === "low") return;
     const where = a.stations.map((s) => S.byId[s]?.name || s).join(", ");

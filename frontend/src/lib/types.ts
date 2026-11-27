@@ -75,6 +75,11 @@ export interface Alert {
   kind: string;
   reason: string | null;
   summaries: Record<string, string>;
+  /** What this event changed; live events only (lib/alerts.ts). */
+  change?: "new" | "escalated" | "reminder" | "ended" | "update";
+  /** The page's own note of a quiet change since the alert was announced: still being
+   * mentioned, or over. */
+  lately?: "reminder" | "ended";
 }
 
 /** One running station as the pipeline reports it. */

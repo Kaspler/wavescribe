@@ -26,6 +26,7 @@ export const T = {
   notTranslated: (lang: string) => `${lang}, not translated`,
   wordsStayThere: "The words stay on the Wavescribe machine.",
   mentions: (n: number) => `${n} mentions`,
+  lately: { reminder: "still being mentioned", ended: "ended" },
   matched: "Matched",
   play: "Play",
   showInTranscript: "Show in the transcript",
