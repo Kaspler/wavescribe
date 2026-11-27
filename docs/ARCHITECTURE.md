@@ -1158,7 +1158,7 @@ it back to 16 kHz PCM with ffmpeg.
 
 **Retention.** Text, translations and their
 index cost about 5.5 bytes per character (measured on real transcripts), so four talk stations
-with one translation add roughly 11–14 GB a year. Forever would break the bounded-disk rule, so
+with one translation add about 11 GB a year. Forever would break the bounded-disk rule, so
 text is kept for `--text-days` (default 365). Speech can't arrive faster than real time, so an age
 limit is also a hard size limit, with no feedback loop. A byte cap was tried first and dropped:
 FTS5 frees index pages only when it merges segments (even with `secure-delete`, which is on),

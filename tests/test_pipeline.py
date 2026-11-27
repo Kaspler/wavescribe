@@ -971,3 +971,33 @@ def test_a_line_of_a_station_that_hears_any_language_keeps_the_language_heard(mo
     pipeline.stop()
     english = next(r for r in results if r.transcript.text == "already English")
     assert english.translations == {"fr": "fr:already English"}
+
+
+def test_a_worker_is_listed_only_once_it_has_started(monkeypatch) -> None:
+    """stop joins the listed threads, and joining one that hasn't started raises: a stop that
+    came while a station was starting ended with an error instead of stopping."""
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline._lock, pipeline._threads, pipeline._errors = threading.Lock(), [], []
+    seen: list[list[threading.Thread]] = []
+    start = threading.Thread.start
+
+    def slow_start(thread: threading.Thread) -> None:
+        if thread.name == "worker":  # someone asks for the list while this one is starting
+            asking = threading.Thread(target=lambda: seen.append(pipeline._listed()))
+            start(asking)
+            asking.join(timeout=0.2)
+        start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", slow_start)
+    done = threading.Event()
+    pipeline._spawn("worker", done.wait)
+    monkeypatch.undo()
+    wait_listed = time.monotonic() + 5
+    while not seen and time.monotonic() < wait_listed:
+        time.sleep(0.01)
+    assert seen and all(t.ident is not None for t in seen[0])
+    assert [t.name for t in pipeline._listed()] == ["worker"]
+    done.set()
+    for t in pipeline._listed():
+        t.join(timeout=5)  # what stop does: never "cannot join thread before it is started"
+        assert not t.is_alive()

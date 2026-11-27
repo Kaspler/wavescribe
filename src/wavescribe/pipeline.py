@@ -706,11 +706,11 @@ class Pipeline:
         for live in list(self._live.values()):
             live.stopping = True  # also ends a station's wait to restart after a failure
             live.source.close()
-        for t in list(self._threads):
+        for t in self._listed():
             if t.name.startswith("source-"):
                 t.join(timeout=10)
         self._put_sentinel(self._asr_q, wait=self._alive("asr"))  # a dead one's never empties
-        for t in list(self._threads):
+        for t in self._listed():
             t.join(timeout=None if drain else 10)
         self._stop.set()
 
@@ -1059,6 +1059,10 @@ class Pipeline:
             with contextlib.suppress(queue.Full):  # a busy worker sees _stop after this item
                 q.put_nowait((_STOP_NOW, 0, None))
 
+    def _listed(self) -> list[threading.Thread]:
+        with self._lock:
+            return list(self._threads)
+
     def _spawn(self, name: str, target: Callable, *args: object) -> None:
         def guarded() -> None:
             try:
@@ -1068,9 +1072,11 @@ class Pipeline:
                 self._errors.append(e)
 
         t = threading.Thread(target=guarded, name=name, daemon=True)
-        with self._lock:  # add_station replaces the list while it drops finished threads
+        # Started before it is listed, and both under the lock: add_station drops the threads
+        # that aren't alive, and stop joins the listed ones, which one not started yet refuses.
+        with self._lock:
+            t.start()
             self._threads.append(t)
-        t.start()
 
     def _notify(self, callback: Callable | None, *args: object) -> None:
         # Observers (views) must never take a worker down with them.
