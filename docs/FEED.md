@@ -176,7 +176,7 @@ an EventSource on such a page.
 
 | Who | The page's data: what was said, alerts, catches, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
 |---|---|---|---|---|
-| This machine | yes | yes, no token | yes | yes |
+| This machine | yes | yes, no token | yes | yes; behind a proxy only with `wavescribe token` (below) |
 | The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
 | Through a proxy (`serve --behind-proxy`, or a request carrying a proxy's header) | a `read` token, unless `serve --public-read` | always a `read` token | only with `--allow-remote-ask`, and a `read` token unless `--public-read` | never |
 
@@ -216,11 +216,26 @@ an EventSource on such a page.
   else gets 421, so a website whose name is made to resolve to 127.0.0.1 (DNS rebinding) can't
   reach the page's controls.
 - **Tokens** are made on the page (*Settings → Connections → For other programs → Feed
-  tokens*) with a scope:
+  tokens*), or with `wavescribe token` on the Wavescribe machine, with a scope:
   - `read`: the feed, and the page's data through a proxy;
   - `push`: `/feed/v1/ingest`.
 
-  Send one as `Authorization: Bearer <token>`. A token is shown once and only its SHA-256 hash
+  Behind a proxy the page's controls are off, even on the Wavescribe machine, so there the
+  command is the way. Run it in the folder Wavescribe runs in, while it runs:
+
+  ```sh
+  uv run wavescribe token make --label "kitchen screen"   # prints the token once
+  uv run wavescribe token list                            # ids, scopes, labels
+  uv run wavescribe token revoke 3f9c0a1b                 # by the id the list shows
+  ```
+
+  It reaches the running Wavescribe through `data/control.key`, a random key `serve` makes
+  once, readable by you only. A request from this machine's own address that carries it counts
+  as this machine's, proxy or not; the command sends it only to this machine (`--url` must be
+  `localhost`). Keep the file as private as `config/ui.toml`, and delete it to make a new one
+  at the next start.
+
+  Send a token as `Authorization: Bearer <token>`. A token is shown once and only its SHA-256 hash
   is kept, in `config/ui.toml` (mode 0600). Deleting a token ends the streams opened with it
   at once (the feed, the page's live events and audio), and its unused tickets stop working.
 - **Where a header can't be set** (a browser's EventSource), trade a `read` token for a stream

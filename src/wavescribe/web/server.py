@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hmac
 import io
 import ipaddress
 import json
@@ -36,6 +37,7 @@ from urllib.parse import parse_qs, urlsplit
 from wavescribe import jsonsafe
 from wavescribe.audio import SAMPLE_RATE, AudioChunk
 from wavescribe.config import StationsConfig
+from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
 from wavescribe.pipeline import Pipeline, Plan, Result
 from wavescribe.web import feed
@@ -830,8 +832,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _is_local(self) -> bool:
         """The request comes from this machine (only it may start and stop stations). Behind a
-        proxy, even one on this machine, every request is another machine's."""
-        return not self._proxied() and _loopback(self.client_address[0])
+        proxy, even one on this machine, every request is another machine's, unless it also
+        carries this machine's control key (``wavescribe.control``: ``wavescribe token``)."""
+        if not _loopback(self.client_address[0]):
+            return False
+        return not self._proxied() or self._holds_key()
+
+    def _holds_key(self) -> bool:
+        key, given = getattr(self.server, "control_key", None), self.headers.get(KEY_HEADER)
+        if not key or not given:
+            return False
+        return hmac.compare_digest(key.encode(), given.encode("latin-1", "replace"))
 
     def _page(self, name: str) -> None:
         """The built page: frontend/ builds into web/dist/, which ships with the package, so
@@ -1199,10 +1210,12 @@ class WebServer(ThreadingHTTPServer):
         *,
         public_read: bool = False,
         remote_ask: bool = False,
+        control_key: str | None = None,
     ) -> None:
         super().__init__(address, Handler)
         self.hub = hub
         self.behind_proxy = behind_proxy
+        self.control_key = control_key  # this machine's commands carry it (wavescribe.control)
         self.public_read = public_read  # through a proxy, the page's reads need no token
         self.remote_ask = remote_ask  # other machines may ask the local model
         self._remote_lock = threading.Lock()
@@ -1252,11 +1265,12 @@ def serve(
     behind_proxy: bool = False,
     public_read: bool = False,
     remote_ask: bool = False,
+    control_key: str | None = None,
 ) -> None:
     """Run ``app`` (``wavescribe.app.App``) with its page until Ctrl-C."""
     check_port(host, port)
     server = WebServer((host, port), app.hub, behind_proxy, public_read=public_read,
-                       remote_ask=remote_ask)  # fmt: skip
+                       remote_ask=remote_ask, control_key=control_key)  # fmt: skip
     threading.Thread(target=server.serve_forever, daemon=True, name="web").start()
     app.start_sampling()
     if on_ready is not None:

@@ -279,6 +279,17 @@ def cmd_listen(args: argparse.Namespace) -> int:
     return 0
 
 
+def port_number(value: str) -> int:
+    """A TCP port for ``--port``: 1 to 65535."""
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a port number") from None
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} isn't a port: ports are 1 to 65535")
+    return port
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -333,9 +344,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if args.open:
             webbrowser.open(url)
 
+    from wavescribe.control import load_key
+
     try:
         serve(app, host=host, port=args.port, on_ready=ready, behind_proxy=args.behind_proxy,
-              public_read=args.public_read, remote_ask=args.allow_remote_ask)  # fmt: skip
+              public_read=args.public_read, remote_ask=args.allow_remote_ask,
+              control_key=load_key(DATA_DIR, create=True))  # fmt: skip
     finally:
         if app.alerter is not None:
             app.alerter.close()
@@ -825,7 +839,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--lan", action="store_true", help="let other devices on the LAN read along (read-only)"
     )
-    p.add_argument("--port", type=int, default=8765, help="port for the page (default 8765)")
+    p.add_argument("--port", type=port_number, default=8765, help="port for the page (default "
+                   "8765)")  # fmt: skip
     p.add_argument(
         "--behind-proxy", action="store_true",
         help="a reverse proxy or tunnel forwards to this server: treat every request as another "
@@ -917,8 +932,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_bakeoff)
 
     from wavescribe.agent.cli import add_parser as add_agent_parser
+    from wavescribe.token_cli import add_parser as add_token_parser
 
     add_agent_parser(sub)
+    add_token_parser(sub)
     _describe(parser)
     return parser
 
