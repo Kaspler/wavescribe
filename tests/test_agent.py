@@ -602,6 +602,8 @@ def test_mcp_control_tools_only_with_allow_control(tmp_path: Path) -> None:
         assert "a" not in running()
         failed, why = mcp.call("start_station", station="nope")
         assert failed and "unknown station 'nope'" in why  # passed on as the server said it
+        failed, why = mcp.call("stop_station", station="nope")  # refused alike, not "ok"
+        assert failed and "unknown station 'nope'" in why
         bad = {
             "name": "add_station",
             "arguments": {"name": "x", "url": "file:///etc/hosts", "language": "en"},
@@ -610,6 +612,25 @@ def test_mcp_control_tools_only_with_allow_control(tmp_path: Path) -> None:
         mcp.close()
     finally:
         node.close()
+
+
+def test_stop_refuses_a_station_nobody_set_up_and_stops_any_other(tmp_path) -> None:
+    from wavescribe.config import ConfigError
+
+    app = make_app(tmp_path)
+    try:
+        with pytest.raises(ConfigError, match="unknown station 'nope'"):
+            app.stop_station("nope")
+        app.stop_station("a")  # set up and not running: nothing to stop, and no error
+        # A page station its entry no longer builds is still set up: stopped, then deleted.
+        app.settings.update(lambda d: d.setdefault("station", []).append(
+            {"id": "broken", "name": "Broken", "language": "en", "stream": "ftp://x"}))  # fmt: skip
+        app._reload()
+        assert "broken" in app.config_errors
+        app.delete_station("broken")
+        assert not any(s.get("id") == "broken" for s in app.settings.get("station") or [])
+    finally:
+        app.close()
 
 
 def test_start_right_after_stop_starts_the_station_or_says_why_not(tmp_path, monkeypatch) -> None:

@@ -680,6 +680,10 @@ class App:
         self._remember_running(sid, True)
 
     def stop_station(self, sid: str) -> None:
+        set_up = {s.id for s in self.config.stations}
+        set_up |= {s.get("id") for s in self.settings.get("station") or []}  # one that broke
+        if sid not in set_up and sid not in self.running():
+            self.config.get(sid)  # no station by that id: says so, as start does
         self.listen_only_run.discard(sid)
         follower = self.followers.pop(sid, None)
         if follower is not None:
