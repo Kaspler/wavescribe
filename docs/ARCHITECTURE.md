@@ -45,7 +45,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
 | `Asker` | Answers a question about what was said (`ask.py`) | The translation LLM plans a search (stations, time range, words in the translation and station languages), FTS5 finds excerpts, and the LLM answers in the question's language citing them as [n]. Runs on the translation thread through `Pipeline.request_llm` |
-| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`, giving way between tokens to alerts and questions; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`); a digest is cancelled by its request id through the same give-way path |
+| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`, giving way between tokens to alerts and questions; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`, or the page's in its place); a digest is cancelled by its request id through the same give-way path |
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md` | `ModelRegistry` (`registry.py`) |
 | Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes | — |
 
@@ -384,7 +384,13 @@ minute at most (`ALERT_WAIT_S`); then it isn't read, and the log says so.
 Scheduled digests run at the first real minute whose local time is on a period, so a change of
 the clocks neither skips nor repeats one, at least a minute apart; each covers the time since
 the one before, and each is shown as a notification without the alerts' sound, whatever became
-of it.
+of it. The page sets the schedule too (`/api/manage/digest/schedule`, local only like every
+control): checked as `[digest]` is, with a coded refusal naming the field, saved as
+`[alerts.digest]` in `config/ui.toml`, which takes the place of alerts.toml's whole table
+(`off = true`: none), and applied at once: the running `Scheduler` is stopped (its own closed
+event; a digest it is making is dropped) and a new one started. A page schedule that no longer
+loads at start (a station it names was deleted) is logged and skipped; a broken file table
+still stops the start.
 
 ### Settings, Find and Listen; feed and receivers
 
@@ -395,7 +401,7 @@ written by the program (mode 0600, replaced atomically) and laid over the hand-e
 stations and dongles; `[run] stations`, the stations to start next time; `[models]`, the chain
 order per capability; `[retention]`; `[node]` (name, public URL); `[[output]]`; `[[feed_token]]`
 (SHA-256 hashes only); `[alerts]` (delivery, actions, voices, rules added on the page, rules
-switched off). A broken override is reported and skipped, never fatal: the station keeps its
+switched off, and `[alerts.digest]`, the digest schedule in place of the file's). A broken override is reported and skipped, never fatal: the station keeps its
 file settings. An override that leaves the station as the file has it (a language added and
 removed again, a form that sends unchanged fields) is not saved, and the page's "changed here"
 (`overridden`) lists only the keys that make the station differ from the file; confirmations

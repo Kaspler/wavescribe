@@ -146,12 +146,18 @@ def load_alerts(path: Path, keywords_dir: Path = DEFAULT_KEYWORDS_DIR) -> AlertC
 
 def merge_page(raw: dict[str, Any], page: dict[str, Any]) -> tuple[dict[str, Any], list, tuple]:
     """alerts.toml with the page's changes (``[alerts]`` in config/ui.toml) laid over it: its
-    delivery settings, actions and voices per key, its own rules, and file rules it switched
-    off. Returns (raw, page rules, disabled rule ids)."""
+    delivery settings, actions and voices per key, its own rules, file rules it switched off,
+    and its digest schedule in place of the file's whole (``off = true``: none). Returns (raw,
+    page rules, disabled rule ids)."""
     out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in raw.items()}
     for key in ("delivery", "actions", "speak"):
         if page.get(key):
             out[key] = {**out.get(key, {}), **page[key]}
+    digest = page.get("digest")
+    if isinstance(digest, dict):  # digest/schedule.py
+        out.pop("digest", None)
+        if not digest.get("off"):
+            out["digest"] = {k: v for k, v in digest.items() if k != "off"}
     return out, list(page.get("rule", [])), tuple(page.get("disabled_rules", ()))
 
 

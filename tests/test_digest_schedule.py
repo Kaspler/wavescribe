@@ -4,12 +4,15 @@
 import itertools
 import threading
 import time
+import tomllib
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+import tests.test_app
 from tests.test_alerts import FakeActions
+from tests.test_app import Running, make_app, wait_for
 from tests.test_digest import MIN, NOW, STATIONS, FakeLlm, add, digester, stocked
 from wavescribe.alerts import Voice
 from wavescribe.config import ConfigError
@@ -62,23 +65,47 @@ def test_the_schedule_is_read_from_its_table() -> None:
 
 
 @pytest.mark.parametrize(
-    ("raw", "says"),
+    ("raw", "says", "code"),
     [
-        ({"every_minutes": 7}, "every_minutes must divide a day into equal parts"),
-        ({"every_minutes": 2}, "every_minutes must divide a day"),
-        ({"stations": "a"}, "stations must be a list of station ids"),
-        ({"language": "English"}, "language must be a BCP-47 tag"),
-        ({"speak": "yes"}, "speak is true or false"),
-        ({"speak": True, "language": "uk"}, r"speak = true needs a \[speak.uk\] voice"),
-        ({"quiet_hours": ["22:00"]}, "quiet_hours is a start and an end"),
-        ({"quiet_hours": ["22:00", "25:00"]}, "quiet_hours is a start and an end"),
-        ({"quiet_hours": ["00:00", "00:00"]}, "quiet_hours starts and ends at the same time"),
-        ({"notify": True}, r"unknown keys \['notify'\]"),
+        ({"every_minutes": 7}, "every_minutes must divide a day into equal parts", "bad_every"),
+        ({"every_minutes": 2}, "every_minutes must divide a day", "bad_every"),
+        ({"stations": "a"}, "stations must be a list of station ids", "bad_stations"),
+        ({"language": "English"}, "language must be a BCP-47 tag", "bad_language"),
+        ({"speak": "yes"}, "speak is true or false", "bad_speak"),
+        ({"speak": True, "language": "uk"}, r"speak = true needs a \[speak.uk\] voice", "no_voice"),
+        ({"quiet_hours": ["22:00"]}, "quiet_hours is a start and an end", "bad_quiet_hours"),
+        (
+            {"quiet_hours": ["22:00", "25:00"]},
+            "quiet_hours is a start and an end",
+            "bad_quiet_hours",
+        ),
+        (
+            {"quiet_hours": ["00:00", "00:00"]},
+            "quiet_hours starts and ends at the same time",
+            "bad_quiet_hours",
+        ),
+        ({"notify": True}, r"unknown keys \['notify'\]", "unknown_keys"),
     ],
 )
-def test_a_schedule_written_wrongly_says_what_to_change(raw, says) -> None:
-    with pytest.raises(ConfigError, match=r"alerts.toml \[digest\]: " + says):
+def test_a_schedule_written_wrongly_says_what_to_change(raw, says, code) -> None:
+    with pytest.raises(ConfigError, match=r"alerts.toml \[digest\]: " + says) as refused:
         parse(**raw)
+    assert refused.value.code == code
+    # The page's: the same refusal, without a file to name.
+    with pytest.raises(ConfigError, match="^" + says) as refused:
+        parse_schedule(raw, None, voices=VOICES, language="en")
+    assert refused.value.code == code
+
+
+def test_a_refusal_names_the_field_and_what_it_takes() -> None:
+    with pytest.raises(ConfigError) as refused:
+        parse(every_minutes=7)
+    assert refused.value.extra["field"] == "every_minutes"
+    assert refused.value.extra["choices"][:6] == [5, 6, 8, 9, 10, 12]
+    assert refused.value.extra["choices"][-1] == 1440 and 7 not in refused.value.extra["choices"]
+    with pytest.raises(ConfigError) as refused:
+        parse(speak=True, language="uk")
+    assert refused.value.extra == {"field": "speak", "language": "uk"}
 
 
 def test_a_station_the_schedule_names_must_be_set_up(tmp_path: Path) -> None:
@@ -108,6 +135,13 @@ def test_digests_come_at_whole_periods_of_the_local_clock(lisbon) -> None:
     night = Schedule(60, "en", quiet=(22 * 60, 7 * 60))
     moments = ("2026-03-04 23:30", "2026-03-04 06:59", "2026-03-04 07:00", "2026-03-04 12:00")
     assert [night.is_quiet(wall(m)) for m in moments] == [True, True, False, False]
+
+
+def test_the_next_digest_made_is_the_first_outside_the_quiet_hours(lisbon) -> None:
+    night = Schedule(60, "en", quiet=(22 * 60, 7 * 60))
+    assert night.next_delivery(wall("2026-03-04 20:30")) == wall("2026-03-04 21:00")
+    assert night.next_delivery(wall("2026-03-04 21:30")) == wall("2026-03-05 07:00")
+    assert Schedule(15, "en").next_delivery(wall("2026-03-04 21:31")) == wall("2026-03-04 21:45")
 
 
 def test_a_change_of_the_clocks_never_puts_the_next_digest_in_the_past(lisbon) -> None:
@@ -284,3 +318,121 @@ def test_a_schedule_reads_out_only_words_that_may_leave(tmp_path: Path) -> None:
     scheduled(store, llm, Schedule(60, "en"), FakeActions()).tick()
     assert "secreto" not in llm.prompts[0]
     store.close()
+
+
+# -- set on the page ----------------------------------------------------------------------------
+
+SCHEDULE = "/api/manage/digest/schedule"
+
+
+@pytest.fixture
+def schedulers(monkeypatch: pytest.MonkeyPatch):
+    """The schedulers started and stopped, without their threads: no digest is made."""
+    started: list[Scheduler] = []
+    stopped: list[Scheduler] = []
+    stop = Scheduler.stop
+    monkeypatch.setattr(Scheduler, "start", lambda self: started.append(self))
+    monkeypatch.setattr(Scheduler, "stop", lambda self: (stopped.append(self), stop(self)))
+    return started, stopped
+
+
+def saved(app) -> dict:
+    return tomllib.loads(app.settings.path.read_text()).get("alerts", {}).get("digest")
+
+
+def test_the_page_sets_the_schedule_in_place_of_the_files_at_once(
+    tmp_path: Path, monkeypatch, schedulers
+) -> None:
+    started, stopped = schedulers
+    alerts = tests.test_app.ALERTS + '\n[digest]\nevery_minutes = 30\nstations = ["a"]\n'
+    monkeypatch.setattr(tests.test_app, "ALERTS", alerts)
+    node = Running(make_app(tmp_path))
+    app = node.app
+    try:
+        wait_for(lambda: started)  # the run started alerts.toml's
+        status, view = node.call("GET", SCHEDULE)
+        assert status == 200 and (view["source"], view["enabled"], view["running"]) == (
+            "file",
+            True,
+            True,
+        )
+        assert view["schedule"] == {
+            "every_minutes": 30,
+            "stations": ["a"],
+            "language": "en",
+            "speak": False,
+            "quiet_hours": None,
+        }
+        assert view["next_at"] > time.time() and view["file"].endswith("alerts.toml")
+        assert view["digest_code"] == "no_llm"  # this run's translator is no LLM
+        assert 45 in view["every_minutes_choices"] and 7 not in view["every_minutes_choices"]
+        assert (view["language"], view["voices"], view["alerts"]) == ("en", [], True)
+
+        body = {"every_minutes": 15, "stations": ["b"], "quiet_hours": ["22:00", "07:00"]}
+        status, view = node.call("POST", SCHEDULE, body)
+        assert status == 200 and view["source"] == "page" and view["running"]
+        assert view["schedule"] == {**body, "language": "en", "speak": False}
+        assert stopped == [started[0]] and started[0]._closed.is_set()
+        assert app.digests is started[1] and app.digests.schedule.every_minutes == 15
+        assert not app.hub._closed.is_set()  # its own event was set, not the app's
+        assert saved(app) == body
+
+        for wrong, code, field in (
+            ({"every_minutes": 7}, "bad_every", "every_minutes"),
+            ({"stations": ["zz"]}, "unknown_station", "stations"),
+            ({"speak": True}, "no_voice", "speak"),
+            ({"quiet_hours": ["22:00"]}, "bad_quiet_hours", "quiet_hours"),
+            ({"enabled": "no"}, "bad_enabled", None),
+            ({"notify": True}, "unknown_keys", None),
+        ):
+            status, out = node.call("POST", SCHEDULE, wrong)
+            assert (status, out["code"], out.get("field")) == (400, code, field), wrong
+        assert len(started) == 2 and app.digests is started[1] and saved(app) == body
+
+        # Off: none runs, and what was set is kept for the page to show.
+        status, view = node.call("POST", SCHEDULE, {**body, "enabled": False})
+        assert (view["enabled"], view["running"], view["next_at"]) == (False, False, None)
+        assert view["schedule"]["every_minutes"] == 15 and app.digests is None
+        assert saved(app) == {**body, "off": True} and stopped[-1] is started[1]
+
+        # Another machine: never, not even to look.
+        status, _ = node.call("GET", SCHEDULE, headers={"X-Forwarded-For": "192.168.1.20"})
+        assert status == 403
+
+        # Forgotten: alerts.toml's again.
+        status, view = node.call("DELETE", SCHEDULE)
+        assert status == 200 and view["source"] == "file" and view["running"]
+        assert app.digests is started[-1] and app.digests.schedule.every_minutes == 30
+        assert saved(app) is None
+    finally:
+        node.close()
+
+
+def test_the_pages_schedule_is_used_at_start_and_a_broken_one_is_skipped(
+    tmp_path: Path, schedulers
+) -> None:
+    page = {"alerts": {"digest": {"every_minutes": 20, "stations": ["a"]}}}
+    app = make_app(tmp_path, page=page)
+    try:
+        assert app.digests.schedule == Schedule(20, "en", ("a",))
+        assert app.digest_schedule_view()["source"] == "page"
+    finally:
+        app.pipeline.stop()
+        app.close()
+        app.store.close()
+
+    # Written by the program: a station it names may have been deleted since.
+    gone = {"alerts": {"digest": {"every_minutes": 20, "stations": ["gone"]}}}
+    app = make_app(tmp_path, "again", page=gone)
+    try:
+        assert app.digests is None and "no station 'gone'" in (app.digest_error or "")
+        view = app.digest_schedule_view()
+        assert (view["error_code"], view["running"], view["source"]) == (
+            "unknown_station",
+            False,
+            "page",
+        )
+    finally:
+        app.pipeline.stop()
+        app.close()
+        app.store.close()

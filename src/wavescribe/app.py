@@ -38,7 +38,7 @@ from wavescribe.pipeline import (
     plan_available,
     plan_station,
 )
-from wavescribe.refusal import Refusal
+from wavescribe.refusal import Refusal, said
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
 from wavescribe.rules import LlmRule, parse_rule
 from wavescribe.settings import (
@@ -132,6 +132,13 @@ class ChangeError(Refusal):
 
 class NotFound(ChangeError):
     """What the change is about doesn't exist (a 404 on the page's routes)."""
+
+
+# Digests on a schedule are delivered as alerts are: without alerts, there are none.
+ALERTS_OFF = (
+    "alerts are off for this run (started with --no-alerts), and digests on a schedule come "
+    "with them"
+)
 
 
 def slug(text: str) -> str:
@@ -310,7 +317,17 @@ class App:
                 music=self.pipeline.music_heard,
             )
             self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
-        self.digests = self._digest_schedule()
+        self._digests_lock = threading.Lock()  # the page replaces the scheduler
+        self._digests_running = False  # run() started them: a replacement starts at once
+        self.digest_error: str | None = None  # why the page's schedule wasn't used at start
+        try:
+            self.digests = self._digest_schedule()
+        except ConfigError as e:
+            if not self._page_digest():
+                raise  # alerts.toml's: it stops the start, as a broken file does
+            # The page's, written by the program: a station it names may have gone since.
+            log.warning("the page's digest schedule is not used: %s", e)
+            self.digests, self.digest_error = None, said(e)
         from wavescribe.downloads import Downloads
 
         self.downloads = Downloads(registry, on_done=self.models_changed)
@@ -333,8 +350,10 @@ class App:
         """Run until Ctrl-C (the pipeline's loop)."""
         for sid in self._starting_remote:
             self._start_follower(self.config.get(sid))
-        if self.digests is not None:
-            self.digests.start()
+        with self._digests_lock:
+            self._digests_running = True
+            if self.digests is not None:
+                self.digests.start()
         try:
             self.pipeline.run(until_idle=False)
         finally:
@@ -351,6 +370,10 @@ class App:
         if self.llm_rules is not None:
             self.llm_rules.close()
         self.outputs.close()
+        with self._digests_lock:
+            self._digests_running = False
+            if self.digests is not None:
+                self.digests.stop()  # a digest being made is dropped
         self.hub.close()
         self.speech.close()  # a digest being read aloud: its `say` mustn't outlive the app
 
@@ -1181,27 +1204,146 @@ class App:
     def _alert_voices(self) -> dict[str, Any]:
         return dict(self.alerter.config.voices) if self.alerter is not None else {}
 
-    def _digest_schedule(self):  # -> Scheduler | None
-        """``[digest]`` in alerts.toml: digests on a schedule, spoken in the alerts' voices."""
+    def _digest_schedule(self, page: dict[str, Any] | None = None):  # -> Scheduler | None
+        """``[digest]`` in alerts.toml, or the page's in its place (``[alerts.digest]`` in
+        config/ui.toml): digests on a schedule, spoken in the alerts' voices. Not started.
+        ``page``: the page's alert settings to use rather than those saved."""
         from wavescribe.digest.schedule import scheduler
         from wavescribe.web.digest import unavailable
 
-        raw, path = self._alert_raw()
-        if self.alerter is None and raw.get("digest") is not None:
-            log.warning("[digest] in %s: no scheduled digests while alerts are off", path)
+        table, where = self._digest_table(page)
+        if self.alerter is None and table is not None:
+            log.warning("[digest] in %s: no scheduled digests while alerts are off", where)
         if self.alerter is None or self.hub.digester is None or self.hub.speaker is None:
             return None
         return scheduler(
-            raw.get("digest"),
-            str(path),
+            table,
+            where,
             digester=self.hub.digester,
             speaker=self.hub.speaker,
             voices=self.alerter.config.voices,
             language=self.alerter.config.notify_language,
             exports=self.hub.exports,
-            closed=self.hub._closed,
+            closed=threading.Event(),  # its own: stop() sets it, and close() calls that
             unavailable=lambda: unavailable(self.hub),
         )
+
+    def _digest_table(self, page: dict[str, Any] | None = None) -> tuple[Any, str]:
+        """The ``[digest]`` table in effect (None: no digests on a schedule) and the file it
+        comes from: the page's in place of alerts.toml's, when the page set one."""
+        from wavescribe.alerts import merge_page
+
+        raw, path = self._alert_raw()
+        page = page if page is not None else (self.settings.get("alerts") or {})
+        merged, _rules, _disabled = merge_page(raw, page)
+        where = self.settings.path if isinstance(page.get("digest"), dict) else path
+        return merged.get("digest"), str(where or "alerts.toml")
+
+    def _page_digest(self) -> dict[str, Any] | None:
+        """The page's digest schedule as saved (``off``: switched off), None when it set none."""
+        table = (self.settings.get("alerts") or {}).get("digest")
+        return table if isinstance(table, dict) else None
+
+    def _check_digest_schedule(self, table: dict[str, Any]):  # -> Schedule
+        """A digest schedule from the page, checked as ``[digest]`` is; refusals are coded."""
+        from wavescribe.digest.schedule import known, parse_schedule
+
+        assert self.alerter is not None
+        schedule = parse_schedule(
+            table, None, voices=self.alerter.config.voices, language=self._digest_language()
+        )
+        assert schedule is not None
+        known(schedule.stations, (s.id for s in self.config.stations), None)
+        return schedule
+
+    def _digest_language(self) -> str:
+        """A scheduled digest's language when its table gives none."""
+        config = self.alerter.config if self.alerter is not None else None
+        if config is not None and config.notify_language:
+            return config.notify_language
+        return self.hub.digester.language() if self.hub.digester is not None else "en"
+
+    def digest_schedule_view(self) -> dict[str, Any]:
+        """The digest schedule for the page: what is set and where, whether it runs, when
+        the next digest comes, and what it may be set to."""
+        from wavescribe.digest.schedule import EVERY
+        from wavescribe.web.digest import digest_fields, unavailable
+
+        raw, path = self._alert_raw()
+        page = self._page_digest()
+        table = page if page is not None else raw.get("digest")
+        shown = {k: v for k, v in table.items() if k != "off"} if isinstance(table, dict) else None
+        error = self.digest_error
+        schedule = self.digests.schedule if self.digests is not None else None
+        if schedule is None and shown is not None and self.alerter is not None:
+            try:
+                schedule = self._check_digest_schedule(shown)
+            except ConfigError as e:
+                error = error or said(e)
+        source = "page" if page is not None else "file" if table is not None else None
+        voices = sorted(self.alerter.config.voices) if self.alerter is not None else []
+        return {
+            "enabled": shown is not None and not (page or {}).get("off"),
+            "source": source,
+            "file": str(path) if path else None,
+            "schedule": schedule.table() if schedule is not None else None,
+            "running": self.digests is not None,
+            "next_at": (
+                round(self.digests.schedule.next_delivery(time.time()))
+                if self.digests is not None
+                else None
+            ),
+            "alerts": self.alerter is not None,
+            **digest_fields(unavailable(self.hub)),
+            "error": str(error) if error else None,
+            "error_code": getattr(error, "code", None),
+            "language": self._digest_language(),
+            "voices": voices,
+            "every_minutes_choices": list(EVERY),
+        }
+
+    def set_digest_schedule(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The page's digest schedule (``every_minutes``, ``stations``, ``language``,
+        ``speak``, ``quiet_hours``), checked as ``[digest]`` is, saved in place of alerts.toml's,
+        and running at once. ``enabled: false`` switches digests on a schedule off; the rest is
+        kept, for the page to show."""
+        if self.alerter is None:
+            raise ChangeError(ALERTS_OFF, "alerts_off")
+        enabled = body.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ChangeError("enabled must be true or false", "bad_enabled")
+        table = {k: v for k, v in body.items() if k != "enabled" and v is not None}
+        schedule = self._check_digest_schedule(table)
+        # every_minutes always: an empty table would be left out of ui.toml, and the file's
+        # schedule would come back in its place.
+        stored = {**table, "every_minutes": schedule.every_minutes}
+        if not enabled:
+            stored["off"] = True
+        page = self.settings.get("alerts") or {}
+        page["digest"] = stored
+        self._reschedule(page)
+        return self.digest_schedule_view()
+
+    def reset_digest_schedule(self) -> dict[str, Any]:
+        """Forget the page's digest schedule: alerts.toml's ``[digest]``, if any, runs again."""
+        if self.alerter is None:
+            raise ChangeError(ALERTS_OFF, "alerts_off")
+        page = self.settings.get("alerts") or {}
+        page.pop("digest", None)
+        self._reschedule(page)
+        return self.digest_schedule_view()
+
+    def _reschedule(self, page: dict[str, Any]) -> None:
+        """Save the page's alert settings ``page`` and run the digest schedule they make in
+        place of the one running; nothing is saved or replaced when it doesn't load."""
+        with self._digests_lock:
+            new = self._digest_schedule(page)
+            self.settings.update(lambda d: d.__setitem__("alerts", page))
+            old, self.digests, self.digest_error = self.digests, new, None
+            if old is not None:
+                old.stop()
+            if new is not None and self._digests_running:
+                new.start()
 
     def _llm_rule_list(self) -> list[LlmRule]:
         return list(self.alerter.config.rules.llm_rules) if self.alerter else []

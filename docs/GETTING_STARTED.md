@@ -340,6 +340,10 @@ For a language other than English, give its `[speak.<lang>]` a `summary` and an 
 sentence, as `alerts.example.toml` shows. Digests keep to the clock on the days it changes too.
 Restart Wavescribe after changing the table.
 
+The page can set the same schedule, or switch it off, on the Wavescribe machine: it takes
+effect at once, without a restart, and is kept in `config/ui.toml` in place of the whole
+`[digest]` table until you reset it there, when the table in `alerts.toml` applies again.
+
 **Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
 home-automation system ([FEED.md](FEED.md)).
 

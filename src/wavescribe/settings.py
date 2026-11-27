@@ -14,6 +14,9 @@ change. One file, one writer, atomic replaces. Sections:
     [[station]]          stations added from the page (same keys as stations.toml, plus remote)
     [[device]]           dongles added from the page
     [[rule]]             alert rules from the page (keyword or llm)
+    [alerts]             laid over alerts.toml (alerts.merge_page): delivery, actions and
+                         speak per key, the page's rules, disabled_rules, and [alerts.digest],
+                         the digest schedule in place of the file's [digest] (off = true: none)
     [[output]]           webhooks and streams
     [[feed_token]]       access tokens for /feed/v1 from other machines
     [catalog]            when the station catalogue snapshot was refreshed

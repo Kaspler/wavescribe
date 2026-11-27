@@ -16,6 +16,10 @@ nothing was said, or why none could be made. A quiet notification centre would o
 as a quiet radio. Only the points are read aloud. It covers only radio that may leave this
 machine, as if another machine had asked: nobody chose to hear it at that moment, and anyone
 in the room hears it or sees it on the screen. Wavescribe reads the table when it starts.
+
+The page sets it too (``/api/manage/digest/schedule``): its table, kept in ``config/ui.toml``
+as ``[alerts.digest]``, takes the place of the file's whole, or switches it off, and takes
+effect at once: the scheduler running is stopped (``Scheduler.stop``) and another started.
 """
 
 from __future__ import annotations
@@ -54,6 +58,8 @@ log = logging.getLogger(__name__)
 KEYS = {"every_minutes", "stations", "language", "speak", "quiet_hours"}
 MIN_EVERY = 5  # a digest every few minutes would be most of what the model does
 DAY_MINUTES = 24 * 60
+# The periods that divide a day evenly: the values every_minutes takes.
+EVERY = tuple(m for m in range(MIN_EVERY, DAY_MINUTES + 1) if DAY_MINUTES % m == 0)
 MIN_GAP_S = 60.0  # between two digests, whatever the clock says
 CLOCK = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 
@@ -86,20 +92,55 @@ class Schedule:
         minute, (start, end) = moment.hour * 60 + moment.minute, self.quiet
         return start <= minute < end if start <= end else minute >= start or minute < end
 
+    def next_delivery(self, now: float) -> float:
+        """When the next digest is made: the next run outside the quiet hours."""
+        t = self.next_run(now)
+        for _ in range(DAY_MINUTES // self.every_minutes + 2):  # quiet for under a day
+            if not self.is_quiet(t):
+                break
+            t = self.next_run(t)
+        return t
+
+    def table(self) -> dict[str, object]:
+        """As ``[digest]`` takes it, every key given: the page's view of it."""
+        quiet = (
+            [f"{m // 60:02d}:{m % 60:02d}" for m in self.quiet] if self.quiet is not None else None
+        )
+        return {
+            "every_minutes": self.every_minutes,
+            "stations": list(self.stations),
+            "language": self.language,
+            "speak": self.speak,
+            "quiet_hours": quiet,
+        }
+
 
 def parse_schedule(
-    raw: object, where: str, *, voices: Mapping[str, Voice], language: str
+    raw: object, where: str | None, *, voices: Mapping[str, Voice], language: str
 ) -> Schedule | None:
     """``[digest]``, checked; None when there is none. ``language`` is the default: the
-    alerts' notification language, else that of the stations' translations."""
+    alerts' notification language, else that of the stations' translations. A refusal names
+    the table in ``where`` (none for the page's), and has a ``code`` and the ``field``
+    concerned: ``bad_schedule`` (not a table), ``unknown_keys`` (with ``keys``),
+    ``bad_every`` (with ``choices``), ``bad_stations``, ``bad_language``, ``bad_speak``,
+    ``no_voice`` (speak, with ``language``) and ``bad_quiet_hours``."""
     if raw is None:
         return None
-    where = f"{where} [digest]"
+
+    def refused(text: str, code: str, field: str | None, **extra: object) -> ConfigError:
+        return ConfigError(f"{where} [digest]: {text}" if where else text, code,
+                           **({"field": field} if field else {}), **extra)  # fmt: skip
+
     if not isinstance(raw, dict):
-        raise ConfigError(f"{where}: must be a table")
+        raise refused("must be a table", "bad_schedule", None)
     unknown = set(raw) - KEYS
     if unknown:
-        raise ConfigError(f"{where}: unknown keys {sorted(unknown)}; it takes {sorted(KEYS)}")
+        raise refused(
+            f"unknown keys {sorted(unknown)}; it takes {sorted(KEYS)}",
+            "unknown_keys",
+            None,
+            keys=sorted(unknown),
+        )
     every = raw.get("every_minutes", 60)
     if (
         not isinstance(every, int)
@@ -107,37 +148,50 @@ def parse_schedule(
         or not MIN_EVERY <= every <= DAY_MINUTES
         or DAY_MINUTES % every
     ):
-        raise ConfigError(
-            f"{where}: every_minutes must divide a day into equal parts, from {MIN_EVERY} to "
-            f"{DAY_MINUTES}: 15, 30, 60, 120 or 180, for example"
+        raise refused(
+            f"every_minutes must divide a day into equal parts, from {MIN_EVERY} to "
+            f"{DAY_MINUTES}: 15, 30, 60, 120 or 180, for example",
+            "bad_every",
+            "every_minutes",
+            choices=list(EVERY),
         )
     stations = raw.get("stations", [])
     if not isinstance(stations, list) or not all(isinstance(s, str) for s in stations):
-        raise ConfigError(f'{where}: stations must be a list of station ids, e.g. ["tsf"]')
+        raise refused(
+            'stations must be a list of station ids, e.g. ["tsf"]', "bad_stations", "stations"
+        )
     lang = raw.get("language", language)
     if not isinstance(lang, str) or not LANGUAGE_TAG.fullmatch(lang):
-        raise ConfigError(f"{where}: language must be a BCP-47 tag, e.g. en or pt-PT")
+        raise refused("language must be a BCP-47 tag, e.g. en or pt-PT", "bad_language", "language")
     speak = raw.get("speak", False)
     if not isinstance(speak, bool):
-        raise ConfigError(f"{where}: speak is true or false")
+        raise refused("speak is true or false", "bad_speak", "speak")
     if speak and not any(same_language(v, lang) for v in voices):
-        raise ConfigError(f"{where}: speak = true needs a [speak.{lang}] voice")
+        raise refused(
+            f"speak = true needs a [speak.{lang}] voice", "no_voice", "speak", language=lang
+        )
     quiet = raw.get("quiet_hours")
     if quiet is not None:
         parts = quiet if isinstance(quiet, list) else []
         times = [CLOCK.fullmatch(t) for t in parts if isinstance(t, str)]
         if len(parts) != 2 or len(times) != 2 or not all(times):
-            raise ConfigError(
-                f'{where}: quiet_hours is a start and an end, e.g. ["22:00", "07:00"]'
+            raise refused(
+                'quiet_hours is a start and an end, e.g. ["22:00", "07:00"]',
+                "bad_quiet_hours",
+                "quiet_hours",
             )
         quiet = tuple(int(m[1]) * 60 + int(m[2]) for m in times if m)
         if quiet[0] == quiet[1]:
-            raise ConfigError(f"{where}: quiet_hours starts and ends at the same time")
+            raise refused(
+                "quiet_hours starts and ends at the same time", "bad_quiet_hours", "quiet_hours"
+            )
     return Schedule(every, lang, tuple(dict.fromkeys(stations)), speak, quiet)
 
 
 class Scheduler:
-    """Makes and delivers the scheduled digests, on a thread of its own until ``closed``."""
+    """Makes and delivers the scheduled digests, on a thread of its own until ``closed`` is
+    set: the app closing, or ``stop`` (another schedule takes its place). ``closed`` is this
+    scheduler's own, as ``stop`` sets it; a digest it is making is then dropped."""
 
     def __init__(
         self,
@@ -166,6 +220,10 @@ class Scheduler:
         thread = threading.Thread(target=self._loop, daemon=True, name="digests")
         thread.start()
         return thread
+
+    def stop(self) -> None:
+        """No more digests from this scheduler; one being made is dropped, unshown."""
+        self._closed.set()
 
     def _loop(self) -> None:
         last: float | None = None
@@ -257,13 +315,17 @@ def scheduler(
     schedule = parse_schedule(raw, where, voices=voices, language=language or digester.language())
     if schedule is None:
         return None
-    _known(schedule.stations, digester.stations(), f"{where} [digest]")
+    known(schedule.stations, digester.stations(), where)
     return Scheduler(
         schedule, digester, speaker, exports=exports, closed=closed, unavailable=unavailable
     )
 
 
-def _known(asked: Iterable[str], stations: Mapping[str, object], where: str) -> None:
-    unknown = [sid for sid in asked if sid not in stations]
+def known(asked: Iterable[str], stations: Iterable[str], where: str | None) -> None:
+    """Refuses stations that aren't set up (code ``unknown_station``, with ``stations``)."""
+    have = set(stations)
+    unknown = [sid for sid in asked if sid not in have]
     if unknown:
-        raise ConfigError(f"{where}: no station {', '.join(map(repr, unknown))} is set up")
+        text = f"no station {', '.join(map(repr, unknown))} is set up"
+        raise ConfigError(f"{where} [digest]: {text}" if where else text, "unknown_station",
+                          field="stations", stations=unknown)  # fmt: skip

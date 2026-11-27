@@ -264,6 +264,27 @@ def _alert_settings(app: App, m, q, b) -> Any:
     return app.rules_view()
 
 
+@route("GET", "/digest/schedule")
+def _digest_schedule(app: App, m, q, b) -> Any:
+    """Digests on a schedule: what is set and where (``source``: ``page``, ``file`` or null),
+    whether they run, when the next comes (``next_at``), and what they may be set to."""
+    return app.digest_schedule_view()
+
+
+@route("POST", "/digest/schedule")
+def _set_digest_schedule(app: App, m, q, b) -> Any:
+    """``{every_minutes, stations, language, speak, quiet_hours}`` as ``[digest]`` takes them,
+    in place of alerts.toml's and at once; ``enabled: false`` switches them off. A refusal has
+    the ``code`` and ``field`` of what to change (digest/schedule.py, ``parse_schedule``)."""
+    return app.set_digest_schedule(_body(b))
+
+
+@route("DELETE", "/digest/schedule")
+def _reset_digest_schedule(app: App, m, q, b) -> Any:
+    """Forget the page's schedule: alerts.toml's ``[digest]``, if any, runs again."""
+    return app.reset_digest_schedule()
+
+
 # -- outputs and feed tokens ------------------------------------------------------------------
 
 
