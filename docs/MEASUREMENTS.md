@@ -14,8 +14,7 @@ lines are flagged, which was 12 of 101 transcripts on talk radio, lyrics include
 **2026-11-26, Ask on the real store** (Qwen3.5-9B 4-bit, M1 Max; ~20k utterances): the plan
 takes 4–6 s (≈1,100 prompt tokens at ~380 tokens/s, ≈90 output tokens at ~60 tokens/s), the
 search under 0.1 s, the answer 1–6 s depending on the excerpts (≈2,000 prompt tokens for 40
-translated excerpts). Whole answers in 5–11 s. The first version sent each excerpt in the source
-language and the translation (≈5,200 tokens) and took 22 s. With `serve` also translating, the
+translated excerpts). Whole answers in 5–11 s. With `serve` also translating, the
 two compete for the GPU: generation fell to 22–28 tokens/s in a side test that loaded a second
 copy of the model.
 
@@ -48,7 +47,7 @@ Parakeet-TDT-0.6B-v3 on MLX, MADLAD-400 3B int8 on 4 CPU threads, beam 2):
 | Dropouts | one TLS drop on Antena 1, reconnected after 1 s |
 
 MT is the capacity limit: at ~22% per busy news station, four stations would put MADLAD near 90%,
-with no headroom. Qwen3.5 on the GPU replaced it as the default translator (below).
+with no headroom.
 
 **2026-11-09, language-agnostic check.** `config/stations.es.example.toml` (RNE Radio 5, es-ES)
 ran through the same code with no changes: Parakeet transcribed Spanish and MADLAD translated it
@@ -68,10 +67,10 @@ live VAD settings. All models on MLX on the M1 Max.
 | Voxtral Mini 4B Realtime (fp16) | **0.9× (slower than real time)** | auto | — | — | — | stopped after 50 utterances |
 
 - **No word error rate.** That needs reference transcripts corrected by a Portuguese speaker (`*.ref-template.txt` from the bake-off). Agreement between models is not accuracy.
-- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet is the default for speed and power (GPU 5% busy for two stations); how its accuracy compares with the others' wasn't measured. The ASR checks now flag text that isn't in the station's language, and flagged text never raises an alert above `low`. Since 2026-11-26 a flagged line is re-checked by Whisper large-v3-turbo, which accepts a hint and drifted least, when it is installed (`asr/recheck.py`; its cost wasn't measured, as the top of this page says).
+- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet is the default for speed and power (GPU 5% busy for two stations); how its accuracy compares with the others' wasn't measured. The ASR checks flag text that isn't in the station's language, and flagged text never raises an alert above `low`. A flagged line is re-checked by Whisper large-v3-turbo, which accepts a hint and drifted least, when it is installed (`asr/recheck.py`; its cost wasn't measured, as the top of this page says).
 - **LLM-style ASR decoders can loop.** Qwen3-ASR repeated "há há há…" for 78 s on one utterance. Any such model needs an output cap tied to the audio length, plus the repeated-n-gram filter.
 - **Nemotron is conservative.** Its 14 empty outputs are mostly jingles and fragments that the others turned into junk ("Yeah.", "Wolf."), plus a few short real phrases.
-- **Voxtral is out on speed** through mlx-audio at fp16.
+- **Voxtral is slower than real time** through mlx-audio at fp16.
 
 **2026-11-10, translation: MADLAD-400 vs Qwen3.5.** The same 30 live pt-PT transcripts, then a
 4-minute live two-station run with each:
@@ -95,7 +94,7 @@ the CPU fallback. Power on battery wasn't measured.
 
 **ASR language confusion.** Parakeet v3 picks the language itself and can't be told which one to
 use. On TSF it occasionally emitted English for Portuguese speech, and MADLAD then paraphrased
-that English into a different English sentence. The ASR checks now flag such text
+that English into a different English sentence. The ASR checks flag such text
 (`lang:en` on a pt-PT station). On 101 real transcripts the flag
 caught 12 lines, all genuinely foreign (Spanish and English lyrics, and one Spanish speaker that
 Parakeet rendered in English), and no Portuguese.
@@ -115,21 +114,17 @@ samples; the CSV stays in `data/soak/`).
 | Utterances | 19,463 stored, 3 dropped by the hallucination filter |
 | Alerts | 111 under the first rules, 25 of them critical, so they would have been spoken aloud. All false |
 
-- **Shutdown bug.** The sampler's stop signal (SIGINT at 24 h) did nothing: a process started in
-  the background by a non-interactive shell inherits SIGINT as ignored, and Python then installs
-  no Ctrl-C handler. The CLI now re-arms SIGINT, and the sampler sends SIGTERM and checks that
-  the server exited.
 - **False alarms.** `alerts replay` reproduced the live run (25 critical in both). Snowball made
   "tornado" match *torna/tornou* ("becomes"), "água" match *águias* (a football nickname) and
   "confinamento" match a tyre brand. "abrigo" was mostly *sem abrigo* (homeless) and *ao abrigo
   de* ("under"). A bare "Proteção Civil" is everyday national news (a new law, a house fire far
-  away), and bare "ataque" is football. Fixed with `=` terms, weak topics for everyday words, and
-  `min_mentions`. Replayed over everything stored by then (35.6 h: the soak and the test runs
-  before it): nothing high or critical, and 6 medium (about 4
+  away), and bare "ataque" is football. With `=` terms, weak topics for everyday words and
+  `min_mentions`, a replay over everything stored by then (35.6 h: the soak and the test runs
+  before it) gave nothing high or critical, and 6 medium (about 4
   silent notifications a day, each a common word next to a broad local place name, or a foreign
   story mentioned twice). Synthetic emergency bulletins (a blackout, a declared calamity,
   boil-water notices) still escalate (`tests/test_replay.py`). Keywords won't reach zero on talk
-  radio; the LLM check on keyword hits (`verify`) and LLM rules were built after this run.
+  radio. This run had neither the LLM check on keyword hits (`verify`) nor LLM rules.
 - **Running unattended:** the Mac must not sleep with the lid closed (`sudo pmset -a disablesleep 1`,
   or keep the lid open), and the audio cap should grow to ~4 GB if a week of replayable speech
   is wanted.
