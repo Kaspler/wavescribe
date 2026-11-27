@@ -180,7 +180,9 @@ def test_zero_minutes_is_until_ctrl_c_as_the_help_says(
     assert asked == [None]  # no deadline
     with pytest.raises(SystemExit):
         main(["radio", "watch", "--help"])
-    assert "0: until Ctrl-C" in " ".join(capsys.readouterr().out.split())
+    shown = " ".join(capsys.readouterr().out.split())
+    assert "0: until Ctrl-C" in shown
+    assert "Weak, very short or overlapping transmissions can be missed" in shown  # honest
 
 
 class NoSpeechModel:

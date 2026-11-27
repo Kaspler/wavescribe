@@ -215,8 +215,9 @@ When a channel's squelch is closed the page shows "channel quiet" instead of sil
 
 *Experimental.* Walkie-talkies, repeaters and aircraft are quiet most of the time, and when
 someone speaks you rarely know on which channel. A **watch** listens to every channel of a band
-at once and transcribes whatever is said on any of them. Each transmission is caught on its own,
-from its first syllable, with the channel it was on:
+at once and transcribes whatever is said on any of them, though weak, very short or overlapping
+transmissions can be missed (see Limits, below). Each transmission is caught on its own, from its
+first syllable, with the channel it was on:
 
 ```sh
 uv run wavescribe radio watch a pmr446 --acknowledge     # all 16 PMR446 channels

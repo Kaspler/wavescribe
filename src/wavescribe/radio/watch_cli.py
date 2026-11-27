@@ -393,7 +393,11 @@ def cmd_note(args: argparse.Namespace) -> int:
 def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any, ppm: Any) -> None:
 
     p = rsub.add_parser(
-        "watch", help="watch a whole band and transcribe whatever is said on any channel"
+        "watch",
+        help="watch a whole band and transcribe whatever is said on any channel",
+        description="Watch every channel of a band at once and transcribe whatever is said on "
+        "any of them. Weak, very short or overlapping transmissions can be missed "
+        "(docs/RADIO.md, Limits). Experimental.",
     )
     p.add_argument("receiver", help="receiver id from the config (e.g. a) or its serial")
     p.add_argument(
