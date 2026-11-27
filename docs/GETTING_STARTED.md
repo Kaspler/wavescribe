@@ -178,11 +178,14 @@ on. Digests are experimental: a point can still run two stories together, add a 
 said or cite the wrong moment, so read its moments before you rely on it.
 
 On the page, press **Summary** at the top of Read and choose how far back: the last 15 minutes,
-the last hour, since a time, or since you last looked when this browser knows. It covers the
-stations you are reading; a column's **⋯** menu asks for that station alone, or *What are they
-talking about now?* in a line under its name. The points come beside the columns (on a phone,
-in their place); press a point's time to read that line in the transcript. On the Wavescribe
-machine, *Read it aloud on this Mac* has it read as soon as it is written.
+the last hour, since a time (or between two), last night (by day, on the Wavescribe machine), or
+since you last looked when this browser knows. It covers the stations you are reading; a
+column's **⋯** menu asks for that station alone, or *What are they talking about now?* in a line
+under its name. The points come beside the columns (on a phone, in their place); press a point's
+time to read that line in the transcript. **Cancel** stops one being written, on the server too,
+and so does leaving the page. On the Wavescribe machine, **Read it aloud** under a summary has
+the Mac read it and **Stop** ends that; *Read it aloud on this Mac when it's ready* reads one as
+soon as it is written.
 
 From the command line, with Wavescribe running, in another Terminal window:
 
@@ -332,9 +335,15 @@ Check that notifications and voices work: `uv run wavescribe alerts test`. Spoke
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.
 
-**A digest every hour:** a `[digest]` table in `config/alerts.toml` brings, on the hour, a
-digest of what was said since the one before ([section 6](#6-search-and-ask)), as a quiet
-notification titled "Wavescribe summary", and read aloud too if you like:
+**A summary every hour:** under Settings → Alerts, **Summaries on a schedule**, switch on *A
+summary every hour*: on the hour, a summary of what was said since the one before
+([section 6](#6-search-and-ask)) comes as a quiet notification titled "Wavescribe summary".
+Like any summary it is experimental, and no warning. Folded under the switch are how often,
+which stations, the language, reading it aloud (where a voice reads that language) and quiet
+hours. The page's schedule takes effect at once and is kept in `config/ui.toml`, in place of any
+`[digest]` table in `config/alerts.toml`; *Use alerts.toml's instead* gives it back to the file.
+
+The same schedule can be written in the file, as a `[digest]` table:
 
 ```toml
 [digest]
@@ -348,22 +357,18 @@ quiet_hours = ["22:00", "07:00"]
 
 `every_minutes` takes a whole number of minutes that divides a day evenly: 5, 6, 8, 9, 10, 12,
 15, 16, 18, 20, 24, 30, 32, 36, 40, 45, 48, 60, 72, 80, 90, 96, 120, 144, 160, 180, 240, 288,
-360, 480, 720 or 1440 (once a day, at midnight). Every digest is shown, whatever became of it: its points, with who wrote them from how much;
-that nothing stood out, or that nothing was said; or why none could be made (the model was
-busy, say: the next one then covers that time too). A quiet notification centre would
-otherwise look like a quiet radio. It covers only radio that may leave the Mac
-([section 10](#10-what-wavescribe-keeps-and-why)): nobody chose to hear it at that moment, and
-anyone in the room does.
+360, 480, 720 or 1440 (once a day, at midnight). Every digest is shown, whatever became of it:
+its points, with who wrote them from how much; that nothing stood out, or that nothing was
+said; or why none could be made (the model was busy, say: the next one then covers that time
+too). A quiet notification centre would otherwise look like a quiet radio. It covers only radio
+that may leave the Mac ([section 10](#10-what-wavescribe-keeps-and-why)): nobody chose to hear
+it at that moment, and anyone in the room does.
 
 Read aloud, a digest opens by saying what it is, names the earlier alerts only by time and
 rule, then reads its points; an alert stops it at once, and one being spoken is waited for.
 For a language other than English, give its `[speak.<lang>]` a `summary` and an `earlier`
 sentence, as `alerts.example.toml` shows. Digests keep to the clock on the days it changes too.
 Restart Wavescribe after changing the table.
-
-The page can set the same schedule, or switch it off, on the Wavescribe machine: it takes
-effect at once, without a restart, and is kept in `config/ui.toml` in place of the whole
-`[digest]` table until you reset it there, when the table in `alerts.toml` applies again.
 
 **Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
 home-automation system ([FEED.md](FEED.md)).
