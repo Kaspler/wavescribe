@@ -184,6 +184,36 @@ def test_stations_added_and_changed_from_the_page_persist(node: Running, tmp_pat
     assert status == 403
 
 
+def test_only_stations_that_differ_from_the_file_are_marked_changed_here(tmp_path: Path) -> None:
+    # Seen in testing: a translation language added to every station from the page, then
+    # removed, left every station marked "changed here" although each was back to the file.
+    app = make_app(tmp_path)
+    marked = lambda: {v["id"]: v["overridden"] for v in app.stations_view()}  # noqa: E731
+    try:
+        for sid in ("a", "b"):  # what the page's Languages section sends to add one
+            app.update_station(sid, {"translate_to": ["en", "fr"]})
+        assert marked() == {"a": ["translate_to"], "b": ["translate_to"]}
+        app.update_station("a", {"translate_to": ["en"]})  # and to remove it
+        assert marked() == {"a": [], "b": ["translate_to"]}
+        assert app.settings.get("overrides") == {"b": {"translate_to": ["en", "fr"]}}
+        # A station's form sends every field; only those that differ from the file are kept.
+        view = app.update_station("a", {"name": "Rádio A", "language": "pt-PT", "priority": 2,
+                                        "translate_to": ["en"], "asr_model": None})  # fmt: skip
+        assert view["overridden"] == ["priority"]
+        assert app.settings.get("overrides")["a"] == {"priority": 2}
+        # Refused changes are still refused, not dropped as "the same as the file".
+        with pytest.raises(ChangeError, match="BCP-47"):
+            app.update_station("a", {"language": "nonsense!"})
+        # One saved before (or a file edited to say the same): it makes no difference, so it
+        # isn't shown as a change.
+        app.settings.update(lambda d: d["overrides"].update(b={"translate_to": ["en"]}))
+        app._reload()
+        assert marked()["b"] == []
+    finally:
+        app.pipeline.stop()
+        app.store.close()
+
+
 def test_status_retention_and_node(node: Running) -> None:
     status, view = node.call("GET", "/api/manage/status")
     assert status == 200

@@ -925,3 +925,46 @@ def test_text_that_falls_behind_shows_in_the_status(monkeypatch) -> None:
     assert wait_for(lambda: pipeline.status()["load"]["state"] == "ok")
     assert pipeline.status()["stations"]["a"]["behind_s"] == {"text": None, "translation": None}
     pipeline.stop()
+
+
+def test_lines_waiting_for_translation_follow_a_change_of_languages(monkeypatch) -> None:
+    # Lines queued before a translation language is removed are translated into what the
+    # station still wants: not into the removed one, and not left without any.
+    import dataclasses
+
+    a, b = station("a", translate_to=("en", "fr")), station("b", translate_to=("en", "de"))
+    results: list[Result] = []
+    pipeline, go, done = busy(monkeypatch, 10, results, a, b)
+    pipeline.ingest(line(a, "busy"))
+    assert wait_for(lambda: pipeline.status()["mt_queue"] == 0)
+    pipeline.ingest(line(a, "queued a"))
+    pipeline.ingest(line(b, "queued b"))
+    pipeline.update_station(dataclasses.replace(a, translate_to=("en",)))
+    pipeline.update_station(dataclasses.replace(b, translate=False))  # text only, from now on
+    go.set()
+    assert wait_for(lambda: len(results) == 3)
+    pipeline.stop()
+    got = {r.transcript.text: r.translations for r in results}
+    assert got["busy"] == {"en": "en:busy", "fr": "fr:busy"}  # already being translated
+    assert got["queued a"] == {"en": "en:queued a"}
+    assert got["queued b"] == {}
+    assert done == ["busy", "busy", "queued a"]
+    assert pipeline.status()["dropped"]["mt"] == 0  # nothing was dropped: nothing was wanted
+
+
+def test_a_line_of_a_station_that_hears_any_language_keeps_the_language_heard(monkeypatch):
+    # Such a station's lines carry the language each was heard in; translated as the station
+    # is now, a line already in a wanted language must not be translated into it again.
+    import dataclasses
+
+    auto = station("a", language="auto", translate_to=("en", "fr"))
+    results: list[Result] = []
+    pipeline, go, _ = busy(monkeypatch, 10, results, auto)
+    pipeline.ingest(line(dataclasses.replace(auto, language="es"), "busy"))
+    assert wait_for(lambda: pipeline.status()["mt_queue"] == 0)
+    pipeline.ingest(line(dataclasses.replace(auto, language="en"), "already English"))
+    go.set()
+    assert wait_for(lambda: len(results) == 2)
+    pipeline.stop()
+    english = next(r for r in results if r.transcript.text == "already English")
+    assert english.translations == {"fr": "fr:already English"}

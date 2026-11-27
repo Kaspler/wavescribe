@@ -19,7 +19,7 @@ import threading
 import time
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -69,6 +69,8 @@ MAX_PUSH_STATIONS = 100
 MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is dropped
 PUSH_ID_CHARS = 40  # a pushed station's id here: <node>-<station>
 PUSH_NODE_CHARS = 16  # what is kept of a long node name in it
+# Overrides kept even when the station comes out the same without them: what the user confirmed.
+KEPT_OVERRIDES = {"acknowledge", "privacy_floor"}
 
 
 def push_id(node: str, remote_id: str) -> str:
@@ -107,6 +109,16 @@ def _untranslated(mt_id: str | None, missing: list[str]) -> str:
     return (f"Not translated into {names}: {mt_id} can't translate into "
             f"{'it' if len(missing) == 1 else 'them'}. Choose another translator for this "
             "station, or other translation languages.")  # fmt: skip
+
+
+def _differing(over: dict[str, Any], s: Station, file: Station | None) -> list[str]:
+    """The overridden keys that make the station differ from stations.toml. One saved before
+    unchanged overrides were dropped, or one the file now says too, isn't a change; a key that
+    isn't a plain station field (a device, a confirmation) always counts."""
+    if file is None:
+        return sorted(over)
+    plain = {f.name for f in fields(Station)}
+    return sorted(k for k in over if k not in plain or getattr(s, k) != getattr(file, k))
 
 
 class ChangeError(ValueError):
@@ -392,6 +404,7 @@ class App:
     def stations_view(self) -> list[dict[str, Any]]:
         page_ids = {s.get("id") for s in self.settings.get("station") or []}
         overrides = self.settings.get("overrides") or {}
+        file = {s.id: s for s in self.base.stations}
         running = self.running()
         out = []
         for s in self.config.stations:
@@ -400,7 +413,8 @@ class App:
                 **station_dict(s),
                 "remote_token": bool(s.remote_token),
                 "origin": "page" if s.id in page_ids else "file",
-                "overridden": sorted(overrides.get(s.id, {})),
+                # Changed here: what the page set that differs from stations.toml.
+                "overridden": _differing(overrides.get(s.id, {}), s, file.get(s.id)),
                 "running": s.id in running,
                 "disabled": s.disabled,
                 "available": s.id not in self.unavailable,
@@ -493,6 +507,7 @@ class App:
                         over.pop(k, None)  # back to what stations.toml says
                     else:
                         over[k] = v
+                self._drop_unchanged(d, sid, changes)
 
         heard = self._check_draft(mutate, sid)
         if changes.get("acknowledge") is True:  # saved as the classes confirmed, this one too
@@ -501,6 +516,27 @@ class App:
         self.settings.update(mutate)
         self._reload()
         return next(v for v in self.stations_view() if v["id"] == sid)
+
+    def _drop_unchanged(self, d: dict[str, Any], sid: str, keys: Iterable[str]) -> None:
+        """Forget the overrides among ``keys`` that leave the station as stations.toml has it
+        (a language added on the page and removed again, a form that sends every field): only
+        what really differs marks it "changed here". Confirmations are always kept, and a draft
+        the station refuses is left for ``_check_draft`` to report."""
+        overrides = d.get("overrides", {})
+        over = overrides.get(sid)
+        if not over:
+            return
+        config, errors = effective_config(self.base, d)
+        if sid in errors:
+            return
+        wanted = config.get(sid)
+        for k in [k for k in keys if k in over and k not in KEPT_OVERRIDES]:
+            without = {kk: vv for kk, vv in over.items() if kk != k}
+            trial = {**d, "overrides": {**overrides, sid: without}}
+            if effective_config(self.base, trial)[0].get(sid) == wanted:
+                over.pop(k)
+        if not over:
+            overrides.pop(sid)
 
     def _check_models(
         self, mutate: Callable[[dict[str, Any]], None], sid: str, changes: dict[str, Any]

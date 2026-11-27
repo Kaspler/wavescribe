@@ -871,6 +871,15 @@ class Pipeline:
         self._drop("mt", result.station.id, why)
         self._finish(result)
 
+    def _current(self, station: Station) -> Station:
+        """The station as it is now (its translation languages, its translator), for work
+        queued before a change; as it was, once it has stopped. The language stays the one the
+        line was heard in (a station that hears any language, or one changed meanwhile)."""
+        live = self._live.get(station.id)
+        if live is None:
+            return station
+        return replace(live.station, language=station.language)
+
     def _skip_stale(self) -> None:
         """Take every station transcript that waited ``MT_STALE_S`` for translation out of the
         queue, at most every few seconds (translation thread): it is shown untranslated now
@@ -1426,10 +1435,18 @@ class Pipeline:
                 self._mt_model = None
                 gc.collect()
                 continue
-            if isinstance(result, TranslationJob | LlmJob):
+            # A station line is translated as its station is now: languages removed while it
+            # waited are left out, and with none left it goes on with its text alone.
+            current = self._current(result.station) if isinstance(result, Result) else None
+            if current is not None and not [
+                t for t in current.translation_targets if t not in result.translations
+            ]:
+                self._finish(result)
+                continue
+            if current is None:
                 translator = get(self._plan.mt)
             else:
-                translator = get(self._plan.translator_for(result.station))
+                translator = get(self._plan.translator_for(current))
             if translator is None:  # no translator, or it failed to load: pass work through
                 if isinstance(result, TranslationJob):
                     self._notify(result.callback, {}, None)
@@ -1451,7 +1468,7 @@ class Pipeline:
             t0 = time.perf_counter()
             self._mt_doing = (result.station.id, result.asr_done_at)
             try:
-                for target in result.station.translation_targets:
+                for target in current.translation_targets:
                     if target in result.translations:  # it came with this one (another node's)
                         continue
                     text = self._translate(

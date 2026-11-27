@@ -71,7 +71,9 @@ language loads with the station, before its audio is read, and counts as in use 
 station runs. An ASR model no running station uses is unloaded after five idle
 minutes (Whisper alone is ~1.6 GB). Stations can be added, changed and deleted while the
 pipeline runs: name, language, priority and translation languages change in place for the next
-utterance; a new URL, device or frequency restarts the station's source.
+utterance; a new URL, device or frequency restarts the station's source. Lines already waiting
+for translation are translated as the station is when their turn comes (its languages and its
+translator), so a language removed meanwhile is left out and the others are kept.
 
 **Per-station switches.** `transcribe = false` makes a station listen-only: its
 audio reaches the page, nothing else. It needs no model at all, not even the VAD
@@ -263,7 +265,10 @@ stations and dongles; `[run] stations`, the stations to start next time; `[model
 order per capability; `[retention]`; `[node]` (name, public URL); `[[output]]`; `[[feed_token]]`
 (SHA-256 hashes only); `[alerts]` (delivery, actions, voices, rules added on the page, rules
 switched off). A broken override is reported and skipped, never fatal: the station keeps its
-file settings. `App` (`app.py`) owns the running parts and applies each change live, without a
+file settings. An override that leaves the station as the file has it (a language added and
+removed again, a form that sends unchanged fields) is not saved, and the page's "changed here"
+(`overridden`) lists only the keys that make the station differ from the file; confirmations
+(`acknowledge`, `privacy_floor`) are always kept. `App` (`app.py`) owns the running parts and applies each change live, without a
 restart: stations are added, changed, started or stopped in the pipeline; rules and outputs are
 swapped in place; retention applies at once: a change to retention or to a class of radio
 (Settings → Storage and privacy) prunes straight away, and the store prunes at start and every ten minutes in the background (it
