@@ -310,7 +310,8 @@ the stations and why in `unread`, `nothing_stood_out` or `unsourced`) and who wr
 much (`notice`: the local model, lines read of those said, the window). The alerts announced
 in the window come with it in the words they were announced in: each incident once, at the time
 it was announced (first, or when it got more serious; the first mention of one whose delivery
-reached nobody, which the store keeps no time for), about what was said, medium and above.
+reached nobody, which the store keeps no time for), about what was said, medium and above;
+never one only logged, whose severity's actions tell nobody.
 
 A digest spends the model as a question does, so it passes the same gate (`do_POST`): from
 another machine only with `serve --allow-remote-ask`, and through a proxy with a read token

@@ -198,8 +198,8 @@ Written by the local model from 140 of 512 lines heard between 14:30 and 16:00; 
 The local model writes it in the language you ask for (by default, the one your stations are
 translated into) from what was said, leaving out songs, station idents and repeats. When there
 is more than it can take it reads an even sample, and the second line says so ("a sample: 252
-of 259,200 lines"). The alerts announced in that time come first, each once, in the words they
-were announced in. A point the model gave without the moments it rests on isn't shown, nor one
+of 259,200 lines"). The alerts announced in that time (notified or spoken, not only logged)
+come first, each once, in the words they were announced in. A point the model gave without the moments it rests on isn't shown, nor one
 that shares no word with the moments it cites (a cheap check: it catches a point that cites
 another story, not one that gets a detail wrong). A point shows three of its moments at most,
 those that share words with it first, spread over all it cited. A watch

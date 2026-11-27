@@ -109,8 +109,12 @@ def test_a_station_alert_or_one_still_pending_is_not_named(tmp_path: Path) -> No
         kind="silence",
     )
     waiting = Alert("fire", "high", ["b"], "pt-PT", "Fogo", ["fogo"], NOW - 60, NOW - 60)
-    store, digest = made(tmp_path, TWO_POINTS, 60, quiet, waiting)
-    # Neither a station's alert, whose end the store doesn't keep, nor one being delivered.
+    logged = Alert(
+        "said", "medium", ["a"], "pt-PT", "Disse", ["disse"], NOW - 120, NOW - 120, status="logged"
+    )
+    store, digest = made(tmp_path, TWO_POINTS, 60, quiet, waiting, logged)
+    # Neither a station's alert, whose end the store doesn't keep, nor one being delivered,
+    # nor one whose severity is only logged: none of them was announced.
     assert [a["rule"] for a in digest.alerts] == ["water"]
     assert spoken(digest, EN)[1] == "Earlier alerts, 1 in all: 11:50, water."
     store.close()

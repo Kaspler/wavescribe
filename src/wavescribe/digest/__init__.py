@@ -111,6 +111,9 @@ CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
 MAX_JOIN = 3  # notes of one story in a choice; a longer "join" lumps unrelated notes together
 ALERT_ROWS = 500  # the newest alerts looked through for those in the window
 SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a receiver
+# Never announced: still being checked or translated, announced by another alert, or only
+# logged, as its severity's actions said (no notification, no voice).
+UNANNOUNCED = ("pending", "covered", "logged")
 TIMEOUT_S = 240.0  # three prompts of notes and the choice, behind whatever backlog there is
 MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
 TIME_FORMAT = "%H:%M"
@@ -530,9 +533,10 @@ class Digester:
         """The alerts announced in the window, oldest first, as the store has them, with when
         (``announced_at``): each incident once, about what was said on one of its stations, at
         medium severity or above, whether or not its delivery reached anybody. Not one
-        announced before the window and only mentioned or recalled in it, nor a station's own
-        alert (no audio, a traffic announcement), whose end the store doesn't keep. For another
-        machine, without the words of radio that stays here."""
+        announced before the window and only mentioned or recalled in it, nor one only logged
+        (its severity's actions tell nobody), nor a station's own alert (no audio, a traffic
+        announcement), whose end the store doesn't keep. For another machine, without the words
+        of radio that stays here."""
         out = []
         wanted = set(request.stations)
         for a in self.store.alerts(limit=ALERT_ROWS):
@@ -1117,8 +1121,8 @@ def _announced(alert: Mapping[str, Any], request: Request) -> float | None:
     delivery that reached somebody (the first, or a rise in severity), else its first mention
     (when that delivery came after the window, or none reached anybody: the store keeps a time
     only for one that did); None when that is outside the window, or it wasn't announced
-    (still pending, or announced by another alert)."""
-    if alert["status"] in ("pending", "covered"):
+    (still pending, announced by another alert, or only logged)."""
+    if alert["status"] in UNANNOUNCED:
         return None
     delivered = alert.get("delivered_at")
     for at in (alert["first_at"],) if delivered is None else (delivered, alert["first_at"]):
