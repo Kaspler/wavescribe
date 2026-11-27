@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { ActButton, Button, Field, Input, Lamp, LangPicker, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
 import { ApiError, type Any, HANDOFF, del, knownLangs, localLang, post, refreshPage } from "./api";
-import { fmtMhz } from "./bands";
+import { and, fmtMhz } from "./bands";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
 import { Scope, snap } from "./Scope";
@@ -175,7 +175,11 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
           <Segmented label="Zoom" value={zoom} onChange={setZoom} options={[...ZOOMS]} />
           <span className="m-hint">Click to tune, scroll or use the arrow keys to step. Receiver {rxName(dev)} hears {lo.toFixed(2)} to {hi.toFixed(2)} MHz.</span>
         </div>
-        {st.paused?.length > 0 && <p className="m-hint">Paused while you listen: {st.paused.join(", ")}. They start again when you stop listening.</p>}
+        {st.paused?.length > 0 && (
+          <p className="m-hint">
+            Paused while you listen: {and(st.paused)}. {st.paused.length === 1 ? "It starts" : "They start"} again when you stop listening.
+          </p>
+        )}
       </Section>
       {isNarrow && <ScanPanel st={st} radio={radio} dev={dev} view={view} stepKhz={steps.stepKhz} onPoll={onPoll} />}
       <Keep st={st} radio={radio} dev={dev} onKept={onKept} />

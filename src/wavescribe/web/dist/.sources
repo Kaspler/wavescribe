@@ -36,7 +36,7 @@ f4c6f1d9f15c6da1efc19a774217d08cf245be5e frontend/src/lib/time.ts
 5f63524d4a72ed1cd3766799d9b17e45b168edcd frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 709b343b531273c53b5e6f6af8ae6e0e3e21f4e8 frontend/src/manage/Internet.tsx
-4f81427995f4d295cccba367eb927cd5626c574a frontend/src/manage/Listen.tsx
+bacef11d85d472012108b81dab53191720b82465 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
@@ -62,7 +62,7 @@ d4cbcd045eb117b3ebbf5e31c3a39dde50236d83 frontend/src/reading/PhoneList.tsx
 585050ace9b0a89cf36877389c78ff26619f8d8f frontend/src/reading/Rack.tsx
 68dd884136422ee49ba3fd0f2364f0f48ec9f2fc frontend/src/reading/Reading.tsx
 bf38f81ec2aa75ca002b22ede6cd5d76a97e653e frontend/src/reading/Search.tsx
-5b8adcf076be813028090086fe220dc04d19ba8c frontend/src/reading/Settings.tsx
+26334172637c075356b12c7cf4ff56cb5c13e568 frontend/src/reading/Settings.tsx
 c58e4f0950da01a92e2b255dd995f46759877778 frontend/src/reading/StationMenu.tsx
 34219af5c1fef4775948c73069734da9b2375a55 frontend/src/reading/TokenGate.tsx
 8f92e929fad369085e34fab30007703247e2f8bf frontend/src/reading/alertText.ts

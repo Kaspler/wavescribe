@@ -46,7 +46,7 @@ function DisplaySettings() {
                 options={[["", T.originalLanguage], ...targets.map((t) => [t, langName(t)] as [string, string])]} />
         {missing.length > 0 && (
           <p className="set-hint">
-            Not translated into {langNameEn(P.lang!)}: {missing.map((s) => s.name).join(", ")}. They show their own language or their first translation.
+            Not translated into {langNameEn(P.lang!)}: {missing.map((s) => s.name).join(", ")}. {missing.length === 1 ? "It shows its" : "They show their"} own language or {missing.length === 1 ? "its" : "their"} first translation.
           </p>
         )}
       </div>
