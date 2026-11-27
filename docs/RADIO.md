@@ -178,11 +178,12 @@ answer: the page names the stations that would be left out, running or not, and 
 stop. A station left out isn't deleted: it stays in your stations, unavailable, with a reason
 that says where to tune the receiver to hear it again. Settings → **Receivers** asks the same
 question when you change a receiver's centre by hand. On the dial, the receiver's line counts
-such stations, and the card of each one's band names it with **Move Receiver A there**, which
-moves the receiver back and starts it, asking first if that leaves others out. A station that is
-switched off is never in the way. A receiver can't hear a station when the frequency is outside
-the 2.4 MHz or so it hears, or (narrowband) on its very centre, where every dongle has a spike
-of its own; for a watch, when any channel of its window is outside.
+such stations, and the card of each one's band names it with **Move Receiver A there** (so does
+Settings → **Stations**), which moves the receiver back and starts it, asking first if that
+leaves others out. A station that is switched off is never in the way. A receiver can't hear a
+station when the frequency is outside the 2.4 MHz or so it hears, or (narrowband) on its very
+centre, where every dongle has a spike of its own; for a watch, when any channel of its window
+is outside.
 
 From a terminal:
 

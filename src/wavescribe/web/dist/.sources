@@ -40,12 +40,13 @@ c56a60c2666be43a85d0763591eda48792cda265 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
+c967754aee1cb8a64a9ec6a311bc11bb628d50df frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-4b11b549287d20b188a9ba6e4464afa34245bbbc frontend/src/manage/Radio.tsx
+474520b2340d1e8b061a084fa0fb9ae5f1b457c1 frontend/src/manage/Radio.tsx
 b79c48adeb4c1af720ede7fdbfd952b9f567f39b frontend/src/manage/Receivers.tsx
 b94eb893c28a23ecd084271dabadfe830d407d30 frontend/src/manage/Refusal.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
-d02e044e5d00361086d6b14eed043adc62776a2f frontend/src/manage/Stations.tsx
+a01b7a30d118adcc48b4798a2bbfef619f414fcd frontend/src/manage/Stations.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
 4f00df408c58ecca3b86a8f4fb814c8caeed40d3 frontend/src/manage/api.ts
 56466eeb98a7b202f73560e19d20314f44168a10 frontend/src/manage/bands.ts

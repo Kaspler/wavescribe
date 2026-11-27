@@ -7,15 +7,16 @@ import { playLive } from "../lib/audio";
 import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
+import { type Any, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
-import { talksNowAndThen, technical, watchCentre, watchWindow } from "./catches";
+import { talksNowAndThen, technical } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
-import { bandAt as narrowestAt, bandOfWindow, centreBelow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
+import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 import { type AddResult, addOnAir } from "./onair";
+import { MoveThere } from "./MoveThere";
 import { Refusal } from "./Refusal";
 import { Ask, type Tuner, useTuner } from "./tuner";
 
@@ -271,7 +272,6 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   // Stations their receiver doesn't hear where it is tuned now (moved for another station):
   // listed, unavailable, and one button away from running again.
   const unheard: { rx: Any; s: Any }[] = v.receivers.flatMap((r: Any) => r.stations.filter((x: Any) => x.out_of_reach).map((x: Any) => ({ rx: r, s: x })));
-  const [moveAsk, setMoveAsk] = useState<{ id: string; question: string; stops: string[] } | null>(null);
   /** The band a station is in: its watch's band, or the band at its frequency. */
   const bandOfStation = (x: Any): Any | undefined => {
     const w = (watches || []).find((y) => y.id === x.id);
@@ -279,21 +279,6 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   };
   /** Moves a receiver back where it hears `s`, asking first if that leaves others out, and
    * starts `s` there. */
-  const moveFor = async (r: Any, s: Any, confirmed = false) => {
-    setMoveAsk(null);
-    const w = (watches || []).find((x) => x.id === s.id);
-    const b = w && typeof w.watch === "string" ? v.bands.find((x: Any) => x.id === w.watch) : w ? bandAt(v.bands, w.watch[0]) : null;
-    const centre = w && b ? watchCentre(watchWindow(b, w.watch), r.span_mhz) : centreBelow(s.mhz, bandAt(v.bands, s.mhz)?.mode);
-    try {
-      await post(`/receivers/${r.id}`, { center_mhz: centre, retune: confirmed });
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "retune" && !confirmed) { setMoveAsk({ id: s.id, question: e.message, stops: e.data.holders || [] }); return; }
-      throw e;
-    }
-    await post(`/stations/${s.id}/start`);
-    toast(`Receiver ${rxName(r.id)} is back where it hears ${s.name}`);
-    await onWatched();
-  };
   const rxs: RxStatus[] = v.receivers.map((r: Any) => {
     const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
     const w = watchOn(r.id);
@@ -434,17 +419,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
       {unheardHere.map(({ rx, s }) => (
         <div key={s.id} className="m-trouble dl-unheard">
           <p>{s.name} can't run where Receiver {rxName(rx.id)} is tuned now.</p>
-          {moveAsk && moveAsk.id === s.id ? (
-            <>
-              <p role="status">{moveAsk.question}</p>
-              <div className="m-actions">
-                <ActButton size="sm" variant="secondary" run={() => moveFor(rx, s, true)}>{moveAsk.stops.length ? `Stop ${and(moveAsk.stops)} and move it` : "Move it"}</ActButton>
-                <Button size="sm" variant="ghost" onClick={() => setMoveAsk(null)}>Keep it as it is</Button>
-              </div>
-            </>
-          ) : (
-            <ActButton size="sm" variant="secondary" run={() => moveFor(rx, s)}>Move Receiver {rxName(rx.id)} there</ActButton>
-          )}
+          <MoveThere rx={rx} s={s} bands={v.bands} watch={(watches || []).find((w) => w.id === s.id)?.watch} onDone={onWatched} />
         </div>
       ))}
       {next && !running && (
