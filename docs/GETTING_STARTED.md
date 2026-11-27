@@ -794,6 +794,10 @@ To see how much room a folder takes, use `du -sh` with its path, e.g. `du -sh ~/
 5. **The Homebrew packages:** `brew uninstall ffmpeg uv librtlsdr`. Other programs may use them,
    ffmpeg most often: `brew uses --installed ffmpeg` lists the Homebrew packages that need it,
    and `brew info ffmpeg` shows its size. Leave a package installed when you're not sure.
+6. **onnxruntime's folder.** Wavescribe switches off the telemetry of onnxruntime (the library
+   that runs the speech detector), so it doesn't create
+   `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime`. If that folder is
+   there and no other program on this Mac uses onnxruntime, it can be deleted.
 
 ## Questions
 
