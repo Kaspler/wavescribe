@@ -37,7 +37,11 @@ Utterance fields:
 - `flags`: notes from the ASR checks. For example, `lang:es` means it sounded like Spanish,
   `repetition` that a phrase was repeated four or more times inside a longer message, and
   `rechecked` that Whisper listened again to a line heard in another language: without `lang:`
-  beside it, Whisper heard the station's language and the text is its transcript.
+  beside it, Whisper heard the station's language and the text is its transcript. A
+  translation that was left out says so too: `untranslated:<language>:<why>`, where why is
+  `declined` (the model said it can't translate the line), `remark` (it wrote about the text
+  instead), `too_long`, `empty` or `failed`; the line then comes without a translation into that
+  language.
 - `rules`: the alert rules this utterance tripped.
 - `node.id`: the sending machine's id, random, made at its first start and kept in its
   `config/ui.toml`. It says nothing about the machine. The commands' `--json` carry it too,
