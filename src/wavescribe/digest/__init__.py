@@ -67,7 +67,15 @@ import sys
 import threading
 import time
 from collections import Counter, OrderedDict
-from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Hashable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -129,6 +137,10 @@ POINT_CHARS = 300  # what is kept of a point: a reply in prose is cut at a sente
 CITED = 3
 GROUND_LETTERS = 4  # a point's words that tie it to its lines: this long at least (sourced)
 STEM_CHARS = 6  # words compared by their start: "outage" is "outages", "inunda" "inundação"
+# Of the words within sentences, the share written with a capital above which a language
+# writes its nouns with one, so that a capital doesn't make a name (stated): about a tenth in
+# English, Portuguese or Spanish transcripts, names and all; over a quarter in German.
+NOUN_CAPS = 0.2
 ANSWER_TOKENS = 500
 CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
 MAX_JOIN = 3  # notes of one story in a choice; a longer "join" lumps unrelated notes together
@@ -154,6 +166,9 @@ RULES = (
     "- Only what the excerpts say: no background knowledge and no guesses. Keep names, places "
     "and numbers as they are, name people rather than writing he or she, and say who did "
     "something only when the excerpts say who.\n"
+    "- A point tells one story: each name, number and detail in it comes from the excerpts it "
+    "cites, and from those about that story (an excerpt can end one item and the next begin "
+    "another).\n"
     "- Write about what was said, never about the excerpts themselves.\n"
     '- If nothing of substance was said, reply with one line: "NONE: " and one sentence in '
     "{language} saying so."
@@ -180,6 +195,12 @@ _CITATION = re.compile(r"\[\s*(\d+(?:\s*[-\u2013,;]\s*\d+)*)\s*\]")
 _NONE = re.compile(r"^\W*NONE\W*:")
 _SENTENCE_END = re.compile(r"[.!?\u2026\u3002\uff01\uff1f](?=\s|$)")
 _GROUP = re.compile(r"\d+(?:\s*\+\s*\d+)*")  # "3+9" in "3+9, 7, 1"
+# A number as written: digits, with a mark between groups ("2,300", "2.9", "12 500").
+_NUMBER = re.compile(r"\d+(?:[.,\u00a0\u202f ]\d+)*")
+_MARK = re.compile(r"[.,\u00a0\u202f ]")
+_DIGITS = re.compile(r"\d+")
+_AROUND = " \t\n\"'()[]{}\u00ab\u00bb\u00bf\u00a1\u2018\u2019\u201c\u201d\u201e\u2039\u203a"
+_STARTS = ".!?:\u2026\u3002\uff01\uff1f"  # what ends a sentence, so that a capital follows
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")  # BCP-47, loosely
 
 
@@ -972,7 +993,7 @@ class _Job:
         once; those dropped for citing nothing given, or nothing that backs them, counted."""
         reply = llm.complete(messages, max_tokens=ANSWER_TOKENS, on_text=self._give_way)
         parsed = parse_points(reply, len(lines))
-        points, unsourced = sourced(parsed.points, lines)
+        points, unsourced = sourced(parsed.points, lines, names=self.names)
         self.nones += parsed.none
         self.uncited += parsed.uncited + unsourced
         return merged(points)
@@ -1286,35 +1307,190 @@ def _numbers(group: str, count: int) -> list[int]:
 
 
 def sourced(
-    points: Iterable[tuple[str, Sequence[int]]], lines: Sequence[Line]
+    points: Iterable[tuple[str, Sequence[int]]],
+    lines: Sequence[Line],
+    *,
+    names: Mapping[str, str] | None = None,
 ) -> tuple[list[Point], int]:
     """The points of a reply that its excerpts (``lines``, numbered from 1) can back, each on
-    at most ``CITED`` of those it cites, and how many were dropped for sharing no word with any
-    of them.
+    at most ``CITED`` of those it cites, and how many were dropped for sharing no word with
+    them, or for stating a name or a number none of those it keeps says.
 
-    The check is cheap and knows no language: a point must share a word (``words``) with one
-    of the lines it cites, in what the model read or in any other text of the line (the words
-    as said, a translation). It catches a point that cites another story than its own, or
-    lines a number or two off; a little word shared by chance (that, with, para) lets one
-    through. Words common to many lines aren't left out: in "now", that is what the station is
-    on about. It is made only when one of those lines has text in the reader's language, which
-    the point is written in: a point written from another language may share no word with it.
+    The checks are cheap and know no language. First, a point must share a word (``words``)
+    with one of the lines it cites, in what the model read or in any other text of the line
+    (the words as said, a translation). It catches a point that cites another story than its
+    own, or lines a number or two off; a little word shared by chance (that, with, para) lets
+    one through. Words common to many lines aren't left out: in "now", that is what the station
+    is on about. It is made only when one of those lines has text in the reader's language,
+    which the point is written in: a point written from another language may share no word
+    with it.
 
-    When a point cites more lines than it keeps, those that share a word with it go first,
-    spread evenly over the order it cited them in; the others, spread too, make up the rest."""
+    Then every name and every number the point states (``stated``) must be in one of the lines
+    it keeps, in any of its texts, by the same rule as a word (a name) or by value (a number,
+    "2,9" being 2.9): that is where a small model goes wrong while sharing words with its
+    lines, adding a name from another story or from what it knows, or a figure no one said.
+    The station's name and the time each line was shown with count as said: the model was
+    given them (``names``: station id -> name as shown). Names are checked only when one of
+    the lines has text in the reader's language, as a place's name may change with the
+    language; numbers always. It can't tell a detail taken from another story told in the same
+    line, a relation turned round, or a number written in words.
+
+    When a point cites more lines than it keeps, those that say what it states go first, as
+    few as say it all; then those that share a word with it, spread evenly over the order it
+    cited them in; the others, spread too, make up the rest."""
+    points = list(points)
+    # Whether a capital makes a name in the language the points are written in.
+    nouns = _capitalises_nouns([ln.text for ln in lines if ln.readers] + [t for t, _ in points])
+    known: dict[int, tuple[frozenset[str], frozenset[float]]] = {}
+
+    def said_in(line: Line) -> tuple[frozenset[str], frozenset[float]]:
+        if line.id not in known:
+            known[line.id] = _said_in(line, (names or {}).get(line.station, line.station))
+        return known[line.id]
+
     out, unsourced = [], 0
     for text, numbers in points:
         cited = [lines[n - 1] for n in numbers]
         said = words(text)
         backing = [line for line in cited if _shares(said, _heard(line))]
-        if not backing and any(line.readers for line in cited):
+        readers = any(line.readers for line in cited)
+        if not backing and readers:
             unsourced += 1
             continue
+        claims = stated(text, names=readers, nouns=nouns)
         if len(cited) > CITED:
-            rest = [line for line in cited if line not in backing]
-            cited = _evenly(backing, CITED) + _evenly(rest, CITED - len(backing))
+            cited = _kept(cited, backing, claims, said_in)
+        if not all(any(_found(c, said_in(line)) for line in cited) for c in claims):
+            unsourced += 1
+            continue
         out.append(Point(text, tuple(line.id for line in sorted(cited, key=lambda x: x.t))))
     return out, unsourced
+
+
+def _kept(
+    cited: Sequence[Line],
+    backing: Sequence[Line],
+    claims: Sequence[str | frozenset[float]],
+    said_in: Callable[[Line], tuple[frozenset[str], frozenset[float]]],
+) -> list[Line]:
+    """``CITED`` of the lines a point cites: first, one by one, the line that says most of
+    what the point states and no line kept says yet; then those that share a word with it,
+    then the rest, each spread evenly over the order cited."""
+    kept: list[Line] = []
+    left = list(claims)
+    while left and len(kept) < CITED:
+        scored = [(sum(_found(c, said_in(ln)) for c in left), ln) for ln in cited if ln not in kept]
+        count, best = max(scored, key=lambda s: s[0])  # the first cited of those saying most
+        if not count:
+            break
+        kept.append(best)
+        left = [c for c in left if not _found(c, said_in(best))]
+    kept += _evenly([ln for ln in backing if ln not in kept], CITED - len(kept))
+    kept += _evenly([ln for ln in cited if ln not in kept and ln not in backing], CITED - len(kept))
+    return kept
+
+
+def stated(text: str, *, names: bool = True, nouns: bool = False) -> list[str | frozenset[float]]:
+    """What a point (``text``) states that the lines it keeps must say too: its names, folded
+    and cut as ``words`` cuts a word, and its numbers, each as the set of values it may have.
+
+    A name is a word written with a capital within a sentence, not as its first word ("the
+    mayor of Velmora"), or with a capital after its first letter wherever it is (EU, McAdam);
+    each word of a run of them ("Ana Velmora") is a name of its own. With ``nouns`` (a language
+    that writes its nouns with a capital, so that a capital doesn't make a name), only the
+    latter; in a point written mostly in capitals, none. A number is any written in digits:
+    "2,300" is 2300 or 2.3, as languages write it one way or the other (``_values``); "three"
+    isn't one."""
+    out: list[str | frozenset[float]] = []
+    cased = [(w, first) for w, first in _in_sentences(text) if len(w) > 1 and w[0].isalpha()]
+    if names and 2 * sum(w.isupper() for w, _ in cased) <= len(cased):
+        for word, first in cased:
+            inner = any(c.isupper() for c in word[1:])  # EU, McAdam
+            if inner or (not nouns and not first and word[0].isupper()):
+                out.append(_stem(fold(word)))
+    out += [values for token in _NUMBER.findall(text) for values in _values(token)]
+    return list(dict.fromkeys(out))
+
+
+def _in_sentences(text: str) -> Iterator[tuple[str, bool]]:
+    """Each word of ``text`` with whether it is the first of a sentence: the first of the text,
+    or after a full stop, a question or exclamation mark or a colon, with any quotes and
+    brackets around."""
+    end = None
+    for m in _WORD.finditer(text):
+        gap = "" if end is None else text[end : m.start()].strip(_AROUND)
+        yield m.group(), end is None or (bool(gap) and gap[-1] in _STARTS)
+        end = m.end()
+
+
+def _capitalises_nouns(texts: Iterable[str]) -> bool:
+    """Whether ``texts`` are in a language that writes its nouns with a capital, as German does:
+    more than ``NOUN_CAPS`` of their words within sentences start with one. Told from the text,
+    as no code here knows a language by its name."""
+    capital = within = 0
+    for text in texts:
+        for word, first in _in_sentences(text):
+            if first or not (word[0].isupper() or word[0].islower()):  # digits, uncased scripts
+                continue
+            within += 1
+            capital += word[0].isupper()
+    return capital > NOUN_CAPS * within
+
+
+def _values(token: str) -> list[frozenset[float]]:
+    """The numbers written as ``token`` (digits and the marks between them), each as the
+    values it may have, read with "." or "," as the decimal mark and the other, or a space,
+    between thousands: "2,300" is 2300 or 2.3, "2.9" and "2,9" are 2.9, "12 500" is 12500.
+    Digits that make no one number either way ("1.5.2025", "2026 300") are numbers of their
+    own."""
+    groups, marks = _MARK.split(token), _MARK.findall(token)
+    if not marks:
+        return [frozenset({float(token)})]
+    found = set()
+    for decimal in ".,":
+        whole, fraction = (groups[:-1], groups[-1]) if marks[-1] == decimal else (groups, "0")
+        if decimal in marks[: len(whole) - 1]:
+            continue
+        if len(whole) > 1 and (len(whole[0]) > 3 or any(len(g) != 3 for g in whole[1:])):
+            continue
+        found.add(float(f"{''.join(whole)}.{fraction}"))
+    return [frozenset(found)] if found else [frozenset({float(g)}) for g in groups]
+
+
+def _said_in(line: Line, station: str) -> tuple[frozenset[str], frozenset[float]]:
+    """What a point's names and numbers are looked for in: the words of every text of ``line``
+    (folded and cut, of any length) and of its station's name and the time it was shown with,
+    and their numbers, each with every value it may have and each run of digits alone."""
+    texts = (line.text, *line.also, station, local_time(line.t, "%a %H:%M"))
+    said = frozenset(_stem(w) for t in texts for w in _WORD.findall(fold(t)))
+    numbers = {v for t in texts for n in _NUMBER.findall(t) for vs in _values(n) for v in vs}
+    numbers.update(float(d) for t in texts for d in _DIGITS.findall(t))
+    return said, frozenset(numbers)
+
+
+def _found(claim: str | frozenset[float], said: tuple[frozenset[str], frozenset[float]]) -> bool:
+    """Whether a line says ``claim``, a name (one word of it the start of the other, as
+    ``_shares`` has it) or a number (any of its values)."""
+    words_, numbers = said
+    if isinstance(claim, frozenset):
+        return bool(claim & numbers)
+    if claim in words_:
+        return True
+    return (
+        claim.isalpha()
+        and len(claim) >= GROUND_LETTERS
+        and any(
+            w.startswith(claim) or claim.startswith(w)
+            for w in words_
+            if w.isalpha() and len(w) >= GROUND_LETTERS
+        )
+    )
+
+
+def _stem(word: str) -> str:
+    """A folded word as ``words`` compares it: its first ``STEM_CHARS`` letters when it is all
+    letters and ``GROUND_LETTERS`` long or more, else whole."""
+    return word[:STEM_CHARS] if word.isalpha() and len(word) >= GROUND_LETTERS else word
 
 
 def merged(points: Iterable[Point]) -> list[Point]:

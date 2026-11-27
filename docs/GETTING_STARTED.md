@@ -217,10 +217,17 @@ programmes, trailers, jingles, contests), and to say that nothing stood out when
 there was; it mostly does, but nothing checks it, so an advert can still slip in as a point.
 The alerts announced in that time (notified or spoken, not only logged)
 come first, each once, in the words they were announced in. A point the model gave without the
-moments it rests on isn't shown, nor one that shares no word with the moments it cites (a cheap
-check: it catches a point that cites another story, not one that gets a detail wrong). A point
-shows three of its moments at most, those that share words with it first, spread over all it
-cited. A watch ([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a
+moments it rests on isn't shown, nor one that shares no word with the moments it cites, nor
+one with a name or a number that none of the moments it shows says, in any of their
+languages: "funded by" two companies no moment names, or "above 2.9%" when the moments say
+2.8 ("2,9" and "2.9" are the same number). These checks are cheap and catch a point that
+cites another story or adds a name or a figure. They don't catch a detail taken from another
+story told in the same moment, a relation turned round ("after blocking the reform" when it
+was his opponents who blocked it), or a number written in words ("three" isn't checked).
+In a language that writes its nouns with a capital, such as German, only acronyms (EU) count
+as names; a name whose spelling changes when it is inflected can make a good point be left
+out. A point shows three of its moments at most: those that say its names and numbers first,
+then those that share words with it, spread over all it cited. A watch ([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a
 digest only when you name it with `--stations`: its lines are short, from many speakers on many
 channels.
 
@@ -233,7 +240,7 @@ said was written down because the station played music (a voice over a song goes
 only music, idents and repeats were written down; a station keeps no text (walkie-talkies,
 digital voice) or isn't running; nothing stood out in the lines it read (only advertising and
 the station's own promotion, say); or the model's reply
-cited nothing it read, or nothing that backs its points. When the time asked for starts before
+cited nothing it read, or nothing that backs its points, words, names and numbers. When the time asked for starts before
 Wavescribe was started, it says that too ("Wavescribe started at 14:55: before then, nothing
 was heard unless an earlier run was listening").
 

@@ -35,6 +35,7 @@ from wavescribe.digest import (
     plan_prompts,
     sourced,
     spread,
+    stated,
 )
 from wavescribe.radio.bandplan import exports
 from wavescribe.store import Store
@@ -544,6 +545,109 @@ def test_words_tie_a_point_to_its_lines_in_scripts_written_without_spaces(tmp_pa
     d = digester(store, FakeLlm(reply), stations=[station("z", language="zh")])
     out = d.run(d.request({"minutes": 60, "language": "zh"})).payload()
     assert [p["text"] for p in out["points"]] == ["明天停水."]
+    assert out["counts"]["uncited"] == 1
+    store.close()
+
+
+def test_a_point_naming_a_name_or_a_number_its_lines_dont_say_is_left_out(tmp_path) -> None:
+    store = Store(tmp_path / "w.db")
+    add(
+        store,
+        "a",
+        "A empresa Velmora vai cortar 120 postos de trabalho em Ostrel",
+        NOW - 20 * MIN,
+        en="The Velmora company will cut 120 jobs in Ostrel",
+    )
+    add(
+        store,
+        "a",
+        "A inflação ficou em 2,8 % em outubro, disse o instituto",
+        NOW - 15 * MIN,
+        en="Inflation stood at 2.8% in October, the institute said",
+    )
+    add(store, "a", "O novo centro custou 2.300 euros por metro quadrado", NOW - 10 * MIN)
+    reply = (
+        # Words shared with their lines, but a name or a number none of them says.
+        "- Velmora's job cuts are funded by Dravik and Selmont [1].\n"
+        "- Velmora will cut 150 jobs [1].\n"
+        "- Inflation rose above 2.9% in October [2].\n"
+        # Each as its lines say it, a number written the other way round included.
+        "- Velmora will cut 120 jobs in Ostrel [1].\n"
+        "- Inflation stood at 2,8% in October [2].\n"
+        "- The new centre cost 2,300 euros a square metre [3].\n"  # untranslated: 2.300
+    )
+    radio = dataclasses.replace(station("a"), name="Rádio Norte 7")
+    d = digester(store, FakeLlm(reply, "- Rádio Norte 7 says 120 jobs go at Velmora [1]."),
+                 stations=[radio])  # fmt: skip
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert [p["text"] for p in out["points"]] == [
+        "Velmora will cut 120 jobs in Ostrel.",
+        "Inflation stood at 2,8% in October.",
+        "The new centre cost 2,300 euros a square metre.",
+    ]
+    assert out["counts"]["uncited"] == 3
+    # The station's name, as the model was shown it, counts as said.
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert [p["text"] for p in out["points"]] == ["Rádio Norte 7 says 120 jobs go at Velmora."]
+    store.close()
+
+
+def test_a_point_keeps_the_lines_that_say_its_names(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    ids = []
+    for i in range(6):
+        en = {3: "The Selmont fair opens soon", 4: "The fair opens on Saturday"}.get(i)
+        en = en or f"The fair opens soon, they said, part {'abcdef'[i]}"
+        ids.append(add(store, "a", f"A feira abre em breve, parte {i}", NOW - 30 * MIN + i, en=en))
+    d = digester(store, FakeLlm("- The Selmont fair opens on Saturday [1-6]."))
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    # Of six that share words with it, the two that say its names, then one more, spread.
+    assert [s["id"] for s in out["sources"]] == [ids[2], ids[3], ids[4]]
+    store.close()
+
+
+def test_what_a_point_states_is_its_names_and_numbers() -> None:
+    assert stated("Rain in Velmora: Ana Selmont of the EU said so, in 2026.") == [
+        "velmor",  # not "Rain", which starts the sentence, nor "Ana" after a colon
+        "selmon",
+        "eu",  # a capital after the first letter, wherever it is
+        frozenset({2026.0}),
+    ]
+    numbers = stated("2,300 or 2.9 or 2,9 or 12\u00a0500, on 1.5.2025, at 3 4", names=False)
+    assert numbers == [
+        frozenset({2300.0, 2.3}),  # as languages write it one way or the other
+        frozenset({2.9}),
+        frozenset({12500.0}),
+        frozenset({1.0}),
+        frozenset({5.0}),
+        frozenset({2025.0}),
+        frozenset({3.0}),
+        frozenset({4.0}),
+    ]
+    assert stated("THE MAYOR OF VELMORA RESIGNED") == []  # in capitals, capitals tell nothing
+    # A language that writes its nouns with a capital: only acronyms are names.
+    assert stated("Die Regierung und die EU planen eine Reform", nouns=True) == ["eu"]
+
+
+def test_in_a_language_that_capitalises_nouns_a_capital_makes_no_name(tmp_path) -> None:
+    store = Store(tmp_path / "w.db")
+    said = [
+        "Die Regierung will im nächsten Jahr die Renten erhöhen, sagte der Minister am Morgen.",
+        "Auf der Autobahn bei Velmor gibt es nach einem Unfall einen langen Stau.",
+    ]
+    for i, text in enumerate(said):
+        add(store, "a", text, NOW - (20 - i) * MIN, lang="de")
+    reply = (
+        "- Die Regierung plant eine Reform der Renten [1].\n"  # "Reform": a noun, not a name
+        "- Die EU zahlt die Erhöhung der Renten [1].\n"  # no line says EU
+        "- Nach einem Unfall bei Velmor gibt es Stau [2]."
+    )
+    d = digester(store, FakeLlm(reply), stations=[station("a", language="de")])
+    out = d.run(d.request({"minutes": 60, "language": "de"})).payload()
+    assert [p["text"] for p in out["points"]] == [
+        "Die Regierung plant eine Reform der Renten.",
+        "Nach einem Unfall bei Velmor gibt es Stau.",
+    ]
     assert out["counts"]["uncited"] == 1
     store.close()
 

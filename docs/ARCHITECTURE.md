@@ -329,8 +329,22 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
    folded words of four letters or more, compared by their first six, numbers, and pairs of
    characters in scripts written without spaces; checked only when one of the lines has text in
-   the reader's language). A point keeps three of its excerpts at most, those that share a word
-   with it first, spread over all it cited; two points citing the same excerpts are one. A point
+   the reader's language). Sharing a word let through what a small model most often gets
+   wrong: a name from another story or from what it knows, a figure no one said. So every name
+   and number a point states (`stated`) must also be in one of the excerpts it keeps, in any
+   of its texts or in the station's name and time it was shown with. A name is a word with a
+   capital within a sentence or after its first letter (EU), compared as words are; numbers
+   are digits, compared by value, "2,300" being 2300 or 2.3 and "2,9" 2.9. Names are checked
+   only when one of the lines is in the reader's language (place names change with the
+   language), numbers always. Whether a capital makes a name is told from the text, as no code
+   knows languages: when over a fifth of the words within the sentences given start with a
+   capital (German writes its nouns so), only acronyms count; a point written mostly in
+   capitals states no name. Known limits: a detail taken from another story told in the same
+   excerpt, a relation turned round, a number in words, and a name whose stem changes when it
+   is inflected, which leaves a good point out. A point keeps three of its excerpts at most:
+   first those that say what it states, as few as say it all, then those that share a word
+   with it, spread over all it cited; two points citing the same excerpts are one. A prompt
+   rule asks for one story per point, its details from the excerpts about it. A point
    is cut at a sentence's end to 300 characters, and a reply of `NONE` is never shown: only when
    every part said so does the digest say, in Wavescribe's words, that nothing stood out in
    the lines read. A window that fills one part is the digest, in one call (so is `now`,
