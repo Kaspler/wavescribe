@@ -660,6 +660,51 @@ def test_a_station_waiting_to_restart_stops_at_once(monkeypatch) -> None:
     assert time.monotonic() - t0 < 2 and sources["b"].opened == 1
 
 
+class SlowToClose(HeldSource):
+    """Like a stream whose ffmpeg takes a moment to exit once it is told to."""
+
+    def __init__(self, station_id: str, linger_s: float) -> None:
+        super().__init__(station_id, silence(1))
+        self.linger_s = linger_s
+
+    def __iter__(self) -> Iterator[AudioChunk]:
+        yield from super().__iter__()
+        time.sleep(self.linger_s)
+
+
+def test_a_station_started_again_while_it_stops_runs_once_the_stop_is_done() -> None:
+    opened: list[SlowToClose] = []
+
+    def source(st: Station) -> SlowToClose:
+        opened.append(SlowToClose(st.id, 0.4))
+        return opened[-1]
+
+    pipeline = fake_pipeline([station("a")], PLAN, lambda _r: None, source)
+    pipeline.start()
+    assert wait_for(lambda: len(opened) == 1 and "a" in pipeline.status()["stations"])
+    pipeline.remove_station("a")  # as the page's Stop does: it doesn't wait
+    pipeline.add_station(station("a"))  # Start, at once
+    time.sleep(0.6)  # the first source has let go by now
+    a = pipeline.status()["stations"].get("a")
+    pipeline.stop()
+    assert len(opened) == 2 and a is not None and not a["stopping"]
+
+
+def test_a_station_that_takes_too_long_to_stop_says_so_when_started(monkeypatch) -> None:
+    from wavescribe.pipeline import StationStopping
+
+    monkeypatch.setattr("wavescribe.pipeline.STOP_WAIT_S", 0.1)
+    pipeline = fake_pipeline(
+        [station("a")], PLAN, lambda _r: None, lambda st: SlowToClose(st.id, 2.0)
+    )
+    pipeline.start()
+    assert wait_for(lambda: "a" in pipeline.status()["stations"])
+    pipeline.remove_station("a")
+    with pytest.raises(StationStopping, match="a is still stopping: try again in a few seconds"):
+        pipeline.add_station(station("a"))
+    pipeline.stop()
+
+
 def test_a_source_that_exits_still_ends_the_run() -> None:
     class Exits(ListSource):
         def __iter__(self) -> Iterator[AudioChunk]:

@@ -483,6 +483,32 @@ def test_mcp_control_tools_only_with_allow_control(tmp_path: Path) -> None:
         node.close()
 
 
+def test_start_right_after_stop_starts_the_station_or_says_why_not(tmp_path, monkeypatch) -> None:
+    from tests.test_pipeline import SlowToClose
+
+    node = Running(make_app(tmp_path))
+    try:
+        node.app.pipeline._source_factory = lambda st: SlowToClose(st.id, 0.4)
+        assert node.call("POST", "/api/manage/stations/a/start") == (200, {"ok": True})
+        wait_for(lambda: "a" in node.app.pipeline.status()["stations"])
+        assert node.call("POST", "/api/manage/stations/a/stop") == (200, {"ok": True})
+        assert node.call("POST", "/api/manage/stations/a/start") == (200, {"ok": True})
+        time.sleep(0.6)  # the first run has let go of its source by now
+        assert "a" in node.app.running()
+
+        monkeypatch.setattr("wavescribe.pipeline.STOP_WAIT_S", 0.1)
+        node.app.pipeline._source_factory = lambda st: SlowToClose(st.id, 2.0)
+        node.call("POST", "/api/manage/stations/a/stop")
+        wait_for(lambda: "a" not in node.app.running())
+        node.call("POST", "/api/manage/stations/a/start")
+        assert node.call("POST", "/api/manage/stations/a/stop") == (200, {"ok": True})
+        status, body = node.call("POST", "/api/manage/stations/a/start")
+        assert (status, body) == (400, {"error": "Rádio A is still stopping: try again in a "
+                                                 "few seconds"})  # fmt: skip
+    finally:
+        node.close()
+
+
 @pytest.mark.parametrize(
     ("value", "schema", "fits"),
     [

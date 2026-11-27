@@ -266,7 +266,8 @@ TOOLS = (
         "start_station",
         "Start listening to a station that is already set up (an id from the stations tool). "
         "Returns {ok: true}, or fails with Wavescribe's reason: for example, a model it needs "
-        "isn't downloaded, or the user switched the station off on the page.",
+        "isn't downloaded, or the user switched the station off on the page. Right after "
+        "stop_station it first waits for that stop to finish, up to 10 s, or fails saying so.",
         _arguments(("station",), station=STATION_ID),
         control=True,
     ),

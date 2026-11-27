@@ -32,6 +32,7 @@ from wavescribe.pipeline import (
     Pipeline,
     Plan,
     Result,
+    StationStopping,
     fan_out,
     plan_available,
     plan_station,
@@ -557,10 +558,14 @@ class App:
             self._start_follower(station)
         else:
             (self.listen_only_run.add if listen_only else self.listen_only_run.discard)(sid)
-            if sid in self.running():  # on already: switch it to the mode asked for
+            on = self.pipeline.status()["stations"].get(sid)
+            if on is not None and not on["stopping"]:  # on already: switch it to the mode asked
                 self.pipeline.update_station(self._runtime(station))
-            else:
-                self.pipeline.add_station(self._runtime(station))
+            else:  # off, or still stopping: add_station waits for the stop, or says why not
+                try:
+                    self.pipeline.add_station(self._runtime(station))
+                except StationStopping as e:
+                    raise ChangeError(str(e)) from e
         self._remember_running(sid, True)
 
     def stop_station(self, sid: str) -> None:

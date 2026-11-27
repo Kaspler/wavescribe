@@ -57,6 +57,7 @@ FAILURES_BEFORE_ERROR = 20
 RESTART_INITIAL_S = 1.0
 RESTART_MAX_S = 60.0
 RESTART_STEADY_S = 30.0  # a run this long without failing starts the delay afresh
+STOP_WAIT_S = 10.0  # a station started while it stops waits this long for the stop to finish
 # Sentinel priorities: STOP_NOW sorts before every queued job, STOP_DRAINED after all of them.
 _STOP_NOW = float("-inf")
 _STOP_DRAINED = float("inf")
@@ -261,6 +262,10 @@ def plan_models(
     return plan
 
 
+class StationStopping(RuntimeError):
+    """A station was started again while its last run is still letting go of its source."""
+
+
 @dataclass
 class _Live:
     """A running station: its source, its segmenter and the latest audio level."""
@@ -379,8 +384,16 @@ class Pipeline:
         planned = self._plan.asr.get(station.id)
         if planned is None and station.transcribe:
             raise ValueError(f"no ASR model was planned for station {station.id!r}")
+        # Stopped a moment ago (Stop, then Start): its source may still be letting go. Started
+        # now, it would count as running and then end with the old run.
+        self._join_source(station.id, STOP_WAIT_S, only_stopping=True)
         with self._lock:
-            if station.id in self._live:
+            old = self._live.get(station.id)
+            if old is not None and old.stopping:
+                raise StationStopping(
+                    f"{station.name} is still stopping: try again in a few seconds"
+                )
+            if old is not None:
                 return
             live = _Live(station, self._source_factory(station))
             self._live[station.id] = live
@@ -403,9 +416,19 @@ class Pipeline:
         live.stopping = True
         live.source.close()
         if wait:
-            for t in list(self._threads):
-                if t.name == f"source-{station_id}":
-                    t.join(timeout=wait)
+            self._join_source(station_id, wait)
+
+    def _join_source(self, station_id: str, wait: float, *, only_stopping: bool = False) -> None:
+        """Wait up to ``wait`` seconds for the station's source worker to end (with
+        ``only_stopping``, only when the station is being stopped)."""
+        with self._lock:
+            live = self._live.get(station_id)
+        if live is None or (only_stopping and not live.stopping):
+            return
+        deadline = time.monotonic() + wait
+        for t in list(self._threads):
+            if t.name == f"source-{station_id}":
+                t.join(timeout=max(0.0, deadline - time.monotonic()))
 
     def update_station(self, station: Station, asr: tuple[ModelEntry, Path] | None = None) -> None:
         """Apply a changed station. Name, language, priority and translation languages change
