@@ -30,6 +30,12 @@ The pt-PT bake-off measured speed and failure modes ([MEASUREMENTS.md](MEASUREME
 waits for reference transcripts. Whisper large-v3-turbo is the chain's fallback for languages
 Parakeet doesn't cover (Hebrew in the world stations).
 The order for other languages should be decided by their own bake-offs, recorded here.
+To run one: `uv run wavescribe record <station id> --minutes 15` saves a clip of an internet
+station under `data/bakeoff/` (broadcast audio is copyrighted: keep it to yourself), and
+`uv run wavescribe bakeoff data/bakeoff/*.wav --models parakeet-tdt-0.6b-v3,whisper-large-v3-turbo
+--language es-ES` runs each model over the same utterances and reports their speed and how far
+they agree, and the word error rate once a speaker of the language has corrected the reference
+file it writes.
 
 **Language identification:** Whisper's built-in language ID identifies a new stream's language
 when a station is added (its **Check**). It also gives a second opinion on lines the ASR checks

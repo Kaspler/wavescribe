@@ -152,6 +152,8 @@ rewritten.
 - **The Aa button** (Display) sets the text size, light or dark theme, which language you
   **read in**, and whether the original is shown beside the translation. These are yours alone:
   another person reading the same Wavescribe can choose differently.
+- **In the Terminal, without the page:** `uv run wavescribe listen <station id> …` prints the
+  same lines as they come, each translation under its original, until you press Ctrl-C.
 
 ## 6. Search and ask
 
@@ -290,7 +292,9 @@ each station's language. Read them, fix any that are wrong, and save.
   are told to leave their homes"*), with no keywords at all. The model reads each station's recent speech
   about every 45 seconds.
 - **Try a sentence**, as the radio would say it, to see which word rules would fire. Nothing is
-  raised.
+  raised. In the Terminal: `uv run wavescribe alerts check "la carretera está cortada"
+  --language es-ES`; `uv run wavescribe alerts replay` runs everything heard so far through the
+  rules and counts what they would have announced.
 - **Its own words:** in `config/alerts.toml`, a keyword rule can list its own words per language
   instead of (or beside) topics from a keyword pack:
   `terms = { es = ["corte de agua"], de = ["Wasser abgestellt"] }`. They match as pack words do
@@ -334,6 +338,11 @@ speak: to quiet them too, take the voices out of **What happens on an alert**.
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.
+
+**Reading them:** the bell at the top of the page (key `A`) shows the alerts, those above *low*
+from the last 12 hours under **Important** and every one under **All**, each with what was said,
+**Play** and **Show in the transcript**; `uv run wavescribe alerts` lists the latest in the
+Terminal.
 
 **A summary every hour:** under Settings → Alerts, **Summaries on a schedule**, switch on *A
 summary every hour*: on the hour, a summary of what was said since the one before

@@ -112,7 +112,8 @@ Alert fields:
   reached someone), `failed` (none did) or `logged` (it had no action but the log);
   `covered` when another alert announced the same sentence. An alert seen as `pending` comes
   again with its new status; only the feed sends those (`change`: `update`).
-- `cap_url`: the same alert as a CAP 1.2 document.
+- `cap_url`: the same alert as a CAP 1.2 document. On the Wavescribe machine,
+  `uv run wavescribe alerts cap <id>` prints it, with the number `wavescribe alerts` shows.
 
 A batch, used by pushes that batch utterances, is
 `{"type": "batch", "version": 1, "node": {…}, "events": [ … ]}`.

@@ -86,6 +86,8 @@ radio, and the radio code is tested on synthetic signals.
 - Small commits with descriptive messages. When you change an interface or a decision, update
   the matching doc in the same commit. Decisions live in ARCHITECTURE.md;
   revisit one with evidence, and record the change there.
+- A change that adds something a person can do adds its line to the README's list
+  ([What it does](README.md#what-it-does)) and its how-to to the docs.
 - **The page** is React + TypeScript + Vite. Sources live in `frontend/`; `npm --prefix frontend
   run build` writes `src/wavescribe/web/dist/`. The built page is always committed with its
   sources, so running Wavescribe never needs Node. The build works offline from
