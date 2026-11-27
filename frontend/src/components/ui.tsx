@@ -138,13 +138,16 @@ const optionOf = (o: Option) => {
   const [v, l] = Array.isArray(o) ? o : [o, o];
   return <option key={v} value={v}>{l}</option>;
 };
-/** `groups`: further options under a heading each, after the plain ones. */
-export function Select({ options, groups = [], className, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { options: Option[]; groups?: [string, Option[]][] }) {
+/** `groups`: further options under a heading each, after the plain ones; a group marked
+ * `disabled` is shown and can't be chosen, its heading saying why. */
+export function Select({ options, groups = [], className, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { options: Option[]; groups?: [string, Option[], { disabled: boolean }?][] }) {
   return (
     <span className={cx("select", className)}>
       <select {...rest}>
         {options.map(optionOf)}
-        {groups.filter(([, opts]) => opts.length).map(([label, opts]) => <optgroup key={label} label={label}>{opts.map(optionOf)}</optgroup>)}
+        {groups.filter(([, opts]) => opts.length).map(([label, opts, how]) => (
+          <optgroup key={label} label={label} disabled={how?.disabled}>{opts.map(optionOf)}</optgroup>
+        ))}
       </select>
       <Icon name="down" size={14} />
     </span>

@@ -14,7 +14,7 @@ c480ad0ffc8c3b901806751b47c26cefbde27006 frontend/public/manifest.webmanifest
 938af0ba42364a8a08d3570f8ef90132e7f44165 frontend/src/components/ErrorBoundary.tsx
 4ab42ccffcf3b4213a254db5534cd4eec8ab917d frontend/src/components/Icon.tsx
 852dd08acc3e316d5b69957ce66c3dcc7a219058 frontend/src/components/ui.css
-a99b44e63a2db7b7b3c74ea0f8f1183a2eb5390e frontend/src/components/ui.tsx
+68e92a5c53727fc0e0baf59de27ab35209ab6ee9 frontend/src/components/ui.tsx
 4a3d400b065d135d842753dbd21c8cefcdfd75ed frontend/src/lib/alerts.ts
 fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 6393956f39e5c9bf33fd16582ee192e7e97e6bf6 frontend/src/lib/auth.ts
@@ -48,7 +48,7 @@ eb68fc38596abcbc38704f9c8c59b5f44ce17e82 frontend/src/manage/Radio.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
-b2ab4fa8d49f041eaaa23f28030842ec7b81ee94 frontend/src/manage/Stations.tsx
+4154707783e8a3d0c883f69362da38d83ebb7252 frontend/src/manage/Stations.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts

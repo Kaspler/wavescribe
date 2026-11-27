@@ -157,17 +157,21 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const [fm, setFm] = useState((s[freqKey] || []).join(", "));
   const [models, setModels] = useState<[string, string][]>([]);
   const [translators, setTranslators] = useState<[string, string][]>([]);
-  // Detected: the model list doesn't say which models tell languages apart, so the server picks
-  // one, and only a model already chosen for the station is listed beside Automatic.
+  // Detected: only a model that tells languages apart will do (the server refuses another,
+  // `cannot_detect`). The other installed ones are shown, not to be chosen, under why.
   const detect = lang === "auto";
+  const [cannot, setCannot] = useState<[string, string][]>([]);
   useEffect(() => {
     const tag = (x: string) => x.split("-")[0];
     const label = (e: Any) => `${e.id}${e.fit?.level === "too_big" ? " (won't fit)" : ""}`;
-    const speaks = (e: Any) => (detect ? e.id === s.asr_choice : e.languages.includes("*") || e.languages.some((l: string) => tag(l) === tag(lang)));
+    const speaks = (e: Any) => (detect ? e.detects_languages : e.languages.includes("*") || e.languages.some((l: string) => tag(l) === tag(lang)));
     get("/models").then((m) => {
-      setModels(m.models
-        .filter((e: Any) => e.capability === "asr" && e.installed && speaks(e))
-        .map((e: Any) => [e.id, label(e)]));
+      const asr = m.models.filter((e: Any) => e.capability === "asr" && e.installed);
+      const fit = asr.filter(speaks);
+      setModels(fit.map((e: Any) => [e.id, label(e)]));
+      setCannot(detect ? asr.filter((e: Any) => !e.detects_languages).map((e: Any) => [e.id, label(e)]) : []);
+      // Detected now, with a model that can't: back to Automatic, which picks one that can.
+      if (detect) setModel((was: string) => (was && !fit.some((e: Any) => e.id === was) ? "" : was));
       setTranslators(m.models.filter((e: Any) => e.capability === "translate" && e.installed).map((e: Any) => [e.id, label(e)]));
     }).catch(() => {});
   }, [lang]);
@@ -240,8 +244,11 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
       {transcribing && s.kind !== "remote" && (
         <Advanced id="station-editor">
           <div className="m-form">
-            <Field id={id("model")} label="Speech model" hint={detect ? "Automatic picks the first installed model that tells languages apart." : models.length ? "Automatic picks the first installed model that speaks its language and fits." : "None downloaded for this language yet: see Languages and models."}>
-              <Select id={id("model")} value={model} onChange={(e) => setModel(e.target.value)} options={[["", "Automatic: the first that fits"], ...models]} />
+            <Field id={id("model")} label="Speech model" hint={
+              detect ? (models.length ? "Automatic picks the first installed model that tells languages apart." : "None that tells languages apart is downloaded yet: see Languages and models.")
+                : models.length ? "Automatic picks the first installed model that speaks its language and fits." : "None downloaded for this language yet: see Languages and models."}>
+              <Select id={id("model")} value={model} onChange={(e) => setModel(e.target.value)} options={[["", "Automatic: the first that fits"], ...models]}
+                      groups={[["Can't tell languages apart", cannot, { disabled: true }]]} />
             </Field>
             {mode === "translate" && (
               <Field id={id("mt")} label="Translation model" hint="Another model than the shared one takes its own memory while it's in use.">
