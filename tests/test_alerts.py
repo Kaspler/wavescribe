@@ -116,6 +116,26 @@ def test_critical_alert_is_notified_in_english_and_spoken_in_ukrainian(tmp_path:
     assert seen[-1]["status"] == "delivered" and seen[-1]["summaries"]["uk"] == UK
 
 
+def test_words_heard_in_the_voices_language_are_spoken_after_its_intro(tmp_path: Path) -> None:
+    config = {
+        **CONFIG,
+        "speak": {
+            "pt": {"voice": "Lesya", "intro": "Atenção. A rádio diz:", "fallback": "Atenção."}
+        },
+        "actions": {**CONFIG["actions"], "critical": ["speak:pt"]},
+    }
+    alerter = Alerter(
+        parse_alerts(config, None, pack(tmp_path)), actions=(actions := FakeActions())
+    )
+    alerter.attach(lambda text, source, targets, callback: callback({}, "fake-mt"))
+    alerter.on_transcript(result("a", "Corte de água em Vila Nova amanhã.", 1000.0))
+    settle(alerter)
+    # Untranslated, as they are already in its language, but never as if the radio spoke.
+    assert actions.calls == [
+        ("speak", "Lesya", "Atenção. A rádio diz: Corte de água em Vila Nova amanhã.")
+    ]
+
+
 def test_translation_in_the_wrong_language_is_never_spoken(tmp_path: Path) -> None:
     # A translator answering in English when asked for Ukrainian (it happened in testing).
     alerter, actions, *_ = make(tmp_path, {"en": EN, "uk": EN})

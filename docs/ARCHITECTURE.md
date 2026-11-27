@@ -836,8 +836,9 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   `translation_wait_s` (default 10 s), then goes out with what it has. Each translation must pass
   the language check (py3langid) or it's discarded; models list targets they were measured
   inventing content for in `unsafe_targets` (MADLAD: `uk`), and those are never requested. A
-  spoken alert says `intro` plus the checked translation, or the language's fixed `fallback`
-  phrase, so nothing unchecked is spoken and no alert is silent. The voice must be installed
+  spoken alert says `intro` plus the checked translation (or the words as said, when they are in
+  the voice's language), or the language's fixed `fallback` phrase, so nothing unchecked is
+  spoken and no alert is silent. The voice must be installed
   (`say -v Unknown` silently uses the default voice, which would read Ukrainian in English).
   Actions run one at a time on one thread, so speech never overlaps. Once an alert is above
   low, its quote is also translated into its stations' `alert_languages` (`stations.toml`),

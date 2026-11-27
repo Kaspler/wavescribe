@@ -973,10 +973,12 @@ class Alerter:
         voice = self.config.voices[lang]
         if self._voices is not None and voice.voice not in self._voices:
             raise ActionError(f"voice {voice.voice!r} is not installed")
+        # The intro ("the radio reports:") is for words heard, in the voice's language or
+        # translated into it: without it, they would sound like the radio itself.
         if same_language(lang, alert.language):
-            said = text
+            said = text if alert.kind in STATION_KINDS else f"{voice.intro} {text}".strip()
         elif lang in checked and alert.kind in STATION_KINDS:
-            said = checked[lang]  # the intro ("the radio reports:") is for words heard
+            said = checked[lang]
         elif lang in checked:
             said = f"{voice.intro} {checked[lang]}".strip()
         else:
