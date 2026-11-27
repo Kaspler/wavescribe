@@ -28,8 +28,10 @@ Every command used here, with all its options, is in [COMMANDS.md](COMMANDS.md).
 - **A Mac with Apple Silicon** (M1 or later). Intel Macs, Windows and Linux aren't supported.
 - **Memory:** 16 GB or more to transcribe and translate. Listening alone needs very little.
   [HARDWARE.md](HARDWARE.md#the-computer) says how many stations fit on which Mac.
-- **Disk:** about 10 GB for the models, plus room for what's heard: about 30 MB a day for four
-  busy stations, and up to 2 GB of speech audio by default.
+- **Disk:** about 11 GB to install: 8 GB of models (9.5 GB with Whisper, for languages the
+  default model doesn't cover) and about 2 GB for the program's own environment. Then room
+  for what's heard: about 30 MB a day for four busy stations, and up to 2 GB of speech audio by
+  default.
 - **Internet during setup**, to download Wavescribe and its models. After that it works
   offline, except for internet radio stations, which need the internet to play.
 - **Optional: a radio receiver.** An RTL-SDR dongle and an antenna (about €40–60) let
@@ -86,7 +88,8 @@ models** page lists every model with its licence, its size, and whether it fits 
 uv run wavescribe models fetch
 ```
 
-That's about 8 GB:
+That's about 8 GB: about four minutes on a fast fibre line, half an hour at 35 Mbit/s and an
+hour at 20 Mbit/s. If it is interrupted, run it again: what is already there is kept.
 
 | Model | What it does | Size |
 |---|---|---|

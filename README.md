@@ -62,6 +62,53 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
   cut of 28 April 2025 in Spain and Portugal, radio was how people learned what was going on, in
   Spanish and Portuguese only.
 
+## Quick start
+
+You need a Mac with Apple Silicon, 16 GB of memory or more, about 11 GB of free disk (8 GB of it
+models), and [Homebrew](https://brew.sh). No receiver is needed to try it: start with internet
+radio.
+
+```sh
+git clone https://github.com/Kaspler/wavescribe.git
+cd wavescribe
+brew install ffmpeg uv librtlsdr        # librtlsdr only for an RTL-SDR receiver
+uv sync
+uv run wavescribe models fetch          # about 8 GB: half an hour at 35 Mbit/s
+uv run wavescribe serve --open          # opens the page: pick stations and read along
+```
+
+Already have ffmpeg and uv? Any recent version works. Those models transcribe 25 European
+languages; for others, also run `uv run wavescribe models fetch whisper-large-v3-turbo` (1.5 GB).
+
+For news stations in eight languages, ready to try:
+
+```sh
+uv run wavescribe serve --config config/stations.world.example.toml --open
+```
+
+A few more commands:
+
+```sh
+uv run wavescribe serve --lan           # phones on the same Wi-Fi read along (read-only, no
+                                        # login: only on a network you trust)
+uv run wavescribe search "água"         # search everything heard
+uv run wavescribe alerts test           # check notifications and the spoken-alert voices
+uv run wavescribe radio scan a fm       # find FM stations with receiver `a`
+```
+
+[Getting started](docs/GETTING_STARTED.md) goes through stations, alerts, phones and a radio
+receiver step by step.
+
+## Hardware
+
+- **None:** internet radio needs only the Mac.
+- **Starter:** one RTL-SDR Blog V4 receiver and its antenna (about €40–60): a few FM stations
+  that sit close together, station finding, and listening to any frequency.
+- **More stations:** three receivers behind one antenna and a splitter (about €150–250).
+
+[docs/HARDWARE.md](docs/HARDWARE.md) says which Mac, what to buy, which antenna and how to
+connect it.
+
 ## What it does
 
 What is implemented today, one line each, with a link to how to use it. *(experimental)* marks
@@ -263,52 +310,6 @@ what is newer and less tried.
 Limits: it runs on macOS on Apple Silicon only. With an RTL-SDR receiver it tunes 24 to
 1766 MHz, which holds FM broadcast and the VHF and UHF bands, not medium wave or shortwave.
 Ideas and requests are welcome as [issues](https://github.com/Kaspler/wavescribe/issues).
-
-## Quick start
-
-You need a Mac with Apple Silicon, 16 GB of memory or more, about 10 GB of disk for the models,
-and [Homebrew](https://brew.sh). No receiver is needed to try it: start with internet radio.
-
-```sh
-git clone https://github.com/Kaspler/wavescribe.git
-cd wavescribe
-brew install ffmpeg uv librtlsdr        # librtlsdr only for an RTL-SDR receiver
-uv sync
-uv run wavescribe models fetch          # about 8 GB of models
-uv run wavescribe serve --open          # opens the page: pick stations and read along
-```
-
-Already have ffmpeg and uv? Any recent version works. Those models transcribe 25 European
-languages; for others, also run `uv run wavescribe models fetch whisper-large-v3-turbo` (1.5 GB).
-
-For news stations in eight languages, ready to try:
-
-```sh
-uv run wavescribe serve --config config/stations.world.example.toml --open
-```
-
-A few more commands:
-
-```sh
-uv run wavescribe serve --lan           # phones on the same Wi-Fi read along (read-only, no
-                                        # login: only on a network you trust)
-uv run wavescribe search "água"         # search everything heard
-uv run wavescribe alerts test           # check notifications and the spoken-alert voices
-uv run wavescribe radio scan a fm       # find FM stations with receiver `a`
-```
-
-[Getting started](docs/GETTING_STARTED.md) goes through stations, alerts, phones and a radio
-receiver step by step.
-
-## Hardware
-
-- **None:** internet radio needs only the Mac.
-- **Starter:** one RTL-SDR Blog V4 receiver and its antenna (about €40–60): a few FM stations
-  that sit close together, station finding, and listening to any frequency.
-- **More stations:** three receivers behind one antenna and a splitter (about €150–250).
-
-[docs/HARDWARE.md](docs/HARDWARE.md) says which Mac, what to buy, which antenna and how to
-connect it.
 
 ## How it works
 
