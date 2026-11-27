@@ -257,10 +257,20 @@ def fake_say(tmp_path: Path, monkeypatch, script: str) -> Path:
 def test_say_is_stopped_at_once_and_doesnt_outlive_its_turn(tmp_path: Path, monkeypatch) -> None:
     pid_file = fake_say(tmp_path, monkeypatch, "sleep 30")
     stop = threading.Event()
-    threading.Timer(0.3, stop.set).start()
-    t0 = time.monotonic()
+    stopped_at: list[float] = []
+
+    def stop_once_saying() -> None:  # a loaded machine may take a while to start it
+        deadline = time.monotonic() + 30
+        while not (pid_file.exists() and pid_file.read_text().strip()):
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.01)
+        stopped_at.append(time.monotonic())
+        stop.set()
+
+    threading.Thread(target=stop_once_saying, daemon=True).start()
     assert MacActions().speak_until("Daniel", "A long sentence.", stop.is_set) is False
-    assert time.monotonic() - t0 < 2
+    assert time.monotonic() - stopped_at[0] < 2
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid_file.read_text()), 0)
 
