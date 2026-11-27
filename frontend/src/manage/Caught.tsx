@@ -67,7 +67,8 @@ interface Want { dev: string; spec: string | [number, number] }
  * Asks for the confirmation the kind of radio needs, and lets a receiver tuned by hand go. The
  * server makes the watch station and starts it, beside the stations the receiver hears: it moves
  * a receiver that doesn't hear the band, and asks first when that leaves stations out. A watch
- * made before for this band (or slice) and receiver is started again. A refusal is said in words. */
+ * made before for this band (or slice) and receiver is started again, the same way. A refusal is
+ * said in words. */
 export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, free, others, needsAck, watches, bands, onDone, onCancel }: {
   band: Band;
   device: string;
@@ -112,9 +113,11 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
     setAsked(null);
     const mine = watches.find((w) => w.device === dev && sameWindow(w.watch, spec));
     let made: Any = null;
+    let again: Any = null;
     try {
       if (dev === device && byHand) await letGo(dev);
-      if (mine) await post(`/stations/${mine.id}/start`);
+      // Started again, it moves the receiver as a new watch does, asking the same question first.
+      if (mine) again = await post(`/stations/${mine.id}/start`, { retune: confirmed });
       else {
         made = await post("/stations", {
           name: typeof spec === "string" ? name : `${name} ${spec[0]}–${spec[1]}`, device: dev, watch: spec, language: "auto", start: true,
@@ -128,9 +131,10 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
       setTrouble(no);
       return;
     }
-    if (made?.live_closed) liveClosed(dev);
+    if ((made || again)?.live_closed) liveClosed(dev);
     const ok = `Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`;
-    const said = made ? addedToast(made, ok) : { text: ok, bad: false };
+    const said = made ? addedToast(made, ok)
+      : again?.start_error ? { text: `${mine!.name} didn't start: ${again.start_error}`, bad: true } : { text: ok, bad: false };
     toast(said.text, said.bad);
     await onDone();
   };

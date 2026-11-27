@@ -1,6 +1,5 @@
 // What watches caught (GET /api/catches), grouped by frequency for "Caught here", and a watch's
-// window and where a receiver is tuned for it. Plain functions, so they can be tested without a
-// page.
+// window in words. Plain functions, so they can be tested without a page.
 
 /** Words heard in a catch, as the store has them. */
 export interface Said {
@@ -112,35 +111,6 @@ export const voiceWord = (v: boolean | null) => (v === true ? "voice" : v === fa
  * talks all the time, and isn't digital, which gives only noise. What a watch can listen to. */
 export const talksNowAndThen = (b: { mode: string | null; privacy: string }) =>
   (b.mode === "nfm" || b.mode === "am") && b.privacy !== "broadcast" && b.privacy !== "digital";
-
-/** A watch's window as a receiver must hear it, in MHz: its first and last channel, the step
- * between channels and a channel's width. */
-export interface WatchWindow { lo: number; hi: number; step: number; channel: number }
-
-type WindowBand = { start_mhz: number; stop_mhz: number; step_khz: number | null; channel_khz: number | null; channels_mhz: number[] };
-
-/** The window a watch of `band` (or of the slice `spec` of it) listens to. */
-export function watchWindow(band: WindowBand, spec: string | number[]): WatchWindow {
-  const channel = (band.channel_khz || 12.5) / 1000;
-  const list = band.channels_mhz.filter((c) => typeof spec === "string" || (c >= spec[0] - 1e-6 && c <= spec[1] + 1e-6));
-  if (list.length) return { lo: list[0], hi: list[list.length - 1], step: list.length > 1 ? +(list[1] - list[0]).toFixed(5) : channel, channel };
-  const [lo, hi] = typeof spec === "string" ? [band.start_mhz, band.stop_mhz] : spec;
-  return { lo, hi, step: (band.step_khz || band.channel_khz || 12.5) / 1000, channel };
-}
-
-const NARROW_MARGIN = 0.06; // NARROW_MARGIN_HZ in dsp/__init__.py, in MHz
-const OFF_CENTRE_NFM = 0.25; // OFF_CENTRE_HZ["nfm"]
-
-/** Where a receiver `spanMhz` wide is tuned to watch `w`, as plan_centre in radio/watch.py: a
- * narrow window wholly above the centre, clear of the dongle's spike and of the mirror it makes
- * of strong signals; a wide one centred between two channels. */
-export function watchCentre(w: WatchWindow, spanMhz: number): number {
-  const reach = spanMhz / 2 - NARROW_MARGIN;
-  const below = w.lo - OFF_CENTRE_NFM;
-  if (w.hi + w.channel / 2 - below <= reach + 1e-9) return +below.toFixed(5);
-  const k = Math.floor(((w.lo + w.hi) / 2 - w.lo) / w.step + 1e-9);
-  return +(w.lo + (k + 0.5) * w.step).toFixed(5);
-}
 
 /** A watch's window in words: a band's name, or "446.000–446.100 MHz". */
 export function windowWords(spec: string | number[], bandName: (id: string) => string | null): string {

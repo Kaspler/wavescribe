@@ -36,6 +36,9 @@ export interface Station {
   languages?: string[] | null;
   /** Why its receiver doesn't hear it where that is tuned now, as a sentence; null when it does. */
   out_of_reach?: string | null;
+  /** Where starting it moves its receiver, while it is out of reach; null when no centre hears
+   * it, or it isn't out of reach. */
+  reach_center_mhz?: number | null;
 }
 
 export interface Hit {

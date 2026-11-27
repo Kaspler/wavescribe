@@ -2,7 +2,7 @@
 // and Edit list to choose which stations this device shows.
 import { useState } from "react";
 import { pick, shownLang } from "../lib/lang";
-import { S, post, running } from "../lib/live";
+import { S, post, running, startThere } from "../lib/live";
 import { P, visible } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
 import { noText, stateOf } from "../lib/station";
@@ -76,6 +76,8 @@ function Row({ st }: { st: Station }) {
   const last = (S.utts[st.id] || []).slice(-2).map((u) => pick(u, st, shown)).filter(([, , s]) => s !== "pending");
   const speech = on && !stale && state.lamp === "speech";
   const ago = on && !speech ? lastTextAgo(st.id) : null;
+  // Out of reach, on this machine: Start opens it, where the move is pressed (as on the rail).
+  const there = S.manage && !st.disabled && !!st.out_of_reach && !!st.device && st.reach_center_mhz != null;
   return (
     <li className="phone-item">
       <button type="button" className={cx("phone-row", !on && "is-off")} onClick={() => setCols([st.id])}>
@@ -97,9 +99,13 @@ function Row({ st }: { st: Station }) {
           </span>
         )}
       </button>
-      {!on && S.canControl && st.available && !st.disabled && (
+      {!on && ((S.canControl && st.available && !st.disabled) || there) && (
         <Button size="sm" variant="ghost" icon="power" className="phone-start" disabled={!S.status?.ready}
-                onClick={(e) => { hold(st.id, e); post(`/api/stations/${st.id}/start`); }} aria-label={T.startStation(st.name)}>
+                onClick={(e) => {
+                  hold(st.id, e);
+                  if (!there) post(`/api/stations/${st.id}/start`);
+                  else { startThere(st.id); setCols([st.id]); }
+                }} aria-label={T.startStation(st.name)}>
           {T.start}
         </Button>
       )}

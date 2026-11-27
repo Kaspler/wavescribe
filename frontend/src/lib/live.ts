@@ -41,6 +41,9 @@ export const S = {
   fresh: new Set<string>(), // utterance keys that just arrived, for a brief highlight
   reading: new Set<string>(), // stations whose column is scrolled back: don't trim them
   notice: "" as string, // one line of trouble shown under the header
+  /** A station whose Start was pressed in a station list while its receiver is tuned where it
+   * doesn't hear it (`startThere`). */
+  startThere: null as string | null,
 };
 
 export const running = (id: string) => !!S.live[id] && !S.live[id].stopping;
@@ -325,6 +328,15 @@ export function connect() {
 /** Starts a station in its own mode: one started only to play is written down from now on. */
 export async function startStation(id: string) {
   if (await post(`/api/stations/${id}/start`)) await stationsChanged().catch(() => {});
+}
+
+/** Start, pressed in a station list on a station its receiver doesn't hear where it is tuned:
+ * the move that brings it back (MoveThere, in its column, which the caller opens) is pressed
+ * there, where the server's question fits when the move leaves other stations out. Only this
+ * machine's page moves a receiver: the reading route refuses such a start. */
+export function startThere(id: string) {
+  S.startThere = id;
+  emit("startThere");
 }
 
 /** After this tab changed the stations: reloads them here and in the other tabs. */

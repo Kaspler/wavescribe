@@ -9,18 +9,17 @@ import { spoken } from "../reading/Column";
 import { type Any, docUrl, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { changedFields } from "./drafts";
 import { watchWords } from "./Caught";
-import { MoveThere } from "./MoveThere";
+import MoveThere from "./MoveThere";
 import { SpokenField } from "./SpokenField";
 
 export function Stations() {
   const { data, error, reload: load } = useLoad(() => get("/stations"));
-  // The receivers and where each is tuned: a station one of them doesn't hear there gets a button
-  // that moves it back.
-  const { data: radio, reload: loadRadio } = useLoad(() => get("/radio").catch(() => null));
+  // The band plan, for the band a watch is written with.
+  const { data: radio } = useLoad(() => get("/radio").catch(() => null));
   if (!data) return <p className="m-loading">{error ? `Couldn't load the stations: ${error}` : "Loading…"}</p>;
   const stations: Any[] = data.stations;
   const devices: string[] = data.devices || [];
-  const reload = async () => { await Promise.all([load(), loadRadio()]); refreshPage(); };
+  const reload = async () => { await load(); refreshPage(); };
   const waiting = stations.filter((s) => s.listen_only && !s.disabled).length;
   return (
     <>
@@ -37,7 +36,7 @@ export function Stations() {
           </div>
         )}
         <ul className="m-list">
-          {stations.map((s) => <StationRow key={s.id} s={s} devices={devices} radio={radio} reload={reload} />)}
+          {stations.map((s) => <StationRow key={s.id} s={s} devices={devices} bands={radio?.bands || []} reload={reload} />)}
         </ul>
       </Section>
     </>
@@ -64,13 +63,13 @@ function site(src: string) {
 /** Whether any of its translation languages differs from what it speaks (en-GB into en isn't). */
 const translated = (s: Any) => (s.translate_to || []).some((t: string) => t.split("-")[0] !== s.language.split("-")[0]);
 
-function StationRow({ s, devices, radio, reload }: { s: Any; devices: string[]; radio: Any | null; reload: () => Promise<void> }) {
+function StationRow({ s, devices, bands, reload }: { s: Any; devices: string[]; bands: Any[]; reload: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
-  const rx = s.device ? radio?.receivers?.find((r: Any) => r.id === s.device) : null;
-  const away = rx?.stations.find((x: Any) => x.id === s.id && x.out_of_reach);
+  // Its receiver is tuned where it doesn't hear it, and a centre hears it: the move back.
+  const movable = !!s.out_of_reach && s.reach_center_mhz != null && !!s.device;
   const kind = s.kind === "remote" && s.remote === "push" ? "pushed" : KIND[s.kind] || s.kind;
   // A watch has a band or a range, not a frequency.
-  const tuned = s.watch != null ? `watching ${watchWords(s, radio?.bands || [])}`
+  const tuned = s.watch != null ? `watching ${watchWords(s, bands)}`
     : `${(s.mhz || s.fm_mhz || []).join(", ")} MHz`;
   const src = s.stream || s.stream_hls || (s.device ? `receiver ${s.device} · ${tuned}${s.mode ? ` ${s.mode.toUpperCase()}` : ""}`
     : s.remote ? `${s.remote}${s.remote_station ? ` → ${s.remote_station}` : ""}` : "no source");
@@ -100,10 +99,10 @@ function StationRow({ s, devices, radio, reload }: { s: Any; devices: string[]; 
         )}
         {" · "}<span className="mono" title={src}>{site(src)}</span>
       </p>
-      {!s.available && s.reason && !s.disabled && (away ? (
+      {!s.available && s.reason && !s.disabled && (movable ? (
         <div className="m-trouble">
           <p>{s.reason}</p>
-          <MoveThere rx={rx} s={away} bands={radio.bands} watch={s.watch} mode={s.mode} onDone={reload} />
+          <MoveThere s={s} device={s.device} onDone={reload} />
         </div>
       ) : <p className="m-trouble">{s.reason}</p>)}
       {s.available && s.translate_to_missing?.length > 0 && !s.listen_only && s.reason && <p className="m-item-sub">{s.reason}</p>}

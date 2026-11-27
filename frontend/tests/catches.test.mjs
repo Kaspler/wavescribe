@@ -1,7 +1,7 @@
 // "Caught here": what watches caught, grouped by frequency and filtered.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandsIn, filterCatches, groupCatches, hasSpeech, talksNowAndThen, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
+import { bandsIn, filterCatches, groupCatches, hasSpeech, talksNowAndThen, voiceWord, windowWords } from "../src/manage/catches.ts";
 
 const NOW = 1_800_000_000;
 const caught = (id, freq_hz, ago, more = {}) => ({
@@ -63,15 +63,4 @@ test("a window in words", () => {
   assert.equal(windowWords("pmr446", names), "Walkie-talkies");
   assert.equal(windowWords("unknown", names), "unknown");
   assert.equal(windowWords([446, 446.1], names), "446.000–446.100 MHz");
-});
-
-test("a watch is moved back where the server would tune it", () => {
-  const pmr = { start_mhz: 446, stop_mhz: 446.2, step_khz: null, channel_khz: 12.5, channels_mhz: Array.from({ length: 16 }, (_, i) => +(446.00625 + i * 0.0125).toFixed(5)) };
-  const twoM = { start_mhz: 144, stop_mhz: 146, step_khz: 12.5, channel_khz: 12.5, channels_mhz: [] };
-  const w = watchWindow(pmr, "pmr446");
-  assert.deepEqual([w.lo, w.hi], [446.00625, 446.19375]);
-  assert.equal(watchCentre(w, 2.4), 445.75625, "a narrow band: wholly above the centre");
-  const m = watchWindow(twoM, "2m");
-  assert.equal(watchCentre(m, 2.4), 145.00625, "a wide one: between two channels near its middle");
-  assert.deepEqual(watchWindow(pmr, [446.0, 446.1]).hi, 446.09375, "a slice: the band's channels inside it");
 });

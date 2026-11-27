@@ -3,7 +3,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo,
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
 import { dirOf, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
-import { S, linesAround, loadEarlier, post, running, setNotice, startStation } from "../lib/live";
+import { S, linesAround, loadEarlier, post, running, setNotice, startStation, stationsChanged } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
 import { noText, overloaded, stateOf } from "../lib/station";
@@ -24,7 +24,7 @@ import { topSeverity, utteranceWords, withInaudible } from "./text";
 
 // Moving a receiver back to a station it doesn't hear is the control centre's: loaded only on the
 // Wavescribe machine, and only for a station that needs it.
-const MoveStation = lazy(() => import("../manage/MoveStation"));
+const MoveThere = lazy(() => import("../manage/MoveStation"));
 
 const PARA_GAP_S = 3; // a pause this long starts a new paragraph…
 const PARA_MAX_S = 45; // …and so does 45 s of continuous speech
@@ -104,8 +104,9 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
   const lag = on && !stale ? columnLag(S.live[st.id]) : null;
   const translated = !sameLang(shownLang(st, P.lang), st.language);
   // Its receiver is tuned where it doesn't hear it: the reason, and on this machine the move back
-  // (not for a station switched off, which the move would start).
+  // where a centre hears it (not for a station switched off, which the move would start).
   const away = !on && !st.disabled && st.out_of_reach;
+  const movable = S.manage && !!away && !!st.device && st.reach_center_mhz != null;
   // It can't start as it is set up (switched off, no source): the server's reason as its state.
   const cant = !on && !st.available && !away ? st.reason || T.unavailable : null;
   return (
@@ -169,7 +170,7 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
       {away && (
         <div className="col-reach">
           <p>{st.out_of_reach}</p>
-          {S.manage && st.device && <Suspense fallback={null}><MoveStation st={st} /></Suspense>}
+          {movable && <Suspense fallback={null}><MoveThere s={st} device={st.device!} onDone={stationsChanged} /></Suspense>}
         </div>
       )}
     </header>

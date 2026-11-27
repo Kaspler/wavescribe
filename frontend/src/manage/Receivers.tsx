@@ -5,10 +5,10 @@ import { S } from "../lib/live";
 import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act, toast } from "../components/ui";
 import { type Any, ApiError, del, docUrl, get, post, useLoad } from "./api";
 import { and } from "./bands";
-import { type Receiver, type Span, usable } from "./dial";
+import { type Receiver, type RxStation, type Span, usable } from "./dial";
 
 // The reading view loads it on its own when a column offers the move: it stays its own piece.
-const MoveStation = lazy(() => import("./MoveStation"));
+const MoveThere = lazy(() => import("./MoveStation"));
 
 /** A receiver as the page names it: receiver "c" is Receiver C, as on a front panel. */
 export const rxName = (id: string) => (id.length === 1 ? id.toUpperCase() : id);
@@ -225,9 +225,10 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
   // follow, so Apply doesn't undo it.
   useEffect(() => { setCenter(String(d.center_mhz)); }, [d.center_mhz]);
   useEffect(() => { setGain(String(d.gain_db)); }, [d.gain_db]);
-  // Its stations it doesn't hear where it is tuned, each with the move back (a switched-off one
-  // is left as it is: the move would start it).
-  const away = (d.stations as Any[]).filter((s) => s.out_of_reach && !S.byId[s.id]?.disabled);
+  // Its stations it doesn't hear where it is tuned, each with the move back where a centre hears
+  // it (a switched-off one is left as it is: the move would start it).
+  const outOfReach = (s: RxStation) => !!s.out_of_reach && !S.byId[s.id]?.disabled;
+  const away = d.stations.filter(outOfReach);
   // The server's question before a retune leaves stations out; nothing has changed while it is asked.
   const [asked, setAsked] = useState<{ question: string; stops: string[] } | null>(null);
   // The question replaces Apply, and Apply the question: the focus goes along.
@@ -246,8 +247,8 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
       if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ question: e.message, stops: e.data.holders || [] }); return; }
       throw e;
     }
-    const was = new Set(away.map((s: Any) => s.id));
-    const left = ((after?.stations || []) as Any[]).filter((s) => s.out_of_reach && !was.has(s.id)).map((s) => s.name);
+    const was = new Set(away.map((s) => s.id));
+    const left = ((after?.stations || []) as RxStation[]).filter((s) => outOfReach(s) && !was.has(s.id)).map((s) => s.name);
     toast(left.length ? `Receiver ${rxName(d.id)} retuned; out of its reach now: ${and(left)}` : "Receiver retuned; its stations restarted");
     await reload();
   };
@@ -324,7 +325,7 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
       {away.map((s) => (
         <div key={s.id} className="m-trouble">
           <p>{s.out_of_reach}</p>
-          {S.byId[s.id] && <Suspense fallback={null}><MoveStation st={S.byId[s.id]} onDone={moved} /></Suspense>}
+          {s.reach_center_mhz != null && <Suspense fallback={null}><MoveThere s={s} device={d.id} onDone={moved} /></Suspense>}
         </div>
       ))}
       {asked && <p className="m-line" role="status">{asked.question}</p>}

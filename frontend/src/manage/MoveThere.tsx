@@ -1,26 +1,29 @@
-// A station its receiver doesn't hear where it is tuned now ("out_of_reach" in the receiver's
-// view): the button that moves the receiver back where it hears it and starts it. Moving it may
-// leave other stations out; the server then asks, and the same press is sent again on yes.
+// A station its receiver doesn't hear where it is tuned now (`out_of_reach`): the button that
+// starts it, the server moving the receiver first to where it hears it (`reach_center_mhz`).
+// Moving it may leave other stations out; the server then asks, and the same press is sent again
+// on yes. Start pressed for it in a station list opens its column and presses this button.
 import { useEffect, useRef, useState } from "react";
-import { ActButton, Button, toast } from "../components/ui";
-import { type Any, ApiError, post } from "./api";
+import { ActButton, Button, act, toast } from "../components/ui";
+import { S } from "../lib/live";
+import { useTopics } from "../lib/store";
+import { ApiError, post } from "./api";
 import { and } from "./bands";
-import { watchCentre, watchWindow } from "./catches";
-import { bandAt, centreBelow, width } from "./dial";
 import { rxName } from "./Receivers";
 
-/** Where receiver `rx` hears station `s` again: a watch's window where the server tunes a watch,
- * else just below the frequency, off the dongle's own spike at its centre. */
-function centreFor(rx: Any, s: Any, bands: Any[], watch: unknown, mode?: string | null): number {
-  const spec = watch as string | number[] | null | undefined;
-  const b = spec == null ? null : typeof spec === "string" ? bands.find((x) => x.id === spec) : bandAt(bands, spec[0]);
-  return b && spec != null ? watchCentre(watchWindow(b, spec), width(rx.span_mhz)) : centreBelow(s.mhz, mode || bandAt(bands, s.mhz)?.mode);
+/** What starting a station answers (`POST /api/manage/stations/<id>/start`): after a move, where
+ * its receiver went, whether listening by hand on it ended, and why the station didn't start if
+ * it didn't. */
+interface Started {
+  ok: boolean;
+  receiver?: { id: string; center_mhz: number; moved: boolean };
+  live_closed?: boolean;
+  start_error?: string | null;
 }
 
-/** `rx`, `s`: the receiver and its station as /radio lists them. `watch`: the station's watch,
- * from the stations view, when it is one. */
-export function MoveThere({ rx, s, bands, watch, mode, onDone }: {
-  rx: Any; s: Any; bands: Any[]; watch?: unknown; mode?: string | null; onDone: () => Promise<unknown> | void;
+/** `s`: the station, by id and name. `device`: its receiver. `onLiveClosed`: listening by hand
+ * on `device` ended for the move, for a page that shows it. */
+export default function MoveThere({ s, device, onDone, onLiveClosed }: {
+  s: { id: string; name: string }; device: string; onDone: () => Promise<unknown> | void; onLiveClosed?: (dev: string) => void;
 }) {
   const [asked, setAsked] = useState<{ question: string; stops: string[] } | null>(null);
   // The question replaces the button, and the button the question: the focus goes along.
@@ -32,20 +35,30 @@ export function MoveThere({ rx, s, bands, watch, mode, onDone }: {
   }, [!!asked]);
   const move = async (confirmed: boolean) => {
     setAsked(null);
+    let a: Started;
     try {
-      await post(`/receivers/${rx.id}`, { center_mhz: centreFor(rx, s, bands, watch, mode), retune: confirmed });
+      a = await post<Started>(`/stations/${s.id}/start`, { retune: confirmed });
     } catch (e) {
       if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ question: e.message, stops: e.data.holders || [] }); return; }
       throw e;
     }
-    await post(`/stations/${s.id}/start`);
-    toast(`Receiver ${rxName(rx.id)} is back where it hears ${s.name}`);
+    if (a.live_closed) onLiveClosed?.(device);
+    const went = a.receiver?.moved ? `Receiver ${rxName(device)} moved to ${+a.receiver.center_mhz.toFixed(3)} MHz` : null;
+    if (a.start_error) toast(`${went ? `${went}, but ` : ""}${s.name} didn't start: ${a.start_error}`, true);
+    else toast(`${went ? `${went}: ` : ""}${s.name} is running${a.live_closed ? `, and listening by hand on Receiver ${rxName(device)} ended` : ""}`);
     await onDone();
   };
+  // Start pressed for it in a station list (`startThere`): the same press.
+  const pressed = useTopics("startThere");
+  useEffect(() => {
+    if (S.startThere !== s.id) return;
+    S.startThere = null;
+    act(() => move(false));
+  }, [pressed, s.id]);
   return (
     <div ref={box}>
       {!asked ? (
-        <div className="m-actions"><ActButton size="sm" variant="secondary" run={() => move(false)}>Move Receiver {rxName(rx.id)} there</ActButton></div>
+        <div className="m-actions"><ActButton size="sm" variant="secondary" run={() => move(false)}>Move Receiver {rxName(device)} there</ActButton></div>
       ) : (
         <>
           <p role="status">{asked.question}</p>

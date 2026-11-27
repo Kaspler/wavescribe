@@ -214,7 +214,8 @@ export function marks(windows: { id: string; lo: number; hi: number }[], scale: 
 /** A receiver's edges, [lo, hi] in MHz, as `span_mhz` gives them. */
 export type Span = [number, number];
 
-/** One of a receiver's stations, as the radio and receivers views list them. */
+/** One of a receiver's stations, as the radio and receivers views list them; the fields this page
+ * doesn't decide on pass through. */
 export interface RxStation {
   id: string;
   name: string;
@@ -225,6 +226,7 @@ export interface RxStation {
   /** Where starting it moves the receiver, while it is out of reach; null when no centre hears
    * it, or it isn't out of reach. */
   reach_center_mhz: number | null;
+  [field: string]: Any;
 }
 
 /** A receiver as `/api/manage/radio` and `/api/manage/receivers` give it, where it is set; the
@@ -306,10 +308,6 @@ export function lookAt(band: RasterBand, heard: { mhz: number; snr_db?: number |
   if (span) return onRaster(band, (span[0] + span[1]) / 2 + (OFF_CENTRE_MHZ[band.mode || "nfm"] ?? 0.25));
   return onRaster(band, (band.start_mhz + band.stop_mhz) / 2);
 }
-
-/** Where a receiver is set to hear a station at `mhz`: just below it, clear of the spike at the
- * dongle's centre, as the server tunes one it moves for a station (OFF_CENTRE_HZ). */
-export const centreBelow = (mhz: number, mode: string | null | undefined) => +(mhz - (OFF_CENTRE_MHZ[mode || "nfm"] ?? 0.25)).toFixed(5);
 
 /** The frequency to tune so that the server, moving the dongle for it, centres it on `centre`. */
 export const lookTune = (centre: number, mode: string | null | undefined) => round3(centre + (OFF_CENTRE_MHZ[mode || "nfm"] ?? 0.25));

@@ -18,7 +18,7 @@ import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receiver
 import { MODE_HINT } from "./Stations";
 import { addedToast } from "./added";
 import { type AddResult, addOnAir } from "./onair";
-import { MoveThere } from "./MoveThere";
+import MoveThere from "./MoveThere";
 import { Refusal } from "./Refusal";
 import { refused } from "./refusals";
 import { SpokenField } from "./SpokenField";
@@ -272,6 +272,8 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   // monitor wait for it (the tuner's view leaves listening by hand out of what holds it).
   const byHand = !!tuner.receivers.find((l) => l.id === device && l.open);
   const holding: string[] = tuner.receivers.find((l) => l.id === device)?.holders ?? rx?.busy ?? [];
+  // The server ended listening by hand on `id` (a watch made, a station moved back to).
+  const liveClosed = (id: string) => { if (tuner.dev === id) { tuner.stopPlayer(); tuner.setSt(null); } };
   const scanWhat = chosen && kindOf(chosen) === "text" ? "Find stations here" : chosen ? `Scan ${bandWords(chosen).name}` : band === "all" ? "Scan everything" : "Scan this range";
   /** Scans on receiver `on`: the band chosen, or `only` in one sweep. */
   const start = async (on = device, only?: string) => {
@@ -286,16 +288,15 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const tryOn = async (id: string) => { await reload(); setDevice(id); await start(id); };
   const minutes = +watch;
   const watchOn = (id: string) => (watches || []).find((w) => w.device === id && w.running);
-  // Stations their receiver doesn't hear where it is tuned now (moved for another station):
-  // listed, unavailable, and one button away from running again.
-  const unheard: { rx: Any; s: Any }[] = v.receivers.flatMap((r: Any) => r.stations.filter((x: Any) => x.out_of_reach).map((x: Any) => ({ rx: r, s: x })));
+  // Stations their receiver doesn't hear where it is tuned now (moved for another station), and
+  // hears from a centre the server names: listed, unavailable, and one button away from running
+  // again. A switched-off one has no such centre: the move would start it.
+  const unheard = v.receivers.flatMap((r) => r.stations.filter((x) => x.out_of_reach && x.reach_center_mhz != null).map((x) => ({ rx: r, s: x })));
   /** The band a station is in: its watch's band, or the band at its frequency. */
   const bandOfStation = (x: Any): Any | undefined => {
     const w = (watches || []).find((y) => y.id === x.id);
     return w ? (typeof w.watch === "string" ? v.bands.find((b: Any) => b.id === w.watch) : bandAt(v.bands, w.watch[0])) : bandAt(v.bands, x.mhz);
   };
-  /** Moves a receiver back where it hears `s`, asking first if that leaves others out, and
-   * starts `s` there. */
   const rxs: RxStatus[] = v.receivers.map((r: Any) => {
     const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
     const w = watchOn(r.id);
@@ -437,7 +438,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
       {unheardHere.map(({ rx, s }) => (
         <div key={s.id} className="m-trouble dl-unheard">
           <p>{s.name} can't run where Receiver {rxName(rx.id)} is tuned now.</p>
-          <MoveThere rx={rx} s={s} bands={v.bands} watch={(watches || []).find((w) => w.id === s.id)?.watch} onDone={onWatched} />
+          <MoveThere s={s} device={rx.id} onDone={onWatched} onLiveClosed={liveClosed} />
         </div>
       ))}
       {next && !running && (
@@ -473,7 +474,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
         <WatchBand band={chosen} device={device} holders={following} needsAck={!!v.policies?.[chosen.privacy]?.needs_ack}
                    free={rxs.find((r) => r.id !== device && r.state === "idle")?.id || null} others={rxs.filter((r) => r.id !== device).map((r) => r.id)}
                    byHand={byHand} letGo={(id) => (tuner.dev === id ? tuner.close() : del(`/live/${id}`))}
-                   liveClosed={(id) => { if (tuner.dev === id) { tuner.stopPlayer(); tuner.setSt(null); } }}
+                   liveClosed={liveClosed}
                    watches={watches} bands={v.bands}
                    onDone={async () => {
                      setWatchAsk(false);

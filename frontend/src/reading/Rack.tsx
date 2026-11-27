@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
 import { pick, shownLang } from "../lib/lang";
-import { S, post, running, startStation } from "../lib/live";
+import { S, post, running, startStation, startThere } from "../lib/live";
 import { P, setPrefs, visible } from "../lib/prefs";
 import { MAX_COLS, go, parse, setCols, useHash } from "../lib/router";
 import { levelOf, noText, stateOf } from "../lib/station";
@@ -236,6 +236,8 @@ function OffStations({ off }: { off: Station[] }) {
             const started = running(st.id); // held in place after a start from here
             const state = started ? stateOf(st.id) : null;
             const away = !st.disabled && st.out_of_reach;
+            // Out of reach, on this machine: Start opens its column, where the move is pressed.
+            const there = S.manage && !!away && !!st.device && st.reach_center_mhz != null;
             const word = away ? T.outOfReach : !st.available ? T.unavailable : state ? state.label : noText(st) ? T.noText : null;
             return (
               <li key={st.id} className={cx("ch", "ch-off", shown && "is-shown")}>
@@ -252,10 +254,14 @@ function OffStations({ off }: { off: Station[] }) {
                     {word && <span className={cx(away && "is-trouble")}>{word}</span>}
                   </span>
                 </button>
-                {startable && !started && (
+                {(startable || there) && !started && (
                   <span className="ch-actions">
                     <button type="button" className="btn btn-band btn-sm ch-btn ch-start" disabled={!S.status?.ready}
-                            onClick={(e) => { hold(st.id, e); post(`/api/stations/${st.id}/start`); }} aria-label={T.startStation(st.name)}>
+                            onClick={(e) => {
+                              hold(st.id, e);
+                              if (!there) post(`/api/stations/${st.id}/start`);
+                              else { startThere(st.id); read(st.id, false); }
+                            }} aria-label={T.startStation(st.name)}>
                       <Icon name="power" />
                       {T.start}
                     </button>
