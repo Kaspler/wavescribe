@@ -531,6 +531,12 @@ class App:
             })  # fmt: skip
         return out
 
+    def defaults_view(self) -> dict[str, Any]:
+        """The stations file's ``[defaults]`` an add form fills a new station from: its language
+        (None when the file gives none) and translation languages."""
+        return {"language": self.base.defaults.get("language"),
+                "translate_to": list(self.base.defaults.get("translate_to", ()))}  # fmt: skip
+
     def _translator_id(self, s: Station) -> str | None:
         mt = self.plan.translator_for(s)
         return mt[0].id if mt else None

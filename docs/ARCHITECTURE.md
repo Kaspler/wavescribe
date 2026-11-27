@@ -400,7 +400,9 @@ reads a playlist or follows another Wavescribe.
   the speech and translation models; switch off or delete. *Add a station* opens Find. An edit
   (`POST /api/manage/stations/<id>`) may change `languages`, the ones a station in language
   `auto` may be; a station in one language refuses them (send `languages: []` with a change
-  away from `auto` that had some).
+  away from `auto` that had some). `GET /api/manage/stations` and `GET /api/manage/radio` both
+  give the stations file's `[defaults]` as `defaults: {language, translate_to}` (language null
+  when the file gives none), which the add forms fill a new station from.
 - **Languages and models:** each model's licence tier, size, fit on this Mac and speed
   estimate, whether it was tested for Wavescribe, installed and in use; download, accept a
   licence, reorder the chains; search Hugging Face; the translation languages.

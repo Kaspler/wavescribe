@@ -357,6 +357,27 @@ def test_every_view_of_a_station_says_where_its_receiver_hears_it_again(tmp_path
         r.close()
 
 
+def test_the_add_forms_get_the_stations_files_defaults(tmp_path: Path) -> None:
+    raw = stations(98.0)
+    r = running(tmp_path, raw)
+    try:
+        said = {"language": "de-DE", "translate_to": ["en"]}  # the file's [defaults]
+        assert r.call("GET", "/api/manage/stations")[1]["defaults"] == said
+        assert r.call("GET", "/api/manage/radio")[1]["defaults"] == said
+    finally:
+        r.close()
+    del raw["defaults"]
+    for s in raw["station"]:
+        s["language"] = "de-DE"
+    (tmp_path / "bare").mkdir()
+    r = running(tmp_path / "bare", raw)
+    try:
+        none = {"language": None, "translate_to": []}
+        assert r.call("GET", "/api/manage/stations")[1]["defaults"] == none
+    finally:
+        r.close()
+
+
 def test_every_view_of_a_receiver_gives_what_it_takes_in_as_lo_and_hi(tmp_path: Path) -> None:
     raw = stations(98.0)
     raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]  # wider than 1.92 MS/s

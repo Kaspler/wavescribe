@@ -100,7 +100,8 @@ def _retention(app: App, m, q, b) -> Any:
 @route("GET", "/stations")
 def _stations(app: App, m, q, b) -> Any:
     return {"stations": app.stations_view(), "errors": app.config_errors,
-            "devices": [d.id for d in app.config.devices]}  # fmt: skip
+            "devices": [d.id for d in app.config.devices],
+            "defaults": app.defaults_view()}  # fmt: skip
 
 
 @route("POST", "/stations")

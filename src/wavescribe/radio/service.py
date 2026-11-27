@@ -147,8 +147,7 @@ class RadioService:
             "policies": {k: {**vars(v), "default": vars(DEFAULT_POLICIES[k]),
                              "changed": sorted(self._policy_changes().get(k, {}))}
                          for k, v in POLICIES.items()},
-            "defaults": {"language": self.app.base.defaults.get("language"),
-                         "translate_to": list(self.app.base.defaults.get("translate_to", ()))},
+            "defaults": self.app.defaults_view(),
             "tools": {"rtl_power": _which("rtl_power"), "rtl_sdr": _which("rtl_sdr")},
             **({"dongles": [{**d, "held_elsewhere": held.get(d["serial"])}
                             for d in self.new_dongles()]}
