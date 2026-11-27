@@ -204,25 +204,46 @@ export function marks(windows: { id: string; lo: number; hi: number }[], scale: 
 
 // -- where a receiver looks ----------------------------------------------------------------------
 
-/** The centre that puts the most of `freqs` (what was heard in the band) inside a window
- * `spanMhz` wide within the band, `marginMhz` clear of its edges, where the dongle's filter
- * falls off, with them in its middle. A band narrower than the window is looked at whole, from its middle; with nothing
- * heard yet, a wide band is looked at from its bottom end. */
-export function bestCentre(band: Pick<Band, "start_mhz" | "stop_mhz">, freqs: number[], spanMhz: number, marginMhz = 0.12): number {
-  const usable = spanMhz - 2 * marginMhz;
-  const width = band.stop_mhz - band.start_mhz;
-  if (width <= usable) return round3((band.start_mhz + band.stop_mhz) / 2);
-  const lo = band.start_mhz + usable / 2, hi = band.stop_mhz - usable / 2;
-  const inBand = freqs.filter((f) => f >= band.start_mhz && f <= band.stop_mhz).sort((a, b) => a - b);
-  let best: number[] = [];
-  for (const f of inBand) {
-    // the window whose lower usable edge sits on f: everything up to f + usable is in it
-    const group = inBand.filter((g) => g >= f && g <= f + usable + 1e-9);
-    if (group.length > best.length) best = group;
+/** A band as far as its raster goes: its channels, or the step its channels sit on. */
+export type RasterBand = Pick<Band, "start_mhz" | "stop_mhz" | "mode" | "step_khz" | "channel_khz" | "channels_mhz">;
+
+/** `mhz` on the band's raster: its nearest channel where the band lists them, else the nearest
+ * step of its raster from the band's start, inside the band; to the kHz outside every band. */
+export function onRaster(band: RasterBand | null | undefined, mhz: number): number {
+  if (band?.channels_mhz?.length) return band.channels_mhz.reduce((p, c) => (Math.abs(c - mhz) < Math.abs(p - mhz) ? c : p));
+  if (band?.step_khz) {
+    const step = band.step_khz / 1000;
+    const last = Math.floor((band.stop_mhz - band.start_mhz) / step + 1e-6);
+    const n = Math.min(last, Math.max(0, Math.round((mhz - band.start_mhz) / step)));
+    return +(band.start_mhz + n * step).toFixed(5);
   }
-  // that group in the middle of the window, so none of it sits on an edge
-  const c = best.length ? (best[0] + best[best.length - 1]) / 2 : lo;
-  return round3(Math.min(hi, Math.max(lo, c)));
+  return round3(mhz);
+}
+
+/** How far from the edges of what a dongle hears a channel must sit (CHANNEL_STOP_HZ and
+ * NARROW_MARGIN_HZ in dsp/__init__.py), in MHz. */
+export const edgeMargin = (mode: string | null | undefined) => (mode === "wfm" ? 0.12 : 0.06);
+
+/** Whether a channel at `mhz` keeps clear of the spike at the centre of a dongle tuned to
+ * `centre` (off_centre in dsp/__init__.py): broadcast FM always does, a narrow channel from a
+ * channel's width away. */
+export const clearOfCentre = (mhz: number, centre: number, mode: string | null | undefined, channelKhz?: number | null) =>
+  mode === "wfm" || Math.abs(mhz - centre) >= (channelKhz || (mode === "am" ? 8.33 : 12.5)) / 1000 - 1e-9;
+
+/** Where Look here tunes a receiver in a band: always on the band's raster, so the frequency the
+ * page shows is the one the receiver is on. The strongest station heard in the band, else the
+ * band's middle. A receiver that should stay where it is (it follows stations in that band, and
+ * moving it would pause them) is given its `window`: the strongest heard inside it, else a
+ * channel near its middle, clear of the dongle's own spike at its centre. */
+export function lookAt(band: RasterBand, heard: { mhz: number; snr_db?: number | null }[], window?: { lo: number; hi: number } | null): number {
+  const centre = window ? (window.lo + window.hi) / 2 : 0;
+  const m = edgeMargin(band.mode);
+  const fits = (f: number) => f >= band.start_mhz && f <= band.stop_mhz
+    && (!window || (f >= window.lo + m && f <= window.hi - m && clearOfCentre(f, centre, band.mode, band.channel_khz)));
+  const best = heard.filter((e) => fits(e.mhz)).sort((a, b) => (b.snr_db ?? 0) - (a.snr_db ?? 0))[0];
+  if (best) return onRaster(band, best.mhz);
+  if (window) return onRaster(band, centre + (OFF_CENTRE_MHZ[band.mode || "nfm"] ?? 0.25));
+  return onRaster(band, (band.start_mhz + band.stop_mhz) / 2);
 }
 
 /** The frequency to tune so that the server, moving the dongle for it, centres it on `centre`. */

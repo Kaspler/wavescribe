@@ -41,7 +41,7 @@ db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-4b021cc551f6acb78cdbae9d56774a9abc1edf4a frontend/src/manage/Radio.tsx
+3b72347c8b904434f259359abdc2f0e2b0cdc578 frontend/src/manage/Radio.tsx
 543cc4abfbaa7ede564ccb5ed43d671b20a88ca2 frontend/src/manage/Receivers.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
 d02e044e5d00361086d6b14eed043adc62776a2f frontend/src/manage/Stations.tsx
@@ -49,7 +49,7 @@ d02e044e5d00361086d6b14eed043adc62776a2f frontend/src/manage/Stations.tsx
 4f00df408c58ecca3b86a8f4fb814c8caeed40d3 frontend/src/manage/api.ts
 56466eeb98a7b202f73560e19d20314f44168a10 frontend/src/manage/bands.ts
 1b00fc252e3925e741c5c435f46d0fbdef6531ed frontend/src/manage/catches.ts
-7b2f5caa73f379769499bd801e8904fff96ec720 frontend/src/manage/dial.ts
+947e903ef5e0a7a1cbec127175d7129c309b33fc frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
 2d68a8da1eeca96d9ce6b7b34a761b21a73cdaa7 frontend/src/manage/manage.css
 38518413f264121ed6ddcb47cd55188df2f72040 frontend/src/manage/tuner.tsx
@@ -77,7 +77,7 @@ b72fa0e883100643d3252a59f3d9fd253d66d71e frontend/src/styles/base.css
 a57655d576ebf8eb77ee500e59d01afc6ba38c1f frontend/tests/auth.test.mjs
 3aa5b94f8179c81ab92f627b1192032b51754fe4 frontend/tests/behind.test.mjs
 de0997f39d785c3eac2a975c6b9cb13e650a8344 frontend/tests/catches.test.mjs
-eab4d12ad7bcd60a0ac6989de7e6278e66e659c1 frontend/tests/dial.test.mjs
+7ed808b76a7e865fb5f8a8c3321c70bf1ae5a920 frontend/tests/dial.test.mjs
 da9bc5828af15a5dbef60f4f3807d178a9c3b821 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 099074d82639e218cd4ebf60cf7a5f9b8421a9a5 frontend/tests/langs.test.mjs

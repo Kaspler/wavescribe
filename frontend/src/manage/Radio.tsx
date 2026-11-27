@@ -11,7 +11,7 @@ import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
-import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
+import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 import { Ask, type Tuner, useTuner } from "./tuner";
@@ -63,15 +63,7 @@ function policyLine(cls: string, policies: Any): string {
 }
 
 /** The nearest channel of the band at `mhz` (its channel list or raster), else `mhz` to the kHz. */
-function snapToBand(bands: Any[], mhz: number): number {
-  const b = bandAt(bands, mhz);
-  if (b?.channels_mhz?.length) return b.channels_mhz.reduce((p: number, c: number) => (Math.abs(c - mhz) < Math.abs(p - mhz) ? c : p));
-  if (b?.step_khz) {
-    const step = b.step_khz / 1000;
-    return +(b.start_mhz + Math.round((mhz - b.start_mhz) / step) * step).toFixed(5);
-  }
-  return +mhz.toFixed(3);
-}
+const snapToBand = (bands: Any[], mhz: number): number => onRaster(bandAt(bands, mhz), mhz);
 
 /** The narrowest band of the plan holding `mhz` (the server decides; this is for hints). */
 const bandAt = (bands: Any[], mhz: number): Any | null => narrowestAt(bands as Band[], mhz);
@@ -289,14 +281,15 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
     setDevice(id);
     tuner.moveTo(id, { mhz, mode: mode || undefined, ...(pause ? { pause: true } : {}) }, play);
   };
-  /** Looks around `centre` with a receiver, without sound until something is chosen. */
-  const look = (id: string, centre: number, mode: string | null) => send(id, lookTune(centre, mode), mode, false);
+  /** Looks around `centre` with a receiver, without sound until something is chosen: tuned to
+   * the channel there, so what the page shows is what it is on. */
+  const look = (id: string, centre: number, mode: string | null) => send(id, snapToBand(v.bands, lookTune(centre, mode)), mode, false);
   const listen = (mhz: number, mode: string | null) => send(device, mhz, mode, true);
-  /** Where most of what was heard in the band is; a receiver already there following stations
-   * looks where it is, which pauses nothing. */
+  /** The strongest station heard in the band; a receiver already there following stations looks
+   * inside what it hears, which pauses nothing. */
   const lookHere = (b: Band) => {
     const there = me && me.holders.length > 0 && bandOfWindow(v.bands, me.lo, me.hi)?.id === b.id;
-    look(device, there ? (me.lo + me.hi) / 2 : bestCentre(b, heardIn(v.heard, b).map((e: Any) => e.mhz), me ? me.hi - me.lo : 2.4), b.mode);
+    send(device, lookAt(b, heardIn(v.heard, b), there ? me : null), b.mode, false);
   };
   // A free receiver to offer instead: one already on the band first.
   const free = rxs.filter((r) => r.id !== moving?.id && r.state === "idle")

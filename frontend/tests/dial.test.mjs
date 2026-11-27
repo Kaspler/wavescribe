@@ -2,7 +2,7 @@
 // legible, receivers never vanish, and a receiver sent to a band looks where its stations are.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandAt, bandOfWindow, bestCentre, dragCentre, labelRows, lookTune, makeScale, marks, segments, ticks } from "../src/manage/dial.ts";
+import { bandAt, bandOfWindow, dragCentre, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks } from "../src/manage/dial.ts";
 
 const band = (id, start_mhz, stop_mhz, mode, privacy) => ({ id, start_mhz, stop_mhz, mode, privacy, tunable: true });
 // A European band plan's shape, as /api/manage/radio sends it.
@@ -106,12 +106,36 @@ test("a receiver's window never vanishes, and nearby receivers' labels stack", (
   assert.ok(by.a.x0 < by.a.xc && by.a.xc < by.a.x1);
 });
 
-test("a receiver sent to a band looks where most of what was heard there is", () => {
-  const fm = BANDS[0];
-  assert.equal(bestCentre(fm, [88.1, 91.2, 101.5, 101.9, 102.6, 103.1], 2.4), 102.3);
-  assert.equal(bestCentre(fm, [], 2.4), 88.58, "nothing heard: from the bottom of the band");
-  assert.equal(bestCentre(fm, [107.9], 2.4), 106.92, "never past the band's end");
-  assert.equal(bestCentre(BANDS.find((b) => b.id === "pmr446"), [446.00625], 2.4), 446.1, "a narrow band whole");
+// Bands with their rasters, as the band plan sends them.
+const FM = { ...BANDS[0], step_khz: 100, channel_khz: null, channels_mhz: [] };
+const TWO_M = { ...BANDS[4], step_khz: 12.5, channel_khz: 12.5, channels_mhz: [] };
+const PMR = { ...BANDS[6], step_khz: null, channel_khz: 12.5, channels_mhz: Array.from({ length: 16 }, (_, i) => +(446.00625 + i * 0.0125).toFixed(5)) };
+const AIR = { ...BANDS[2], step_khz: 25 / 3, channel_khz: 8.33, channels_mhz: [] };
+const heard = (mhz, snr_db) => ({ mhz, snr_db });
+
+test("a frequency is put on its band's raster, and never past the band", () => {
+  assert.equal(onRaster(FM, 98.86), 98.9);
+  assert.equal(onRaster(FM, 98.84), 98.8);
+  assert.equal(onRaster(FM, 120), 108, "inside the band");
+  assert.equal(onRaster(TWO_M, 145.006), 145.0);
+  assert.equal(onRaster(PMR, 446.097), 446.09375, "the nearest channel of the list");
+  assert.equal(onRaster(AIR, 127.501), 127.5);
+  assert.equal(onRaster(null, 1200.12345), 1200.123, "outside every band: to the kHz");
+});
+
+test("Look here tunes the strongest station heard in the band, else the band's middle, on its raster", () => {
+  assert.equal(lookAt(FM, [heard(88.1, 12), heard(102.4, 37), heard(91.9, 32)]), 102.4);
+  assert.equal(lookAt(FM, []), 97.8, "the middle of 87.5 to 108, on the 100 kHz raster");
+  assert.equal(lookAt(TWO_M, []), 145.0);
+  assert.ok(PMR.channels_mhz.includes(lookAt(PMR, [])), "a channel of the list, not between two");
+  assert.equal(lookAt(FM, [heard(150, 40), heard(91.9, 10)]), 91.9, "only what is in the band");
+});
+
+test("a receiver that stays where it is looks inside what it hears, clear of its centre", () => {
+  const win = { lo: 143.8, hi: 146.2 };
+  assert.equal(lookAt(TWO_M, [heard(147, 30), heard(145.5, 9)], win), 145.5);
+  assert.equal(lookAt(TWO_M, [heard(145.0, 20)], win), 145.25, "a station on the centre spike is passed over");
+  assert.equal(lookAt(FM, [], { lo: 101.3, hi: 103.7 }), 102.8, "nothing heard there: near the middle, on the raster");
 });
 
 test("the frequency tuned puts the dongle's centre where the receiver should look", () => {
