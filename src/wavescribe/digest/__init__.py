@@ -8,10 +8,13 @@ each point with the moments it rests on.
 Both read what the store kept: of each utterance, its translation into the reader's language
 where there is one, else the words as said (or another translation), quoted to the model as
 numbered excerpts the way Ask quotes them. The model writes a few points and cites the
-excerpts each rests on; a point that cites nothing it was given is dropped, so every point
-shown can be checked against what was said, and the stations a point names are those of its
-sources, never the model's word for them. Alerts raised in the window come first, as the
-store has them: the model never restates them.
+excerpts each rests on; a point that cites nothing it was given is dropped (and counted), so
+every point shown can be checked against what was said, and the stations a point names are
+those of its sources, never the model's word for them. Nothing else the model writes is shown:
+when it finds nothing of substance, the digest says so in words of its own, with how much was
+read, as a sentence of the model's backed by no source could say anything at all, including
+what a transcript told it to. Alerts raised in the window come first, as the store has them:
+the model never restates them.
 
 Input is bounded. Lines heard as another language than the station's (mostly songs), station
 idents and repeats are skipped. Each station then gets a fair share of ``DIGEST_CHARS``, at
@@ -80,6 +83,7 @@ FETCH_PER_STATION = 600  # rows read per station, evenly spread, before the budg
 POINTS = {"digest": 5, "now": 2}
 NOTE_POINTS = 6  # asked for per prompt in the first of two stages; more are kept
 POINT_WORDS = 25
+POINT_CHARS = 300  # what is kept of a point: a reply in prose is cut at a sentence's end
 CITED = 3  # excerpts a point may cite, as the prompt asks; when it cites more, the first
 ANSWER_TOKENS = 500
 CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
@@ -109,7 +113,8 @@ ORDER = (
 )
 _POINT = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")  # "- ", also "* ", "1. "
 _CITATION = re.compile(r"\[\s*(\d+(?:\s*[,;]\s*\d+)*)\s*\]")
-_NONE = re.compile(r"^\W*NONE\W*:\s*(.+\S)\s*$", re.M)
+_NONE = re.compile(r"^\W*NONE\W*:")
+_SENTENCE_END = re.compile(r"[.!?\u2026\u3002\uff01\uff1f](?=\s|$)")
 _GROUP = re.compile(r"\d+(?:\s*\+\s*\d+)*")  # "3+9" in "3+9, 7, 1"
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")  # BCP-47, loosely
 
@@ -163,6 +168,15 @@ class Point:
     ids: tuple[int, ...]  # the utterances it rests on, oldest first
 
 
+@dataclass(frozen=True)
+class Parsed:
+    """A reply to an excerpts prompt."""
+
+    points: list[tuple[str, list[int]]]  # each with the numbers it cites
+    uncited: int  # points dropped for citing nothing they were given
+    none: bool  # it said nothing of substance was said, and gave no point
+
+
 @dataclass
 class Selection:
     said: dict[str, int]  # utterances per station in the window
@@ -182,8 +196,9 @@ class Digest:
     read: int = 0  # utterances the model read
     calls: int = 0  # to the model
     points: list[Point] = field(default_factory=list)
-    nothing: str | None = None  # the model's own sentence when nothing of substance was said
-    note: str | None = None  # why there are no points, when the model didn't say
+    uncited: int = 0  # points the model gave without a source it was given, left out
+    nothing: bool = False  # every reply said nothing of substance was said
+    note: str | None = None  # why there are no points otherwise
     model: str | None = None
     timings: dict[str, int] = field(default_factory=dict)
 
@@ -210,7 +225,10 @@ class Digest:
         """The digest as plain text: a point a line with the numbers of its sources, or the
         one sentence that says why there are none."""
         if not self.points:
-            return self.nothing or self.note or ""
+            if self.nothing:
+                said = sum(self.said.values())
+                return f"Nothing stood out in the {_lines(self.read)} read of {said} said."
+            return self.note or ""
         n = self.numbered()
         return "\n".join(
             f"- {self.heard_on(p)}{p.text} [{', '.join(str(n[i]) for i in p.ids)}]"
@@ -235,6 +253,7 @@ class Digest:
                 "read": self.read,
                 "skipped": self.skipped,
                 "calls": self.calls,
+                "uncited": self.uncited,
                 "stations": {sid: self.said.get(sid, 0) for sid in r.stations},
             },
             "alerts": [
@@ -455,9 +474,13 @@ class Digester:
         digest.read = sum(len(p) for p in prompts)
         digest.calls = job.calls
         digest.points = job.points
-        digest.nothing = job.nothing
-        if not job.points and not job.nothing:
-            digest.note = "the model's reply cited none of the moments it was given"
+        digest.uncited = job.uncited
+        digest.nothing = not job.points and job.nones == len(prompts)
+        if not job.points and not digest.nothing:
+            digest.note = (
+                "The model's reply cited none of the lines it read, so it isn't shown: it may "
+                "have missed things. Try again, or read the transcript."
+            )
         digest.model = job.model
         digest.timings = {
             "model_ms": round(job.model_s * 1000),
@@ -500,7 +523,8 @@ class _Job:
         self.error: Exception | None = None
         self.notes: list[Point] = []
         self.points: list[Point] = []
-        self.nothing: str | None = None
+        self.nones = 0  # replies that said nothing of substance was said
+        self.uncited = 0
         self.model: str | None = None
         self.calls = 0
         self.model_s = 0.0
@@ -543,16 +567,15 @@ class _Job:
             if len(self.prompts) == 1:
                 lines = self.prompts[0]
                 messages = excerpt_messages(r, lines, self.names, points=POINTS[r.kind])
-                found, self.nothing = _reply(llm, messages, len(lines))
-                points = [Point(t, _ids(lines, ns)) for t, ns in found]
+                points = [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
                 self.points = pick(points, POINTS[r.kind], self._station)
                 return True
             if self.calls < len(self.prompts):  # the first stage: notes from one prompt
                 lines = self.prompts[self.calls]
                 messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
-                found, nothing = _reply(llm, messages, len(lines))
-                self.notes += [Point(t, _ids(lines, ns)) for t, ns in found]
-                self.nothing = self.nothing or nothing
+                self.notes += [
+                    Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)
+                ]
                 if self.calls + 1 < len(self.prompts) or len(self.notes) > 1:
                     return False
                 self.points = list(self.notes)  # nothing to choose from
@@ -571,6 +594,14 @@ class _Job:
         finally:
             self.calls += 1
             self.model_s += time.perf_counter() - t0
+
+    def _reply(
+        self, llm: Llm, messages: list[dict[str, str]], lines: Sequence[Line]
+    ) -> list[tuple[str, list[int]]]:
+        parsed = parse_points(llm.complete(messages, max_tokens=ANSWER_TOKENS), len(lines))
+        self.nones += parsed.none
+        self.uncited += parsed.uncited
+        return parsed.points
 
     def _stations_of(self, ids: Iterable[int]) -> list[str]:
         return list(dict.fromkeys(self._lines[i].station for i in ids))
@@ -779,42 +810,55 @@ def parse_choice(reply: str, count: int, limit: int) -> list[list[int]]:
     return []
 
 
-def parse_points(reply: str, count: int) -> tuple[list[tuple[str, list[int]]], str | None]:
-    """The points of a reply, each with the numbers it cites among the ``count`` it was given,
-    and the reply's "nothing of substance" sentence when it gave no such point. A point that
-    cites nothing it was given is dropped: every point shown rests on a moment that can be
-    checked. Numbers on a line of their own belong to the points above them that have none.
-    A point keeps the first ``CITED`` numbers it gives: a small model cites the moment a story
-    starts, then whatever follows it."""
+def parse_points(reply: str, count: int) -> Parsed:
+    """The points of a reply, each with the numbers it cites among the ``count`` it was given.
+    A point that cites nothing it was given is dropped and counted: every point shown rests on
+    a moment that can be checked. Numbers apart from a point, on a line of their own or after a
+    label ("Sources: [1, 2]"), are no source of anything: they would credit the points above
+    with moments that may not back them. A point keeps the first ``CITED`` numbers it gives (a
+    small model cites the moment a story starts, then whatever follows it) and, when the model
+    wrote prose, its sentences up to ``POINT_CHARS``. The model's "NONE:" line counts only as
+    saying that nothing stood out; its words are never kept."""
     found: list[tuple[str, list[int]]] = []
+    uncited, none = 0, False
     for line in reply.splitlines():
         m = _POINT.match(line)
         body = m.group(1) if m else line.strip()
+        if _NONE.match(body):
+            none = True
+            continue
         cited = [int(n) for group in _CITATION.findall(body) for n in re.findall(r"\d+", group)]
         cited = [n for n in dict.fromkeys(cited) if 1 <= n <= count]
+        bare = _CITATION.sub("", body)
         # "said so: [3]" and "said so — [3]" lose what stood before the numbers too.
-        text = re.sub(r"\s+([.,;:])", r"\1", _CITATION.sub("", body))
-        text = text.strip().rstrip(":;,-\u2013\u2014 ")
-        if not text:
-            for _, numbers in found:
-                if not numbers:
-                    numbers += cited
+        text = re.sub(r"\s+([.,;:])", r"\1", bare).strip().rstrip(":;,-\u2013\u2014 ")
+        label = bare.strip().rstrip(",;. ")
+        if not text or (label.endswith(":") and len(label.split()) <= 3):
             continue
-        if (m or cited) and not _NONE.match(text):
-            found.append((text, cited))
-    points = [(text, cited[:CITED]) for text, cited in found if cited]
-    nothing = _NONE.search(reply)
-    return points, (nothing.group(1) if nothing and not points else None)
+        if not cited:
+            uncited += m is not None  # a line of prose without numbers is no point
+            continue
+        found.append((_sentences(text, POINT_CHARS), cited[:CITED]))
+    return Parsed(found, uncited, none and not found)
 
 
-def _reply(
-    llm: Llm, messages: list[dict[str, str]], count: int
-) -> tuple[list[tuple[str, list[int]]], str | None]:
-    return parse_points(llm.complete(messages, max_tokens=ANSWER_TOKENS), count)
+def _sentences(text: str, limit: int) -> str:
+    """``text`` up to the last sentence end within ``limit`` characters; cut at a word, with an
+    ellipsis, when there is none."""
+    if len(text) <= limit:
+        return text
+    ends = [m.end() for m in _SENTENCE_END.finditer(text, 0, limit)]
+    if ends:
+        return text[: ends[-1]]
+    return text[: limit - 1].rsplit(" ", 1)[0] + "\u2026"
 
 
 def _ids(lines: Sequence[Line], numbers: Iterable[int]) -> tuple[int, ...]:
     return tuple(line.id for line in sorted((lines[n - 1] for n in numbers), key=lambda x: x.t))
+
+
+def _lines(n: int) -> str:
+    return f"{n} line" if n == 1 else f"{n:,} lines"
 
 
 def _names(ids: Iterable[str], names: Mapping[str, str]) -> str:

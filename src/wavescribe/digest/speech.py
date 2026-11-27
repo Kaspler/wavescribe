@@ -100,7 +100,7 @@ def spoken(digest: Digest, *, seconds: float = SECONDS) -> list[str]:
             out.append(said)
     out += [f"{digest.heard_on(p)}{p.text}" for p in digest.points]
     if not digest.points and digest.nothing:
-        out.append(digest.nothing)
+        out.append(digest.text())
     kept, left = [], seconds
     for line in out:
         left -= len(line) / (DENSE_CHARS_PER_S if NO_SPACES.search(line) else CHARS_PER_S)
