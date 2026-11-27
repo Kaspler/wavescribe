@@ -1,9 +1,13 @@
 // Receivers: the RTL-SDR dongles, their tuning, and what they hear; and the pieces the pages that
 // use a receiver share: its name, the switch between receivers, and a dongle put to use in one step.
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { S } from "../lib/live";
 import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act, toast } from "../components/ui";
 import { type Any, ApiError, del, docUrl, get, post, useLoad } from "./api";
 import { and } from "./bands";
+
+// The reading view loads it on its own when a column offers the move: it stays its own piece.
+const MoveStation = lazy(() => import("./MoveStation"));
 
 /** A receiver as the page names it: receiver "c" is Receiver C, as on a front panel. */
 export const rxName = (id: string) => (id.length === 1 ? id.toUpperCase() : id);
@@ -213,18 +217,48 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
   const [gain, setGain] = useState(String(d.gain_db));
   const [rate, setRate] = useState(String(d.sample_rate));
   const [ppm, setPpm] = useState(String(d.ppm ?? 0));
+  // Tuned elsewhere meanwhile (a move back to a station, from here or another page): the fields
+  // follow, so Apply doesn't undo it.
+  useEffect(() => { setCenter(String(d.center_mhz)); }, [d.center_mhz]);
+  useEffect(() => { setGain(String(d.gain_db)); }, [d.gain_db]);
+  // Its stations it doesn't hear where it is tuned, each with the move back (a switched-off one
+  // is left as it is: the move would start it).
+  const away = (d.stations as Any[]).filter((s) => s.out_of_reach && !S.byId[s.id]?.disabled);
   // The server's question before a retune leaves stations out; nothing has changed while it is asked.
   const [asked, setAsked] = useState<{ question: string; stops: string[] } | null>(null);
+  // The question replaces Apply, and Apply the question: the focus goes along.
+  const actions = useRef<HTMLDivElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || asked) actions.current?.querySelector<HTMLElement>("button")?.focus();
+    opened.current = true;
+  }, [!!asked]);
   const apply = async (confirmed = false) => {
     setAsked(null);
+    let after: Any;
     try {
-      await post(`/receivers/${d.id}`, { center_mhz: +center, gain_db: +gain, sample_rate: +rate, ppm: Math.round(+ppm) || 0, retune: confirmed });
+      after = await post(`/receivers/${d.id}`, { center_mhz: +center, gain_db: +gain, sample_rate: +rate, ppm: Math.round(+ppm) || 0, retune: confirmed });
     } catch (e) {
       if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ question: e.message, stops: e.data.holders || [] }); return; }
       throw e;
     }
-    toast("Receiver retuned; its stations restarted");
+    const was = new Set(away.map((s: Any) => s.id));
+    const left = ((after?.stations || []) as Any[]).filter((s) => s.out_of_reach && !was.has(s.id)).map((s) => s.name);
+    toast(left.length ? `Receiver ${rxName(d.id)} retuned; out of its reach now: ${and(left)}` : "Receiver retuned; its stations restarted");
     await reload();
+  };
+  // The move replaces its own button: the focus goes to Apply.
+  const moved = async () => {
+    await reload();
+    requestAnimationFrame(() => actions.current?.querySelector<HTMLElement>("button")?.focus());
+  };
+  // No to the question: the fields go back to how the receiver is tuned.
+  const keep = () => {
+    setAsked(null);
+    setCenter(String(d.center_mhz));
+    setGain(String(d.gain_db));
+    setRate(String(d.sample_rate));
+    setPpm(String(d.ppm ?? 0));
   };
   const over = d.clipped > 0.001;
   return (
@@ -282,15 +316,22 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
           </>
         )}
       </Advanced>
+      {away.map((s) => (
+        <div key={s.id} className="m-trouble">
+          <p>{s.out_of_reach}</p>
+          {S.byId[s.id] && <Suspense fallback={null}><MoveStation st={S.byId[s.id]} onDone={moved} /></Suspense>}
+        </div>
+      ))}
       {asked && <p className="m-line" role="status">{asked.question}</p>}
-      <div className="m-actions">
+      <div ref={actions} className="m-actions">
         {asked ? (
           <>
-            <ActButton variant="primary" run={() => apply(true)}>{asked.stops.length ? `Stop ${and(asked.stops)} and apply` : "Apply all the same"}</ActButton>
-            <Button variant="ghost" onClick={() => setAsked(null)}>Keep it as it is</Button>
+            <ActButton key="yes" variant="primary" run={() => apply(true)}>{asked.stops.length ? `Stop ${and(asked.stops)} and apply` : "Apply all the same"}</ActButton>
+            <Button variant="ghost" onClick={keep}>Keep it as it is</Button>
           </>
         ) : (
-          <ActButton variant="primary" run={() => apply()}>Apply</ActButton>
+          // Its own button, not the yes still busy with the retune: that one can't take the focus.
+          <ActButton key="apply" variant="primary" run={() => apply()}>Apply</ActButton>
         )}
       </div>
     </Section>

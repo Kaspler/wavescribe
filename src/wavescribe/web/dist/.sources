@@ -40,11 +40,11 @@ bd888117fb0d9575aef81e607e54dcce4446a872 frontend/src/manage/Internet.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
-1d3ee611eda8ed9def14cd6c1fe8af631987704f frontend/src/manage/MoveStation.tsx
+0830993c56cdfd17da1789b13ce5e439758d600a frontend/src/manage/MoveStation.tsx
 157bdbf49a829e680d3a4e9a67b6add81f2be726 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
 56d7ba59162b6c67507e4c60fd61615b3de06570 frontend/src/manage/Radio.tsx
-b79c48adeb4c1af720ede7fdbfd952b9f567f39b frontend/src/manage/Receivers.tsx
+db88957c9b82f3898a70850a4db4dd7c7f1fb5b0 frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
