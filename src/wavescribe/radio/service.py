@@ -31,6 +31,7 @@ from wavescribe.radio.bandplan import (
     region_bands,
 )
 from wavescribe.radio.catalog import Catalog
+from wavescribe.radio.words import joined, receiver_name, sentence, them
 
 if TYPE_CHECKING:
     from wavescribe.app import App
@@ -194,7 +195,7 @@ class RadioService:
         keeps the one it has (``privacy_floor``) until the user confirms the new class on the
         page, with the same acknowledgement as tuning it: a region alone never loosens."""
         if region is not None and region not in REGIONS:
-            raise RadioError(f"unknown region {region!r}")
+            raise RadioError(f"There is no region {region!r}: choose {', '.join(REGIONS)}.")
         from wavescribe.config import ConfigError, radio_policy
         from wavescribe.radio.bandplan import stricter
 
@@ -232,7 +233,7 @@ class RadioService:
     def _device(self, device_id: str) -> Any:
         d = next((x for x in self.app.config.devices if x.id == device_id), None)
         if d is None:
-            raise RadioError(f"no receiver called {device_id!r}")
+            raise RadioError(f"There is no receiver {device_id!r}.")
         return d
 
     def start_scan(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -240,8 +241,9 @@ class RadioService:
         rx = next(r for r in self.receivers() if r["id"] == d.id)
         if rx["busy"] and not raw.get("pause"):
             raise RadioError(
-                f"receiver {d.id} is busy with {', '.join(rx['busy'])}: pause it for the scan, "
-                "or scan with another receiver", "busy", holders=rx["busy"],
+                f"Receiver {receiver_name(d.id)} is running {joined(rx['busy'])}. Pause "
+                f"{them(rx['busy'])} for the scan, or scan with another receiver.", "busy",
+                holders=rx["busy"],
             )  # fmt: skip
         region, _ = self.region()
         band = raw.get("band")
@@ -259,14 +261,16 @@ class RadioService:
                 check_tunable(stop)
                 what = f"{start / 1e6:g} to {stop / 1e6:g} MHz"
         except (KeyError, TypeError, ValueError, scanner.ScanError) as e:
-            raise RadioError(f"what to scan: {e}") from e
+            raise RadioError(sentence(f"what to scan: {e}")) from e
         gain = float(raw.get("gain_db") or d.gain_db)
         rds = bool(raw.get("rds", True))
         watch_s = max(0.0, min(3600.0, float(raw.get("watch_min") or 0) * 60))
         learn = bool(raw.get("learn_spurs"))
         with self._lock:
             if self._job and self._job["phase"] not in ("done", "error"):
-                raise RadioError("a scan is already running", "scanning")
+                other = receiver_name(self._job["device"])
+                raise RadioError(f"Receiver {other} is already scanning: one scan runs at a "
+                                 "time. Wait for it, or stop it.", "scanning")  # fmt: skip
             paused = self._pause(d, rx, take_live=True) if rx["busy"] else None
             cancel = threading.Event()
             self._cancel = cancel
@@ -385,7 +389,7 @@ class RadioService:
             freq = frequency_hz(raw.get("mhz"))
             check_tunable(freq)
         except ValueError as e:
-            raise RadioError(str(e)) from e
+            raise RadioError(sentence(str(e))) from e
         mhz = freq / 1e6
         band = lookup(freq, region)
         mode = raw.get("mode") or (band.mode if band and band.mode else "nfm")
@@ -394,15 +398,17 @@ class RadioService:
             privacy, band_id = radio_policy(freq, mode, region, ack, f"{mhz_text(mhz)} MHz")
         except ConfigError as e:
             needs = "acknowledge" in str(e)
-            raise RadioError(str(e).split(": ", 1)[-1], "acknowledge" if needs else "refused",
+            said = str(e).split(": ", 1)[-1].replace(" Set acknowledge = true to confirm",
+                                                     " Confirm")  # fmt: skip
+            raise RadioError(sentence(said), "acknowledge" if needs else "refused",
                              privacy=band.privacy if band else "private") from e  # fmt: skip
         job = self._job
         if job and job["device"] == d.id and job["phase"] not in ("done", "error"):
-            raise RadioError(f"receiver {d.id} is scanning: wait for it, or stop the scan",
-                             "scanning")  # fmt: skip
+            raise RadioError(f"Receiver {receiver_name(d.id)} is scanning: wait for it, or stop "
+                             "the scan.", "scanning")  # fmt: skip
         language = raw.get("language") or self.app.base.defaults.get("language")
         if not language:
-            raise RadioError("which language is spoken there?", "language")
+            raise RadioError("Which language is spoken there?", "language")
 
         if not in_band(freq, d.center_hz, d.sample_rate, mode):
             self._retune(d, freq, mode, bool(raw.get("retune")))
@@ -442,19 +448,21 @@ class RadioService:
         from wavescribe.admin import AdminError, update_device
 
         rx = next(r for r in self.receivers() if r["id"] == d.id)
+        name = receiver_name(d.id)
         if rx["scanning"]:
-            raise RadioError(f"receiver {d.id} is scanning", "scanning")
+            raise RadioError(f"Receiver {name} is scanning: wait for it, or stop the scan.",
+                             "scanning")  # fmt: skip
         if rx["busy"] and not force:
             where = (
-                f"is the very centre of what receiver {d.id} hears now, where the dongle's own "
+                f"is the very centre of what receiver {name} hears now, where the dongle's own "
                 "spike would hold the squelch open"
                 if on_centre
-                else f"is outside what receiver {d.id} hears now "
+                else f"is outside what receiver {name} hears now "
                 f"({d.center_hz / 1e6:.2f} MHz ± {d.sample_rate / 2e6 - 0.12:.2f})"
             )
             raise RadioError(
-                f"{mhz_text(freq / 1e6)} MHz {where}. Retuning it stops {', '.join(rx['busy'])}.",
-                "retune", holders=rx["busy"],
+                f"{mhz_text(freq / 1e6)} MHz {where}. Retuning the receiver stops "
+                f"{joined(rx['busy'])}.", "retune", holders=rx["busy"],
             )  # fmt: skip
         offset = OFF_CENTRE_HZ[mode]
         if force:

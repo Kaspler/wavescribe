@@ -66,6 +66,8 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
     # The receiver is busy now: no scan, and moving it far away needs a yes.
     status, err = radio.call("POST", "/api/manage/radio/scan", {"device": "x", "band": "pmr446"})
     assert status == 400 and err["code"] == "busy" and err["holders"] == [st["name"]]
+    assert err["error"] == (f"Receiver X is running {st['name']}. Pause it for the scan, or scan "
+                            "with another receiver.")  # fmt: skip
     far = {"device": "x", "mhz": 145.5, "language": "en"}
     status, err = radio.call("POST", "/api/manage/radio/tune", far)
     assert status == 400 and err["code"] == "retune"
@@ -234,11 +236,11 @@ def test_what_cant_be_a_frequency_is_refused_with_the_likely_mistake(
 ) -> None:
     body = {"device": "x", "mhz": mhz, "language": "es-ES", "acknowledge": True}
     status, err = radio.call("POST", "/api/manage/radio/tune", body)
-    assert status == 400 and message in err["error"]
+    assert status == 400 and message.lower() in err["error"].lower()  # a sentence of its own
     assert radio.app.settings.get("station") is None  # no station was made of it
     status, err = radio.call("POST", "/api/manage/radio/scan",
                              {"device": "x", "start_mhz": mhz, "stop_mhz": 447})  # fmt: skip
-    assert status == 400 and "what to scan" in err["error"]
+    assert status == 400 and err["error"].startswith("What to scan: ")
 
 
 def test_listing_dongles_opens_none(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -166,8 +166,13 @@ def test_listening_far_away_pauses_stations_only_when_asked(node: Running) -> No
 
     status, err = node.call("POST", "/api/manage/live/x", {"mhz": 145.5})
     assert status == 400 and err["code"] == "busy" and err["holders"] == [st["name"]]
+    assert err["error"] == (
+        f"Receiver X is running {st['name']}. That frequency or gain needs the receiver to "
+        "itself: pause it while you listen, or use another receiver."
+    )
     status, far = node.call("POST", "/api/manage/live/x", {"mhz": 145.5, "pause": True})
-    assert status == 200 and far["paused"] == [st["id"]] and removed == [st["id"]]
+    assert status == 200 and removed == [st["id"]]
+    assert far["paused"] == [st["name"]] != [st["id"]]  # as the page names them
 
     node.call("DELETE", "/api/manage/live/x")
     assert added == [st["id"]]  # it starts again when listening ends

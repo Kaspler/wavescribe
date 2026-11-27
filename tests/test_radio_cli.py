@@ -181,3 +181,15 @@ def test_a_busy_receiver_says_when_wavescribe_itself_holds_it(
 )
 def test_a_running_serve_is_found_however_it_was_started(command, found) -> None:
     assert bool(radio_cli.SERVE.search(command)) is found
+
+
+def test_messages_name_and_list_things_as_the_page_does() -> None:
+    from wavescribe.radio.words import joined, masked_serial, receiver_name, sentence, them
+
+    assert receiver_name("a") == "A" and receiver_name("roof") == "roof"
+    assert joined(["FM 1"]) == "FM 1" and joined(["FM 1", "FM 2", "the monitor"]) == (
+        "FM 1, FM 2 and the monitor"
+    )
+    assert them(["FM 1"]) == "it" and them(["FM 1", "FM 2"]) == "them"
+    assert sentence("which language?") == "Which language?" and sentence("a b") == "A b."
+    assert masked_serial("00001234") == "…1234" and masked_serial("12") == "…2"

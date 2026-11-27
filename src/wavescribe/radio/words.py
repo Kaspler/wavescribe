@@ -34,3 +34,13 @@ def joined(names: Sequence[str]) -> str:
 def them(names: Sequence[str]) -> str:
     """The pronoun for what ``names`` lists: "it" for one, else "them"."""
     return "it" if len(names) == 1 else "them"
+
+
+def sentence(text: str) -> str:
+    """A message as the page shows it on its own: a capital letter first and a full stop at the
+    end (another program's words, quoted after a colon, stay as they are)."""
+    text = text.strip()
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".?!" else text + "."

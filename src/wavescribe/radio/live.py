@@ -44,6 +44,7 @@ from wavescribe.dsp.wfm import WfmDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import Band, lookup, mhz_text
 from wavescribe.radio.service import RadioError
+from wavescribe.radio.words import joined, receiver_name, sentence, them
 from wavescribe.sources import SourceHealth
 
 if TYPE_CHECKING:
@@ -291,8 +292,8 @@ def _channel_hz(raw: dict[str, Any]) -> float | None:
     except (TypeError, ValueError):
         hz = -1.0
     if not MIN_CHANNEL_HZ <= hz <= MAX_CHANNEL_HZ:
-        raise LiveError(f"a channel is {MIN_CHANNEL_HZ / 1e3:g} to {MAX_CHANNEL_HZ / 1e3:g} kHz "
-                        "wide, e.g. 12.5 or 25")  # fmt: skip
+        raise LiveError(f"A channel is {MIN_CHANNEL_HZ / 1e3:g} to {MAX_CHANNEL_HZ / 1e3:g} kHz "
+                        "wide, e.g. 12.5 or 25.")  # fmt: skip
     return hz
 
 
@@ -343,8 +344,8 @@ class LiveService:
         if rx is None or d is None or rx.device.config == d:
             return None
         mhz = mhz_text(rx.tuning.freq_hz / 1e6)
-        return (f"receiver {device_id} is tuned by hand under Listen ({mhz} MHz): "
-                "stop listening there first")  # fmt: skip
+        return (f"Receiver {receiver_name(device_id)} is tuned by hand under Listen ({mhz} MHz): "
+                "stop listening there first.")  # fmt: skip
 
     def tune(self, device_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         """Open the dongle's live receiver, or retune it."""
@@ -354,16 +355,16 @@ class LiveService:
             freq = frequency_hz(raw.get("mhz"))
             check_tunable(freq)
         except ValueError as e:
-            raise LiveError(str(e)) from e
+            raise LiveError(sentence(str(e))) from e
         band = lookup(freq, region)
         mode = str(raw.get("mode") or (band.mode if band and band.mode else "nfm"))
         if mode not in MODES:
-            raise LiveError(f"the mode is one of {', '.join(MODES)}")
+            raise LiveError(f"The mode is one of {', '.join(MODES)}.")
         squelch = raw.get("squelch_db")
         try:
             squelch_db = float(squelch) if squelch not in (None, "") else None
         except (TypeError, ValueError) as e:
-            raise LiveError("the squelch is a level in dB, e.g. -40") from e
+            raise LiveError("The squelch is a level in dB, e.g. -40.") from e
         channel_hz = None if mode == "wfm" else _channel_hz(raw) or _band_channel_hz(band, mode)
         tuning = Tuning(freq, mode, squelch_db=squelch_db, channel_hz=channel_hz)
         self._check_ack(d.id, freq, mode, region, bool(raw.get("acknowledge")), tuning.width_hz)
@@ -375,7 +376,7 @@ class LiveService:
             try:
                 want_gain = float(gain) if gain not in (None, "") else dev_cfg.gain_db
             except (TypeError, ValueError) as e:
-                raise LiveError("the gain is a number in dB, e.g. 30") from e
+                raise LiveError("The gain is a number in dB, e.g. 30.") from e
             fits = in_band(freq, dev_cfg.center_hz, dev_cfg.sample_rate, mode) and off_centre(
                 freq, dev_cfg.center_hz, mode, channel_hz
             )
@@ -386,7 +387,7 @@ class LiveService:
                 # on the dongle's thread, and a failure there could only detach it.
                 demodulator(cfg, tuning)
             except ValueError as e:
-                raise LiveError(f"can't listen to that: {e}") from e
+                raise LiveError(sentence(f"can't listen to that: {e}")) from e
             if cfg == dev_cfg:
                 if rx is not None and not rx.closed:  # closed: the device dropped it
                     rx.scan = None  # a frequency chosen by hand ends a scan
@@ -434,8 +435,8 @@ class LiveService:
         out: dict[str, Any] = {
             "id": d.id, "device": d.id, "open": rx is not None, "center_mhz": cfg.center_hz / 1e6,
             "span_mhz": cfg.sample_rate / 1e6, "gain_db": cfg.gain_db,
-            "holders": self._holders(d.id), "paused": (self._paused.get(d.id) or {}).get(
-                "stations", []),
+            "holders": self._holders(d.id), "paused": self._names(
+                (self._paused.get(d.id) or {}).get("stations", [])),
         }  # fmt: skip
         if rx is None:
             return out
@@ -469,16 +470,16 @@ class LiveService:
         d = self._config(device_id)
         rx = self._rx.get(d.id)
         if rx is None or rx.closed:
-            raise LiveError("tune the receiver first: the scan uses the band it hears", "closed")
+            raise LiveError("Tune the receiver first: the scan uses the band it hears.", "closed")
         cfg = rx.device.config
         region, _ = self.app.radio.region()
         try:
             freqs = sorted({frequency_hz(f) for f in raw.get("freqs_mhz") or []})
         except (TypeError, ValueError) as e:
-            raise LiveError(f"the channels to scan, in MHz: {e}") from e
+            raise LiveError(sentence(f"the channels to scan, in MHz: {e}")) from e
         mode = str(raw.get("mode") or "nfm")
         if mode not in ("nfm", "am"):
-            raise LiveError("scanning stops on voice channels: NFM or AM")
+            raise LiveError("A scan stops on voice channels: choose NFM or AM.")
         channel = _channel_hz(raw)
         inside = [
             f for f in freqs
@@ -488,8 +489,8 @@ class LiveService:
         if not inside:
             lo = (cfg.center_hz - cfg.sample_rate / 2) / 1e6
             hi = (cfg.center_hz + cfg.sample_rate / 2) / 1e6
-            raise LiveError(f"none of those channels is in what receiver {d.id} hears now "
-                            f"({lo:.3f} to {hi:.3f} MHz): tune near them first",
+            raise LiveError(f"None of those channels is in what receiver {receiver_name(d.id)} "
+                            f"hears now ({lo:.3f} to {hi:.3f} MHz): tune near them first.",
                             "band")  # fmt: skip
         for f in inside:  # once per privacy class: the answer is remembered
             self._check_ack(d.id, f, mode, region, bool(raw.get("acknowledge")))
@@ -514,7 +515,8 @@ class LiveService:
         """Skip (or stop skipping) a channel in the running scan: a spur, a busy data link."""
         rx = self._rx.get(device_id)
         if rx is None or rx.scan is None:
-            raise LiveError("no scan is running", "closed")
+            raise LiveError(f"No scan is running on receiver {receiver_name(device_id)}.",
+                            "closed")  # fmt: skip
         f = min(rx.scan.freqs, key=lambda x: abs(x - float(mhz) * 1e6))
         (rx.scan.locked_out.add if on else rx.scan.locked_out.discard)(f)
         if on and rx.scan.holding == f:
@@ -525,7 +527,7 @@ class LiveService:
         """Keep what is tuned as a station (listened to, transcribed, or also translated)."""
         rx = self._rx.get(device_id)
         if rx is None:
-            raise LiveError("nothing is tuned on this receiver", "closed")
+            raise LiveError(f"Nothing is tuned on receiver {receiver_name(device_id)}.", "closed")
         t = rx.tuning
         tune: dict[str, Any] = {
             "device": device_id, "mhz": t.freq_hz / 1e6, "mode": t.mode,
@@ -548,8 +550,13 @@ class LiveService:
     def _config(self, device_id: str, missing_ok: bool = False) -> SdrDevice:
         d = next((x for x in self.app.config.devices if x.id == device_id), None)
         if d is None and not missing_ok:
-            raise LiveError(f"no receiver called {device_id!r}")
+            raise LiveError(f"There is no receiver {device_id!r}.")
         return d  # type: ignore[return-value]
+
+    def _names(self, station_ids: list[str]) -> list[str]:
+        """Stations as the user knows them: by name."""
+        names = {s.id: s.name for s in self.app.config.stations}
+        return [names.get(sid, sid) for sid in station_ids]
 
     def _current_config(self, d: SdrDevice) -> SdrDevice:
         from wavescribe.sources import sdr
@@ -572,16 +579,16 @@ class LiveService:
         try:
             radio_policy(freq, mode, region, ack or privacy in known, "here", width_hz)
         except ConfigError as e:
-            raise LiveError(str(e).split(": ", 1)[-1].replace(
-                " Set acknowledge = true to confirm", " Confirm"), "acknowledge",
+            raise LiveError(sentence(str(e).split(": ", 1)[-1].replace(
+                " Set acknowledge = true to confirm", " Confirm")), "acknowledge",
                 privacy=privacy) from e  # fmt: skip
         known.add(privacy)
 
     def _refuse_while_scanning(self, device_id: str) -> None:
         job = self.app.radio.scan_status()
         if job and job["device"] == device_id and job["phase"] not in ("done", "error"):
-            raise LiveError(f"receiver {device_id} is scanning the band: wait for it, or stop "
-                            "the scan", "scanning")  # fmt: skip
+            raise LiveError(f"Receiver {receiver_name(device_id)} is scanning the band: wait for "
+                            "it, or stop the scan.", "scanning")  # fmt: skip
 
     def _on_audio(self, sid: str):
         tap = self.app.hub.tap(sid)
@@ -593,9 +600,9 @@ class LiveService:
         try:
             device = sdr.shared_device(cfg)
         except ValueError as e:
-            raise LiveError(str(e)) from e
+            raise LiveError(sentence(str(e))) from e
         if not device.available:
-            raise LiveError("rtl_sdr isn't installed (brew install librtlsdr)", "tools")
+            raise LiveError("rtl_sdr isn't installed: brew install librtlsdr.", "tools")
         rx = LiveReceiver(device, tuning, self._on_audio(live_id(d.id)))
         device.attach(rx)  # type: ignore[arg-type]
         self._rx[d.id] = rx
@@ -609,9 +616,9 @@ class LiveService:
         holders = self._holders(d.id)
         if holders and not pause:
             raise LiveError(
-                f"receiver {d.id} is busy with {', '.join(holders)}: that frequency or gain "
-                "needs the dongle to itself. Pause them while you listen, or use another "
-                "receiver", "busy", holders=holders,
+                f"Receiver {receiver_name(d.id)} is running {joined(holders)}. That frequency or "
+                f"gain needs the receiver to itself: pause {them(holders)} while you listen, or "
+                "use another receiver.", "busy", holders=holders,
             )  # fmt: skip
         old = self._rx.pop(d.id, None)
         if old is not None:  # first, or pausing the stations waits for it to let go
