@@ -264,7 +264,9 @@ heard: `freq_hz`, the channel a watch caught it on or a radio station's own freq
 (`segments.freq_hz`; null for a stream or another machine's station), and `label`, what the band
 plan in effect calls that frequency, with the channel number where the band has a list
 (`bandplan.channel_label`: "PMR446 walkie-talkies, channel 1", as a watch's catches name it; null
-without a frequency or for one no plan lists). `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
+without a frequency or for one no plan lists), with that band's id (`band`) and the channel
+number (`channel`) beside it, so a program shows its own names without reading the label's
+words; catches and scan rows carry `channel` beside their `band` and `label` too. `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
 
 **Ask.** Above the search box, a question in any language goes to
 `POST /api/ask`, which streams Server-Sent Events back: `plan` (stations, time range, search

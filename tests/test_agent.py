@@ -62,7 +62,8 @@ HEARD_KEYS = {"freq_hz", "mhz", "band", "label", "mode", "privacy", "level_db", 
               "first_heard", "last_heard", "times", "seen", "passes", "missing",
               "device"}  # fmt: skip
 CATCH_KEYS = {"id", "station", "freq_hz", "mhz", "t_start", "t_end", "duration", "mode", "band",
-              "label", "snr_db", "peak_db", "voice", "reason", "privacy", "utterances"}  # fmt: skip
+              "label", "channel", "snr_db", "peak_db", "voice", "reason", "privacy",
+              "utterances"}  # fmt: skip
 CHECK_KEYS = {"type", "group", "check", "status", "summary", "fix", "details"}
 SUMMARY_KEYS = {"type", "status", "problems", "warnings", "version", "folder", "options",
                 "from_service"}  # fmt: skip

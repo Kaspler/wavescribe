@@ -36,6 +36,7 @@ from wavescribe.log import event
 from wavescribe.radio.bandplan import (
     TUNER_RANGE_HZ,
     Band,
+    channel_of,
     channel_width,
     lookup,
     region_band,
@@ -151,6 +152,7 @@ class Signal:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["mhz"] = round(self.mhz, 5)
+        d["channel"] = channel_of(self.band, self.freq_hz)  # beside label, for programs
         return d
 
 

@@ -73,6 +73,7 @@ def test_a_catch_is_kept_with_the_words_heard_in_it(tmp_path: Path) -> None:
     [row] = store.catches()
     assert row["freq_hz"] == TWO_M and row["mhz"] == 145.5 and row["duration"] == 3.0
     assert row["voice"] is True and row["privacy"] == "amateur" and row["label"] == "Amateur 2 m"
+    assert row["band"] == "2m" and row["channel"] is None  # 2 m has a raster, no channel list
     assert [u["text"] for u in row["utterances"]] == ["CQ CQ from the hill"]
     assert store.catches(freq_hz=TWO_M + 12_500) == []
     assert len(store.catches(freq_hz=TWO_M + 10_000, width_hz=12_500)) == 1

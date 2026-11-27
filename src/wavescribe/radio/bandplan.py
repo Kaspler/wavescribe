@@ -421,6 +421,26 @@ def _lookup_auto(hz: float, width_hz: float | None = None) -> Band | None:
     return _reaching(None, hz, width_hz, [b for b in bands() if b.privacy == strictest])
 
 
+def channel_of(band_id: str | None, hz: float | None) -> int | None:
+    """The 1-based channel number of ``hz`` in band ``band_id``'s channel list, else None: what
+    a program shows beside a ``label`` without reading the label's words."""
+    if not band_id or not hz:
+        return None
+    try:
+        return find(band_id).channel_number(hz)
+    except KeyError:  # a band no longer in the plan
+        return None
+
+
+@lru_cache(maxsize=4096)  # bounded: a page of history asks for the same few channels
+def channel_place(hz: int | None, region: str) -> tuple[str | None, str | None, int | None]:
+    """``channel_label``, with the band's id and the channel number beside it."""
+    band = lookup(hz, region) if hz else None
+    if band is None or not hz:
+        return None, None, None
+    return band.label(hz), band.id, band.channel_number(hz)
+
+
 @lru_cache(maxsize=4096)  # bounded: a page of history asks for the same few channels
 def channel_label(hz: int | None, region: str) -> str | None:
     """What a frequency is called, as a watch's catches name it: its band's name, with the

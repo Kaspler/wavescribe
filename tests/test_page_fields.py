@@ -98,6 +98,7 @@ def test_an_utterance_says_the_channel_it_was_heard_on(tmp_path: Path) -> None:
             if event == "utterance":
                 u = json.loads(data)
                 live[u["station"]] = (u["freq_hz"], u["label"])
+                assert u["band"] == ("2m" if u["freq_hz"] else None) and u["channel"] is None
         assert live == {"ham2m": (145_500_000, "Amateur 2 m"),
                         "rpt": (145_600_000, "Amateur 2 m"), "stream": (None, None)}  # fmt: skip
         for sid, where in live.items():
@@ -110,6 +111,15 @@ def test_an_utterance_says_the_channel_it_was_heard_on(tmp_path: Path) -> None:
         # A channel with a number in its band's list is named with it, as catches name it.
         assert channel_label(446_006_250, "cept") == "PMR446 walkie-talkies, channel 1"
         assert channel_label(None, "cept") is None
+        # Beside it, the band's id and the number, so the page needn't read the words.
+        from wavescribe.radio.bandplan import channel_of, channel_place
+        from wavescribe.radio.scan import Signal
+
+        assert channel_place(446_006_250, "cept") == (
+            "PMR446 walkie-talkies, channel 1", "pmr446", 1)  # fmt: skip
+        assert channel_of("pmr446", 446_093_750) == 8 and channel_of("gone", 1e8) is None
+        row = Signal(446_018_750, -40.0, 20.0, 1e4, band="pmr446", label="x").to_dict()
+        assert row["channel"] == 2
     finally:
         r.app.hub.unsubscribe(q)
         r.close()

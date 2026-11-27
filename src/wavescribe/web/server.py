@@ -209,12 +209,13 @@ class WebHub:
 
     def labelled(self, utterances: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Utterances with the ``label`` of where each was heard (``freq_hz``), as the band plan
-        in effect names it (``bandplan.channel_label``, as a watch's catches have it)."""
-        from wavescribe.radio.bandplan import AUTO, channel_label
+        in effect names it (``bandplan.channel_label``, as a watch's catches have it), and that
+        band's id (``band``) and channel number (``channel``), so the page needn't read words."""
+        from wavescribe.radio.bandplan import AUTO, channel_place
 
         region = self.config.radio_region or AUTO
         for u in utterances:
-            u["label"] = channel_label(u.get("freq_hz"), region)
+            u["label"], u["band"], u["channel"] = channel_place(u.get("freq_hz"), region)
         return utterances
 
     def on_alert(self, alert: dict[str, Any]) -> None:

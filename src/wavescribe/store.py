@@ -1310,6 +1310,8 @@ class Store:
         """Catches, newest first, each with the words heard in it. ``freq_hz`` picks one
         channel, or with ``width_hz`` everything that far either side. With ``exports``, only
         what may leave this machine, words included."""
+        from wavescribe.radio.bandplan import channel_of
+
         where, args = _exports_sql(exports, "c")
         if freq_hz is not None:
             where += " AND c.freq_hz BETWEEN ? AND ?"
@@ -1358,6 +1360,7 @@ class Store:
                         "mode": r["mode"],
                         "band": r["band"],
                         "label": r["label"],
+                        "channel": channel_of(r["band"], r["freq_hz"]),
                         "snr_db": r["snr_db"],
                         "peak_db": r["peak_db"],
                         "voice": None if r["voice"] is None else bool(r["voice"]),
