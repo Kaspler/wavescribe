@@ -78,6 +78,9 @@ DEFAULT_MINUTES = 60.0
 NOW_MINUTES = 5.0
 MAX_MINUTES = 24 * 60.0  # beyond a day, even two stages would read too thin a sample
 MAX_NOW_MINUTES = 60.0
+# For another machine: reading a long window costs this one the store's read lock for a while.
+REMOTE_MINUTES = 6 * 60.0
+MAX_LANGUAGE = 35  # a BCP-47 tag's length in practice
 # Behind the translations of every station, whatever priority a station has (a positive
 # integer), and ahead only of the pipeline's stop once drained.
 DIGEST_PRIORITY = sys.float_info.max
@@ -357,11 +360,13 @@ class Digester:
                 counts[t] = counts.get(t, 0) + 1
         return max(counts, key=lambda t: counts[t]) if counts else "en"
 
-    def request(self, body: Mapping[str, Any], exports: Exports | None = None) -> Request:
+    def request(
+        self, body: Mapping[str, Any], exports: Exports | None = None, *, remote: bool = False
+    ) -> Request:
         """A request from JSON: ``kind`` ("digest" or "now"), ``stations`` (by default those
         heard in the window), ``minutes`` or ``since`` (seconds since 1970), ``language``. A
         station that ``exports`` hides is unknown, as it is everywhere else another machine
-        looks."""
+        looks. A ``remote`` request (another machine's) covers ``REMOTE_MINUTES`` at most."""
         now = self._clock()
         kind = body.get("kind") or "digest"
         if kind not in KINDS:
@@ -391,22 +396,29 @@ class Digester:
         if not stations:
             raise RequestError("there is no station to make a digest of")
         longest = MAX_NOW_MINUTES if kind == "now" else MAX_MINUTES
+        longest = min(longest, REMOTE_MINUTES) if remote else longest
+        who = "from another machine, " if remote else ""
         minutes, since = body.get("minutes"), body.get("since")
         if minutes is not None and since is not None:
             raise RequestError("give minutes or since, not both")
         if since is not None:
             if not _number(since) or not now - longest * 60 <= since < now:
                 raise RequestError(
-                    f"since must be a time in the last {longest:g} minutes, in seconds since 1970"
+                    f"{who}since must be a time in the last {longest:g} minutes, in seconds since "
+                    "1970"
                 )
         else:
             if minutes is None:
                 minutes = NOW_MINUTES if kind == "now" else DEFAULT_MINUTES
             if not _number(minutes) or not 1 <= minutes <= longest:
-                raise RequestError(f"minutes must be a number from 1 to {longest:g}")
+                raise RequestError(f"{who}minutes must be a number from 1 to {longest:g}")
             since = now - minutes * 60
         language = body.get("language") or self.language()
-        if not isinstance(language, str) or not LANGUAGE_TAG.fullmatch(language):
+        if (
+            not isinstance(language, str)
+            or len(language) > MAX_LANGUAGE
+            or not LANGUAGE_TAG.fullmatch(language)
+        ):
             raise RequestError("language must be a BCP-47 tag, e.g. en or pt-PT")
         if kind == "digest" and not asked:
             # Not every station set up is running: a digest names only those it is about.
@@ -489,7 +501,9 @@ class Digester:
                 continue
             if not wanted & set(a["stations"]):
                 continue
-            out.append(a if exports is None else exports.alert(a))
+            if exports is not None:  # radio that stays here: no words, and not even its name
+                a = {**exports.alert(a), "stations": [s for s in a["stations"] if s in wanted]}
+            out.append(a)
         return sorted(out, key=lambda a: a["last_at"])
 
     # -- making one ---------------------------------------------------------------------------
@@ -506,8 +520,24 @@ class Digester:
         digests are waiting, the queue is full, or no answer within ``timeout``) or ``Failed``.
         With nothing said in the window it answers at once, without the model. ``stop`` (the
         app closing) cancels it: ``Busy`` again, and what is still queued is skipped."""
+        # A turn is taken before the store is read: reading a day of many stations holds the
+        # store's read lock for a second, which callers queueing here mustn't multiply.
+        if not self._running.acquire(blocking=False):
+            raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
+        try:
+            return self._run(request, exports, timeout, stop)
+        finally:
+            self._running.release()
+
+    def _run(
+        self,
+        request: Request,
+        exports: Exports | None,
+        timeout: float,
+        stop: threading.Event | None,
+    ) -> Digest:
         t0 = time.perf_counter()
-        names = {s.id: s.name for s in self._stations()}
+        names = {sid: s.name for sid, s in self.stations(exports).items()}
         selection = self.select(request, exports)
         digest = Digest(
             request,
@@ -521,12 +551,7 @@ class Digester:
         prompts = plan_prompts(selection.lines)
         if not prompts:
             return digest
-        if not self._running.acquire(blocking=False):
-            raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
-        try:
-            job = self._wait(_Job(self._submit, request, prompts, names), timeout, stop)
-        finally:
-            self._running.release()
+        job = self._wait(_Job(self._submit, request, prompts, names), timeout, stop)
         if job.error is not None:
             if isinstance(job.error, Unavailable | Busy):
                 raise job.error

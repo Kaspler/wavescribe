@@ -6,9 +6,11 @@ about now, as JSON (``wavescribe/digest`` makes it).
     {"kind": "now", "stations": ["tsf"], "language": "en"}          what are they on about?
 
 It reads only, so other machines (``serve --lan``) may ask too, and get a digest of only what
-may leave this machine; like asking, it needs the ``X-Wavescribe`` header, so that another
-website can't spend the model. The answer comes once the model is done, which can take a
-few minutes while live translation goes first.
+may leave this machine, over a few hours at most; like asking, it needs the ``X-Wavescribe``
+header, so that another website can't spend the model, and once the feed asks other machines
+for a token, a digest asks for one too (``feed.authorised``). The answer comes once the model
+is done, which can take a few minutes while live translation goes first; when two digests are
+being made, it is refused at once with ``Retry-After``.
 
 ``"speak": true`` also reads it aloud here, in the alerts' voice for its language; the answer
 then carries ``speech``: ``{"started": true}``, or ``{"started": false, "error": why}``. Only
@@ -21,11 +23,14 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from wavescribe.digest import Busy, Failed, RequestError, Unavailable
+from wavescribe.events import to_json
+from wavescribe.web import feed
 
 if TYPE_CHECKING:
     from wavescribe.web.server import Handler, WebHub
 
 PATH = "/api/digest"
+RETRY_AFTER_S = 60
 
 
 def unavailable(hub: WebHub) -> str | None:
@@ -58,6 +63,11 @@ def handle(h: Handler) -> None:
         )
         return
     exports = h._exports()
+    if exports is not None and not feed.authorised(h, {}, "read"):
+        h._json(
+            {"error": "a feed token is needed (Authorization: Bearer …)"}, HTTPStatus.UNAUTHORIZED
+        )
+        return
     speak = body.get("speak", False)
     if not isinstance(speak, bool):
         h._json({"error": "speak is true or false"}, HTTPStatus.BAD_REQUEST)
@@ -69,14 +79,14 @@ def handle(h: Handler) -> None:
         )
         return
     try:
-        request = hub.digester.request(body, exports)
+        request = hub.digester.request(body, exports, remote=exports is not None)
         digest = hub.digester.run(request, exports)
     except RequestError as e:
         h._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
     except Unavailable as e:
         h._json({"error": str(e)}, HTTPStatus.CONFLICT)
     except Busy as e:
-        h._json({"error": str(e)}, HTTPStatus.SERVICE_UNAVAILABLE)
+        _busy(h, str(e))
     except Failed as e:
         h._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
@@ -88,3 +98,14 @@ def handle(h: Handler) -> None:
                 else {"started": False, "error": "reading aloud isn't set up in this run"}
             )
         h._json(out)
+
+
+def _busy(h: Handler, why: str) -> None:
+    body = to_json({"error": why}).encode()
+    h.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
+    h.send_header("Retry-After", str(RETRY_AFTER_S))
+    h.send_header("Content-Type", "application/json; charset=utf-8")
+    h.send_header("Content-Length", str(len(body)))
+    h.send_header("Cache-Control", "no-store")
+    h.end_headers()
+    h.wfile.write(body)

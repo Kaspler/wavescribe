@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import dataclasses
 import itertools
+import json
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from tests.test_store import result
 from wavescribe.alerts import Alert
 from wavescribe.digest import (
     DIGEST_CHARS,
+    MAX_RUNNING,
     POINT_CHARS,
     STAGE_CHARS,
     SYSTEM,
@@ -546,6 +548,73 @@ def test_another_machine_gets_a_digest_only_of_what_may_leave(tmp_path: Path) ->
     here = d.run(d.request({"minutes": 60})).payload()
     assert "ham" in here["stations"] and "ponte às dez" in llm.prompts[1]
     assert [a["quote"] for a in here["alerts"]] == ["Corte de água amanhã"]
+    store.close()
+
+
+def test_words_heard_under_a_class_that_stays_here_are_neither_read_nor_counted(tmp_path) -> None:
+    store = stocked(tmp_path)
+    # Heard on a station that may leave, under a class that may not: the words stay here.
+    add(store, "a", "Encontro secreto na ponte às dez horas", NOW - 15 * MIN, privacy="amateur")
+    leaving = exports(STATIONS)
+    llm = FakeLlm("- Something was said [1].")
+    d = digester(store, llm)
+    out = d.run(d.request({"minutes": 60}, leaving), leaving).payload()
+    assert "secreto" not in llm.prompts[0]
+    assert out["counts"]["said"] == 6 and out["counts"]["stations"] == {"a": 3, "b": 3}
+    here = d.run(d.request({"minutes": 60})).payload()
+    assert "secreto" in llm.prompts[1] and here["counts"]["said"] == 7
+    store.close()
+
+
+def test_another_machine_learns_no_name_of_radio_that_stays_here(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    pmr = dataclasses.replace(station("pmr3"), name="PMR 3, the neighbours", privacy="private")
+    stations = [*STATIONS, pmr]
+    a = Alert(
+        "water",
+        "high",
+        ["a", "pmr3"],
+        "pt-PT",
+        "Corte de água",
+        ["água"],
+        NOW - 60,
+        NOW - 60,
+        status="delivered",
+        privacy=["broadcast", "private"],
+    )
+    store.add_alert(a)
+    leaving = exports(stations)
+    d = digester(store, FakeLlm("- Water is cut [1]."), stations=stations)
+    out = d.run(d.request({"minutes": 60}, leaving), leaving).payload()
+    [shown] = out["alerts"]
+    assert shown["stations"] == ["a"] and shown["names"] == ["a"] and shown["quote"] == ""
+    assert "neighbours" not in json.dumps(out) and "pmr3" not in json.dumps(out)
+    store.close()
+
+
+def test_a_digest_takes_its_turn_before_reading_the_store(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    d = digester(store, FakeLlm("- x [1]."))
+    reads: list[str] = []
+    store_window = store.window
+    store.window = lambda **kw: reads.append("window") or store_window(**kw)
+    for _ in range(MAX_RUNNING):
+        assert d._running.acquire(blocking=False)
+    with pytest.raises(Busy, match="already being made"):
+        d.run(d.request({"minutes": 60}))
+    assert reads == []
+    store.close()
+
+
+def test_another_machine_asks_for_a_few_hours_at_most(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    d = digester(store)
+    leaving = exports(STATIONS)
+    with pytest.raises(RequestError, match="from another machine, minutes must be a number from 1"):
+        d.request({"minutes": 600}, leaving, remote=True)
+    assert d.request({"minutes": 600}).minutes == 600
+    with pytest.raises(RequestError, match="BCP-47"):
+        d.request({"language": "en-" + "x" * 40})
     store.close()
 
 

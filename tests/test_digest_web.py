@@ -14,7 +14,7 @@ from tests.test_pipeline import station
 from tests.test_store import result
 from tests.test_web import start_server
 from wavescribe.config import StationsConfig
-from wavescribe.digest import Digester
+from wavescribe.digest import MAX_RUNNING, Digester
 from wavescribe.store import Store
 
 LOCAL = {"X-Wavescribe": "1", "Content-Type": "application/json"}
@@ -166,3 +166,44 @@ def test_the_app_queues_digests_on_the_translation_model(tmp_path: Path) -> None
         assert status == 409 and out["error"].startswith("a digest needs an LLM; this run")
     finally:
         node.close()
+
+
+def test_another_machine_needs_a_feed_token_once_there_are_tokens(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+
+    class Tokens:
+        def tokens_required(self) -> bool:
+            return True
+
+        def check_token(self, token, scope) -> bool:
+            return token == "secret"
+
+    web.hub.app = Tokens()
+    try:
+        status, out = post(web.server, {"language": "en"}, FROM_LAN)
+        assert status == 401 and "feed token" in out["error"]
+        with_token = {**FROM_LAN, "Authorization": "Bearer secret"}
+        assert post(web.server, {"language": "en"}, with_token)[0] == 200
+        assert post(web.server, {"language": "en"})[0] == 200  # this machine needs none
+    finally:
+        web.close()
+        store.close()
+
+
+def test_a_busy_digester_says_when_to_try_again(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    for _ in range(MAX_RUNNING):
+        web.hub.digester._running.acquire()
+    try:
+        conn = http.client.HTTPConnection(*web.server.server_address, timeout=10)
+        conn.request("POST", "/api/digest", json.dumps({}), LOCAL)
+        resp = conn.getresponse()
+        assert resp.status == 503 and resp.getheader("Retry-After") == "60"
+        assert "already being made" in json.loads(resp.read())["error"]
+        status, out = post(web.server, {"minutes": 600}, FROM_LAN)
+        assert status == 400 and "from another machine" in out["error"]
+    finally:
+        web.close()
+        store.close()
