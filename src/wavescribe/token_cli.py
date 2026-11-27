@@ -72,8 +72,9 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     tokens = _call(args, "GET", "/outputs").get("tokens") or []
     if not tokens:
-        print("# no feed tokens: the feed is open to the LAN under --lan until the first is made",
-              file=sys.stderr)  # fmt: skip
+        print("# no feed tokens yet. Under --lan the feed is open to the network until the first "
+              "is made; through a proxy nothing can be read without one (the page's reads only "
+              "with --public-read)", file=sys.stderr)  # fmt: skip
     for t in tokens:
         made = time.strftime("%Y-%m-%d %H:%M", time.localtime(t.get("created") or 0))
         print(f"{t['id']}  {', '.join(t.get('scopes', []))}  {made}  {t.get('label', '')}")
@@ -100,13 +101,14 @@ def add_parser(sub: Any) -> None:
         "are off, and this is the way. Run it on the Wavescribe machine, in the folder "
         "Wavescribe runs in, while it runs. See docs/FEED.md.",
     )
-    p.add_argument(
-        "--url",
-        default=DEFAULT_URL,
-        help=f"the running `wavescribe serve` on this machine (default: {DEFAULT_URL})",
-    )
+    url_help = f"the running `wavescribe serve` on this machine (default: {DEFAULT_URL})"
+    p.add_argument("--url", default=DEFAULT_URL, help=url_help)
+    # Before or after the action alike: an action's own --url leaves the default alone unless
+    # it is given.
+    url = argparse.ArgumentParser(add_help=False)
+    url.add_argument("--url", default=argparse.SUPPRESS, help=url_help)
     actions = p.add_subparsers(dest="action", required=True, metavar="ACTION")
-    make = actions.add_parser("make", help="make a token and print it once")
+    make = actions.add_parser("make", help="make a token and print it once", parents=[url])
     make.add_argument("--label", default="", help="what it is for, shown in the list")
     make.add_argument(
         "--scope",
@@ -116,9 +118,9 @@ def add_parser(sub: Any) -> None:
         "give it twice for both)",
     )
     make.set_defaults(func=cmd_make)
-    actions.add_parser("list", help="the tokens made, without their secrets").set_defaults(
-        func=cmd_list
-    )
-    revoke = actions.add_parser("revoke", help="revoke a token now: its streams end")
+    actions.add_parser(
+        "list", help="the tokens made, without their secrets", parents=[url]
+    ).set_defaults(func=cmd_list)
+    revoke = actions.add_parser("revoke", help="revoke a token now: its streams end", parents=[url])
     revoke.add_argument("id", help="the token's id, as `list` shows it")
     revoke.set_defaults(func=cmd_revoke)

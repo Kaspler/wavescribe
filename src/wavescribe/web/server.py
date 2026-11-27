@@ -724,8 +724,7 @@ class Handler(BaseHTTPRequestHandler):
 
         hub = self.server.hub
         if not self._is_local():
-            self._json({"error": "the page's controls only work on the Wavescribe machine"},
-                       HTTPStatus.FORBIDDEN)  # fmt: skip
+            self._json({"error": self._controls_off()}, HTTPStatus.FORBIDDEN)
             return
         if self.headers.get(CONTROL_HEADER) != "1":
             self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
@@ -769,8 +768,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._ask()
             return
         if not self._is_local():
-            msg = "read-only from the LAN: start and stop stations on the Wavescribe machine"
-            self._json({"error": msg}, HTTPStatus.FORBIDDEN)
+            self._json({"error": self._controls_off()}, HTTPStatus.FORBIDDEN)
             return
         if self.headers.get(CONTROL_HEADER) != "1":
             self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
@@ -859,6 +857,13 @@ class Handler(BaseHTTPRequestHandler):
         if not _loopback(self.client_address[0]):
             return False
         return not self._proxied() or self._holds_key()
+
+    def _controls_off(self) -> str:
+        """Why this request may not change anything, as true for a proxy as for the LAN."""
+        if self._proxied():
+            return ("through a proxy the page's controls are off, also on the Wavescribe machine; "
+                    "there, `wavescribe token` and the agent tools still reach them")  # fmt: skip
+        return "read-only from the LAN: change things on the Wavescribe machine"
 
     def _holds_key(self) -> bool:
         key, given = getattr(self.server, "control_key", None), self.headers.get(KEY_HEADER)

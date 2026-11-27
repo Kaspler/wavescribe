@@ -42,7 +42,11 @@ def test_behind_a_proxy_only_the_key_makes_a_request_this_machines(
         assert status == 200 and made["token"].startswith("wst_")
         # A proxy on this machine forwarding the key's header still needs the key itself.
         proxied = {"X-Forwarded-For": "203.0.113.5"}
-        assert node.call("GET", "/api/manage/outputs", headers=proxied)[0] == 403
+        status, refused = node.call("GET", "/api/manage/outputs", headers=proxied)
+        assert status == 403 and "through a proxy" in refused["error"]
+        assert "LAN" not in refused["error"] and "wavescribe token" in refused["error"]
+        status, refused = node.call("POST", "/api/stations/x/start", {}, headers=proxied)
+        assert status == 403 and "through a proxy" in refused["error"]
         assert (
             node.call("GET", "/api/manage/outputs", headers={**proxied, KEY_HEADER: key})[0] == 200
         )
@@ -70,12 +74,12 @@ def test_token_make_list_and_revoke(
         [made] = node.app.tokens_view()
         assert node.app.check_token(token, "read") and made["label"] == "kitchen screen"
 
-        assert main(["token", "--url", url, "list"]) == 0
+        assert main(["token", "list", "--url", url]) == 0  # --url after the action works too
         listed = capsys.readouterr().out
         assert made["id"] in listed and "kitchen screen" in listed and token not in listed
 
         with pytest.raises(SystemExit, match="no token 'ffff'"):
-            main(["token", "--url", url, "revoke", "ffff"])
+            main(["token", "revoke", "ffff", "--url", url])
         assert main(["token", "--url", url, "revoke", made["id"]]) == 0
         assert node.app.tokens_view() == [] and not node.app.check_token(token, "read")
     finally:
@@ -86,8 +90,9 @@ def test_token_refuses_another_machine_and_a_missing_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(token_cli, "DATA_DIR", tmp_path)
-    with pytest.raises(SystemExit, match="isn't this machine"):
-        main(["token", "--url", "http://192.0.2.7:8765", "list"])  # the key never leaves
+    for args in (["--url", "http://192.0.2.7:8765", "list"], ["list", "--url", "http://192.0.2.7"]):
+        with pytest.raises(SystemExit, match="isn't this machine"):
+            main(["token", *args])  # the key never leaves
     with pytest.raises(SystemExit, match="no control key"):
         main(["token", "list"])
     load_key(tmp_path, create=True)
