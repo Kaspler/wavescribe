@@ -911,8 +911,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("search", help="search everything heard so far, in any language")
     p.add_argument(
-        "query", nargs="+", help="words to find, at the start of a word (*word: anywhere in one)"
-    )
+        "query", nargs="+",
+        help="words to find, at the start of a word (*word: anywhere in one); words in double "
+        """quotes are a phrase, quoted again for the shell: '"boil water"'""",
+    )  # fmt: skip
     p.add_argument("--station", help="only this station (its id)")
     p.add_argument("--limit", type=at_least_one, default=30, help="at most this many (30)")
     add_json_arg(p)

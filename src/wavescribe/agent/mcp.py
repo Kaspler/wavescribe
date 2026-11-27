@@ -203,7 +203,9 @@ TOOLS = (
         "Full-text search of everything Wavescribe has kept (by default a year of broadcast "
         "radio), in the original words and in the translations, ignoring case and accents. "
         "Every word given must appear at the start of a word (flood finds floods); write *word "
-        "to find it inside words too (*eau finds niveau). In languages written without spaces "
+        "to find it inside words too (*eau finds niveau). Words in double quotes are a phrase, "
+        'found in that order with nothing but spaces or punctuation between them ("boil water" '
+        'finds "boil water notice", not "water to boil"). In languages written without spaces '
         "every word matches anywhere. Returns {utterances}, newest first, at most "
         "60. " + UTTERANCES + "Use it to find when something was said; use ask "
         "for a question whose answer needs several moments read together. It searches all "
@@ -214,7 +216,7 @@ TOOLS = (
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200,
-                "description": "Words to find, in any language.",
+                "description": 'Words to find, in any language; "a phrase" in double quotes.',
             },
             station={**STATION_ID, "description": "Only this station."},
             limit={

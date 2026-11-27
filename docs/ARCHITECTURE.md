@@ -232,7 +232,7 @@ places it where that was said. Every `/api/history` request takes `limit`, at mo
 default; 50 for `around_id`), and `around_id` wins over `before_id`. Old text is trimmed from the page only while the reader follows the live end, with a hard cap of
 3,000 utterances per station. The search box (`GET /api/search?q=`) finds words in the source text
 and in every translation, ignoring case and accents, at the start of a word (`*word` anywhere
-inside one; below, *Search*), and highlights the matches. A paragraph's timestamp, and each search hit, plays the archived speech
+inside one, `"a phrase"` in order; below, *Search*), and highlights the matches. A paragraph's timestamp, and each search hit, plays the archived speech
 (`GET /api/segments/<id>/audio.pcm`) through the same Web Audio player as **Listen**. Live
 payloads carry the stored segment id, so the live stream and history merge into one list on the
 page. `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
@@ -867,7 +867,10 @@ searched as plain text. The index finds each word as a substring, which alone ma
 punctuation or the start), so a word also finds its inflections that add letters at the end
 ("agua" finds "águas"). It folds case and accents as the keyword rules do (`rules/text.py`):
 accents only where they are optional, so a Devanagari nukta or a kana voicing mark still counts. `*word` asks for a fragment anywhere inside words (compounds), and in
-scripts written without spaces every word matches anywhere. The same code serves `wavescribe
+scripts written without spaces every word matches anywhere. Words in double quotes are a
+phrase: the index is asked for its words of three characters or more (so "corte de água" stays
+an index lookup despite "de"), and `search.py` keeps the rows where they follow one another with
+only spaces or punctuation between. The same code serves `wavescribe
 search`, `/api/search` and everything built on it, and marks the matches in a snippet of about 80
 characters.
 

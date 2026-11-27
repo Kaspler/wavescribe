@@ -462,6 +462,9 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
         assert set(hit) == UTTERANCE_KEYS and hit["id"] == second
         assert hit["translations"] == {"en": "Heavy rain forecast"}
         assert mcp.call("search", query="chuva", station="a")[1] == {"utterances": []}
+        _, phrase = mcp.call("search", query='"corte de água"')  # a phrase, short word and all
+        assert [u["id"] for u in phrase["utterances"]] == [first]
+        assert mcp.call("search", query='"de água corte"')[1] == {"utterances": []}
 
         _, alerts = mcp.call("alerts", minutes=60)
         [alert] = alerts["alerts"]

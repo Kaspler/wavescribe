@@ -9,8 +9,9 @@ Alerts, their mentions (for highlighting) and their translated summaries live he
 
 Search uses FTS5 with the trigram tokenizer, which matches substrings in any script (languages
 written without spaces included), ignoring case and accents: "agua" finds "águas". Queries with a
-word shorter than three characters fall back to a LIKE scan. ``wavescribe.search`` then keeps
-the hits where each word starts a word, unless it was written ``*word``.
+word shorter than three characters fall back to a LIKE scan (in a phrase, only when all its words
+are that short). ``wavescribe.search`` then keeps the hits where each word starts a word, unless
+it was written ``*word``, and where each phrase has its words in order.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from wavescribe.audio import SAMPLE_RATE
 from wavescribe.config import Station
 from wavescribe.log import event
 from wavescribe.pipeline import Result
+from wavescribe.search import lookups as search_lookups
 from wavescribe.search import match as search_match
 from wavescribe.search import parse as search_terms
 from wavescribe.search import snippet as search_snippet
@@ -886,7 +888,8 @@ class Store:
         exports: Exports | None = None,
     ) -> list[dict[str, Any]]:
         """Utterances whose source text or any translation has every word of ``query`` at the
-        start of a word, or anywhere for a word written ``*word`` (``wavescribe.search``).
+        start of a word, or anywhere for a word written ``*word``, and every phrase in double
+        quotes with its words in order (``wavescribe.search``).
 
         Newest first. Each hit carries ``snippet`` (the matching text with HIT_START/HIT_END
         around matches), ``field`` ("source" or "translation") and ``field_lang``.
@@ -894,7 +897,7 @@ class Store:
         terms = search_terms(query)
         if not terms:
             return []
-        words = [t.text for t in terms]
+        words = search_lookups(terms)
         where, where_args = _exports_sql(exports)
         if station_id:
             where += " AND s.station_id = ?"

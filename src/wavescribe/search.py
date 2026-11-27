@@ -10,17 +10,24 @@
   A trailing ``*`` changes nothing (every word is a prefix already).
 - In scripts written without spaces between words (Chinese, Japanese, Thai, ...) there are no
   word starts to look for, so every word matches anywhere.
+- Words in double quotes are a phrase: found in that order, one right after the other, with
+  only spaces or punctuation between them. Its first word starts a word, as any word does, and
+  its last may go on: "corte de águ" finds "corte de águas", but not "corte de luz e água". In
+  scripts written without spaces, its words may also follow with nothing between. A quote
+  left open runs to the end of the query.
 - Every character is itself: ``%`` and ``_`` are no wildcards. An apostrophe matches any other
   (U+0027, U+2019, U+2018, U+02BC), so "it's" finds the typographic "it\u2019s" and the
   other way round.
 
 The store's trigram index finds the candidates (every word as a substring, in each of its
-``spellings``); ``match`` keeps the ones whose words start where they should and says where, for
-highlighting.
+``spellings``; of a phrase, its words of three characters or more, which the index can look up,
+see ``lookups``); ``match`` keeps the ones whose words start where they should and says where,
+for highlighting.
 """
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -32,35 +39,62 @@ SNIPPET_CHARS = 80  # about what FTS5's snippet() gave over trigrams, cut at spa
 # An apostrophe is typed one way and written another: a keyboard's ', typography's U+2019, U+2018
 # by mistake, and U+02BC (a letter in Ukrainian, among others). Each finds the others.
 APOSTROPHES = "'\u2019\u2018\u02bc"
+# Double quotes, as a keyboard types them and as typography writes them in several languages.
+QUOTES = '"\u201c\u201d\u201e\u00ab\u00bb'
+_QUOTE = re.compile(f"[{QUOTES}]")
 
 
 @dataclass(frozen=True)
 class Term:
     text: str  # as typed, without ``*``: what the index is asked for
     folded: str
-    anywhere: bool  # may start inside a word
+    # May start inside a word. For a phrase's later words: may follow the word before with
+    # nothing between (a script written without spaces).
+    anywhere: bool
+    then: tuple[Term, ...] = ()  # a phrase's later words, in order
 
 
 def parse(query: str) -> list[Term]:
-    """The words of ``query``, in order."""
-    terms = []
-    for word in query.split():
-        text = word.strip(FRAGMENT)
-        folded = _folded(text)[0]
-        if not folded:
+    """The words and phrases of ``query``, in order."""
+    terms: list[Term] = []
+    for i, part in enumerate(_QUOTE.split(query)):
+        words = [t for t in (_term(w) for w in part.split()) if t is not None]
+        if i % 2 == 0:  # outside quotes
+            terms += words
             continue
-        anywhere = (
-            word.startswith(FRAGMENT) or bool(NO_SPACES.search(text)) or not _is_word(folded[0])
-        )
-        terms.append(Term(text, folded, anywhere))
+        # Punctuation alone between a phrase's words is skipped like a space.
+        words = [t for t in words if any(_is_word(c) for c in t.folded)]
+        if words:
+            later = tuple(Term(t.text, t.folded, bool(NO_SPACES.search(t.text))) for t in words[1:])
+            terms.append(Term(words[0].text, words[0].folded, words[0].anywhere, later))
     return terms
+
+
+def lookups(terms: list[Term]) -> list[str]:
+    """What the store's index is asked for: every word, and of a phrase the words of three
+    characters or more (all of them when it has none), since the index can't look up shorter
+    ones and ``match`` checks the whole phrase anyway."""
+    out: list[str] = []
+    for term in terms:
+        words = [term.text, *(t.text for t in term.then)]
+        out += [w for w in words if len(w) >= 3] or words
+    return out
+
+
+def _term(word: str) -> Term | None:
+    text = word.strip(FRAGMENT)
+    folded = _folded(text)[0]
+    if not folded:
+        return None
+    anywhere = word.startswith(FRAGMENT) or bool(NO_SPACES.search(text)) or not _is_word(folded[0])
+    return Term(text, folded, anywhere)
 
 
 def match(terms: list[Term], text: str) -> list[tuple[int, int]] | None:
     """Character spans in ``text`` where the terms are found, in order and merged, or None
-    when a word that must start a word doesn't. The index has already found every term as a
-    substring, so one that may match anywhere never rules a text out, even where Python's
-    folding differs from FTS5's."""
+    when a word that must start a word doesn't, or a phrase isn't there in its order. The index
+    has already found every word as a substring, so one that may match anywhere never rules a
+    text out, even where Python's folding differs from FTS5's."""
     folded, origin = _folded(text)
     found: list[tuple[int, int]] = []
     for term in terms:
@@ -68,9 +102,11 @@ def match(terms: list[Term], text: str) -> list[tuple[int, int]] | None:
         at = folded.find(term.folded)
         while at != -1:
             if term.anywhere or at == 0 or not _is_word(folded[at - 1]):
-                hits.append((at, at + len(term.folded)))
+                end = _phrase_end(term.then, folded, at + len(term.folded))
+                if end is not None:
+                    hits.append((at, end))
             at = folded.find(term.folded, at + 1)
-        if not hits and not term.anywhere:
+        if not hits and (term.then or not term.anywhere):  # the index never saw the order
             return None
         found += hits
     spans: list[tuple[int, int]] = []
@@ -83,6 +119,26 @@ def match(terms: list[Term], text: str) -> list[tuple[int, int]] | None:
         else:
             spans.append((a, b))
     return spans
+
+
+def _phrase_end(words: tuple[Term, ...], folded: str, at: int) -> int | None:
+    """Where a phrase ends when its later ``words`` follow from ``at`` in ``folded``, each
+    after spaces or punctuation (or right after the one before, where that doesn't cut into a
+    word); None when they don't."""
+    for word in words:
+        gap = at
+        while gap < len(folded) and not _is_word(folded[gap]):
+            gap += 1
+        # A word that begins with punctuation of its own may begin inside the gap.
+        start = next((p for p in range(at, gap + 1) if folded.startswith(word.folded, p)), None)
+        if start is None:
+            return None
+        inside = 0 < start < len(folded) and _is_word(folded[start - 1]) and _is_word(
+            folded[start])  # fmt: skip
+        if inside and not word.anywhere:
+            return None
+        at = start + len(word.folded)
+    return at
 
 
 def snippet(
