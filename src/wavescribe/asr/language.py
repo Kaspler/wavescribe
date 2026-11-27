@@ -5,8 +5,8 @@ A watch hears whoever is on the air, in whatever language they speak, so its lan
 ``auto``. Whisper tells the language from the first 30 s of an utterance; the station's
 ``languages`` (if any) narrow the choice to the likely ones, which keeps a short or noisy
 utterance from being taken for a language nobody nearby speaks. A language clearly none of
-them is still taken as heard: told to hear Russian as English, Whisper translates instead of
-transcribing, and the text would look like what was said when it isn't. The rest of the
+them is still taken as heard: told that speech in one language is another, Whisper translates
+instead of transcribing, and the text would look like what was said when it isn't. The rest of the
 pipeline then sees the utterance as one of a station in that language: its checks,
 translation, alert rules and the store.
 """
