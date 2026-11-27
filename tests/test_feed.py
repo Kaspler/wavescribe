@@ -411,15 +411,20 @@ def http_get(server: WebServer, path: str) -> bytes:
 def test_parameters_that_arent_numbers_get_a_400_as_feed_md_says(tmp_path: Path) -> None:
     server, hub, store = feed_server(tmp_path)
     try:
-        for path in ["/feed/v1/utterances?limit=ten", "/feed/v1/utterances?since=today",
-                     "/feed/v1/utterances?since=1&until=later", "/feed/v1/utterances?since_id=x",
-                     "/feed/v1/alerts?since=today", "/feed/v1/events?since=today",
-                     "/feed/v1/events?since_id=x"]:  # fmt: skip
+        for path, named in [("/feed/v1/utterances?limit=ten", "limit"),
+                            ("/feed/v1/utterances?since=today", "since"),
+                            ("/feed/v1/utterances?since=1&until=later", "until"),
+                            ("/feed/v1/utterances?since_id=7&until=later", "until"),
+                            ("/feed/v1/utterances?since_id=x", "since_id"),
+                            ("/feed/v1/alerts?since=today", "since"),
+                            ("/feed/v1/events?since=today", "since"),
+                            ("/feed/v1/events?since_id=x", "since_id")]:  # fmt: skip
             conn = http.client.HTTPConnection(*server.server_address, timeout=10)
             conn.request("GET", path)
             resp = conn.getresponse()
             assert resp.status == 400, path
-            assert json.loads(resp.read())["error"].startswith("bad parameter: "), path
+            # The answer names the parameter, as docs/FEED.md says.
+            assert json.loads(resp.read())["error"].startswith(f"bad parameter: {named} "), path
             conn.close()
         assert json.loads(http_get(server, "/feed/v1/utterances?limit=999999&color=red")) == []
         # A Last-Event-ID that isn't one is ignored: the stream starts live.

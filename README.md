@@ -324,6 +324,7 @@ Internet streams enter at "audio per station". Details are in
 | | |
 |---|---|
 | [Getting started](docs/GETTING_STARTED.md) | Install, stations, reading, search and Ask, alerts, phones, radio receivers, troubleshooting |
+| [Commands](docs/COMMANDS.md) | Every `wavescribe` command and its options |
 | [Hardware](docs/HARDWARE.md) | Which Mac, what to buy, antennas, connectors, setup |
 | [Radio](docs/RADIO.md) | Finding stations, listening by hand, what's kept of each kind of radio, the law |
 | [Feed and outputs](docs/FEED.md) | The text feed, webhooks, remote stations, using Wavescribe from another program |

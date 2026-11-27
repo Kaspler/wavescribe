@@ -398,7 +398,10 @@ def _select(h: Handler, query: dict[str, str]) -> list[dict[str, Any]]:
     hub = h.server.hub
     leaving = hub.exports()
     ids = _list(query.get("stations")) or None
-    limit = max(1, min(10000, int(query.get("limit") or 500)))
+    try:
+        limit = max(1, min(10000, int(query.get("limit") or 500)))
+    except ValueError:
+        raise ValueError("limit must be a whole number") from None
     # What may not leave is left out before the limit, so a page is never empty while more
     # follows: a client paging with since_id would otherwise stop at a run of hidden rows.
     if hub.store is None:
@@ -411,13 +414,13 @@ def _select(h: Handler, query: dict[str, str]) -> list[dict[str, Any]]:
         start = resume_point(query["since_id"])  # a segment id, or a live stream's event id
         if start is None:
             raise ValueError("since_id must be a segment id or an event id")
-        until = float(query["until"]) if query.get("until") else None
+        until = _epoch(query, "until")
         rows = hub.store.after(start[0], station_ids=ids, until=until, limit=limit,
                                exports=leaving)  # fmt: skip
         return [r for r in rows if r["id"] not in start[1]]
     now = time.time()
-    since = float(query.get("since") or now - 3600)
-    until = float(query.get("until") or now + 60)
+    since = _epoch(query, "since") or now - 3600
+    until = _epoch(query, "until") or now + 60
     return hub.store.between(since, until, station_ids=ids, limit=limit, exports=leaving)
 
 
