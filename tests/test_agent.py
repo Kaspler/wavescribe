@@ -445,6 +445,22 @@ def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) 
         store.close()
 
 
+@pytest.mark.parametrize(
+    ("command", "url"),
+    [("follow", "ftp://localhost:8765"), ("mcp", "notaurl"), ("digest", "http://"),
+     ("follow", "localhost:8765"), ("mcp", "http://localhost:99999"), ("follow", "http://[::1"),
+     ("mcp", "http://user:secret@localhost:8765"), ("follow", "http://localhost:8765/?x=1"),
+     ("digest", "http://local host:8765")],
+)  # fmt: skip
+def test_agent_commands_refuse_an_address_that_isnt_a_wavescribes(command, url, capsys) -> None:
+    with pytest.raises(SystemExit) as stop:
+        main([command, "--url", url])
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert err.splitlines()[-1].startswith(f"wavescribe {command}: error: argument --url: ")
+    assert "Traceback" not in err
+
+
 # -- the MCP adapter --------------------------------------------------------------------------
 
 READ_TOOLS = ["stations", "recent", "search", "alerts", "wait_for_alert", "catches", "ask",

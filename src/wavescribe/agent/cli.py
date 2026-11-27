@@ -8,6 +8,7 @@ import argparse
 import logging
 import os
 import sys
+import urllib.parse
 from typing import Any
 
 from wavescribe.agent import DEFAULT_URL, TOKEN_ENV
@@ -17,6 +18,32 @@ def _client(args: argparse.Namespace) -> Any:
     from wavescribe.agent.client import Client
 
     return Client(args.url, args.token or os.environ.get(TOKEN_ENV) or None)
+
+
+def server_url(text: str) -> str:
+    """``--url``: a Wavescribe's address, refused at once (argparse says why and exits 2)
+    unless it is http:// or https:// with a host. Anything else would hang (ftp://) or fail on
+    every request."""
+    try:
+        parts = urllib.parse.urlsplit(text)
+        _ = parts.port  # ValueError for one that isn't a port
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"{text!r} isn't a web address ({e})") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} isn't an http:// or https:// address with a host, like {DEFAULT_URL}"
+        )
+    if any(c.isspace() or not c.isprintable() for c in text):
+        raise argparse.ArgumentTypeError(f"{text!r} has a space or a control character in it")
+    if parts.username is not None or parts.password is not None:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} has a name or password in it; give a feed token with --token instead"
+        )
+    if parts.query or parts.fragment or "?" in text or "#" in text:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} has a ?query or #fragment; give the address Wavescribe answers at"
+        )
+    return text
 
 
 def cmd_follow(args: argparse.Namespace) -> int:
@@ -74,6 +101,7 @@ def add_parser(sub: Any) -> None:
     def server(p: argparse.ArgumentParser) -> None:
         p.add_argument(
             "--url",
+            type=server_url,
             default=DEFAULT_URL,
             help=f"the running `wavescribe serve` (default: {DEFAULT_URL}, this machine's)",
         )

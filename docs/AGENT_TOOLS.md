@@ -183,7 +183,7 @@ printed once.
 | `--langs LANGS` | only these translations, comma-separated |
 | `--alerts-only` | alerts, no utterances |
 | `--since-id ID`, `--since EPOCH` | first, what was stored after that utterance, or heard since that time (up to 1,000), then live |
-| `--url URL` | another Wavescribe (default `http://localhost:8765`) |
+| `--url URL` | another Wavescribe (default `http://localhost:8765`): an `http://` or `https://` address with a host; anything else is refused at once, and `follow` exits 2 |
 | `--token TOKEN` | a feed token, which a Wavescribe on another machine asks for once it has one ([FEED.md](FEED.md), *Who can read what*); `WAVESCRIBE_TOKEN` in the environment does the same and doesn't show in the list of running processes |
 
 `follow` prints every alert event the feed sends, not only announcements: an alert comes when
