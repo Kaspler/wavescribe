@@ -22,7 +22,15 @@ import numpy as np
 from wavescribe.audio import SAMPLE_RATE
 from wavescribe.dsp import DEFAULT_CHANNEL_HZ, NARROW_MARGIN_HZ, OFF_CENTRE_HZ
 from wavescribe.dsp.activity import THRESHOLD_DB
-from wavescribe.radio.bandplan import AUTO, STRICTNESS, find, lookup, mhz_text, privacy_of
+from wavescribe.radio.bandplan import (
+    AUTO,
+    STRICTNESS,
+    find,
+    lookup,
+    mhz_text,
+    privacy_of,
+    region_bands,
+)
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +138,8 @@ def _plan(
                 f"no band {spec!r} in the band plan (wavescribe radio bands lists them), "
                 "or give a range in MHz, e.g. 446.0:446.2"
             ) from None
+        # As the region uses it, where it does (CB is FM in the CEPT countries, AM elsewhere).
+        band = next((b for b in region_bands(region) if b.id == spec), band)
         lo, hi, label, key = band.start_hz, band.stop_hz, band.name, spec
     else:
         pair = isinstance(spec, list | tuple) and len(spec) == 2

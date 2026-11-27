@@ -82,6 +82,13 @@ def test_a_range_takes_the_raster_and_mode_of_its_band() -> None:
         plan_window("nowhere", "1", rate=RATE)
 
 
+def test_a_band_is_watched_in_the_mode_its_region_uses() -> None:
+    # CB is FM in the CEPT countries and AM elsewhere.
+    assert plan_window("cb", "cept", rate=RATE)[1:] == ("nfm", 10_000)
+    assert plan_window("cb", "2", rate=RATE)[1:] == ("am", 10_000)
+    assert plan_window((26.965, 27.405), "cept", rate=RATE)[1] == "nfm"  # a range: its band's
+
+
 # -- as a station ----------------------------------------------------------------------------
 
 
