@@ -765,8 +765,9 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .sum-pick-list > button:hover:not(:disabled) svg { color: var(--accent); }
 .sum-pick-list > button:disabled { color: var(--ink-3); }
 .sum-pick-list > button:focus-visible { outline-offset: -2px; }
-.sum-pick-since { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 0 0 8px; border-bottom: 1px solid var(--rule); }
-.sum-pick-since label { flex: 1; }
+.sum-pick-since { display: grid; gap: 6px; padding: 8px 0 8px 8px; border-bottom: 1px solid var(--rule); }
+.sum-pick-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sum-pick-row .sum-pick-sub { flex: 1; min-width: 10em; }
 .sum-pick-since .input { width: auto; height: 28px; }
 .sum-pick-why { font-size: var(--t-sm); line-height: 1.45; color: var(--ink-2); text-wrap: pretty; }
 .sum-off { display: grid; gap: var(--s4); justify-items: start; }

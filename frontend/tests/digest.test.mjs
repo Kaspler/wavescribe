@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, newId, nowBody, readingAt, saidBy, shown,
-  sinceClock, speakResult, speechOf, spokenSeconds, windowProblem,
+  ALERT_SPEECH_S, MAX_MINUTES, REMOTE_MINUTES, answerOf, asSentence, cutAt, digestBody, failureOf, lastNight, linksOf, newId,
+  nowBody, readingAt, saidBy, shown, sinceClock, speakResult, speechOf, spokenSeconds, untilClock, windowProblem,
 } from "../src/reading/digest.ts";
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
@@ -52,6 +52,38 @@ test("a window must reach back at least a minute and no further than the server 
   assert.equal(windowProblem(now - 7 * 3600, now, 1440), null);
 });
 
+test("a window that ends earlier must have ended, last a minute, and be no longer than the server reads", () => {
+  const now = 100_000;
+  assert.equal(windowProblem(now - 3600, now, 1440, now - 1800), null);
+  assert.equal(windowProblem(now - 3600, now, 1440, now + 60), "later");
+  assert.equal(windowProblem(now - 3600, now, 1440, now - 3570), "soon");
+  // The length counts, not how far back it starts: a day ago for an hour is fine.
+  assert.equal(windowProblem(now - 25 * 3600, now, 1440, now - 24 * 3600), null);
+  assert.equal(windowProblem(now - 8 * 3600, now, 360, now - 1000), "far");
+});
+
+test("an end time is the first such time after the start", () => {
+  const since = at(14, 0).getTime() / 1000;
+  assert.equal(untilClock("15:30", since), at(15, 30).getTime() / 1000);
+  // Before the start's time of day: the next day's, past midnight.
+  const late = at(23, 0).getTime() / 1000;
+  const next = at(1, 0);
+  next.setDate(next.getDate() + 1);
+  assert.equal(untilClock("01:00", late), next.getTime() / 1000);
+  assert.equal(untilClock("14:00", since), since + 24 * 3600);
+  for (const bad of ["", "25:00", "later"]) assert.equal(untilClock(bad, since), null, bad);
+});
+
+test("last night is offered by day, and only where the server reads a whole night", () => {
+  const w = lastNight(at(9, 30), MAX_MINUTES);
+  const start = at(22, 0);
+  start.setDate(start.getDate() - 1);
+  assert.deepEqual(w, { at: start.getTime() / 1000, until: at(7, 0).getTime() / 1000 });
+  assert.notEqual(lastNight(at(21, 59), MAX_MINUTES), null);
+  for (const night of [at(6, 59), at(22, 0), at(23, 30), at(0, 10)]) assert.equal(lastNight(night, MAX_MINUTES), null);
+  assert.equal(lastNight(at(9, 30), REMOTE_MINUTES), null);
+});
+
 test("the request names its id, the stations, the window and the language, and only those", () => {
   const id = "a1b2c3d4";
   assert.deepEqual(digestBody({ kind: "minutes", minutes: 15 }, { id, stations: ["tsf"] }), { kind: "digest", id, stations: ["tsf"], minutes: 15 });
@@ -59,6 +91,10 @@ test("the request names its id, the stations, the window and the language, and o
     { kind: "digest", id, stations: ["tsf", "rr"], since: 1234, language: "es" });
   assert.deepEqual(digestBody({ kind: "away", at: 99 }, { id, stations: ["tsf"], speak: true }),
     { kind: "digest", id, stations: ["tsf"], since: 99, speak: true });
+  assert.deepEqual(digestBody({ kind: "since", at: 1000.5, until: 4600.9 }, { id, stations: ["tsf"] }),
+    { kind: "digest", id, stations: ["tsf"], since: 1000, until: 4600 });
+  assert.deepEqual(digestBody({ kind: "night", at: 1000, until: 33400 }, { id, stations: ["tsf"] }),
+    { kind: "digest", id, stations: ["tsf"], since: 1000, until: 33400 });
 });
 
 test("what a station is talking about now names its id, the one station, and the language when given", () => {

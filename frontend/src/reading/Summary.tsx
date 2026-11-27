@@ -15,7 +15,10 @@ import { SEV_WORD, human } from "./Alerts";
 import { SourceRow } from "./Ask";
 import { langNameEn } from "../lib/lang";
 import { Aloud, readAloud, stopReading } from "./aloud";
-import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, linksOf, readingAt, saidBy, shown, sinceClock, windowProblem } from "./digest";
+import {
+  type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, lastNight, linksOf, readingAt, saidBy, shown,
+  sinceClock, untilClock, windowProblem,
+} from "./digest";
 import { T } from "./strings";
 import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary, speakNext } from "./summaries";
 
@@ -40,7 +43,9 @@ function Elapsed({ since }: { since: number }) {
 
 function choiceLabel(c: Choice): string {
   if (c.kind === "minutes") return T.lastMinutes(c.minutes);
-  return c.kind === "away" ? T.sinceLookedAt(whenLabel(c.at)) : T.sinceLabel(whenLabel(c.at));
+  if (c.kind === "away") return T.sinceLookedAt(whenLabel(c.at));
+  if (c.kind === "night") return T.lastNightLabel(hm(c.at), hm(c.until));
+  return c.until != null ? T.betweenLabel(whenLabel(c.at), hm(c.until)) : T.sinceLabel(whenLabel(c.at));
 }
 
 /** Shows the answer: beside the columns, or on a phone as its own page. */
@@ -106,6 +111,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
   useTopics("summary", "state");
   const uid = useId();
   const [time, setTime] = useState("");
+  const [end, setEnd] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const job = Sm.job;
   const busy = making(job);
@@ -119,12 +125,14 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
     e.preventDefault();
     const at = sinceClock(time, new Date());
     if (at == null) return;
-    const why = windowProblem(at, Date.now() / 1000, longest);
-    if (why) setProblem(why === "soon" ? T.windowSoon : T.windowFar(longest / 60, S.canControl));
-    else ask({ kind: "since", at });
+    const until = end ? untilClock(end, at) ?? undefined : undefined;
+    const why = windowProblem(at, Date.now() / 1000, longest, until);
+    if (why) setProblem(why === "later" ? T.windowLater : why === "soon" ? T.windowSoon : T.windowFar(longest / 60, S.canControl));
+    else ask({ kind: "since", at, until });
   };
   const list = names(stations);
   const away = awaySince(looked(), Date.now() / 1000, longest);
+  const night = lastNight(new Date(), longest);
   return (
     <div className="sum-pick">
       <h2 className="sum-pick-h" dir="auto">{one ? T.summaryOf(list[0] ?? "") : T.summary}</h2>
@@ -166,12 +174,26 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
                 {T.lastMinutes(m)}<Icon name="right" />
               </button>
             ))}
+            {night && (
+              <button type="button" disabled={busy} onClick={() => ask({ kind: "night", ...night })}>
+                <span>{T.lastNight} <span className="num sum-pick-at">{hm(night.at)}–{hm(night.until)}</span></span>
+                <Icon name="right" />
+              </button>
+            )}
             <form className="sum-pick-since" onSubmit={since}>
-              <label htmlFor={`${uid}-t`}>{T.sinceTime}</label>
-              <input id={`${uid}-t`} className="input num" type="time" name="since" autoComplete="off" value={time} disabled={busy} required
-                     onChange={(e) => { setTime(e.target.value); setProblem(null); }}
-                     aria-invalid={problem ? true : undefined} aria-describedby={problem ? `${uid}-p` : undefined} />
-              <Button type="submit" size="sm" variant="secondary" disabled={busy || !time}>{T.summarise}</Button>
+              <div className="sum-pick-row">
+                <label htmlFor={`${uid}-t`}>{T.sinceTime}</label>
+                <input id={`${uid}-t`} className="input num" type="time" name="since" autoComplete="off" value={time} disabled={busy} required
+                       onChange={(e) => { setTime(e.target.value); setProblem(null); }}
+                       aria-invalid={problem ? true : undefined} aria-describedby={problem ? `${uid}-p` : undefined} />
+                <label htmlFor={`${uid}-u`}>{T.untilTime}</label>
+                <input id={`${uid}-u`} className="input num" type="time" name="until" autoComplete="off" value={end} disabled={busy}
+                       onChange={(e) => { setEnd(e.target.value); setProblem(null); }} aria-describedby={`${uid}-h`} />
+              </div>
+              <div className="sum-pick-row">
+                <span className="sum-pick-sub" id={`${uid}-h`}>{T.untilHint}</span>
+                <Button type="submit" size="sm" variant="secondary" disabled={busy || !time}>{T.summarise}</Button>
+              </div>
             </form>
           </div>
           {problem && <p className="sum-pick-why" id={`${uid}-p`} role="alert">{problem}</p>}

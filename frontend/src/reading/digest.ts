@@ -81,10 +81,12 @@ export const SPANS = [15, 60] as const;
 
 export type Choice =
   | { kind: "minutes"; minutes: number }
-  /** Since a time of day the reader gave, in seconds since 1970. */
-  | { kind: "since"; at: number }
+  /** Since a time of day the reader gave, in seconds since 1970, to another one or to now. */
+  | { kind: "since"; at: number; until?: number }
   /** Since the reader last looked (lib/away.ts). */
-  | { kind: "away"; at: number };
+  | { kind: "away"; at: number }
+  /** Last night, from NIGHT[0] to NIGHT[1] o'clock. */
+  | { kind: "night"; at: number; until: number };
 
 /** "14:30" as the start of a window: today's, or yesterday's when it is still to come (at 00:15,
  * 23:30 is three quarters of an hour ago), as `wavescribe digest --since` reads it. Null for
@@ -98,12 +100,43 @@ export function sinceClock(text: string, now: Date): number | null {
   return t.getTime() / 1000;
 }
 
-/** Why a window from `since` can't be asked for: "soon" (less than a minute ago), "far" (further
- * back than `longest` minutes), or null when it can. */
-export function windowProblem(since: number, now: number, longest: number): "soon" | "far" | null {
-  if (now - since < 60) return "soon";
-  if (now - since > longest * 60) return "far";
+/** "15:30" as the end of a window that starts at `since`: the first such time after it, or null
+ * for anything but a time of day. It may be still to come; windowProblem says so. */
+export function untilClock(text: string, since: number): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  const t = new Date(since * 1000);
+  t.setHours(+m[1], +m[2], 0, 0);
+  if (t.getTime() / 1000 <= since) t.setDate(t.getDate() + 1);
+  return t.getTime() / 1000;
+}
+
+/** Why a window from `since` to `until` (now when none) can't be asked for: "later" (it ends
+ * after now), "soon" (it is less than a minute long), "far" (longer than `longest` minutes, the
+ * most the server reads), or null when it can. */
+export function windowProblem(since: number, now: number, longest: number, until?: number): "later" | "soon" | "far" | null {
+  const end = until ?? now;
+  if (end > now) return "later";
+  if (end - since < 60) return "soon";
+  if (end - since > longest * 60) return "far";
   return null;
+}
+
+/** The night a summary of last night covers, in hours of the clock. */
+export const NIGHT = [22, 7] as const;
+
+/** Last night, offered from its end until it begins again, and only where the server reads that
+ * far back (not from another machine: REMOTE_MINUTES is shorter than a night). */
+export function lastNight(now: Date, longest: number): { at: number; until: number } | null {
+  const h = now.getHours();
+  if (h < NIGHT[1] || h >= NIGHT[0]) return null;
+  const until = new Date(now);
+  until.setHours(NIGHT[1], 0, 0, 0);
+  const at = new Date(until);
+  at.setDate(at.getDate() - 1);
+  at.setHours(NIGHT[0], 0, 0, 0);
+  const w = { at: at.getTime() / 1000, until: until.getTime() / 1000 };
+  return w.until - w.at > longest * 60 ? null : w;
 }
 
 /** The request for a summary of `stations` over `choice`, in `language` (the server's default
@@ -112,6 +145,7 @@ export function digestBody(choice: Choice, o: { id: string; stations: string[]; 
   const out: Record<string, unknown> = { kind: "digest", id: o.id, stations: o.stations };
   if (choice.kind === "minutes") out.minutes = choice.minutes;
   else out.since = Math.floor(choice.at);
+  if (choice.kind !== "minutes" && choice.kind !== "away" && choice.until != null) out.until = Math.floor(choice.until);
   if (o.language) out.language = o.language;
   if (o.speak) out.speak = true;
   return out;
