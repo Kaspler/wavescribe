@@ -343,6 +343,7 @@ def test_other_machines_get_only_so_many_connections(monkeypatch) -> None:
     monkeypatch.setattr(web, "MAX_REMOTE_CONNECTIONS", 2)
     monkeypatch.setattr(web, "MAX_REMOTE_REFUSALS", 1)
     server, hub = idle_server(behind_proxy=True)  # every connection is another machine's
+    server.public_read = True  # read without a token: this is about connections
     own, own_hub = idle_server()
     try:
         held = [socket.create_connection(server.server_address) for _ in range(2)]
@@ -373,6 +374,7 @@ def test_requests_a_proxy_here_forwards_count_against_the_cap(monkeypatch) -> No
 
     monkeypatch.setattr(web, "MAX_REMOTE_CONNECTIONS", 1)
     server, hub = idle_server()  # no --behind-proxy: the proxy's address is this machine's
+    server.public_read = True  # read without a token: this is about connections
     forwarded = {"X-Forwarded-For": "203.0.113.9"}
     try:
         conn = http.client.HTTPConnection(*server.server_address, timeout=10)

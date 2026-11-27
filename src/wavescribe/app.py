@@ -1210,13 +1210,17 @@ class App:
         return bool(self.settings.get("feed_token"))
 
     def check_token(self, token: str | None, scope: str) -> bool:
+        return self.token_id(token, scope) is not None
+
+    def token_id(self, token: str | None, scope: str) -> str | None:
+        """The id of the feed token ``token`` is, if it has ``scope``; None otherwise."""
         if not token:
-            return False
+            return None
         digest = _hash(token)
-        return any(
-            secrets.compare_digest(t.get("hash", ""), digest) and scope in t.get("scopes", [])
-            for t in self.settings.get("feed_token") or []
-        )
+        for t in self.settings.get("feed_token") or []:
+            if secrets.compare_digest(t.get("hash", ""), digest) and scope in t.get("scopes", []):
+                return str(t.get("id") or digest[:8])
+        return None
 
     # -- status ------------------------------------------------------------------------------
 

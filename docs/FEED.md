@@ -138,48 +138,71 @@ In CSV, a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return g
 apostrophe, so a spreadsheet doesn't run it as a formula. A parameter that should be a number
 and isn't gets a 400.
 
-## Who may read
+## Who can read what
 
-- **From the machine itself:** reading needs no token. Pushing to `/feed/v1/ingest` always needs
-  a `push` token, as JSON (`Content-Type: application/json`): otherwise any web page open on the
-  machine could post events and set off alerts.
+`serve` prints one line when it starts saying which of these holds.
+
+| Who | The page's data: what was said, alerts, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
+|---|---|---|---|---|
+| This machine | yes | yes, no token | yes | yes |
+| The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
+| Through a proxy (`serve --behind-proxy`, or a request carrying a proxy's header) | a `read` token, unless `serve --public-read` | always a `read` token | only with `--allow-remote-ask`, and a `read` token unless `--public-read` | never |
+
+- **Everyone:** the page itself (its HTML, scripts and icons) and `/healthz` need nothing.
+  Pushing to `/feed/v1/ingest` always needs a `push` token, even from this machine, as JSON
+  (`Content-Type: application/json`): otherwise any web page open on the machine could post
+  events and set off alerts.
+- **The page's data** is what the page reads: `/api/state`, `/api/events`, `/api/history`,
+  `/api/search`, `/api/alerts`, `/api/alerts/<id>.cap`, `/api/segments/<id>/audio.wav` (the
+  feed's `audio_url`) and `…/audio.pcm`, and `/audio/<station>.pcm`. Without a token where one is
+  needed, the answer is 401 with `{"error": …, "token_required": true}` and
+  `WWW-Authenticate: Bearer`.
+- **On the LAN** there is no login: anyone on your network reads the page, what it heard and its
+  recordings, as they could listen to the radio in the room. Use `--lan` only on a network you
+  trust. Feed tokens guard the feed there, not the page.
+- **Asking** runs this machine's LLM, which is then busy for everything else, so another machine
+  may ask only when `serve --allow-remote-ask` lets it. Otherwise the page there shows Ask as
+  unavailable (`ask` in `/api/state` says why) and `POST /api/ask` is 403.
+- **Through a proxy.** A request carrying `Forwarded`, `X-Forwarded-For`, `X-Real-IP` or `Via`
+  came through a proxy, so it is another machine's even when it connects from this one: it is
+  read-only, counts against the limits for other machines, and needs a token as in the table.
+  The address in those headers is never trusted or used for anything else. A proxy that adds
+  none of them makes every visitor look like this machine, controls included: start Wavescribe
+  with `serve --behind-proxy` whenever a proxy or tunnel forwards to it.
+- **Over the internet:** put Wavescribe behind a reverse proxy with TLS and start it with
+  `serve --behind-proxy`. Set the proxy's public name as the *Public URL* first (*Settings →
+  Connections → For other programs*): requests that name the machine any other way get 421.
+  `--public-read` lets anyone who reaches the proxy read the page without a token; the feed
+  still needs one.
+- **What leaves this machine:** to every other machine, radio whose class keeps its text here
+  (by default everything but broadcast and streams) is invisible, and its alerts reach them
+  without words.
 - **By the machine's name only:** every request must name the machine in its `Host` header
   (`localhost`, `127.0.0.1`, `[::1]`, a `.localhost` name, the machine's own name or an
   address); from other machines a `.local` name and the public URL's host count too. Anything
-  else gets 421, so a website whose name is made to resolve to 127.0.0.1
-  (DNS rebinding) can't reach the page's controls.
-- **From other machines:** only when Wavescribe was started with `serve --lan`, which binds to
-  the network. Until the first feed token is made, the LAN reads the feed as it reads the page.
-  Once one exists, every feed request from another machine needs a token, sent as
-  `Authorization: Bearer <token>`.
+  else gets 421, so a website whose name is made to resolve to 127.0.0.1 (DNS rebinding) can't
+  reach the page's controls.
+- **Tokens** are made on the page (*Settings → Connections → For other programs → Feed
+  tokens*) with a scope:
+  - `read`: the feed, and the page's data through a proxy;
+  - `push`: `/feed/v1/ingest`.
+
+  Send one as `Authorization: Bearer <token>`. A token is shown once and only its SHA-256 hash
+  is kept, in `config/ui.toml` (mode 0600).
 - **Where a header can't be set** (a browser's EventSource), trade a `read` token for a stream
   ticket and put that in the URL: `POST /feed/v1/ticket` with the token in the
   `Authorization` header (never in the URL) returns `{"ticket": "wsk_…", "expires_in": 60}`,
-  then `GET /feed/v1/events?ticket=wsk_…` opens the stream. A ticket works once, within 60 s,
-  and only for reading, so one found in a log is spent. An EventSource reconnects with the URL
-  it was given, which no longer works: close it, get a new ticket and open a new one with
-  `?since_id=<the last event id>` (EventSource keeps it as `lastEventId`). `?token=<token>` still works but is logged as a warning (at most
-  once an hour): a token in a URL ends up in logs, here, in browsers and on any proxy.
+  then `GET /feed/v1/events?ticket=wsk_…` (or `/api/events?ticket=…`) opens the stream. A
+  ticket works once, within 60 s, and only for reading, so one found in a log is spent. An
+  EventSource reconnects with the URL it was given, which no longer works: close it, get a new
+  ticket and open a new one with `?since_id=<the last event id>` (EventSource keeps it as
+  `lastEventId`). `?token=<token>` still works but is logged as a warning (at most once an
+  hour): a token in a URL ends up in logs, here, in browsers and on any proxy.
 
   ```sh
-  T=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" http://kitchen-mac.local:8765/feed/v1/ticket | jq -r .ticket)
+  T=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://kitchen-mac.local:8765/feed/v1/ticket" | jq -r .ticket)
   curl -N "http://kitchen-mac.local:8765/feed/v1/events?ticket=$T"
   ```
-- **Tokens** are made on the page (*Settings → Connections → For other programs → Feed
-  tokens*) with a scope:
-  - `read`: the feed;
-  - `push`: `/feed/v1/ingest`.
-
-  A token is shown once and only its SHA-256 hash is kept, in `config/ui.toml` (mode 0600).
-- **The page's controls (`/api/manage/…`: Settings, Find, tuning) never work from another machine**, including requests
-  that come through a proxy (see below).
-- **Over the internet:** put Wavescribe behind a reverse proxy with TLS, and start it with
-  `serve --behind-proxy`: a proxy on the same machine would otherwise make every visitor look
-  like this machine. With that option the feed needs a token even before the first one is
-  made. Set the proxy's public name as the *public URL* (page, *Outputs*) first: requests that
-  name the machine any other way get 421. Tokens protect `/feed/v1` only; the page's own read-only endpoints are as open as
-  `--lan` makes them. On both, radio whose class keeps its text on this machine (by default
-  everything but broadcast and streams) is invisible to other machines, and its alerts reach them without words.
 
 ## Push: outputs
 

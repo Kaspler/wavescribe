@@ -288,7 +288,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.log import setup_logging
     from wavescribe.registry import ModelRegistry
     from wavescribe.settings import Settings
-    from wavescribe.web.server import PortInUseError, check_port, lan_urls, serve
+    from wavescribe.web.server import PortInUseError, access_line, check_port, lan_urls, serve
 
     setup_logging(
         DATA_DIR / "logs", console_level=logging.INFO if args.verbose else logging.WARNING
@@ -328,11 +328,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if host not in ("127.0.0.1", "::1", "localhost"):
             for lan in lan_urls(args.port):
                 print(f"  on the LAN (read-only): {lan}", file=sys.stderr)
+        print(access_line(host, behind_proxy=args.behind_proxy, public_read=args.public_read,
+                          remote_ask=args.allow_remote_ask), file=sys.stderr)  # fmt: skip
         if args.open:
             webbrowser.open(url)
 
     try:
-        serve(app, host=host, port=args.port, on_ready=ready, behind_proxy=args.behind_proxy)
+        serve(app, host=host, port=args.port, on_ready=ready, behind_proxy=args.behind_proxy,
+              public_read=args.public_read, remote_ask=args.allow_remote_ask)  # fmt: skip
     finally:
         if app.alerter is not None:
             app.alerter.close()
@@ -827,6 +830,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--behind-proxy", action="store_true",
         help="a reverse proxy or tunnel forwards to this server: treat every request as another "
         "machine's (read-only, feed tokens required)",
+    )  # fmt: skip
+    p.add_argument(
+        "--public-read", action="store_true",
+        help="through a proxy, let anyone read the page (what was said, alerts, audio) without a "
+        "feed token",
+    )  # fmt: skip
+    p.add_argument(
+        "--allow-remote-ask", action="store_true",
+        help="let other machines ask the local model questions (it is busy meanwhile)",
     )  # fmt: skip
     p.add_argument("--open", action="store_true", help="open the page in the default browser")
     add_settings_arg(p)

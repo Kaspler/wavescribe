@@ -208,7 +208,12 @@ slowly its bytes come (a body gets more by its size), and a read or write that s
 ends the connection, so a stuck or hostile device can't hold the server's threads.
 A request that a proxy forwarded (`Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `Via`), or any
 request under `serve --behind-proxy`, counts as another machine's, for those limits too (a
-proxy on this machine connects from its address). Every response carries a
+proxy on this machine connects from its address). Such a request reads the page's data (what was
+said, alerts, audio, live events) only with a feed token with the `read` scope, or a ticket
+made from one (`feed.page_grant`), unless `serve --public-read`; the LAN reads it without one.
+Asking the local model (`POST /api/ask`) from another machine needs `serve --allow-remote-ask`:
+it spends the one LLM everything else waits for. `serve` prints one line at start saying which
+of these holds (`server.access_line`). Every response carries a
 Content-Security-Policy (`default-src 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`
 and `Referrer-Policy: no-referrer`.
 Before loading models, `serve` checks that no other program holds the port on 127.0.0.1 (macOS
@@ -351,8 +356,9 @@ per event (`events.py`, version 1: `utterance`, `alert`, `batch`) serves all thr
 - A remote station follows another Wavescribe's feed (`remote.py`), or is created by that
   machine's pushes to `/feed/v1/ingest`.
 
-Feed tokens (scopes `read`, `push`) guard other machines once the first one exists; the machine
-itself needs none to read, and a push always needs one. They go in the `Authorization` header;
+Feed tokens (scopes `read`, `push`) guard other machines once the first one exists, and any
+request through a proxy always (FEED.md, "Who can read what"); the machine itself needs none to
+read, and a push always needs one. They go in the `Authorization` header;
 a client that can't set one trades a read token for a one-time, 60-second stream ticket
 (`POST /feed/v1/ticket`, `feed.Tickets`, kept in memory only) for `?ticket=`. `?token=` still
 works and is logged as a warning.

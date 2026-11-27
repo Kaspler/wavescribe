@@ -716,7 +716,11 @@ def test_security_headers_and_requests_through_a_proxy(tmp_path: Path) -> None:
         # A proxy on this machine forwards other machines' requests.
         fwd = {"X-Forwarded-For": "203.0.113.5"}
         assert node.call("GET", "/api/manage/status", headers=fwd)[0] == 403
-        assert node.call("GET", "/api/state", headers={"Via": "1.1 p"})[1]["can_control"] is False
+        # It reads what was said only with a read token, as with --behind-proxy.
+        assert node.call("GET", "/api/state", headers={"Via": "1.1 p"})[0] == 401
+        token = node.app.create_token("viewer", ["read"])["token"]
+        via = {"Via": "1.1 p", "Authorization": f"Bearer {token}"}
+        assert node.call("GET", "/api/state", headers=via)[1]["can_control"] is False
         node.server.behind_proxy = True  # serve --behind-proxy: every request
         assert node.call("GET", "/api/manage/status")[0] == 403
         assert node.call("GET", "/feed/v1/stations")[0] in (401, 403)  # no token made yet

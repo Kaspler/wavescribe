@@ -17,9 +17,12 @@
 
 From this machine, no token is needed. From elsewhere (``serve --lan``), the feed is open
 until the first feed token is made on the page; from then on every request from another
-machine needs one, as ``Authorization: Bearer <token>``. A client that can't set headers (a
-browser's EventSource) trades it for a ticket and sends ``?ticket=``. ``?token=`` still works,
-but is logged as a warning: a URL ends up in logs. docs/FEED.md is the reference.
+machine needs one, as ``Authorization: Bearer <token>``. Through a proxy (``serve
+--behind-proxy``, or a request that carries a proxy's header) a token is always needed, for
+the page's own reads too (``page_grant``) unless ``serve --public-read``. A client that can't
+set headers (a browser's EventSource) trades it for a ticket and sends ``?ticket=``.
+``?token=`` still works, but is logged as a warning: a URL ends up in logs. docs/FEED.md, "Who
+can read what", is the reference.
 """
 
 from __future__ import annotations
@@ -72,25 +75,27 @@ class Tickets:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._open: dict[str, float] = {}  # a ticket's SHA-256 -> when it expires
+        # a ticket's SHA-256 -> (when it expires, the id of the token it was made from)
+        self._open: dict[str, tuple[float, str]] = {}
 
-    def issue(self) -> str:
+    def issue(self, token_id: str) -> str:
         ticket = "wsk_" + secrets.token_urlsafe(24)
         now = time.monotonic()
         with self._lock:
-            self._open = {k: t for k, t in self._open.items() if t > now}
+            self._open = {k: t for k, t in self._open.items() if t[0] > now}
             while len(self._open) >= MAX_TICKETS:
                 del self._open[next(iter(self._open))]
-            self._open[_digest(ticket)] = now + TICKET_TTL_S
+            self._open[_digest(ticket)] = (now + TICKET_TTL_S, token_id)
         return ticket
 
-    def take(self, ticket: str | None) -> bool:
-        """Whether ``ticket`` was issued and is neither used nor expired; it is used up."""
+    def take(self, ticket: str | None) -> str | None:
+        """The id of the token ``ticket`` was made from, if it was issued and is neither used
+        nor expired; it is used up."""
         if not ticket:
-            return False
+            return None
         with self._lock:
-            expires = self._open.pop(_digest(ticket), None)
-        return expires is not None and expires > time.monotonic()
+            got = self._open.pop(_digest(ticket), None)
+        return got[1] if got is not None and got[0] > time.monotonic() else None
 
 
 def _digest(ticket: str) -> str:
@@ -183,20 +188,53 @@ def token_of(h: Handler, query: dict[str, str]) -> str | None:
     return token
 
 
-def authorised(h: Handler, query: dict[str, str], scope: str) -> bool:
+@dataclass(frozen=True)
+class Grant:
+    """Why a request may go on: ``token`` is the id of the feed token it was let in by (sent
+    itself, or a ticket made from it), or None when it needed none."""
+
+    token: str | None = None
+
+
+OPEN = Grant()
+
+
+def _read_token(h: Handler, query: dict[str, str]) -> Grant | None:
+    """A read token in the request, or a ticket made from one."""
+    app = h.server.hub.app
+    if app is None:
+        return None
+    token_id = app.token_id(token_of(h, query), "read")
+    if token_id is None:
+        token_id = h.server.hub.tickets.take(query.get("ticket"))
+    return Grant(token_id) if token_id is not None else None
+
+
+def grant(h: Handler, query: dict[str, str], scope: str) -> Grant | None:
+    """Whether a feed request may go on (None: it may not)."""
     # Pushing always needs a token, even from this machine: any web page open here could
     # otherwise post events (a plain-text form needs no permission) and set off alerts.
     if h._is_local() and scope != "push":
-        return True
+        return OPEN
     app = h.server.hub.app
-    proxied = getattr(h.server, "behind_proxy", False)  # whoever reaches the proxy: always a token
+    proxied = h._proxied()  # whoever reaches the proxy: always a token
     if app is None:
-        return scope == "read" and not proxied
-    if scope == "push" or proxied or app.tokens_required():
-        if app.check_token(token_of(h, query), scope):
-            return True
-        return scope == "read" and h.server.hub.tickets.take(query.get("ticket"))
-    return True  # serve --lan with no tokens made: the LAN reads, as it reads the page
+        return OPEN if scope == "read" and not proxied else None
+    if scope == "push":
+        token_id = app.token_id(token_of(h, query), "push")
+        return Grant(token_id) if token_id is not None else None
+    if proxied or app.tokens_required():
+        return _read_token(h, query)
+    return OPEN  # serve --lan with no tokens made: the LAN reads, as it reads the page
+
+
+def page_grant(h: Handler, query: dict[str, str]) -> Grant | None:
+    """Whether a request may read the page's own data: what was said, alerts, audio, the live
+    events (None: it may not). This machine and the LAN may; a request through a proxy needs a
+    read token, as the feed does, unless the server was started with ``--public-read``."""
+    if not h._proxied() or getattr(h.server, "public_read", False):
+        return OPEN
+    return _read_token(h, query)
 
 
 def handle_get(h: Handler, path: str, query: dict[str, str]) -> bool:
@@ -208,9 +246,8 @@ def handle_get(h: Handler, path: str, query: dict[str, str]) -> bool:
         return True
     if path != "/metrics" and not path.startswith("/feed/v1/"):
         return False
-    if not authorised(h, query, "read"):
-        h._json({"error": "a feed token is needed (Authorization: Bearer …)"},
-                HTTPStatus.UNAUTHORIZED)  # fmt: skip
+    if grant(h, query, "read") is None:
+        h._unauthorised()
         return True
     if path == "/metrics":
         body = metrics(h).encode()
@@ -240,9 +277,8 @@ def handle_post(h: Handler, path: str, query: dict[str, str]) -> bool:
     if app is None:
         h._json({"error": "this run can't take pushed events"}, HTTPStatus.CONFLICT)
         return True
-    if not authorised(h, query, "push"):
-        h._json({"error": "pushing needs a feed token with the push scope"},
-                HTTPStatus.UNAUTHORIZED)  # fmt: skip
+    if grant(h, query, "push") is None:
+        h._unauthorised("pushing needs a feed token with the push scope")
         return True
     ctype = (h.headers.get("Content-Type") or "").split(";")[0].strip().lower()
     if ctype != "application/json":  # a page can't send this cross-site without asking first
@@ -282,11 +318,11 @@ def ticket(h: Handler) -> None:
     never one in the URL, which is what tickets keep out of logs, and never without a token, even
     from this machine (which reads without one: it has no need of a ticket)."""
     app = h.server.hub.app
-    if app is None or not app.check_token(token_of(h, {}), "read"):
-        h._json({"error": "a ticket is had for a read token, sent as Authorization: Bearer …"},
-                HTTPStatus.UNAUTHORIZED)  # fmt: skip
+    token_id = app.token_id(token_of(h, {}), "read") if app is not None else None
+    if token_id is None:
+        h._unauthorised("a ticket is had for a read token, sent as Authorization: Bearer …")
         return
-    h._json({"ticket": h.server.hub.tickets.issue(), "expires_in": TICKET_TTL_S})
+    h._json({"ticket": h.server.hub.tickets.issue(token_id), "expires_in": TICKET_TTL_S})
 
 
 def _context(h: Handler) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -309,7 +345,7 @@ def node(h: Handler) -> dict[str, Any]:
         "stations": len(shown),
         "translation_languages": langs,
         "store": hub.store is not None,
-        "ask": hub.ask_unavailable() is None,
+        "ask": h._ask_unavailable() is None,
     }
 
 

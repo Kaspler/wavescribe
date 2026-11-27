@@ -7,7 +7,10 @@ it works with no internet).
 
 Binds to 127.0.0.1 unless told otherwise. With ``--lan`` phones and tablets on the network can
 read along and listen, but the page is read-only for them: starting and stopping stations only
-works from the machine itself. There is no login, so only expose it on a LAN you trust.
+works from the machine itself. There is no login, so only expose it on a LAN you trust. Through a
+proxy (``--behind-proxy``) the page's reads need a feed token (``feed.page_grant``), unless
+``--public-read``; asking the local model from another machine needs ``--allow-remote-ask``.
+``access_line`` says which holds, once, when ``serve`` starts.
 """
 
 from __future__ import annotations
@@ -75,6 +78,12 @@ SECURITY_HEADERS = (
 PROXY_HEADERS = ("Forwarded", "X-Forwarded-For", "X-Real-IP", "Via")
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 ASK_TIMEOUT_S = 180.0  # a question waits at most this long for its answer
+REMOTE_ASK_OFF = ("asking from another machine is off: it spends this machine's model, so the "
+                  "Wavescribe machine turns it on with serve --allow-remote-ask")  # fmt: skip
+# The page's own reads: what was said, alerts, audio, the live events. Through a proxy they need
+# a feed token, as /feed/v1 does (feed.page_grant).
+PAGE_READS = ("/api/state", "/api/events", "/api/history", "/api/search", "/api/alerts")
+PAGE_READ_PREFIXES = ("/api/segments/", "/api/alerts/", "/audio/")
 MAX_ASKS = 3  # questions queued or being answered at once
 MAX_BODY = 16_384
 LOAD_FAILED = "could not be loaded; the log on the Wavescribe machine says why"
@@ -603,11 +612,17 @@ class Handler(BaseHTTPRequestHandler):
             self._manage("GET", path, query)
         elif feed.handle_get(self, path, query):
             pass
+        elif (path in PAGE_READS or path.startswith(PAGE_READ_PREFIXES)) and (
+            feed.page_grant(self, query) is None
+        ):
+            self._unauthorised()
         elif path.startswith("/api/segments/") and path.endswith("/audio.wav"):
             self._wav(path[len("/api/segments/") : -len("/audio.wav")])
         elif path == "/api/state":
             hub = self.server.hub
-            self._json(hub.state(can_control=self._is_local(), exports=self._exports()))
+            state = hub.state(can_control=self._is_local(), exports=self._exports())
+            state["ask"] = self._ask_unavailable()
+            self._json(state)
         elif path == "/api/events":
             self._events()
         elif path.startswith("/audio/") and path.endswith(".pcm"):
@@ -676,9 +691,15 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/api/manage/"):
             self._manage("POST", url.path, query)
             return
-        if self.path == "/api/ask":  # reads only, so LAN viewers may ask too
+        if url.path == "/api/ask":  # from another machine only with --allow-remote-ask
             if self.headers.get(CONTROL_HEADER) != "1":
                 self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
+                return
+            if not self._is_local() and not getattr(self.server, "remote_ask", False):
+                self._json({"error": REMOTE_ASK_OFF}, HTTPStatus.FORBIDDEN)
+                return
+            if feed.page_grant(self, query) is None:  # an answer quotes what was said
+                self._unauthorised()
                 return
             self._ask()
             return
@@ -712,6 +733,30 @@ class Handler(BaseHTTPRequestHandler):
         so none decides for itself what another machine sees."""
         return None if self._is_local() else self.server.hub.exports()
 
+    def _proxied(self) -> bool:
+        """The request came through a proxy: ``serve --behind-proxy``, or it carries a header
+        a proxy adds. Its sender may be anyone who reaches that proxy."""
+        if getattr(self.server, "behind_proxy", False):
+            return True
+        return any(h in self.headers for h in PROXY_HEADERS)
+
+    def _unauthorised(self, why: str = "a feed token is needed (Authorization: Bearer …)") -> None:
+        """401, with what the page needs to ask for a token: ``token_required``."""
+        body = to_json({"error": why, "token_required": True}).encode()
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("WWW-Authenticate", 'Bearer realm="wavescribe"')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _ask_unavailable(self) -> str | None:
+        """Why this request can't ask questions, or None when it can."""
+        reason = self.server.hub.ask_unavailable()
+        allowed = self._is_local() or getattr(self.server, "remote_ask", False)
+        return reason if reason is not None or allowed else REMOTE_ASK_OFF
+
     def _hidden_here(self, station_id: str) -> bool:
         """A station another machine may not see (its radio stays here); never for this one."""
         leaving = self._exports()
@@ -727,11 +772,7 @@ class Handler(BaseHTTPRequestHandler):
     def _is_local(self) -> bool:
         """The request comes from this machine (only it may start and stop stations). Behind a
         proxy, even one on this machine, every request is another machine's."""
-        if getattr(self.server, "behind_proxy", False):
-            return False
-        if any(h in self.headers for h in PROXY_HEADERS):
-            return False
-        return _loopback(self.client_address[0])
+        return not self._proxied() and _loopback(self.client_address[0])
 
     def _page(self, name: str) -> None:
         """The built page: frontend/ builds into web/dist/, which ships with the package, so
@@ -1082,10 +1123,20 @@ def check_port(host: str, port: int) -> None:
 class WebServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], hub: WebHub, behind_proxy: bool = False) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        hub: WebHub,
+        behind_proxy: bool = False,
+        *,
+        public_read: bool = False,
+        remote_ask: bool = False,
+    ) -> None:
         super().__init__(address, Handler)
         self.hub = hub
         self.behind_proxy = behind_proxy
+        self.public_read = public_read  # through a proxy, the page's reads need no token
+        self.remote_ask = remote_ask  # other machines may ask the local model
         self._remote_lock = threading.Lock()
         # Open connections from other machines; True for those past the limit.
         self._remote: dict[socket.socket, bool] = {}
@@ -1125,11 +1176,19 @@ class WebServer(ThreadingHTTPServer):
 
 
 def serve(
-    app: App, *, host: str, port: int, on_ready: Any = None, behind_proxy: bool = False
+    app: App,
+    *,
+    host: str,
+    port: int,
+    on_ready: Any = None,
+    behind_proxy: bool = False,
+    public_read: bool = False,
+    remote_ask: bool = False,
 ) -> None:
     """Run ``app`` (``wavescribe.app.App``) with its page until Ctrl-C."""
     check_port(host, port)
-    server = WebServer((host, port), app.hub, behind_proxy)
+    server = WebServer((host, port), app.hub, behind_proxy, public_read=public_read,
+                       remote_ask=remote_ask)  # fmt: skip
     threading.Thread(target=server.serve_forever, daemon=True, name="web").start()
     app.start_sampling()
     if on_ready is not None:
@@ -1140,6 +1199,33 @@ def serve(
     finally:
         server.shutdown()
         time.sleep(0.1)
+
+
+def access_line(
+    host: str, *, behind_proxy: bool = False, public_read: bool = False, remote_ask: bool = False
+) -> str:
+    """One line for ``serve`` to print at start: who can read what, and who can ask."""
+    if behind_proxy:
+        who = (
+            "through the proxy, anyone can read the page (what was said, alerts, audio) without "
+            "a token (--public-read); the feed needs a token"
+            if public_read
+            else "through the proxy, reading the page (what was said, alerts, audio) and the feed "
+            "needs a feed token with the read scope"
+        )
+    elif host in LOOPBACK_NAMES or host == "localhost":
+        return "Access: only this machine can open the page."
+    else:
+        who = (
+            "devices on the network read the page (what was said, alerts, audio) without a "
+            "token; the feed needs one once a token exists"
+        )
+    ask = (
+        "other machines may ask the local model (--allow-remote-ask)"
+        if remote_ask
+        else "only this machine may ask questions (--allow-remote-ask lets others)"
+    )
+    return f"Access: {who}; {ask}."
 
 
 def lan_urls(port: int) -> list[str]:

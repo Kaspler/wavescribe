@@ -241,7 +241,9 @@ name is in System Settings → General → Sharing → Local hostname. Open the 
 name or the address `serve --lan` prints; for any other name (a router's, a VPN's), set it as
 the *Public URL* under Settings → **Connections** → *For other programs* first, or the phone
 gets an error. Other devices can
-read and listen, but can't change anything; only the Mac itself can.
+read and listen, but can't change anything; only the Mac itself can. They can't use Ask either,
+which keeps the Mac's model busy: `serve --lan --allow-remote-ask` lets them. `serve` says at
+start who can read and ask ([FEED.md](FEED.md), *Who can read what*).
 
 > **Only on a network you trust.** The page is plain HTTP with no login: anyone on the same
 > network can read your broadcast stations' transcripts. Radio that isn't broadcast never

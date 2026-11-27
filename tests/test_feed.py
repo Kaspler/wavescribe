@@ -148,6 +148,102 @@ def test_a_client_that_reconnects_gets_each_line_it_missed_once_and_finished(
         store.close()
 
 
+def open_stream(server: WebServer, path: str, headers: dict[str, str] | None = None):
+    """The status of a streaming GET, and its connection (close it)."""
+    conn = http.client.HTTPConnection(*server.server_address, timeout=10)
+    conn.request("GET", path, headers=headers or {})
+    resp = conn.getresponse()
+    return resp, conn
+
+
+PAGE_READS = ["/api/state", "/api/history?station=a", "/api/search?q=x", "/api/alerts",
+              "/api/alerts/1.cap", "/api/segments/1/audio.wav", "/api/segments/1/audio.pcm",
+              "/audio/a.pcm"]  # fmt: skip
+
+
+def test_through_a_proxy_the_pages_reads_need_a_token(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_app import Running, make_app
+    from wavescribe.web.server import Handler
+
+    node = Running(make_app(tmp_path))
+    try:
+        token = node.app.create_token("viewer", ["read"])["token"]
+        pusher = node.app.create_token("pusher", ["push"])["token"]
+        bearer = {"Authorization": f"Bearer {token}"}
+        node.server.behind_proxy = True  # serve --behind-proxy
+        for path in [*PAGE_READS, "/api/events"]:
+            resp, conn = open_stream(node.server, path)
+            body = resp.read() if resp.status == 401 else b""
+            conn.close()
+            assert resp.status == 401, path
+            assert json.loads(body)["token_required"] is True
+            assert resp.getheader("WWW-Authenticate") == 'Bearer realm="wavescribe"'
+        for path in PAGE_READS:
+            if path != "/audio/a.pcm":  # a live stream: it waits for audio
+                assert node.call("GET", path, headers=bearer)[0] != 401, path
+        push_only = {"Authorization": f"Bearer {pusher}"}
+        assert node.call("GET", "/api/state", headers=push_only)[0] == 401
+        # The page's EventSource can't send a header: a ticket made from the token.
+        ticket = node.call("POST", "/feed/v1/ticket", headers=bearer)[1]["ticket"]
+        resp, conn = open_stream(node.server, f"/api/events?ticket={ticket}")
+        assert resp.status == 200
+        conn.close()
+        # The page itself, its health and its files need nothing.
+        assert node.call("GET", "/")[0] == 200 and node.call("GET", "/healthz")[0] == 200
+
+        node.server.public_read = True  # serve --behind-proxy --public-read
+        assert node.call("GET", "/api/state")[0] == 200
+        assert node.call("GET", "/feed/v1/node")[0] == 401  # the feed still needs a token
+
+        # The LAN reads as before, tokens or not; a proxy's header makes it a proxy's request.
+        node.server.behind_proxy = node.server.public_read = False
+        monkeypatch.setattr(Handler, "_is_local", lambda self: False)
+        assert node.call("GET", "/api/state")[0] == 200
+        assert node.call("GET", "/api/state", headers={"X-Forwarded-For": "203.0.113.5"})[0] == 401
+    finally:
+        node.close()
+
+
+def test_asking_from_another_machine_is_off_unless_turned_on(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_app import Running, make_app
+    from wavescribe.web.server import REMOTE_ASK_OFF, Handler
+
+    node = Running(make_app(tmp_path))
+    question = {"question": "What was said about water?"}
+    try:
+        node.app.hub.ask_unavailable = lambda: None  # as if an LLM were loaded
+        assert node.call("GET", "/api/state")[1]["ask"] is None
+        monkeypatch.setattr(Handler, "_is_local", lambda self: False)
+        status, answer = node.call("POST", "/api/ask", question)
+        assert status == 403 and "--allow-remote-ask" in answer["error"]
+        assert node.call("GET", "/api/state")[1]["ask"] == REMOTE_ASK_OFF  # the page says why
+        assert node.call("GET", "/feed/v1/node")[1]["ask"] is False
+        node.server.remote_ask = True  # serve --allow-remote-ask
+        assert node.call("GET", "/api/state")[1]["ask"] is None
+        node.app.hub.asks.acquire()  # every slot busy: past the gate, refused for that
+        node.app.hub.asks.acquire()
+        node.app.hub.asks.acquire()
+        assert node.call("POST", "/api/ask", question)[0] == 429
+        node.server.behind_proxy = True  # through a proxy, an answer needs a read token too
+        assert node.call("POST", "/api/ask", question)[0] == 401
+    finally:
+        node.close()
+
+
+def test_serve_says_at_start_who_can_read_and_ask() -> None:
+    from wavescribe.web.server import access_line
+
+    assert access_line("127.0.0.1") == "Access: only this machine can open the page."
+    lan = access_line("0.0.0.0")
+    assert "network read the page" in lan and "without a token" in lan
+    assert "only this machine may ask" in lan
+    proxied = access_line("127.0.0.1", behind_proxy=True, remote_ask=True)
+    assert "needs a feed token" in proxied and "other machines may ask" in proxied
+    public = access_line("127.0.0.1", behind_proxy=True, public_read=True)
+    assert "anyone can read the page" in public and "--public-read" in public
+    assert all(line.count("\n") == 0 for line in (lan, proxied, public))
+
+
 def test_a_resume_point_lists_at_most_so_many_ids_and_a_client_skips_repeats() -> None:
     cursor = Cursor(None, lambda station: True)
     waiting = Mark(10 + MAX_AHEAD + 5, ((10, "a"),))  # line 10 still being translated
