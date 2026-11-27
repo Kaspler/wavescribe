@@ -174,8 +174,9 @@ def add_parser(sub: Any) -> None:
 
     p = sub.add_parser(
         "digest",
-        help="what was said while you weren't listening, from a running Wavescribe",
-        description="A few points the running Wavescribe's local model picks out of what some "
+        help="what was said while you weren't listening, from a running Wavescribe (experimental)",
+        description="Experimental. A few points the running Wavescribe's local model picks out "
+        "of what some "
         "stations said over the last hour (or --minutes, or --since; --until for a time that "
         "ended earlier), each with the lines it rests on, in your language; --now: what one "
         "station is on about. It waits behind live translation, so it can take a few minutes, "
@@ -224,13 +225,15 @@ def add_parser(sub: Any) -> None:
         help="tools for an AI agent: an MCP server on stdin and stdout (experimental)",
         description="A Model Context Protocol server over stdio for an AI agent, in front of "
         "a running Wavescribe on this machine; experimental. Its tools read stations, what "
-        "was said, search, alerts and status, wait for the next alert and ask the local "
-        "model. See docs/AGENT_TOOLS.md.",
+        "was said, search, alerts, what band watches caught (catches) and status, wait for "
+        "the next alert, ask the local model, and have it sum up what was said (digest) or "
+        "what a station is on about (now). See docs/AGENT_TOOLS.md.",
     )
     server(p)
     p.add_argument(
         "--allow-control",
         action="store_true",
-        help="also offer tools that start and stop stations and add an internet station",
+        help="also offer tools that start and stop stations and add an internet station, and "
+        "let digest and now read their answer aloud on the Wavescribe machine (speak)",
     )
     p.set_defaults(func=cmd_mcp)

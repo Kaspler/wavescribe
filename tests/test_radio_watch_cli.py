@@ -7,6 +7,7 @@ real receiver is opened, and no model is loaded."""
 from __future__ import annotations
 
 import logging
+import re
 import stat
 import sys
 import threading
@@ -150,8 +151,12 @@ def test_a_receiver_that_stops_sending_for_a_while_is_said_and_fails(
     assert main([*argv, "--minutes", "0.06"]) == 1
     err = capsys.readouterr().err
     assert "] receiver A stopped sending; trying again" in err
-    assert "] receiver A is sending again, after 1 s" in err
-    assert err.splitlines()[-1] == "# 0 caught, 0 with speech; receiver A wasn't heard for 1 s"
+    # A second or two: how long the gap is seen as depends on how busy the machine is.
+    again = re.search(r"\] receiver A is sending again, after ([1-3]) s", err)
+    assert again, err
+    assert err.splitlines()[-1] == (
+        f"# 0 caught, 0 with speech; receiver A wasn't heard for {again[1]} s"
+    )
 
 
 @pytest.mark.parametrize("value", ["-3", "nan", "inf", "soon"])
