@@ -33,6 +33,7 @@ const LINES: Record<string, string> = {
   airband: "Pilots and air traffic control, in short exchanges.",
   "airband-25": "Pilots and air traffic control, in short exchanges.",
   marine: "Marine radio: ships and coast stations.",
+  "land-mobile-vhf": "Business and public-service radio: taxis, utilities, building sites and some public services.",
   "weather-us": "Weather broadcasts from NOAA.",
   "2m": "Radio amateurs on the 2 m band.",
   "2m-wide": "Radio amateurs on the 2 m band.",
@@ -92,6 +93,12 @@ const WORDS: Record<string, BandWords> = {
     what: "Ships, harbours and coast stations: a call on channel 16, then a move to a working channel. Coast stations read weather and safety messages at set times.",
     when: "Busy near the coast and on big rivers; inland, mostly silent.",
     antenna: "An upright antenna about 45 cm long; height matters more than anything.",
+  },
+  "land-mobile-vhf": {
+    name: "Business radio",
+    what: "The two-way radio of businesses and services, between the marine channels: taxis, utilities, building sites and some public services, each on channels of its own. Some of it is digital, which shows up as a signal only.",
+    when: "Mostly in working hours.",
+    antenna: "An upright antenna about 45 cm long, as for boats and ports.",
   },
   "weather-us": {
     name: "Weather radio",

@@ -52,7 +52,7 @@ cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
-56466eeb98a7b202f73560e19d20314f44168a10 frontend/src/manage/bands.ts
+497477cf3b6c9a584148978366e26ad7ffe597e2 frontend/src/manage/bands.ts
 c6d249e387553088b3c4d2d5f2ca3f8c4e9b2291 frontend/src/manage/catches.ts
 cd991cc8d9ac21eb246ad56b656c52953ce32c18 frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
