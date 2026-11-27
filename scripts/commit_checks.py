@@ -9,13 +9,16 @@
    frontend/package-lock.json) needs a docs/LICENSING.md entry, unless it is a transitive
    package with a tier-A licence. A new or re-pinned model in models.toml needs LICENSING.md
    updated in the same commit.
+3. **The README lists every command.** Each top-level `wavescribe` command must be named in
+   README.md as `wavescribe <name>`: its line in the list under "What it does". The names are
+   read from the sources, where each is registered with `sub.add_parser("<name>", ...)`.
 
 Checks of your own (anything local to your clone) can go in `.git/hooks/pre-commit.local`: the
 installed hook runs it after these when it exists and is executable.
 
 Usage:
   commit_checks.py install        Install the pre-commit hook.
-  commit_checks.py check          Checks 1-2 on the staged commit (the pre-commit hook).
+  commit_checks.py check          Checks 1-3 on the staged commit (the pre-commit hook).
   commit_checks.py check --base REV
                                   The same on what is checked out, with check 2 on everything
                                   that changed since commit REV (CI: a pull request or a push).
@@ -39,6 +42,11 @@ BUILT = "src/wavescribe/web/dist"
 SOURCES = f"{BUILT}/.sources"
 LICENSING = "docs/LICENSING.md"
 MODELS = "src/wavescribe/models.toml"
+README = "README.md"
+PACKAGE = "src/wavescribe"
+# How a top-level command is registered: on the main parser's subcommands, which cli.py and
+# every module that adds a command call `sub`. A command's own actions go on another name.
+ADD_COMMAND = re.compile(r"""(?<![\w.])sub\.add_parser\(\s*["']([a-z][a-z0-9_-]*)["']""")
 BUILD_COMMAND = f"npm --prefix {FRONTEND} run build"
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 HOOK_MARKER = "# installed by scripts/commit_checks.py"
@@ -441,6 +449,44 @@ def check_models(repo: Repo, changed: set[str]) -> list[str]:
     return problems
 
 
+# ---- the README's list ----
+
+
+def commands_in(source: str) -> list[str]:
+    """The top-level `wavescribe` commands a module's source registers."""
+    return ADD_COMMAND.findall(source)
+
+
+def unlisted(commands: list[str], readme: str) -> list[str]:
+    """The commands ``readme`` doesn't name as `wavescribe <name>`."""
+    return sorted(
+        c
+        for c in set(commands)
+        if not re.search(rf"(?<![\w-])wavescribe\s+{re.escape(c)}(?![\w-])", readme)
+    )
+
+
+def check_readme(repo: Repo) -> list[str]:
+    try:
+        found = repo.git("grep", "--cached", "-lzF", "sub.add_parser(", "--", f"{PACKAGE}/*.py")
+    except subprocess.CalledProcessError as e:
+        if e.returncode != 1:
+            raise
+        return []  # nothing registers a command
+    commands = [c for p in found.split("\0") if p for c in commands_in(repo.read(p) or "")]
+    missing = unlisted(commands, repo.read(README) or "")
+    if not missing:
+        return []
+    return [
+        f"{README} doesn't name these commands: "
+        + ", ".join(f"`wavescribe {c}`" for c in missing)
+        + ". Every `wavescribe` command has a line in the README's list (What it does): add "
+        "one for each, saying in plain words what a person can do with it, with the command "
+        "written as `wavescribe <name>` and a link to its how-to in docs/, and stage "
+        f"{README} (CONTRIBUTING.md, Conventions)."
+    ]
+
+
 def install(repo: Repo) -> list[str]:
     hooks = repo.root / repo.git("rev-parse", "--git-path", "hooks").strip()
     hooks.mkdir(parents=True, exist_ok=True)
@@ -460,7 +506,7 @@ def install(repo: Repo) -> list[str]:
 
 
 def run_checks(repo: Repo) -> list[str]:
-    return check_page(repo) + check_licences(repo)
+    return check_page(repo) + check_licences(repo) + check_readme(repo)
 
 
 def report(problems: list[str]) -> str:

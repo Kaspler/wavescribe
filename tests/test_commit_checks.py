@@ -156,6 +156,83 @@ def test_ci_checks_the_licences_of_everything_since_a_base_commit(repo):
     assert check("--base").returncode == 1  # the revision is missing
 
 
+CLI = """
+def build_parser():
+    sub = parser.add_subparsers(dest="command")
+    models = sub.add_parser("models", help="list and download models")
+    models_sub = models.add_subparsers(dest="models_command")
+    models_sub.add_parser("fetch", help="download models")
+    alerts = sub.add_parser(
+        "alerts",
+        help="recent alerts",
+    )
+    add_agent_parser(sub)
+"""
+AGENT_CLI = """
+def add_parser(sub):
+    p = sub.add_parser("follow", help="the live feed")
+    actions = p.add_subparsers(dest="action")
+    actions.add_parser("once")
+"""
+
+
+def test_every_command_needs_its_line_in_the_readme(repo):
+    assert cc.check_readme(repo) == []  # no command line here
+    readme = "- Models, with `wavescribe models fetch`.\n- Alerts: `wavescribe\n  alerts`.\n"
+    stage(
+        repo,
+        {
+            "src/wavescribe/cli.py": CLI,
+            "src/wavescribe/agent/cli.py": AGENT_CLI,
+            "README.md": readme,
+        },
+    )
+    problems = cc.check_readme(repo)
+    assert len(problems) == 1 and "`wavescribe follow`" in problems[0]
+    # Named ones pass, and a command's own actions (fetch, once) aren't asked for.
+    for name in ("models", "alerts", "fetch", "once"):
+        assert f"`wavescribe {name}`" not in problems[0]
+    assert "What it does" in problems[0] and "docs/" in problems[0]
+    assert cc.run_checks(repo) == problems
+
+    # Its name alone, or as the start of another word, isn't its line.
+    stage(repo, {"README.md": readme + "`follow`, `wavescribe followers`, Wavescribe follow\n"})
+    assert "`wavescribe follow`" in cc.check_readme(repo)[0]
+    stage(repo, {"README.md": readme + "- The live feed: `wavescribe follow`.\n"})
+    assert cc.check_readme(repo) == []
+
+    # A commit that adds a command without its line is blocked, with what to add.
+    git(repo.root, "commit", "-qm", "commands")
+    token = 'def add_parser(sub):\n    sub.add_parser("token")\n'
+    stage(repo, {"src/wavescribe/token_cli.py": token})
+
+    def check():
+        return subprocess.run(["python3", "-I", str(SCRIPT), "check"], cwd=repo.root,
+                              capture_output=True, text=True)  # fmt: skip
+
+    blocked = check()
+    assert blocked.returncode == 1 and "`wavescribe token`" in blocked.stderr
+    stage(repo, {"README.md": (repo.root / "README.md").read_text() + "`wavescribe token`\n"})
+    assert check().returncode == 0
+
+
+def test_the_commands_read_from_the_sources_are_the_real_ones_and_the_readme_names_them():
+    """The check reads the sources instead of importing them: this holds it to the parser."""
+    import argparse
+
+    from wavescribe.cli import build_parser
+
+    root = SCRIPT.parent.parent
+    commands = next(a for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+    found = [
+        name
+        for path in sorted((root / "src/wavescribe").rglob("*.py"))
+        for name in cc.commands_in(path.read_text(encoding="utf-8"))
+    ]
+    assert sorted(found) == sorted(commands.choices)
+    assert cc.unlisted(found, (root / "README.md").read_text(encoding="utf-8")) == []
+
+
 def test_spdx_expressions():
     assert cc.spdx_ok("MIT")
     assert cc.spdx_ok("(MIT OR GPL-3.0-or-later)")

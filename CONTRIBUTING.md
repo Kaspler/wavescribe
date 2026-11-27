@@ -102,14 +102,18 @@ radio, and the radio code is tested on synthetic signals.
 
 - the built page doesn't match the page sources being committed;
 - a new dependency has no LICENSING.md entry, or a model is added or re-pinned without
-  LICENSING.md updated in the same commit.
+  LICENSING.md updated in the same commit;
+- a `wavescribe` command isn't named in README.md, written as `wavescribe <name>`: every
+  command has its line in the README's list. It is a tripwire for commands only; what the page
+  can do has no such check, so add its line by hand.
 
 Checks of your own can go in `.git/hooks/pre-commit.local`: the hook runs it afterwards when it
 exists and is executable. Do what a blocked commit says and commit again; don't bypass the hook.
 
 Every pull request runs the same checks on GitHub: ruff, the tests that need no models, the
-page's own tests, a fresh build of the page compared with the committed one, and the licence
-check over every commit it brings (`commit_checks.py check --base <rev>`).
+page's own tests, a fresh build of the page compared with the committed one, the README's
+commands, and the licence check over every commit it brings
+(`commit_checks.py check --base <rev>`).
 
 ## License
 
