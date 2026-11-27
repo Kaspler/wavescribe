@@ -405,6 +405,7 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         "[4] a: First note on a.\n[5] a: Second note on a." in shown
     )
     assert "Which 5 of them matter most" in choice and "of two that matter as much" in choice
+    assert "Advertising, sponsorship and the station's promotion of itself" in choice
     # The note joined to the first is left out, sources and all: a join isn't trusted. Two
     # chosen of five asked for, the notes left out make up the rest, in the order shown.
     assert digest.text() == (

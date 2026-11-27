@@ -212,9 +212,10 @@ to its end, and the second line says so ("140 of 512 lines, spread evenly", or "
 of 259,200 lines" when it is thin). A small model asked about a long stretch at once writes
 about what it reads first, so a digest asks about it a part at a time (three parts for a busy
 station) and then chooses the points that matter most, the latest first when two matter as
-much. The model is told to leave out advertising and a station's promotion of itself (its
-programmes, trailers, jingles, contests), and to say that nothing stood out when that is all
-there was; it mostly does, but nothing checks it, so an advert can still slip in as a point.
+much. The model is told to leave out advertising, sponsorship and a station's promotion of
+itself (its programmes, trailers, jingles, contests, its events), and to say that nothing
+stood out when that is all there was, and again when it chooses the points. It doesn't always
+listen when it reads an ad break, and nothing checks it, so an advert can still slip in.
 The alerts announced in that time (notified or spoken, not only logged)
 come first, each once, in the words they were announced in. A point the model gave without the
 moments it rests on isn't shown, nor one that shares no word with the moments it cites, nor

@@ -182,13 +182,14 @@ ORDER = (
 # small model (a bank's offer, "our special edition at 17:30"). No check here can tell them
 # apart, so the prompt says it, by examples a model knows in any language.
 SUBSTANCE = (
-    "- News, warnings, public notices, decisions and events, and what guests and callers said "
-    "about them.\n"
-    "- Leave out advertising and sponsorship (products, offers, prices, shops, banks, "
-    "websites to visit) and the station's promotion of itself (its name, its programmes and "
-    "when they are on, trailers, jingles, contests, its own events and partners), and music, "
-    "greetings and small talk. Never make a point of them, even when they are all there was: "
-    "then nothing of substance was said."
+    "- News: what happened or is to happen, warnings, public notices and decisions, and what "
+    "guests and callers said about them.\n"
+    "- Leave out advertising and sponsorship (products, offers, prices, tickets, shops, banks, "
+    "websites to visit, who supports a programme) and the station's promotion of itself (its "
+    "name, its programmes and presenters and when they are on or repeated, trailers, "
+    "jingles, contests, events it organises or supports, its partners), and music, greetings "
+    "and small talk. Never make a point of them, even when they are all there was: then "
+    "nothing of substance was said."
 )
 _POINT = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")  # "- ", also "* ", "1. "
 _CITATION = re.compile(r"\[\s*(\d+(?:\s*[-\u2013,;]\s*\d+)*)\s*\]")
@@ -1235,9 +1236,10 @@ def choice_messages(
         "transcripts:\n\n" + "\n".join(blocks) + f"\n\nWhich {count} of them matter most to "
         "someone who missed it, with at least one from each station? Warnings and dangers "
         "first, then decisions and events that touch many people, then the rest; of two that "
-        "matter as much, the later. Notes that tell the same story count as one: join their "
-        'numbers with "+".\nReply with one line: the numbers, the most important first, like '
-        '"3+9, 7, 1, 12, 5".'
+        "matter as much, the later. Advertising, sponsorship and the station's promotion of "
+        "itself (its programmes, trailers, events) never matter. Notes that tell the same "
+        'story count as one: join their numbers with "+".\nReply with one line: the numbers, '
+        'the most important first, like "3+9, 7, 1, 12, 5".'
     )
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
 

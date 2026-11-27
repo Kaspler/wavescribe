@@ -323,7 +323,9 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    excerpts, never from the model's words. It is told to leave out advertising and sponsorship
    and the station's promotion of itself (programmes and when they are on, trailers, jingles,
    contests), which fill much of a station's airtime and read like news to a small model, and
-   to answer `NONE` when that is all there was. Nothing checks it: no cheap test tells an
+   to answer `NONE` when that is all there was; the choice below is told so too. On real
+   transcripts the model still wrote ad notes for a part that held an ad break (it listed every
+   excerpt), which the choice then left out. Nothing checks it: no cheap test tells an
    advert from news (the existing ones, idents of under three words and the ASR's junk
    phrases, catch almost none of them). A range (`[1-23]`) is read whole. A point that cites none of them is
    dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
