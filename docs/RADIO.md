@@ -288,6 +288,10 @@ How it works:
   caught while it lasts. If it stays for ten seconds (a charger switched on nearby), it is taken
   as the new floor. The station's status says the watch is deaf while it lasts, and
   `radio watch` prints a line when that starts and when it ends.
+- Unless one channel stands 15 dB or more over all the others beyond its neighbours: that is a
+  transmitter close by overloading the receiver, and the rest of the window rising is what it
+  does to the receiver. That channel is caught and marked as overloaded, and nothing else is
+  caught while it lasts (see [Testing with a walkie-talkie](#testing-with-a-walkie-talkie)).
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 
@@ -335,10 +339,40 @@ Limits:
 - **Busy bands queue up.** Catches go through speech recognition one after another, so on a band
   with many transmissions their words come later. Beyond 16 waiting, more are counted in the log
   (`watch_behind`) and not kept.
+- **While a transmitter close by overloads the receiver, only its channel is caught.** A weaker
+  transmission elsewhere in the window at the same moment is missed; one already being caught
+  goes on, marked as overloaded too. Two transmitters that close at once, a few dB apart, leave
+  no channel on top, and the watch is deaf while they last, as with interference. A single
+  strong carrier that comes with noise across the window looks the same as a transmitter close
+  by, and is caught as one.
 - **Tried on the air only briefly**, with an indoor whip on 2 m, where short transmissions on an
   amateur channel were caught and logged; before that on synthetic signals and with no antenna
-  (no false catches in 10 minutes on PMR446 and on 2 m). Speech from a walkie-talkie nearby
-  hasn't been tried yet.
+  (no false catches in 10 minutes on PMR446 and on 2 m). A first try with a walkie-talkie a few
+  metres from the antenna overloaded the receiver, and the watch, taking it for interference,
+  caught nothing; it now catches such a transmission, as tried on synthetic signals, and says
+  the receiver was overloaded. Speech from a walkie-talkie at a sensible distance hasn't been
+  tried yet.
+
+### Testing with a walkie-talkie
+
+A walkie-talkie keyed in the same room as the antenna is far stronger than anything the
+receiver is meant to hear, even at its lowest power. It overloads the receiver: the waterfall
+lights up across the whole window, Settings → **Receivers** marks the receiver *overload*, and
+copies of the signal show on other channels. To test a watch:
+
+- keep the walkie-talkie a few metres from the antenna or more (another room is better), never
+  touching the antenna or its cable;
+- use its low-power setting, if it has one;
+- talk for a few seconds, then look under **Caught here** (or in Read, for a kind of radio that
+  keeps nothing).
+
+If the receiver is overloaded anyway, the watch still catches the transmission on its channel
+and marks it as overloaded (`overload`). The watch's status says "A very strong signal nearby
+overloaded Receiver A. Move the radio further away, or lower the gain in Settings → Receivers.",
+and the log has `watch_deaf` with `reason=overload` for an overload of 3 s or more (noise is
+`reason=interference`). `radio watch` prints the same sentence in the terminal, with `--gain` for
+the gain. Distance helps more than gain: a walkie-talkie in the same room can overload the
+receiver even at a low gain, and a lower gain makes weak, distant transmissions harder to catch.
 
 ## What Wavescribe does with each kind of radio
 
