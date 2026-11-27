@@ -342,4 +342,36 @@ export function bandOfWindow<B extends DialBand>(bands: B[], lo: number, hi: num
   return best;
 }
 
+// -- how much a receiver hears at once ---------------------------------------------------------
+
+/** Shares of a band as said, nearest first; under a tenth's reach, the MHz are said instead. */
+const SHARES: [number, string][] = [[3 / 4, "three quarters"], [2 / 3, "two thirds"], [1 / 2, "half"], [1 / 3, "a third"], [1 / 4, "a quarter"], [1 / 5, "a fifth"], [1 / 10, "a tenth"]];
+function shareWords(q: number): string | null {
+  if (q >= 0.9) return "nearly all";
+  if (q < 0.07) return null;
+  return `about ${SHARES.reduce((a, b) => (Math.abs(Math.log(q / b[0])) < Math.abs(Math.log(q / a[0])) ? b : a))[1]}`;
+}
+const mhzWords = (v: number) => `${+v.toFixed(v < 0.1 ? 2 : 1)} MHz`;
+const rangeWords = (b: Pick<Band, "start_mhz" | "stop_mhz">) => `${+b.start_mhz.toFixed(3)}–${+b.stop_mhz.toFixed(3)} MHz`;
+
+/** What a receiver taking in `span` hears at once, against the band its window is on
+ * (bandOfWindow), for the line beside its window on the dial, whose pieced scale doesn't show
+ * widths: how many MHz (the part where a channel of the band's kind is heard, `usable`), then all
+ * of the band, a share of it, the part of it at one edge and how far past, or no band at all.
+ * `name`: what the page calls a band. */
+export function windowWords<B extends DialBand>(rx: string, span: Span, bands: B[], name: (b: B) => string): string {
+  const band = bandOfWindow(bands, span[0], span[1]);
+  const [lo, hi] = usable(span, band?.mode);
+  const head = `Receiver ${rx} hears about ${mhzWords(hi - lo)} at once`;
+  if (!band || hi <= band.start_mhz || lo >= band.stop_mhz) return `${head}, ${lo.toFixed(2)} to ${hi.toFixed(2)} MHz, outside every band on the dial`;
+  const of = `the ${name(band)} band (${rangeWords(band)})`;
+  if (lo <= band.start_mhz && hi >= band.stop_mhz) return `${head}: all of ${of}`;
+  const inside = Math.min(hi, band.stop_mhz) - Math.max(lo, band.start_mhz);
+  if (hi > band.stop_mhz) return `${head}: the top ${mhzWords(inside)} of ${of} and ${mhzWords(hi - band.stop_mhz)} above it`;
+  if (lo < band.start_mhz) return `${head}: the lowest ${mhzWords(inside)} of ${of} and ${mhzWords(band.start_mhz - lo)} below it`;
+  const whole = band.stop_mhz - band.start_mhz;
+  const share = shareWords(inside / whole);
+  return share ? `${head}: ${share} of ${of}` : `${head}: a small part of ${of}, ${mhzWords(inside)} of its ${mhzWords(whole)}`;
+}
+
 const round3 = (v: number) => Math.round(v * 1000) / 1000;

@@ -412,6 +412,14 @@ tr.is-off td { color: var(--ink-3); }
 .dl-card-tech { font-size: var(--t-sm); font-weight: 400; color: var(--ink-3); }
 .dl-card-text { max-width: 66ch; margin-top: var(--s3); font-size: var(--t-md); line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .dl-card-who { margin-bottom: var(--s5); }
+/* A band to scale in its card, and what the chosen receiver hears of it at once. */
+.dl-scale { position: relative; display: grid; gap: 3px; max-width: 66ch; margin-top: var(--s4); padding-top: 16px; font-size: var(--t-xs); color: var(--ink-3); }
+.dl-scale-bar { position: relative; height: 8px; border-radius: 2px; background: var(--rule); }
+.dl-scale-win { position: absolute; top: -2px; bottom: -2px; border: 1px solid var(--ink-2); border-radius: 2px; background: color-mix(in oklab, var(--ink) 20%, transparent); }
+.dl-scale-who { position: absolute; top: 0; transform: translateX(-50%); font-weight: 650; color: var(--ink-2); line-height: 1; }
+.dl-scale-ends { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.dl-rx-width { margin-top: var(--s2); }
+.dl.is-list ~ .dl-rx-width .dl-drag { display: none; } /* the list has no letters to drag */
 /* Receivers on the dial: a tab with the receiver's lamp and letter on a stem down to its window,
    a pale box on the bar. The receiver in view below has the pointer's edge. */
 .dl-rxs { position: relative; }

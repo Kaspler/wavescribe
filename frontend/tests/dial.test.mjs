@@ -3,7 +3,7 @@
 // a receiver sent to a band looks where its stations are.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandAt, bandOfWindow, dragCentre, hears, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks, usable, width } from "../src/manage/dial.ts";
+import { bandAt, bandOfWindow, dragCentre, hears, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks, usable, width, windowWords } from "../src/manage/dial.ts";
 
 const band = (id, start_mhz, stop_mhz, mode, privacy) => ({ id, start_mhz, stop_mhz, mode, privacy, tunable: true });
 // A European band plan's shape, as /api/manage/radio sends it.
@@ -193,4 +193,29 @@ test("a window is said to be on the band at its centre, else the one it shows mo
   assert.equal(bandOfWindow(BANDS, 96.8, 99.2).id, "fm");
   assert.equal(bandOfWindow(BANDS, 106.9, 109.3).id, "fm", "half out of the band");
   assert.equal(bandOfWindow(BANDS, 1200, 1202.4), null, "outside the plan");
+});
+
+// The line beside a receiver's window: the dial's pieced scale makes 2.4 MHz look wide on the
+// broadcast band and narrow on the TV band, so the words say how much of the band it really is.
+const says = (span) => windowWords("A", span, BANDS, (b) => b.id);
+
+test("a receiver's window holding a whole band says so", () => {
+  assert.equal(says([444.56, 446.96]), "Receiver A hears about 2.3 MHz at once: all of the pmr446 band (446–446.2 MHz)");
+  assert.equal(says([143.8, 146.2]), "Receiver A hears about 2.3 MHz at once: all of the 2m band (144–146 MHz)");
+});
+
+test("a window on part of a band says which share, from the band's own kind of channel", () => {
+  // Broadcast FM keeps 120 kHz from each edge: 2.16 of the band's 20.5 MHz.
+  assert.equal(says([97.9, 100.3]), "Receiver A hears about 2.2 MHz at once: about a tenth of the fm band (87.5–108 MHz)");
+  assert.equal(says([157.8, 160.2]), "Receiver A hears about 2.3 MHz at once: about a third of the marine band (156–162.025 MHz)");
+  assert.equal(says([500, 502.4]), "Receiver A hears about 2.3 MHz at once: a small part of the dvbt band (470–694 MHz), 2.3 MHz of its 224 MHz");
+});
+
+test("a window across a band's edge says how much is in it and how far past", () => {
+  assert.equal(says([107, 109.4]), "Receiver A hears about 2.2 MHz at once: the top 0.9 MHz of the fm band (87.5–108 MHz) and 1.3 MHz above it");
+  assert.equal(says([117, 119.4]), "Receiver A hears about 2.3 MHz at once: the lowest 1.3 MHz of the airband band (118–137 MHz) and 0.9 MHz below it");
+});
+
+test("a window outside every band says where it is", () => {
+  assert.equal(says([300, 302.4]), "Receiver A hears about 2.3 MHz at once, 300.06 to 302.34 MHz, outside every band on the dial");
 });

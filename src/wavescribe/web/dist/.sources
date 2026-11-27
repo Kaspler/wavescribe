@@ -37,7 +37,7 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
 880e6e6edcfc4bf0d4429f96c92e65a6f7a1370d frontend/src/manage/AlertRules.tsx
 bc4745619c3c4c68660dde6f41a1967b23ddb91d frontend/src/manage/Caught.tsx
-271e49466eeaf420f4dce5a427dfcefd715f5391 frontend/src/manage/DialView.tsx
+3b4e0473f651c0262d8f8a68059690a9bfaf3274 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 dd8b9b2d3cba4c54cea6f144e724fbdba7fe82e8 frontend/src/manage/Internet.tsx
 fd2a0b8473226b3d6bc8624830d8e1bfbf629a88 frontend/src/manage/Listen.tsx
@@ -47,7 +47,7 @@ ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 dc4f8cf17da31768e9d65b42775df30addf1b571 frontend/src/manage/MoveStation.tsx
 4386a911e5b3ed5ba6a7677268645a00132698e2 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-c0fef78413fb4088b7a22e78b62803b457a7d837 frontend/src/manage/Radio.tsx
+fa39a3488d92853e57f906f1182c2fbe90dd54c2 frontend/src/manage/Radio.tsx
 e8bf0386ccb363ae2e1df628660b7d150bb2002b frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 d6b4328d5ad20a75a99f0a145baebcce8d9a3e39 frontend/src/manage/Scope.tsx
@@ -60,9 +60,9 @@ dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 995950933ff4308317d22f1aa5a40406bc36fafa frontend/src/manage/bandplan.ts
 16baa601a050446286a84ab9edd1f44752f442d7 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
-f88889a0f0bab37d17d7448614e098d3a78e9c5d frontend/src/manage/dial.ts
+8462bc03da016801dfd7271eefbb09367d9cdfc9 frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
-539e3159f2ffb51b3d279aef1fade0cd1e2d447b frontend/src/manage/manage.css
+566be0651cd586525b96998225f1d504a261e47d frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts
@@ -102,7 +102,7 @@ a57655d576ebf8eb77ee500e59d01afc6ba38c1f frontend/tests/auth.test.mjs
 3aa5b94f8179c81ab92f627b1192032b51754fe4 frontend/tests/behind.test.mjs
 e92d3893e448ccf8bb74903a3d9c2ad9e0b5ca92 frontend/tests/catches.test.mjs
 b8346db81c1de59110f722a54d1476a7c987e0a9 frontend/tests/channels.test.mjs
-0d29d7d0e54e76e4e1d9736187b2238a41b260fa frontend/tests/dial.test.mjs
+ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
 ea5c7b494338ae17caf01fd574e737f5558e4d82 frontend/tests/digest.test.mjs
 da9bc5828af15a5dbef60f4f3807d178a9c3b821 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json

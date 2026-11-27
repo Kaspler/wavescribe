@@ -10,7 +10,7 @@ import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import { agoWords } from "../lib/time";
 import type { Any } from "./api";
 import { type Band, and, bandLabel, bandWords } from "./bands";
-import { type LiveReceiver, type Receiver, type Segment, type Span, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks, width as widthOf } from "./dial";
+import { type LiveReceiver, type Receiver, type Segment, type Span, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks, usable, width as widthOf } from "./dial";
 import { rxName } from "./Receivers";
 import { type Marker, Scope } from "./Scope";
 import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps, useTuningKeys } from "./tuner";
@@ -227,7 +227,12 @@ export function ReceiverWords({ rxs }: { rxs: RxStatus[] }) {
 
 /** A chosen band, explained: what it is, what you would hear and when, the antenna it wants, and
  * what Wavescribe does with it; then what can be done there (`children`). */
-export function BandCard({ band, kept, policies, heard, children }: { band: Band; kept: string; policies: Any; heard: number; children?: ReactNode }) {
+export function BandCard({ band, kept, policies, heard, rx, children }: {
+  band: Band; kept: string; policies: Any; heard: number;
+  /** The receiver chosen, whose window the card draws to scale where it falls on the band. */
+  rx?: { name: string; span: Span } | null;
+  children?: ReactNode;
+}) {
   const w = bandWords(band);
   const ask = !!policies?.[band.privacy]?.needs_ack;
   return (
@@ -236,6 +241,7 @@ export function BandCard({ band, kept, policies, heard, children }: { band: Band
         {w.name}
         <span className="dl-card-tech">{band.name} · {+band.start_mhz.toFixed(3)}–{+band.stop_mhz.toFixed(3)} MHz{band.mode ? ` · ${band.mode.toUpperCase()}` : ""}</span>
       </h4>
+      {rx && <ToScale band={band} rx={rx} />}
       <p className="dl-card-text">{[w.what, w.when, w.antenna].filter(Boolean).join(" ")}</p>
       <p className="m-hint dl-card-who">
         {band.privacy === "broadcast" ? "Broadcast radio: meant for everyone." : kept}
@@ -243,6 +249,25 @@ export function BandCard({ band, kept, policies, heard, children }: { band: Band
         {kindOf(band) === "text" && heard > 0 && ` ${heard === 1 ? "One frequency" : `${heard} frequencies`} heard here so far.`}
       </p>
       {children}
+    </div>
+  );
+}
+
+/** The band from end to end, to scale, and the part of it a receiver hears at once: the dial's
+ * own scale is pieced, so its windows don't show how much of a band they hold. Nothing where the
+ * receiver is elsewhere; the line above the card says it in words. */
+function ToScale({ band, rx }: { band: Band; rx: { name: string; span: Span } }) {
+  const [lo, hi] = usable(rx.span, band.mode);
+  const whole = band.stop_mhz - band.start_mhz;
+  if (hi <= band.start_mhz || lo >= band.stop_mhz || whole <= 0) return null;
+  const at = (mhz: number) => (Math.min(band.stop_mhz, Math.max(band.start_mhz, mhz)) - band.start_mhz) / whole * 100;
+  return (
+    <div className="dl-scale" aria-hidden="true" title={`What Receiver ${rx.name} hears at once, to scale on the band`}>
+      <span className="dl-scale-who" style={{ left: `${Math.min(97, Math.max(3, (at(lo) + at(hi)) / 2))}%` }}>{rx.name}</span>
+      <span className="dl-scale-bar">
+        <span className="dl-scale-win" style={{ left: `${at(lo)}%`, width: `${Math.max(0.6, at(hi) - at(lo))}%` }} />
+      </span>
+      <span className="dl-scale-ends"><span>{+band.start_mhz.toFixed(3)}</span><span>{+band.stop_mhz.toFixed(3)} MHz</span></span>
     </div>
   );
 }

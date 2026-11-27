@@ -14,7 +14,7 @@ import { forgetBandPlan } from "./bandplan";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
-import { type Receiver, bandAt as narrowestAt, bandOfWindow, hears, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
+import { type Receiver, bandAt as narrowestAt, bandOfWindow, hears, kindOf, lookAt, lookTune, onDial, onRaster, windowWords } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName, watchOf } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 import { addedToast } from "./added";
@@ -338,6 +338,9 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
     const lost = unheard.filter((x) => x.rx.id === r.id);
     return lost.length ? { ...t, words: `${t.words}; ${lost.length === 1 ? lost[0].s.name : `${lost.length} of its stations`} can't run where it is tuned now` } : t;
   });
+  // The receiver chosen, whose window is said in MHz and drawn to scale in the band's card: not
+  // while it sweeps or watches, when its window on the dial is the sweep or the channels.
+  const sized = rxs.find((r) => r.id === device && r.state !== "scanning" && !r.on);
   const me = rxs.find((r) => r.id === device);
   const [moving, setMoving] = useState<{ id: string; mhz: number; mode: string | null; play: boolean } | null>(null);
   const question = useRef<HTMLDivElement>(null);
@@ -565,8 +568,14 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
       <DialLegend />
       <RegionLine v={v} />
       {rxs.length > 0 && <ReceiverWords rxs={rxs} />}
+      {sized && (
+        <p className="m-hint dl-rx-width">
+          {windowWords(rxName(sized.id), sized.span, v.bands, bandLabel)}.<span className="dl-drag"> Drag its letter along the dial to move it.</span>
+        </p>
+      )}
       {onTheDial && chosen ? (
-        <BandCard band={chosen} kept={policyLine(chosen.privacy, v.policies)} policies={v.policies} heard={heardIn(v.heard, chosen).length}>
+        <BandCard band={chosen} kept={policyLine(chosen.privacy, v.policies)} policies={v.policies} heard={heardIn(v.heard, chosen).length}
+                  rx={sized && { name: rxName(sized.id), span: sized.span }}>
           {actions}
         </BandCard>
       ) : (
