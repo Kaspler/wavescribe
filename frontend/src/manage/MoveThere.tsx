@@ -1,7 +1,7 @@
 // A station its receiver doesn't hear where it is tuned now ("out_of_reach" in the receiver's
 // view): the button that moves the receiver back where it hears it and starts it. Moving it may
 // leave other stations out; the server then asks, and the same press is sent again on yes.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActButton, Button, toast } from "../components/ui";
 import { type Any, ApiError, post } from "./api";
 import { and } from "./bands";
@@ -23,6 +23,13 @@ export function MoveThere({ rx, s, bands, watch, mode, onDone }: {
   rx: Any; s: Any; bands: Any[]; watch?: unknown; mode?: string | null; onDone: () => Promise<unknown> | void;
 }) {
   const [asked, setAsked] = useState<{ question: string; stops: string[] } | null>(null);
+  // The question replaces the button, and the button the question: the focus goes along.
+  const box = useRef<HTMLDivElement>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    box.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [!!asked]);
   const move = async (confirmed: boolean) => {
     setAsked(null);
     try {
@@ -35,14 +42,19 @@ export function MoveThere({ rx, s, bands, watch, mode, onDone }: {
     toast(`Receiver ${rxName(rx.id)} is back where it hears ${s.name}`);
     await onDone();
   };
-  if (!asked) return <div className="m-actions"><ActButton size="sm" variant="secondary" run={() => move(false)}>Move Receiver {rxName(rx.id)} there</ActButton></div>;
   return (
-    <>
-      <p role="status">{asked.question}</p>
-      <div className="m-actions">
-        <ActButton size="sm" variant="secondary" run={() => move(true)}>{asked.stops.length ? `Stop ${and(asked.stops)} and move it` : "Move it"}</ActButton>
-        <Button size="sm" variant="ghost" onClick={() => setAsked(null)}>Keep it as it is</Button>
-      </div>
-    </>
+    <div ref={box}>
+      {!asked ? (
+        <div className="m-actions"><ActButton size="sm" variant="secondary" run={() => move(false)}>Move Receiver {rxName(rx.id)} there</ActButton></div>
+      ) : (
+        <>
+          <p role="status">{asked.question}</p>
+          <div className="m-actions">
+            <ActButton size="sm" variant="secondary" run={() => move(true)}>{asked.stops.length ? `Stop ${and(asked.stops)} and move it` : "Move it"}</ActButton>
+            <Button size="sm" variant="ghost" onClick={() => setAsked(null)}>Keep it as it is</Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

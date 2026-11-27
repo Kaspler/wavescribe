@@ -1,5 +1,5 @@
 // One station's transcript: paragraphs split at pauses, times in the margin, newest at the bottom.
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
 import { dirOf, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
@@ -13,12 +13,18 @@ import type { Station, Utterance } from "../lib/types";
 import { Icon } from "../components/Icon";
 import { Button, Lamp, cx } from "../components/ui";
 import { V } from "../lib/view";
+import { bandWords } from "../manage/bands";
 
 const FLASH_MS = 2400; // how long a line asked for by a link stays marked
 const PAGES_BACK = 20; // how far "Load earlier" may page back to reach such a line
+import { channelHeads, channelText } from "./channels";
 import { StationMenu } from "./StationMenu";
 import { T } from "./strings";
 import { topSeverity, utteranceWords, withInaudible } from "./text";
+
+// Moving a receiver back to a station it doesn't hear is the control centre's: loaded only on the
+// Wavescribe machine, and only for a station that needs it.
+const MoveStation = lazy(() => import("../manage/MoveStation"));
 
 const PARA_GAP_S = 3; // a pause this long starts a new paragraph…
 const PARA_MAX_S = 45; // …and so does 45 s of continuous speech
@@ -46,19 +52,23 @@ function group(list: Utterance[]): Para[] {
   return paras;
 }
 
-/** "446.00625 MHz · PMR446 ch 3": the channel a watch's line was caught on. */
-const channelOf = (u: Utterance) =>
-  u.freq_hz == null ? null : `${(u.freq_hz / 1e6).toFixed(5).replace(/(\.\d{3}\d*?)0+$/, "$1")} MHz${u.label ? ` · ${u.label}` : ""}`;
+/** "watching Walkie-talkies", "watching 446.000–446.100 MHz": what a watch listens to, a band
+ * by the name the dial gives it. */
+const watching = (w: string | [number, number]) =>
+  T.watching(typeof w === "string" ? bandWords({ id: w, name: w }).name : `${w[0].toFixed(3)}–${w[1].toFixed(3)} MHz`);
 
-/** "every channel of the band", "446.000–446.100 MHz": what a watch listens to. */
-const watching = (w: string | [number, number]) => (typeof w === "string" ? T.watchingBand : T.watchingRange(w[0], w[1]));
+/** The language a station speaks, in words: its own, or where the speech model tells each line's
+ * (language "auto"), the ones it expects, if it was told any. */
+export function spoken(st: Station): string {
+  if (st.language !== "auto") return langNameEn(st.language);
+  const expected = st.languages || [];
+  return expected.length ? T.detectedOf(T.oneOf(expected.map(langNameEn))) : T.detected;
+}
 
 /** "Hebrew → English", or just "Hebrew" when the station is shown in its own language. */
 export function langPair(st: Station): string {
-  if (st.language === "auto") return T.anyLanguage; // a watch: each line says its own
   const shown = shownLang(st, P.lang);
-  const from = langNameEn(st.language);
-  return sameLang(shown, st.language) ? from : `${from} → ${langNameEn(shown)}`;
+  return sameLang(shown, st.language) ? spoken(st) : `${spoken(st)} → ${langNameEn(shown)}`;
 }
 
 export function lastTextAgo(id: string): string | null {
@@ -93,6 +103,8 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
   // Translation lag matters only to someone reading the translation.
   const lag = on && !stale ? columnLag(S.live[st.id]) : null;
   const translated = !sameLang(shownLang(st, P.lang), st.language);
+  // Its receiver is tuned where it doesn't hear it: the reason, and on this machine the move back.
+  const away = !on && st.out_of_reach;
   return (
     <header className="col-head">
       <div className="col-title">
@@ -137,7 +149,9 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
         {st.watch && <span>{watching(st.watch)}</span>}
         {lag?.text && <span className="is-trouble num">{T.colBehind(lag.text)}</span>}
         {lag?.translation && translated && <span className="num">{T.colTranslationBehind(lag.translation)}</span>}
-        {(stale || !speech) && (
+        {away ? (
+          <span className="col-state is-trouble">{T.outOfReach}</span>
+        ) : (stale || !speech) && (
           <span className={cx("col-state", state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>
             {stale ? T.reconnecting : state.why || state.label}
           </span>
@@ -149,6 +163,12 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
         )}
         {span && <span className="col-span num" title="The time span in view">{span}</span>}
       </p>
+      {away && (
+        <div className="col-reach">
+          <p>{st.out_of_reach}</p>
+          {S.manage && st.device && <Suspense fallback={null}><MoveStation st={st} /></Suspense>}
+        </div>
+      )}
     </header>
   );
 }
@@ -161,6 +181,7 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
   const [around, setAround] = useState<Utterance[] | null>(null);
   const list = around || S.utts[st.id] || [];
   const paras = useMemo(() => group(list), [v, around]);
+  const heads = channelHeads(paras, st.watch != null);
   const shown = shownLang(st, P.lang);
   const body = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -307,12 +328,12 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
               </Button>
             </div>
           )}
-          {paras.map((p) => (
-            <ParaView key={p.utts[0].key} para={p} st={st} shown={shown} src={P.src} />
+          {paras.map((p, i) => (
+            <ParaView key={p.utts[0].key} para={p} st={st} shown={shown} src={P.src} channel={heads[i]} />
           ))}
           {!list.length && (
             <p className="col-empty">
-              {!on ? T.stationOff : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
+              {!on ? (st.out_of_reach ? null : T.stationOff) : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
               {on && noText(st) && S.manage && (
                 <> <button type="button" className="col-empty-link" onClick={() => go("#/settings/languages")}>{T.getModels}</button></>
               )}
@@ -336,7 +357,8 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
   );
 }
 
-const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; st: Station; shown: string; src: boolean }) {
+/** `channel`: the paragraph says the channel its lines were heard on (channels.ts). */
+const ParaView = memo(function ParaView({ para, st, shown, src, channel }: { para: Para; st: Station; shown: string; src: boolean; channel: boolean }) {
   const [linked, setLinked] = useState<string | null>(null);
   const [reveal, setReveal] = useState<string | null>(null);
   const translated = !sameLang(shown, st.language);
@@ -362,12 +384,12 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
         <time className="ts num" title={hms(para.start)}>{whenLabel(para.start)}</time>
       )}
       <div className="para-body">
-        {channelOf(para.utts[0]) && <p className="para-ch num">{channelOf(para.utts[0])}</p>}
+        {channel && <p className="para-ch num">{channelText(para.utts[0])}</p>}
         <p className="para-text" dir={dirOf(shown)} onClick={onClick}
            onMouseOver={src ? (e) => setLinked(keyOf(e)) : undefined} onMouseLeave={src ? () => setLinked(null) : undefined}>
           {para.utts.map((u, i) => (
             <UttView key={`${u.key}:${pick(u, st, shown)[2]}`} u={u} st={st} shown={shown} linked={linked === u.key}
-                     label={labelOf(u, st, shown) !== (i ? labelOf(para.utts[i - 1], st, shown) : "")} />
+                     label={!!labelOf(u, st, shown) && labelOf(u, st, shown) !== (i ? labelOf(para.utts[i - 1], st, shown) : "")} />
           ))}
           {pending && !src && <span className="sr-only">{T.translating}</span>}
         </p>
@@ -391,14 +413,17 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
     </div>
   );
 }, (a, b) =>
-  a.shown === b.shown && a.src === b.src && a.st === b.st &&
+  a.shown === b.shown && a.src === b.src && a.st === b.st && a.channel === b.channel &&
   a.para.utts.length === b.para.utts.length && a.para.utts.every((u, i) => u === b.para.utts[i]));
 
-/** Why an utterance isn't in the reader's language, if it isn't: the chip a run of them shares. */
+/** Why an utterance isn't in the reader's language, if it isn't, or for a station whose speech
+ * model tells each line's language, the language it told: the chip a run of them shares. */
 function labelOf(u: Utterance, st: Station, shown: string): string {
   const [, lang, state] = pick(u, st, shown);
   const other = otherLang(u);
-  return state === "untranslated" ? langNameEn(lang) : other ? T.saidIn(langNameEn(other)) : "";
+  if (state === "untranslated") return langNameEn(lang);
+  if (other) return T.saidIn(langNameEn(other));
+  return st.language === "auto" && sameLang(shown, st.language) && u.language ? langNameEn(u.language) : "";
 }
 
 function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; shown: string; linked: boolean; label: boolean }) {
@@ -426,7 +451,7 @@ function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; s
     <span data-k={u.key} data-u={u.id ?? undefined} lang={lang} dir="auto" title={title || undefined}
           className={cx("u", fresh && "u-fresh", state === "untranslated" && "u-untranslated", other && "u-other",
                         sev && text !== u.text && `u-hit kw-${sev}`, linked && "is-linked")}>
-      {label && (state === "untranslated" || other) && <span className="u-lang">{labelOf(u, st, shown)}</span>}
+      {label && <span className="u-lang">{labelOf(u, st, shown)}</span>}
       {utteranceWords(u, text)}{" "}
     </span>
   );

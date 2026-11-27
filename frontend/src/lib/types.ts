@@ -21,13 +21,21 @@ export interface Station {
   kind: string;
   disabled: boolean;
   fm_mhz?: number[];
-  /** Radio stations: the kind of radio it counts as (broadcast, amateur, utility, private…). */
+  /** The kind of radio it counts as (broadcast, amateur, utility, private…); streams are
+   * broadcast. */
   privacy?: string;
   /** Set after a change of region would make the station's kind of radio less strict: it keeps
    * `privacy` until the operator confirms, and this is what the region says. */
   privacy_region?: string;
+  /** Its receiver's id; null for a stream or another machine's station. */
+  device?: string | null;
   /** A watch: every channel of a band (its id) or of a range in MHz, each line with its own. */
   watch?: string | [number, number] | null;
+  /** The languages a watch or a station in language "auto" expects ([]: any the model tells);
+   * null for a station in one language. */
+  languages?: string[] | null;
+  /** Why its receiver doesn't hear it where that is tuned now, as a sentence; null when it does. */
+  out_of_reach?: string | null;
 }
 
 export interface Hit {
@@ -53,7 +61,9 @@ export interface Utterance {
   audio: boolean;
   flags?: string[];
   hits?: Hit[];
-  /** A watch's line: the channel it was caught on, and the band plan's name for it. */
+  /** Where it was heard: the channel a watch caught it on, or a radio station's own frequency
+   * (null for a stream), and the band plan's name for it, with the channel number where the
+   * band has a list. */
   freq_hz?: number | null;
   label?: string | null;
 }

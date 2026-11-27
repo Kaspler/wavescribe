@@ -1,7 +1,7 @@
 // Phones: the station list with the last thing each station said, Start on the ones that are off,
 // and Edit list to choose which stations this device shows.
 import { useState } from "react";
-import { langNameEn, pick, shownLang } from "../lib/lang";
+import { pick, shownLang } from "../lib/lang";
 import { S, post, running } from "../lib/live";
 import { P, visible } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
@@ -11,7 +11,7 @@ import type { Station } from "../lib/types";
 import { Icon } from "../components/Icon";
 import { Button, Check, Lamp, LinkButton, cx } from "../components/ui";
 import { AlertList, recentAlerts } from "./Alerts";
-import { lastTextAgo } from "./Column";
+import { lastTextAgo, spoken } from "./Column";
 import { held, hold, letGo } from "./held";
 import { NoneRunning, showHere } from "./Rack";
 import { T } from "./strings";
@@ -87,8 +87,8 @@ function Row({ st }: { st: Station }) {
           )}
         </span>
         <span className="phone-sub">
-          {langNameEn(st.language)}
-          {on && !stale && state.why ? ` · ${state.why}` : !on && noText(st) ? ` · ${T.noText}` : ""}
+          {spoken(st)}
+          {on && !stale && state.why ? ` · ${state.why}` : !on && st.out_of_reach ? ` · ${T.outOfReach}` : !on && noText(st) ? ` · ${T.noText}` : ""}
           {ago ? ` · ${T.lastText(ago)}` : ""}
         </span>
         {on && last.length > 0 && (

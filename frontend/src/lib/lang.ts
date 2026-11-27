@@ -16,7 +16,7 @@ export const dirOf = (tag: string | null | undefined): "rtl" | "ltr" => (RTL.has
 const names = new Map<string, string>();
 /** "Ukrainian · українська": the name in English and in the language itself, when they differ. */
 export function langName(tag: string): string {
-  if (tag === "auto") return "Any language"; // a watch's: each line is told its own
+  if (tag === "auto") return "Language detected"; // the speech model tells each line's own
   const hit = names.get(tag);
   if (hit) return hit;
   let out = tag;
@@ -40,10 +40,11 @@ export function shownLang(st: Station, readerLang: string | null): string {
 }
 
 export type Shown = "" | "pending" | "untranslated";
-/** [text, its language, state] for one utterance in the language shown for its station. */
+/** [text, its language, state] for one utterance in the language shown for its station. A line
+ * heard in that language already (one a station in language "auto" told apart) is as it is. */
 export function pick(u: Utterance, st: Station, shown: string): [string, string, Shown] {
   const orig = u.language || st.language;
-  if (sameLang(shown, st.language)) return [u.text, orig, ""];
+  if (sameLang(shown, st.language) || sameLang(shown, orig)) return [u.text, orig, ""];
   const tr = u.translations[shown];
   if (tr != null) return [tr, shown, ""];
   if (u.pending.includes(shown)) return [u.text, orig, "pending"];

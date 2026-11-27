@@ -5,7 +5,7 @@
 // device shows.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
-import { langNameEn, pick, shownLang } from "../lib/lang";
+import { pick, shownLang } from "../lib/lang";
 import { S, post, running, startStation } from "../lib/live";
 import { P, setPrefs, visible } from "../lib/prefs";
 import { MAX_COLS, go, parse, setCols, useHash } from "../lib/router";
@@ -15,7 +15,7 @@ import type { Station } from "../lib/types";
 import { V } from "../lib/view";
 import { Icon } from "../components/Icon";
 import { Lamp, cx } from "../components/ui";
-import { lastTextAgo } from "./Column";
+import { lastTextAgo, spoken } from "./Column";
 import { held, hold, letGo } from "./held";
 import { StationMenu } from "./StationMenu";
 import { T } from "./strings";
@@ -152,13 +152,13 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
       <button ref={ref} type="button" className="ch-main" aria-pressed={shown} onFocus={show} onBlur={hide}
               onClick={(e) => { hide(); read(st.id, e.altKey || e.metaKey || e.shiftKey); }}
               aria-keyshortcuts={n <= 9 ? String(n) : undefined}
-              aria-label={`${st.name}, ${langNameEn(st.language)}, ${stale ? "unknown" : state.label}${shown ? ", shown" : ""}`}>
+              aria-label={`${st.name}, ${spoken(st)}, ${stale ? "unknown" : state.label}${shown ? ", shown" : ""}`}>
         <span className="ch-name">
           <Lamp state={stale ? "off" : state.lamp} onBand />
           <span className="ch-title" dir="auto">{st.name}</span>
         </span>
         <span className="ch-sub">
-          <span>{langNameEn(st.language)}</span>
+          <span>{spoken(st)}</span>
           {word && <span className={cx(state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>{word}</span>}
         </span>
         {!stale && state.lamp === "trouble" && state.detail && <span className="ch-why" title={state.detail}>{state.detail}</span>}
@@ -235,20 +235,20 @@ function OffStations({ off }: { off: Station[] }) {
             const startable = S.canControl && st.available && !st.disabled;
             const started = running(st.id); // held in place after a start from here
             const state = started ? stateOf(st.id) : null;
-            const word = !st.available ? T.unavailable : state ? state.label : noText(st) ? T.noText : null;
+            const word = st.out_of_reach ? T.outOfReach : !st.available ? T.unavailable : state ? state.label : noText(st) ? T.noText : null;
             return (
               <li key={st.id} className={cx("ch", "ch-off", shown && "is-shown")}>
                 <button type="button" className="ch-main" aria-pressed={shown}
                         onClick={(e) => read(st.id, e.altKey || e.metaKey || e.shiftKey)}
                         title={st.available ? undefined : st.reason || T.unavailable}
-                        aria-label={`${st.name}, ${langNameEn(st.language)}, ${state ? state.label : st.available ? T.off.toLowerCase() : T.unavailable}${shown ? ", shown" : ""}`}>
+                        aria-label={`${st.name}, ${spoken(st)}, ${state ? state.label : st.available ? T.off.toLowerCase() : st.out_of_reach ? T.outOfReach : T.unavailable}${shown ? ", shown" : ""}`}>
                   <span className="ch-name">
                     <Lamp state={state ? state.lamp : "off"} onBand />
                     <span className="ch-title" dir="auto">{st.name}</span>
                   </span>
                   <span className="ch-sub">
-                    <span>{langNameEn(st.language)}</span>
-                    {word && <span>{word}</span>}
+                    <span>{spoken(st)}</span>
+                    {word && <span className={cx(st.out_of_reach && "is-trouble")}>{word}</span>}
                   </span>
                 </button>
                 {startable && !started && (
