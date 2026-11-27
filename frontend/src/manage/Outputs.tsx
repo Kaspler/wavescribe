@@ -49,7 +49,7 @@ export function Outputs() {
               <td>{v.outputs.find((o: Any) => o.id === (d.output_id ?? d.output))?.name || d.output_id || d.output}</td>
               <td title={d.delivery ? `Delivery ${d.delivery} (X-Wavescribe-Delivery)` : undefined}>
                 {d.event}{d.ref ? ` ${d.ref}` : ""}
-                {d.after_restart && <span className="m-muted"> · after a restart</span>}
+                {d.after_restart && <span className="m-cell-note is-one">after a restart</span>}
               </td>
               <td>{d.ok ? <Tag tone="good">{d.status ?? "ok"}</Tag> : <Tag tone="warn">{d.status ?? "failed"}</Tag>}</td>
               <td className="num">{d.attempts}</td>

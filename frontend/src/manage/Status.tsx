@@ -235,7 +235,7 @@ function OutputHealth({ outs }: { outs: Record<string, Any> }) {
           <tr key={id}>
             <td>
               {id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}
-              {alertsLine(o) && <span className="m-cell-note">{alertsLine(o)}</span>}
+              {alertsLine(o) && <span className="m-cell-note is-wide">{alertsLine(o)}</span>}
             </td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
             <td className={o.last_error ? "is-trouble" : "m-muted"}>{o.last_error || "–"}</td>
           </tr>
