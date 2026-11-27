@@ -550,6 +550,28 @@ def test_a_misspelt_digest_key_is_refused_when_the_file_is_read(tmp_path: Path) 
         read_alerts(path)
 
 
+def test_the_example_rules_load_with_every_commented_out_part_switched_on(tmp_path) -> None:
+    """What the example file offers to uncomment (another voice, own words, an LLM rule, the
+    traffic rule, a digest schedule) is in keys the program takes."""
+    import re
+
+    from wavescribe.alerts import load_alerts
+
+    switched_on = re.compile(r"^# (\[\[?[a-z.]+\]?\]|[a-z_]+ = .*)$")
+    lines = Path("config/alerts.example.toml").read_text(encoding="utf-8").splitlines()
+    path = tmp_path / "alerts.toml"
+    path.write_text(
+        "\n".join(m[1] if (m := switched_on.match(line)) else line for line in lines),
+        encoding="utf-8",
+    )
+    config = load_alerts(path, pack(tmp_path))
+    assert {"water-cut", "motorway-closed"} <= {r.id for r in config.rules.rules}
+    assert [r.id for r in config.rules.llm_rules] == ["told-to-leave"]
+    assert [r.kind for r in config.rules.station_rules] == ["silence", "traffic"]
+    assert set(config.voices) == {"en", "es"} and config.voices["es"].summary
+    assert config.rules.get("water-cut").verify is True
+
+
 def test_actions_written_as_one_string_are_refused(tmp_path: Path) -> None:
     raw = {**CONFIG, "actions": {"critical": "notify"}}  # read as a list: "n", "o", "t", ...
     with pytest.raises(ConfigError, match=r"\[actions\]: critical must be a list of actions"):

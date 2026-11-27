@@ -1,6 +1,10 @@
 # Example alert rules. Rules run on SOURCE-LANGUAGE text, so they never depend on translation.
 # Alerts can be missed or wrong: never the only warning where life, health or property is at stake.
 # Keyword rules reference topics from config/keywords/<lang>.toml, picked by each station's language.
+# One word list is shipped, as an example, for one language (pt.example.toml): the topic rules
+# below match stations in that language only. For any other language, add its list
+# (config/keywords/<lang>.toml), give a rule its own `terms`, or describe what to listen for in
+# plain language (kind = "llm"); docs/GETTING_STARTED.md, section 7, says how.
 # Copy to config/alerts.toml (gitignored) and adapt. A key this file doesn't take (a misspelt
 # one, say) is refused by name when Wavescribe starts; `uv run wavescribe alerts check` says it too.
 #
@@ -118,6 +122,17 @@ severity = "low"
 # id = "water-cut"
 # terms = { es = ["corte de agua", "sin agua"], de = ["Wasser abgestellt"] }
 # severity = "medium"
+# verify = true     # under serve, the local model confirms each match in context before it
+#                   # is announced; one it can't judge in time goes out marked "not checked"
+
+# A rule in plain language, for stations in any language: under serve, the local model reads
+# what each station said against it about every 45 s. It needs the translation LLM, and it
+# decides alone, so it can miss what you meant or match what you didn't.
+# [[rule]]
+# id = "told-to-leave"
+# kind = "llm"
+# prompt = "residents are told to leave their homes or to stay indoors"
+# severity = "high"
 
 # Regular expressions, beside or instead of topics and terms: matched on the original text,
 # ignoring case, in any language (no accents folded, no plurals). Write them in 'single quotes'

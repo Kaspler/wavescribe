@@ -275,12 +275,55 @@ it, worth reading before you act on a point.
 
 ## 7. Get alerts
 
-Alerts tell you when something that matters is said, so you don't have to read all day. Rules
-run on what was said in the station's own language, never on the translation, so a poor
-translation can't hide an alert.
+Alerts tell you when something you asked to hear about is said. Rules run on what was said in
+the station's own language, never on the translation, so a poor translation can't hide an
+alert.
 
 Alerts are a help, not a warning system: one can be missed, come late or be raised for
 something that wasn't said. In an emergency, follow official warnings and the emergency services.
+
+**What runs before you set anything.** Until you make a `config/alerts.toml`, the example
+rules in `config/alerts.example.toml` run. Most of them are topic rules (water, power, civil
+protection, hazards), and a topic's words come from a *keyword pack*: a word list for one
+language, in `config/keywords/`. Wavescribe ships one pack, as an example, for one language
+(`pt.example.toml`, Portuguese). So as installed:
+
+- stations in that language get the topic alerts;
+- stations in any other language get only the example's *station silent* alert, until you
+  give them rules that work in their language.
+
+Nothing warns you of this while Wavescribe runs: a topic rule simply never matches a station
+whose language has no pack. (A warning is logged, once, only for a rule whose topic is in no
+pack at all.) To see where you stand:
+
+```sh
+uv run wavescribe alerts check --language es "Hiervan el agua antes de beberla"
+```
+
+says when no rule matches and that topic rules have no word list in that language;
+`uv run wavescribe doctor` names the languages that have one (`keyword packs: pt`), and so does
+the rule editor on the page, under *Ready-made word lists*.
+
+Two kinds of rule work in any language, with no pack:
+
+- **words of your own**, typed for each language (the simplest rule, below);
+- **a description in plain language**, which the local model reads against what each station
+  said, whatever the language (*Describe it in your words*, below).
+
+**A pack for another language** is one file. Copy `config/keywords/pt.example.toml` to
+`config/keywords/<code>.toml` (`es.toml`, `ja.toml`), set `language` to that code, and under
+each topic put the words and phrases the radio uses in that language. Keep the topic names
+(`water`, `power`, `civil_protection`…) so that the same rules use them, and put your own
+place names under `[places]`. The comments in the example say how words match. Have someone
+who knows the language well read the list: a word that is also an everyday word raises alerts
+all day, and a phrase left out misses the announcement, which is why no other pack is
+shipped. Then try sentences with `alerts check`, run `uv run wavescribe alerts replay` over
+what was already heard, and start Wavescribe again.
+
+**Your own rules file:** copy `config/alerts.example.toml` to `config/alerts.toml` and change
+it. Rules and settings made on the page are kept apart, in `config/ui.toml`, and laid over it.
+A key the file doesn't take (a misspelt `min_mention`, say) is refused by name when Wavescribe
+starts, and `alerts check` says it without starting anything.
 
 **The simplest rule:** Settings → **Alerts** → **Words to listen for**. Give it an **Id** (a
 short name in lowercase letters, digits and dashes, such as `road-closed`), type the
@@ -291,9 +334,23 @@ each station's language. Read them, fix any that are wrong, and save.
 - **Severity** decides what happens. *Low* is only highlighted in the transcript. *Medium*
   shows a notification on the Mac. *High* and *critical* are also **spoken aloud**, in the
   languages you choose. You can change what each level does.
-- **Let the model confirm** each match: hits are checked by the local model in context before
-  they're announced. It filters out songs, adverts, sport and other meanings of the word. If the model
-  can't answer in time, the alert still goes out, marked *not checked*.
+- **Ready-made word lists** are the topics of the keyword packs, for the languages that have
+  one. **More severe near** raises a match one level when a place from the pack's `[places]` is
+  named in the same sentence.
+- Under **Advanced**:
+  - **Mentions before alerting:** with 2 or more, a first mention is kept as *low* and not
+    announced, since a real event gets repeated (`min_mentions` in the file).
+  - **Only on these stations** keeps the rule to the stations you tick (`stations`).
+  - **Let the model confirm** each match (`verify = true`): hits are checked by the local
+    model in context before they're announced. It filters out songs, adverts, sport and other
+    meanings of the word. If the model can't answer in time, the alert still goes out, marked
+    *not checked*.
+  - **Patterns (regular expressions)** match as well as words, such as a road and its number:
+    `\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b`. They ignore case and work in any language, but match
+    the text exactly as written otherwise (no accents folded, no plurals). `\b` marks the edge
+    of a word, which Chinese, Japanese or Thai don't have, so leave it out there. A pattern
+    that could take very long (a repeated group that repeats inside, like `(\w+ )+`) is
+    refused, with the rule's name; a rule takes 20 patterns at most, of 200 characters each.
 - **Describe it in your words:** say what you want to hear about in one sentence (*"residents
   are told to leave their homes"*), with no keywords at all. The model reads each station's recent speech
   about every 45 seconds.
@@ -301,16 +358,12 @@ each station's language. Read them, fix any that are wrong, and save.
   raised. In the Terminal: `uv run wavescribe alerts check "la carretera está cortada"
   --language es-ES`; `uv run wavescribe alerts replay` runs everything heard so far through the
   rules and counts what they would have announced.
-- **Its own words:** in `config/alerts.toml`, a keyword rule can list its own words per language
-  instead of (or beside) topics from a keyword pack:
-  `terms = { es = ["corte de agua"], de = ["Wasser abgestellt"] }`. They match as pack words do
-  (case, accents and plurals don't matter), on stations whose language starts with that code.
-- **Patterns:** in `config/alerts.toml`, a keyword rule can match regular expressions as well as
-  words, such as a road and its number: `regex = ['\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b']`. They
-  ignore case and work in any language, but match the text exactly as written otherwise (no
-  accents folded, no plurals). `\b` marks the edge of a word, which Chinese, Japanese or Thai
-  don't have, so leave it out there. A pattern that could take very long (a repeated group that
-  repeats inside, like `(\w+ )+`) is refused when the file loads, with the rule's name.
+- **In `config/alerts.toml`** every rule is a `[[rule]]` with an `id` and a `severity` (medium
+  when left out). A keyword rule has `topics` from the packs, its own words per language
+  (`terms = { es = ["corte de agua"], de = ["Wasser abgestellt"] }`, for stations whose
+  language starts with that code; case, accents and plurals don't matter) or `regex` (in
+  'single quotes', so backslashes stay as they are). A rule in plain language is
+  `kind = "llm"` with a `prompt`. The example file shows each of them.
 
 **A story told again and again is one alert.** Further mentions add to it (the page counts
 them) and are not announced again, unless it gets more serious. After 15 minutes without a
@@ -320,21 +373,24 @@ stations ("STILL HIGH · water · …") and saying how often it was mentioned si
 (`remind_minutes` under `[delivery]`; 0 turns it off). Reminders are never spoken.
 
 **When a station goes silent:** the example rules (`config/alerts.example.toml`) have one
-(`kind = "silence"`): a station that sends no audio, or only silence, for 5 minutes raises an
-alert, and you get a notification when its audio is back. It's how you find out that the
-stream, the receiver or the network went down. It says the station went quiet, not that
+(`kind = "silence"`), and Settings → **Alerts** → **Station silent** makes or changes one: a
+station that sends no audio, or only silence, for 5 minutes (from half a minute to a day)
+raises an alert, and you get a notification when its audio is back. It's how you find out that
+the stream, the receiver or the network went down. It says the station went quiet, not that
 anything happened. Stations you only listen to, and stations switched off, never raise it.
 
 **Traffic announcements:** FM stations flag their traffic news in their broadcast data (RDS).
-Add a rule with `kind = "traffic"` (there is one to uncomment in the example rules) and you get
-an alert when one starts on a station you receive with an SDR, at most once per cooldown. It
-works on stations you only listen to as well, since nothing has to be transcribed.
+Add a rule with **Traffic announcement** on the same page, or with `kind = "traffic"` in the
+file (there is one to uncomment in the example rules), and you get an alert when one starts on
+a station you receive with an SDR, at most once per cooldown. It works on stations you only
+listen to as well, since nothing has to be transcribed.
 
-**Alerts in more languages:** notifications and voices use the languages set under Settings →
-Alerts → **What happens on an alert**. To have a station's alerts translated into other
-languages as well, for everyone reading the page or receiving webhooks, give the station
-`alert_languages = ["es", "fr"]` in `config/stations.toml`. Alerts above *low* are translated
-into them.
+**Alerts in more languages:** notifications use the language set as **Notifications in** under
+Settings → Alerts → **What happens on an alert** (`notify_language`; with none set they are in
+the station's language), and voices speak theirs. To have a station's alerts translated into
+other languages as well, for everyone reading the page or receiving webhooks, set **Translate
+alerts into** for it under Settings → **Stations**, or `alert_languages = ["es", "fr"]` in
+`config/stations.toml`. Alerts above *low* are translated into them.
 
 **Quiet notifications:** an alert's notification plays the Mac's *Glass* sound (a digest's
 never does). To keep them but lose the sound (for the night, say), set `notify_sound = ""` under

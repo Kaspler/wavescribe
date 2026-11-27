@@ -9,7 +9,7 @@ This page explains the defaults.
 1. A station declares its source language (BCP-47, e.g. `pt-PT`).
 2. The registry (`registry.py`) picks the **first model in the ASR chain** below that supports that language and is installed.
 3. Keyword matching folds case and accents the same way for every script, and stems with Snowball where it has the language; scripts written without spaces match as substrings ([ARCHITECTURE.md](ARCHITECTURE.md), *Alerts*).
-4. Keyword packs come from `config/keywords/<lang>.toml`. A language without a pack still gets the LLM rules, which are language-agnostic.
+4. Keyword packs come from `config/keywords/<lang>.toml`. One is shipped, as an example, for one language (`pt.example.toml`). A language without a pack gets no topic rules; it still gets rules with their own words in that language, and the LLM rules, which are language-agnostic ([GETTING_STARTED.md](GETTING_STARTED.md#7-get-alerts)).
 5. Translation goes to the primary language continuously and to secondary languages for alerts.
 6. TTS uses the voice configured for each target language.
 
