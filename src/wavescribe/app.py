@@ -293,6 +293,7 @@ class App:
                 self.pipeline.request_llm,
                 self.alerter.on_hits,
                 reason_language=self._primary_language(),
+                has_llm=lambda: self.plan.mt is not None,
             )
             self.alerter.verify = self.llm_rules.verify
         self.asker: Asker | None = None

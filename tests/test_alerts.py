@@ -487,7 +487,7 @@ VOICE = {"voice": "Lesya", "fallback": "Увага. Радіо."}
         ({"rule": [{"id": "water", "topics": ["water"], "min_mention": 3, "severty": "high"}]},
          r"^alerts\.toml: rule water: unknown keys \['min_mention', 'severty'\]; a keyword rule "
          r"takes \['id', 'kind', 'min_mentions', 'near', 'regex', 'severity', 'stations', "
-         r"'terms', 'topics', 'verify'\]$"),
+         r"'terms', 'topics', 'unverified', 'verify'\]$"),
         # A key of another kind of rule would be ignored just the same.
         ({"rule": [{"id": "leave", "kind": "llm", "prompt": "told to leave", "verify": True}]},
          r"rule leave: unknown keys \['verify'\]; an llm rule takes \['id', 'kind', "
@@ -525,6 +525,7 @@ def test_every_key_the_alerts_file_takes_loads(tmp_path: Path) -> None:
         'summary = "Огляд {stations}."\nearlier = "Раніше: {alerts}."\n'
         '[[rule]]\nid = "water"\nkind = "keyword"\ntopics = ["water"]\nnear = ["local"]\n'
         'severity = "high"\nmin_mentions = 2\nstations = ["a"]\nverify = true\n'
+        'unverified = "hold"\n'
         "regex = ['\\bsem água\\b']\nterms = { es = [\"sin agua\"] }\n"
         '[[rule]]\nid = "leave"\nkind = "llm"\nprompt = "people are told to leave"\n'
         'severity = "high"\nmin_mentions = 2\nstations = ["a"]\n'
@@ -594,6 +595,7 @@ def test_the_example_rules_load_with_every_commented_out_part_switched_on(tmp_pa
     assert [r.kind for r in config.rules.station_rules] == ["silence", "traffic"]
     assert set(config.voices) == {"en", "es"} and config.voices["es"].summary
     assert config.rules.get("water-cut").verify is True
+    assert config.rules.get("water-cut").unverified == "lower"
 
 
 def test_actions_written_as_one_string_are_refused(tmp_path: Path) -> None:

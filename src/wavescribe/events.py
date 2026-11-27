@@ -8,10 +8,12 @@ Version 1 shapes (docs/FEED.md is the reference):
     utterance  {type, id, node, station{id,name,language,privacy}, time, t_start, duration,
                 language, text, translations{lang: text}, flags[], rules[], audio_url?}
     alert      {type, id, node, rule, kind, severity, status, time, first_at, last_at, mentions,
-                terms[], reason?, station{…}, stations[{…}], language, text, translations{…},
-                context[{id, time, station, text, translations}], segment_id, audio_url?,
-                cap_url?, change?}  change (live events and pushes): new, escalated,
-                reminder or ended when it was announced; update for anything else
+                terms[], reason?, checked, station{…}, stations[{…}], language, text,
+                translations{…}, context[{id, time, station, text, translations}], segment_id,
+                audio_url?, cap_url?, change?}  change (live events and pushes): new, escalated,
+                reminder or ended when it was announced; update for anything else. checked (a
+                rule with verify): true, the LLM confirmed the match; false, it was raised
+                without the LLM's answer; null when nothing was checked
     batch      {type: "batch", node, events[…]}
 """
 
@@ -212,6 +214,7 @@ def alert_event(
         "mentions": alert.get("mentions", 1),
         "terms": list(alert.get("terms") or []),
         "reason": alert.get("reason"),
+        "checked": alert.get("checked"),
         "station": station_ref(ids[0], stations) if ids else None,
         "stations": [station_ref(s, stations) for s in ids],
         "language": alert.get("language"),
@@ -247,7 +250,8 @@ def as_text(ev: Mapping[str, Any], languages: Iterable[str] = ()) -> str:
     shown = next((tr[lang] for lang in langs if lang in tr), None) or next(iter(tr.values()), "")
     station = (ev.get("station") or {}).get("name") or "?"
     if ev["type"] == "alert":
-        head = f"[{str(ev.get('severity', '')).upper()}] {ev.get('rule')} · {station}"
+        unchecked = ", not checked" if ev.get("checked") is False else ""
+        head = f"[{str(ev.get('severity', '')).upper()}{unchecked}] {ev.get('rule')} · {station}"
         head += {"escalated": " (more serious now)", "reminder": " (still being mentioned)",
                  "ended": " (over)"}.get(ev.get("change") or "", "")  # fmt: skip
         body = shown or ev.get("text", "")

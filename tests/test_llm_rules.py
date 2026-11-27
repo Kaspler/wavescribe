@@ -8,7 +8,7 @@ from tests.test_alerts import CONFIG, FakeActions, settle
 from tests.test_rules import RULES, pack
 from tests.test_store import result
 from wavescribe.alerts import Alerter, merge_page, parse_alerts
-from wavescribe.rules import Hit, LlmRule, RuleSet, parse_rule
+from wavescribe.rules import LlmRule, RuleSet, parse_rule
 from wavescribe.rules.llm import LlmRuleChecker, parse_matches
 
 
@@ -199,41 +199,3 @@ def test_an_alert_keeps_the_reason_that_goes_with_its_quote(tmp_path: Path) -> N
         alerter.on_hits(r, [hit])
     assert (bridge.quote, bridge.reason) == ("A ponte fechada desde ontem.", "the bridge is closed")
     alerter.close()
-
-
-@pytest.mark.parametrize("why", ["no llm", "queue full", "crash", "garbage", "timeout", "no"])
-def test_a_keyword_hit_is_announced_when_the_llm_cant_check_it(why: str) -> None:
-    """A rule marked verify must never go silent because the check couldn't run."""
-    rule = parse_rule({"id": "bridge", "severity": "high", "verify": True,
-                       "terms": {"pt": ["ponte"]}})  # fmt: skip
-    seen: list = []
-
-    class NotAnLlm:
-        model_id = "madlad"
-
-    replies = {"crash": None, "garbage": "sure!", "no": '{"real": false, "reason": "a song"}'}
-    llm = NotAnLlm() if why == "no llm" else FakeLlm(replies.get(why) or "")
-    if why == "crash":
-        llm.complete = lambda *a, **k: 1 / 0  # type: ignore[method-assign]
-
-    def submit(run, name, priority, station=None):
-        if why == "queue full":
-            return False
-        if why != "timeout":  # the LLM never gets to it
-            run(llm)
-        return True
-
-    c = LlmRuleChecker(lambda: [], submit, lambda r, hits: seen.append(hits), timer=False)
-    c.verify_timeout_s = 0.05
-    hit = Hit("bridge", "high", ["ponte"], [], [], again=True)
-    c.verify(result("a", "A ponte caiu.", 1.0), hit, rule)  # type: ignore[arg-type]
-    if why == "timeout":
-        import time
-
-        time.sleep(0.3)
-    if why == "no":
-        assert seen == [] and c.unchecked == 0  # the LLM said no: that's the filter working
-        return
-    [[announced]] = seen
-    assert announced.severity == "high" and announced.reason.startswith("not checked")
-    assert c.unchecked == 1

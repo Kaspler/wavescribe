@@ -269,6 +269,41 @@ def test_opens_a_version_5_database_and_adds_the_alerts_class(tmp_path: Path) ->
     store.close()
 
 
+def test_opens_a_version_8_database_and_adds_whether_an_alert_was_checked(tmp_path: Path) -> None:
+    from wavescribe.alerts import Alert
+    from wavescribe.rules import Hit
+
+    Store(tmp_path / "w.db").close()
+    old = sqlite3.connect(tmp_path / "w.db")  # make it look like a schema-8 database
+    old.execute("ALTER TABLE alerts DROP COLUMN checked")
+    old.execute(
+        "INSERT INTO alerts (rule_id, severity, first_at, last_at, stations, language, "
+        "quote, terms, privacy) VALUES ('flood', 'high', 1000, 1000, 'a', 'nl-NL', "
+        "'van eerder', '[]', 'broadcast')"
+    )
+    old.execute("PRAGMA user_version = 8")
+    old.commit()
+    old.close()
+    store = Store(tmp_path / "w.db")
+    assert store.alerts()[0]["checked"] is None  # from before it was kept: nothing is claimed
+    alert = Alert("flood", "medium", ["a"], "nl-NL", "van nu", [], 2000.0, 2000.0, checked=False)
+    store.add_alert(alert)
+    assert store.alert(alert.id)["checked"] is False
+    alert.checked, alert.severity = True, "high"  # a later mention the model confirmed
+    store.add_mention(alert, None, Hit("flood", "high", [], [], [], checked=True))
+    assert (store.alert(alert.id)["checked"], store.alert(alert.id)["severity"]) == (True, "high")
+    plain = Alert("frost", "low", ["a"], "nl-NL", "van nu", [], 2000.0, 2000.0)
+    store.add_alert(plain)
+    assert store.alert(plain.id)["checked"] is None
+    store.close()
+    db = sqlite3.connect(tmp_path / "w.db")
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert db.execute("SELECT checked FROM alerts ORDER BY id").fetchall() == [
+        (None,), (1,), (None,),
+    ]  # fmt: skip
+    db.close()
+
+
 def test_the_store_prunes_by_itself_while_nothing_is_written(tmp_path: Path) -> None:
     def wait_for(cond) -> None:
         deadline = time.time() + 10

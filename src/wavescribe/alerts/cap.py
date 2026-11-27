@@ -96,6 +96,8 @@ def to_cap(alert: dict[str, Any], *, station_names: dict[str, str] | None = None
             ("terms", ", ".join(alert["terms"])),
             ("stations", ", ".join(alert["stations"])),
             ("mentions", str(alert["mentions"])),
+            # A rule that has the LLM check its matches: whether this one's check answered.
+            ("checked", {True: "true", False: "false"}.get(alert.get("checked"))),
             ("machine_translation", machine_translation),
         ):
             if value:

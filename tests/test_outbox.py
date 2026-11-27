@@ -538,7 +538,7 @@ def test_a_data_directory_from_before_the_outbox_opens(tmp_path: Path) -> None:
     outs.close()
     store.close()
     db = sqlite3.connect(tmp_path / "w.db")
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 9
     db.close()
 
 

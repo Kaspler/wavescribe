@@ -67,7 +67,7 @@ Utterance fields:
   "type": "alert", "version": 1, "id": 77, "node": {"name": "kitchen-mac", "url": "…"},
   "rule": "water", "kind": "keyword", "severity": "high", "status": "delivered",
   "time": "2026-11-26T14:05:40Z", "first_at": 1795701740.0, "last_at": 1795701940.2,
-  "mentions": 3, "terms": ["corte de água"], "reason": null,
+  "mentions": 3, "terms": ["corte de água"], "reason": null, "checked": null,
   "station": {"id": "antena1", "name": "Antena 1", "language": "pt-PT", "privacy": "broadcast"},
   "stations": [{"id": "antena1", "name": "Antena 1", "language": "pt-PT", "privacy": "broadcast"}],
   "language": "pt-PT", "text": "…what was said…", "translations": {"en": "…"},
@@ -101,6 +101,16 @@ Alert fields:
   `en`), with no words heard and no `terms`; when a silent station's audio is back, a second
   event for the same alert carries "Audio is back on …" as its `text` and `reason`.
 - `reason`: the LLM's one-line reason, when it was involved.
+- `checked`: for a keyword rule whose matches the LLM confirms (`verify`), whether it did.
+  `true`: the LLM confirmed the match the alert's `severity` comes from. `false`: that match
+  was raised without the LLM's answer (none loaded, too busy, a failure, no answer in time),
+  `reason` starts with "not checked by the LLM" and says why, and `severity` is one step below
+  what a confirmed match gets, unless the rule has `unverified = "announce"`. `null`: nothing
+  was to be checked (any other rule), or the answer hasn't come yet. It can change during an
+  alert, with an `update` or an `escalated` event: a later match the LLM confirms makes it
+  `true`, and one that raises the severity unchecked makes it `false`. The alert's CAP document
+  (`cap_url`) has it as the parameter `checked`, and a `text` output's first line says "not
+  checked" after the severity.
 - `text`: what was announced, in the source language.
 - `translations`: only translations checked to be in their target language.
 - `context`: up to two utterances stored just before its first mention (`segment_id`), on

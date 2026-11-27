@@ -49,9 +49,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 8  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
+SCHEMA_VERSION = 9  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
 # 5: segments.privacy; 6: the class on every row, alerts.privacy; 7: catches, segments.freq_hz;
-# 8: outbox, deliveries.delivery and after_restart
+# 8: outbox, deliveries.delivery and after_restart; 9: alerts.checked
 # Snippet markers around matches; the page turns them into <mark>.
 HIT_START, HIT_END = "\x02", "\x03"
 
@@ -126,8 +126,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     actions TEXT NOT NULL DEFAULT '{}', -- JSON: action -> "ok" or the failure
     kind TEXT NOT NULL DEFAULT 'keyword',  -- keyword|llm
     reason TEXT,                        -- the LLM's reason (LLM rules, verified keyword hits)
-    privacy TEXT                        -- comma-separated classes its stations had when they
+    privacy TEXT,                       -- comma-separated classes its stations had when they
                                         -- were heard; NULL in rows from before it was kept
+    checked INTEGER                     -- a rule with verify: 1 the LLM confirmed the match,
+                                        -- 0 it was raised without its answer; NULL otherwise
 );
 CREATE INDEX IF NOT EXISTS alerts_last ON alerts (last_at);
 CREATE TABLE IF NOT EXISTS alert_mentions (
@@ -286,6 +288,8 @@ class Store:
         columns = {r[1] for r in self._db.execute("PRAGMA table_info(alerts)")}
         if "privacy" not in columns:  # 5 -> 6: alerts carry their stations' classes too
             self._db.execute("ALTER TABLE alerts ADD COLUMN privacy TEXT")
+        if "checked" not in columns:  # 8 -> 9: whether the LLM's check of a match answered
+            self._db.execute("ALTER TABLE alerts ADD COLUMN checked INTEGER")
         columns = {r[1] for r in self._db.execute("PRAGMA table_info(deliveries)")}
         if "delivery" not in columns:  # 7 -> 8: which delivery a request was (outbox is new)
             self._db.execute("ALTER TABLE deliveries ADD COLUMN delivery TEXT")
@@ -847,15 +851,15 @@ class Store:
         with self._tx() as db:
             cur = db.execute(
                 "INSERT INTO alerts (rule_id, severity, first_at, last_at, stations, language, "
-                "quote, terms, mentions, segment_id, status, kind, reason, privacy) "
+                "quote, terms, mentions, segment_id, status, kind, reason, privacy, checked) "
                 # An utterance older than the text kept (one caught up after a pause) may be
                 # pruned already: the alert is kept, without its link to the gone segment.
-                "VALUES (?,?,?,?,?,?,?,?,?,(SELECT id FROM segments WHERE id = ?),?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,(SELECT id FROM segments WHERE id = ?),?,?,?,?,?)",
                 (alert.rule_id, alert.severity, alert.first_at, alert.last_at,
                  ",".join(alert.station_ids), alert.language, alert.quote,
                  json.dumps(alert.terms, ensure_ascii=False), alert.mentions,
                  alert.segment_ids[0] if alert.segment_ids else None, alert.status,
-                 alert.kind, alert.reason, ",".join(alert.privacy) or None),
+                 alert.kind, alert.reason, ",".join(alert.privacy) or None, alert.checked),
             )  # fmt: skip
             alert.id = int(cur.lastrowid or 0)
         return alert.id
@@ -874,10 +878,10 @@ class Store:
                 )  # fmt: skip
             db.execute(
                 "UPDATE alerts SET severity = ?, last_at = ?, stations = ?, mentions = ?, "
-                "terms = ?, reason = ?, privacy = ? WHERE id = ?",
+                "terms = ?, reason = ?, privacy = ?, checked = ? WHERE id = ?",
                 (alert.severity, alert.last_at, ",".join(alert.station_ids), alert.mentions,
                  json.dumps(alert.terms, ensure_ascii=False), alert.reason,
-                 ",".join(alert.privacy) or None, alert.id),
+                 ",".join(alert.privacy) or None, alert.checked, alert.id),
             )  # fmt: skip
 
     def update_delivery(self, alert: Alert) -> None:
@@ -1004,6 +1008,7 @@ class Store:
                 "actions": json.loads(r["actions"]),
                 "kind": r["kind"],
                 "reason": r["reason"],
+                "checked": None if r["checked"] is None else bool(r["checked"]),
                 "summaries": summaries.get(r["id"], {}),
                 "summaries_model": models.get(r["id"]),
             }

@@ -380,8 +380,8 @@ each station's language. Read them, fix any that are wrong, and save.
   - **Only on these stations** keeps the rule to the stations you tick (`stations`).
   - **Let the model confirm** each match (`verify = true`): hits are checked by the local
     model in context before they're announced. It filters out songs, adverts, sport and other
-    meanings of the word. If the model can't answer in time, the alert still goes out, marked
-    *not checked*.
+    meanings of the word. A match the model couldn't check still goes out, marked
+    *not checked* and one severity lower (*When a match can't be checked*, below).
   - **Patterns (regular expressions)** match as well as words, such as a road and its number:
     `\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b`. They ignore case and work in any language, but match
     the text exactly as written otherwise (no accents folded, no plurals). `\b` marks the edge
@@ -401,6 +401,31 @@ each station's language. Read them, fix any that are wrong, and save.
   language starts with that code; case, accents and plurals don't matter) or `regex` (in
   'single quotes', so backslashes stay as they are). A rule in plain language is
   `kind = "llm"` with a `prompt`. The example file shows each of them.
+
+**When a match can't be checked.** A rule with *Let the model confirm* asks the local model
+about every match. Sometimes the model doesn't answer: none is loaded, it is too busy, it
+fails, or 90 seconds pass. The match is raised all the same, and the alert says it was **not
+checked**: the notification's title has it after the severity ("MEDIUM, not checked ·
+water-cut · …"), and the alert's reason says why ("not checked by the LLM: it was busy; raised
+as medium, not high"). *Not checked* means the words were heard and nothing looked at what
+they were about: it can be the event, a song or a football team. What becomes of such a match
+is the rule's `unverified`, in `config/alerts.toml` (a rule made on the page has `"lower"`):
+
+- `"lower"`, the default: raised one severity lower than it would have been. A *critical* match
+  comes as *high*, a *high* one as *medium*, and a *medium* one as *low*, which is only
+  highlighted unless you changed what *low* does. You asked for matches to be confirmed, so one
+  that wasn't counts for less, and it still reaches you.
+- `"announce"`: raised at the rule's own severity, checked or not.
+- `"hold"`: kept back while the check is tried again, 30 seconds later and then twice as long
+  each time. When the model answers, the match is raised as confirmed, or dropped. If there is
+  still no answer 10 minutes after the words were heard, it is raised as `"lower"` would raise
+  it, so a held match is never lost. At most 32 matches wait at a time: one more raises the
+  oldest, and stopping Wavescribe raises them all. While it waits, the match is on the page as
+  a *low* alert.
+
+A match the model looked at and found not real is dropped, whatever `unverified` says: this is
+only about checks that didn't happen. Under `wavescribe listen` there is no model to ask, so
+`verify` does nothing there and a match is raised at the rule's severity.
 
 **A story told again and again is one alert.** Further mentions add to it (the page counts
 them) and are not announced again, unless it gets more serious. After 15 minutes without a

@@ -124,7 +124,11 @@ severity = "low"
 # terms = { es = ["corte de agua", "sin agua"], de = ["Wasser abgestellt"] }
 # severity = "medium"
 # verify = true     # under serve, the local model confirms each match in context before it
-#                   # is announced; one it can't judge in time goes out marked "not checked"
+#                   # is announced, and drops one that isn't real
+# unverified = "lower"  # with verify: a match the model couldn't check (none loaded, too busy,
+#                       # no answer in 90 s) is raised marked "not checked": "lower" (the
+#                       # default) one severity lower, "announce" at the rule's own, "hold"
+#                       # when the check answers, or after 10 minutes as "lower" would
 
 # A rule in plain language, for stations in any language: under serve, the local model reads
 # what each station said against it about every 45 s. It needs the translation LLM, and it

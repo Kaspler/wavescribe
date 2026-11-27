@@ -39,6 +39,9 @@ MAX_REGEXES = 20  # per rule
 REGEX_TEXT_CHARS = 2000  # more than any utterance the ASR checks keep (35 chars/s, ~30 s)
 SLOW_REGEX_MS = 50  # a pattern taking this much CPU on one utterance is named in the log, once
 STATION_KINDS = ("silence", "traffic")  # rules about a station, not about what it says
+# What a rule with `verify` does with a match the LLM's check didn't answer for: raise it one
+# severity lower, raise it as it is, or hold it while the check is tried again (rules/llm.py).
+UNVERIFIED = ("lower", "announce", "hold")
 
 
 def raise_severity(severity: str, steps: int = 1) -> str:
@@ -111,6 +114,7 @@ class KeywordRule:
     # Regular expressions, compiled at load, matched on the source text ignoring case, whatever
     # the station's language (`stations` narrows them down).
     regex: tuple[re.Pattern[str], ...] = ()
+    unverified: str = "lower"  # with `verify`: a hit whose check didn't answer (UNVERIFIED)
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,9 @@ class Hit:
     kind: str = "keyword"  # or "llm", "silence", "traffic"
     reason: str | None = None  # the LLM's one-line reason (LLM rules and verified hits)
     again: bool = False  # the LLM confirmed an earlier hit on the same utterance
+    # A hit of a rule with `verify`, once it is raised: True when the LLM confirmed it, False
+    # when its check didn't answer. None for any other hit.
+    checked: bool | None = None
 
     def payload(self) -> dict[str, Any]:
         return {"rule": self.rule_id, "severity": self.severity, "spans": self.spans}
@@ -175,7 +182,8 @@ _RULE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 # misspelt one (min_mention, severty) would leave the rule reading stricter than it runs.
 _EVERY_RULE = {"id", "kind", "severity", "stations"}
 RULE_KEYS = {
-    "keyword": _EVERY_RULE | {"topics", "terms", "regex", "near", "verify", "min_mentions"},
+    "keyword": _EVERY_RULE
+    | {"topics", "terms", "regex", "near", "verify", "unverified", "min_mentions"},
     "llm": _EVERY_RULE | {"prompt", "min_mentions"},
     "silence": _EVERY_RULE | {"after_minutes", "level_db"},
     "traffic": _EVERY_RULE,
@@ -260,10 +268,19 @@ def parse_rule(
     verify = raw.get("verify", False)
     if not isinstance(verify, bool):
         raise ValueError(f"rule {rid}: verify must be true or false")
+    unverified = raw.get("unverified", "lower")
+    if not isinstance(unverified, str) or unverified not in UNVERIFIED:
+        raise ValueError(f"rule {rid}: unverified must be one of {UNVERIFIED}")
+    if "unverified" in raw and not verify:
+        raise ValueError(
+            f"rule {rid}: unverified needs verify = true: it says what becomes of a match "
+            "the model couldn't check"
+        )
     near = _strings(raw.get("near"), f"rule {rid}: near")
     return KeywordRule(
-        rid, topics, severity, near, min_mentions, terms, stations, verify, origin, regex
-    )
+        rid, topics, severity, near, min_mentions, terms, stations, verify, origin, regex,
+        unverified,
+    )  # fmt: skip
 
 
 @dataclass

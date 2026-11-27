@@ -40,7 +40,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Transcriber` | utterance → text + language + confidence | `ParakeetMlx` (default for European languages), `MlxAudioTranscriber` (Whisper, Qwen3-ASR, Voxtral, Nemotron through mlx-audio) |
 | Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it; and a line that is nothing but what models write over silence and music, subtitle credits and video sign-offs ("Thanks for watching!", "Untertitel im Auftrag des ZDF", "字幕由Amara.org社区提供"), from `asr/junk.toml`, which lists them for many languages and applies every one to every station (ignoring case, accents and punctuation; anything else said keeps the line). A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **Re-check** (`asr/recheck.py`): when a Whisper model that covers the station's language is installed and the station isn't transcribed by Whisper already, Whisper's language identification listens to a flagged line's audio again. If it hears the station's language, Whisper transcribes the line in that language and, if its text passes these checks, it replaces the flagged text (model: the Whisper's id, flags: `rechecked`); if it hears another language, the line stays as it was, with `rechecked` added. Re-checks run on the ASR thread behind every live utterance; at most 3 per station and 8 in all wait, one that waited over 60 s is skipped, and a line that finds no room stays flagged (`recheck_skipped` in the log). With no such Whisper installed nothing changes, and one log line at start names the model that would do it. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
 | `Translator` | text → text in a target language | `LlmTranslator` (Qwen3.5 through mlx-lm, the default; TranslateGemma opt-in), `MadladTranslator` (MADLAD-400 through CTranslate2, CPU, the fallback) |
-| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule` and `TrafficRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
+| Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify` and `unverified`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule` and `TrafficRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
 | `Actions` | Deliver an alert (`alerts/actions.py`) | `MacActions`: `notify` (a macOS notification through `osascript`, with the sound `[delivery] notify_sound` names, Glass by default, or none for ""), `speak:<lang>` (macOS `say`, one voice per language), `log` (an `alert` line at info level: an alert is the program working, a warning is something to fix; the console shows it with `-v`); `LogOnlyActions` elsewhere. Webhooks go through `Outputs` |
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an alert that hasn't got there is also a row in the store's `outbox`, written before the first try and deleted after the delivery, so the next run sends what a restart or crash left (at least once: each alert delivery carries the same random id on every try, `X-Wavescribe-Delivery` and the JSON's `delivery_id`), and it is given up when older than the output's `alert_max_age_hours` (24, at most 168); utterances, and everything under `--no-store`, wait in memory only; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
@@ -603,10 +603,37 @@ for the page (`origin`, `enabled`) is dropped when the rule comes back.
 
 **Rules from the page.** A keyword rule is the same as in `alerts.toml`, with terms per
 language. A rule with `verify = true` has each hit held at low severity until the LLM confirms
-it in context. If the LLM can't judge it (none loaded, its queue full, a failure, an unreadable
-reply, or no verdict within 90 s), the hit is announced anyway at its own severity, with "not
-checked by the LLM" as its reason, and counted in the status (`unchecked`): a rule never goes
-silent because its check couldn't run. An LLM rule (`kind = "llm"`, `rules/llm.py`) is a sentence ("people are told to
+it in context; a hit the LLM says isn't real stays there. A rule never goes silent because its
+check couldn't run: when the check doesn't answer (no LLM loaded, its queue full, a failure,
+an unreadable reply, or no verdict within 90 s), the hit is raised all the same, marked as not
+checked, with "not checked by the LLM: …" as its reason. The rule's `unverified` says how:
+
+- `lower` (the default): one severity below the hit's own (critical → high → medium → low).
+  Whoever switched `verify` on asked for matches to be confirmed, so an unconfirmed one is
+  worth less to them, and it still reaches them.
+- `announce`: at the hit's own severity.
+- `hold`: not until the check answers. It is asked again 30 s after the try that didn't
+  answer, then twice as long each time, which is five tries at most: a model that fails every
+  time isn't asked for ever. 10 minutes after the hit was heard it is raised as `lower` would
+  raise it, so a held hit can't be lost: that is time for a model to load or a digest to
+  finish, and inside the default cooldown, so the hit joins the alert it opened (with a
+  `cooldown_minutes` under 10 it opens another). At most 32 hits are held, each with its
+  utterance; one more raises the oldest, and stopping Wavescribe raises them all.
+
+The alert says so in `checked` (`Alert.checked`, the store's `alerts.checked`, the event,
+CAP's `checked` parameter): true when the LLM confirmed the match the alert's severity comes
+from, false when that match was raised without its answer, null otherwise (a rule without
+`verify`, or no answer yet). A later match changes it only when it asks for a higher severity,
+or was confirmed at the same one. A notification's title says ", not checked" after the
+severity ("MEDIUM, not checked · water · …"), as do the `log` action's line (`checked`) and
+the first line of a `text` output; nothing is added to what is spoken. `LlmRuleChecker.status()`
+(`llm_rules` in `/api/manage/status`) counts since the start, under `verify`: `confirmed` and
+`rejected` (checks that answered), `not_run` by why (`timeout`, `failed`, `queue_full`,
+`no_model`; a held hit counts once for each try) and `held` (now); `unchecked` is the hits
+raised without an answer. `listen` and `alerts replay` have no LLM: there `verify` isn't in
+force, a hit is raised at its rule's severity, and `checked` stays null.
+
+An LLM rule (`kind = "llm"`, `rules/llm.py`) is a sentence ("people are told to
 leave their homes"). Each station's source text is collected and checked against every LLM
 rule about every 45 s (or at 1,500 characters), as one prompt at priority 0.3, behind alert
 translations and ahead of Ask; a backlog of station lines makes way for it (see Overload). A
@@ -1141,6 +1168,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 - `outbox(id, output_id, delivery_id, event, raised_at, attempts, next_at, privacy, first_at)`: one row per alert on its way to an output, until it is delivered, refused for good, older than the output's `alert_max_age_hours`, or its output is removed; at most 2,000 per output. `event` is the JSON as it is sent, `privacy` the classes of radio its words were heard on (NULL: no words), and `first_at` the alert's first mention, which `Store.prune_outbox()` counts a class's days from (schema 8)
 - `segments.privacy` (the class the row was heard under), `alerts.privacy` (the classes of the alert's stations when heard, comma-separated), index `segments_class`, schema 6; at start, older rows take their station's current class if it isn't broadcast
 - `catches(id, station_id, freq_hz, t_start, t_end, mode, band, label, snr_db, peak_db, voice, reason, privacy)`: one row per transmission a watch caught, kept and pruned like text of its class (not written at all where the class keeps no text); its words are the segments of the same station and frequency over the same moments, read with their translations under the same rules (`Store.catches`). `segments.freq_hz` (where radio was heard), schema 7
+- `alerts.checked` (1 the LLM confirmed the match of a rule with `verify`, 0 the match was raised without its answer, NULL otherwise and in rows from before), schema 9
 
 The schema version lives in `PRAGMA user_version`. The database runs in WAL mode, so `wavescribe
 search` can read while `listen` or `serve` writes. Searches read through a second, read-only

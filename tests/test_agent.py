@@ -53,8 +53,8 @@ FOLLOW_KEYS = {"resume"}  # what `wavescribe follow` adds to each utterance
 # from docs/FEED.md (feed events) and docs/AGENT_TOOLS.md (the rest) without a test saying so.
 ALERT_KEYS = {
     "type", "version", "id", "node", "rule", "kind", "severity", "status", "time", "first_at",
-    "last_at", "mentions", "terms", "reason", "station", "stations", "language", "text",
-    "translations", "context", "segment_id",
+    "last_at", "mentions", "terms", "reason", "checked", "station", "stations", "language",
+    "text", "translations", "context", "segment_id",
 }  # fmt: skip
 MODEL_KEYS = {"id", "capability", "license", "license_url", "tier", "size_gb", "languages",
               "accepted", "installed"}  # fmt: skip

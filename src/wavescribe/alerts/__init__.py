@@ -308,6 +308,10 @@ class Alert:
     confirmed: bool = True
     kind: str = "keyword"  # or "llm", or a station rule's kind ("silence", "traffic")
     reason: str | None = None  # the LLM's reason, when an LLM rule or check was involved
+    # A rule with `verify`: whether the LLM confirmed the match the alert's severity comes
+    # from (True), or that match was raised without its answer (False). None: nothing was
+    # checked (the rule has no `verify`), or no answer has come yet.
+    checked: bool | None = None
     ended: bool = False  # a station alert whose cause is over (the station is back)
     languages: list[str] = field(default_factory=list)  # its stations' alert_languages
     # Deliveries (kept in memory only): the highest severity one ran at, whether or not it
@@ -343,6 +347,7 @@ class Alert:
             "summaries_model": self.summaries_model,
             "kind": self.kind,
             "reason": self.reason,
+            "checked": self.checked,
         }
 
 
@@ -379,6 +384,21 @@ def _rank(severity: str | None) -> int:
     return -1 if severity is None else SEVERITIES.index(severity)
 
 
+def _checked(alert: Alert, severity: str) -> bool | None:
+    """``alert.checked`` for an announcement at ``severity``. It is about the highest severity
+    the alert's matches asked for, so an announcement below that says nothing either way: an
+    alert the LLM confirmed, then raised higher by a match it didn't check, may still be
+    announcing the confirmed one, and a low alert may be on its way out while its check
+    comes back."""
+    return alert.checked if _rank(severity) >= _rank(alert.wanted) else None
+
+
+def _unchecked(alert: Alert, severity: str) -> str:
+    """What a notification's title says after the severity of an alert whose rule asked for
+    the LLM's check and didn't get its answer ("HIGH, not checked")."""
+    return ", not checked" if _checked(alert, severity) is False else ""
+
+
 class Alerter:
     """Pipeline observer: evaluates rules on each transcript and delivers alerts."""
 
@@ -402,7 +422,8 @@ class Alerter:
         # webhooks and feed pushes (wavescribe.outputs).
         self.on_delivered: Callable[[dict[str, Any], str, str, dict[str, str]], None] | None = None
         # verify(result, hit, rule): ask the LLM whether a keyword hit is real; it answers by
-        # calling on_hits with a confirmed copy (wavescribe.rules.llm).
+        # calling on_hits with a confirmed copy, or with one marked as not checked when the
+        # check didn't answer (wavescribe.rules.llm).
         self.verify: Callable[[Any, Hit, Any], None] | None = None
         self._clock = clock
         self._lock = threading.Lock()
@@ -737,6 +758,12 @@ class Alerter:
 
     def _confirm(self, alert: Alert, hit: Hit) -> None:
         """Count a hit towards its rule's min_mentions (caller holds the lock)."""
+        if hit.checked is not None:
+            # ``checked`` is about the match the alert's severity comes from: a hit that asks
+            # for more brings its own, and at the same severity one the LLM confirmed counts.
+            rank, top = _rank(hit.severity), _rank(alert.wanted)
+            if alert.checked is None or rank > top or (hit.checked and rank == top):
+                alert.checked = hit.checked
         if _rank(hit.severity) > _rank(alert.wanted):
             alert.wanted = hit.severity
         if hit.capped is not None:  # another language, a loop, unverified: never confirms
@@ -905,7 +932,7 @@ class Alerter:
                     lang_ = self.config.notify_language
                     body = checked.get(lang_, "") if lang_ else ""
                     rules = alert.rule_id + (f" + {', '.join(covers)}" if covers else "")
-                    label = "BACK" if back else severity.upper()
+                    label = "BACK" if back else severity.upper() + _unchecked(alert, severity)
                     title = f"{label} · {rules} · {', '.join(names)}"
                     self.actions.notify(title, body or text, sound=self.config.notify_sound)
                 elif kind == "speak":
@@ -914,7 +941,7 @@ class Alerter:
                     # The log is kept longer than such radio's text: its words stay out.
                     words = "(not logged: kept only for days)" if alert.short_lived else text
                     event(log, "alert", alert=alert.id,
-                          rule=alert.rule_id, severity=severity,
+                          rule=alert.rule_id, severity=severity, checked=_checked(alert, severity),
                           covers=",".join(covers), stations=",".join(alert.station_ids),
                           text=words[:200])  # fmt: skip
                 outcomes[action] = "ok"
@@ -981,12 +1008,14 @@ class Alerter:
         for action in self.config.actions.get(severity, ()):
             try:
                 if action == "notify":
-                    title = f"STILL {severity.upper()} · {alert.rule_id} · {', '.join(names)}"
+                    label = f"STILL {severity.upper()}{_unchecked(alert, severity)}"
+                    title = f"{label} · {alert.rule_id} · {', '.join(names)}"
                     self.actions.notify(title, body, sound=self.config.notify_sound)
                 elif action == "log":
                     words = "(not logged: kept only for days)" if alert.short_lived else said
                     event(log, "alert", alert=alert.id,
-                          rule=alert.rule_id, severity=severity, change="reminder",
+                          rule=alert.rule_id, severity=severity, checked=_checked(alert, severity),
+                          change="reminder",
                           mentions=alert.mentions, stations=",".join(alert.station_ids),
                           text=words[:200])  # fmt: skip
             except Exception as e:  # as for an announcement: a failed action is logged
