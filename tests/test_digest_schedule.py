@@ -178,7 +178,7 @@ def test_a_schedule_that_goes_wrong_still_waits_between_digests(lisbon) -> None:
 def scheduled(store, llm, schedule: Schedule, actions, *, clock=None, submit=None, **kw):
     clock = clock or (lambda: NOW)
 
-    def at_once(run) -> bool:
+    def at_once(run, given_up) -> bool:
         run(llm)
         return True
 
@@ -241,7 +241,7 @@ def test_scheduled_digests_cover_the_time_between_them_whatever_was_skipped(tmp_
     clock, queue_full = [NOW], [False]
     llm = FakeLlm(TWO_POINTS)
 
-    def submit(run) -> bool:
+    def submit(run, given_up) -> bool:
         if queue_full[0]:
             return False
         run(llm)

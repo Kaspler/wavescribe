@@ -112,7 +112,7 @@ STATIONS = [station("a"), station("b"), station("c", language="uk")]
 
 
 def digester(store: Store, llm=None, *, stations=STATIONS, submit=None) -> Digester:
-    def at_once(run) -> bool:
+    def at_once(run, given_up) -> bool:
         run(llm)
         return True
 
@@ -333,7 +333,7 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         "The most important: 1+4, 3, 9, 3",
     )
 
-    def submit(run) -> bool:
+    def submit(run, given_up) -> bool:
         queued.append("job")
         assert len(queued) == len(llm.prompts) + 1  # each call queued once the last is done
         run(llm)
@@ -717,12 +717,12 @@ def test_a_translator_that_isnt_an_llm_cant_make_digests(tmp_path: Path) -> None
 
 def test_a_full_queue_and_a_model_that_never_gets_to_it_are_busy(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    full = digester(store, submit=lambda run: False)
+    full = digester(store, submit=lambda run, given_up: False)
     with pytest.raises(Busy, match="queue is full"):
         full.run(full.request({}))
 
     queued: list = []
-    late = digester(store, submit=lambda run: queued.append(run) or True)
+    late = digester(store, submit=lambda run, given_up: queued.append(run) or True)
     with pytest.raises(Busy, match="no digest in time"):
         late.run(late.request({}), timeout=0.3)
     llm = FakeLlm("- too late [1].")

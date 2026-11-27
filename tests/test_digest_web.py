@@ -29,7 +29,7 @@ def post(server, body: object, headers: dict[str, str] = LOCAL) -> tuple[int, di
 
 
 def at_once(llm):
-    def submit(run) -> bool:
+    def submit(run, given_up) -> bool:
         run(llm)
         return True
 
@@ -131,7 +131,7 @@ def test_why_a_digest_failed_stays_on_this_machine(tmp_path: Path) -> None:
 
 def test_a_full_queue_is_busy(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    web = Serving(store, submit=lambda run: False)
+    web = Serving(store, submit=lambda run, given_up: False)
     try:
         status, out = post(web.server, {})
         assert status == 503 and "queue is full" in out["error"]

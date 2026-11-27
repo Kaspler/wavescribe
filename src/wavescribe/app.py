@@ -10,7 +10,6 @@ needs a restart, and the hand-edited TOML files are never rewritten.
 from __future__ import annotations
 
 import contextlib
-import functools
 import hashlib
 import logging
 import re
@@ -290,9 +289,10 @@ class App:
 
             self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
             self.hub.asker = self.asker
-            llm = functools.partial(
-                self.pipeline.request_llm, name="digest", priority=DIGEST_PRIORITY
-            )
+
+            def llm(run: Callable[[Any], None], given_up: Callable[[], None]) -> bool:
+                return self.pipeline.request_llm(run, "digest", DIGEST_PRIORITY, given_up=given_up)
+
             self.hub.digester = Digester(
                 store,
                 lambda: self.config.stations,

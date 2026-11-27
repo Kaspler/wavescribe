@@ -343,7 +343,7 @@ class Digester:
         self,
         store: Store,
         stations: Callable[[], Iterable[Station]],
-        submit: Callable[[Callable[[Any], None]], bool],
+        submit: Callable[[Callable[[Any], None], Callable[[], None]], bool],
         *,
         clock: Callable[[], float] = time.time,
         running: Callable[[], Collection[str]] | None = None,
@@ -612,7 +612,7 @@ class _Job:
 
     def __init__(
         self,
-        submit: Callable[[Callable[[Any], None]], bool],
+        submit: Callable[[Callable[[Any], None], Callable[[], None]], bool],
         request: Request,
         prompts: list[list[Line]],
         names: Mapping[str, str],
@@ -637,8 +637,12 @@ class _Job:
         self.model_s = 0.0
 
     def next(self) -> None:
-        if not self._submit(self._step):
+        if not self._submit(self._step, self._given_up):
             self._fail(Busy("the model's queue is full; try again in a moment"))
+
+    def _given_up(self) -> None:
+        """Station lines needed the queue's room: the first thing to make way is a digest."""
+        self._fail(Busy("live translation needed the model's queue; try again in a few minutes"))
 
     def _fail(self, error: Exception) -> None:
         self.error = error

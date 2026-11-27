@@ -153,13 +153,17 @@ class LlmJob:
     name: str = "llm"
     station: str | None = None  # whose text it reads (LLM rule checks), for the drop counts
     queued_at: float = field(default_factory=time.time)
+    # A job that may make way for any other work when the queue is full (a digest): told here,
+    # instead of being counted as dropped work.
+    given_up: Callable[[], None] | None = None
 
 
 class _WorkQueue:
     """A bounded priority queue of ``(priority, tiebreak, item)`` entries, lowest first.
 
     When it is full, a more urgent entry takes the place of the least urgent one that
-    ``evictable`` allows (station work; never jobs, model loads or stop markers) instead of
+    ``evictable`` allows (station work, and a job that may make way; never other jobs, model
+    loads or stop markers) instead of
     being turned away, and ``on_evict`` is told, outside the lock. Otherwise it is refused
     (``queue.Full``), as is an entry no more urgent than everything there: among equals the
     newest goes. An LLM rule check or an alert's translation must not be refused because the
@@ -477,8 +481,11 @@ class Pipeline:
             lambda item: isinstance(item, tuple),  # (station, utterance)
             lambda e: self._drop("asr", e[2][0].id, "full"),
         )
-        self._mt_q = _WorkQueue(MT_QUEUE_MAX, lambda item: isinstance(item, Result),
-                                lambda e: self._untranslated(e[2], "full"))  # fmt: skip
+        self._mt_q = _WorkQueue(
+            MT_QUEUE_MAX,
+            lambda item: isinstance(item, Result) or getattr(item, "given_up", None) is not None,
+            self._made_way,
+        )
         self._tiebreak = itertools.count()
         self._lock = threading.Lock()
         self._live: dict[str, _Live] = {}
@@ -865,6 +872,14 @@ class Pipeline:
             self._recent_drops.add((stage, why, station_id), now)
         self._log_drops()
 
+    def _made_way(self, entry: tuple) -> None:
+        """A translation queue entry that more urgent work took the place of."""
+        item = entry[2]
+        if isinstance(item, LlmJob) and item.given_up is not None:
+            item.given_up()  # not dropped station work: the job says so to whoever waits
+        else:
+            self._untranslated(item, "full")
+
     def _untranslated(self, result: Result, why: str) -> None:
         """A transcript that won't be translated (no room, or too late): counted, and finished
         with the text alone, so it is stored and shown all the same."""
@@ -979,11 +994,13 @@ class Pipeline:
         name: str = "llm",
         priority: float = LLM_JOB_PRIORITY,
         station: str | None = None,
+        given_up: Callable[[], None] | None = None,
     ) -> bool:
         """Queue ``run(translator)`` on the translation thread. False if there is no translator
         or its queue is full of other jobs (station lines make way for it). An LLM rule check
         (``name`` "llm-rules") that can't be queued is counted against its ``station``: it is
-        a possibly missed alert."""
+        a possibly missed alert. A job with ``given_up`` makes way for any other work when the
+        queue is full, and is told so."""
         rules = name == "llm-rules"
         if self._plan.mt is None:
             if rules:
@@ -991,7 +1008,8 @@ class Pipeline:
             return False
         self._start_mt()
         try:
-            self._mt_q.put_nowait((priority, next(self._tiebreak), LlmJob(run, name, station)))
+            job = LlmJob(run, name, station, given_up=given_up)
+            self._mt_q.put_nowait((priority, next(self._tiebreak), job))
         except queue.Full:
             if rules:
                 self._drop("rules", station, "full")
@@ -1003,8 +1021,7 @@ class Pipeline:
     def llm_waiting(self, below: float) -> bool:
         """Whether a job of priority under ``below`` waits for the translation thread: what a
         long job of lower priority gives way to (a digest's call)."""
-        with self._mt_q.mutex:
-            return bool(self._mt_q.queue) and self._mt_q.queue[0][0] < below
+        return any(entry[0] < below for entry in self._mt_q.snapshot())
 
     def _busy_fraction(self, stage: str, now: float, window: float = 60.0) -> float:
         return min(1.0, sum(d for t, d in list(self._busy[stage]) if t > now - window) / window)
