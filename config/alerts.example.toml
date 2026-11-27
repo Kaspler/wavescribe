@@ -108,6 +108,15 @@ topics = ["conflict_weak"]
 near = ["local"]
 severity = "low"
 
+# A rule's own words, per language (the station's language, its first part: "es" for es-MX),
+# beside or instead of topics from a pack. They match as pack terms do: case and accents ignored,
+# plurals found, a phrase word by word, "=" for only as written. A station whose language has no
+# terms here and no pack isn't matched by this rule.
+# [[rule]]
+# id = "water-cut"
+# terms = { es = ["corte de agua", "sin agua"], de = ["Wasser abgestellt"] }
+# severity = "medium"
+
 # Regular expressions, beside or instead of topics and terms: matched on the original text,
 # ignoring case, in any language (no accents folded, no plurals). Write them in 'single quotes'
 # so backslashes stay as they are. \b is the edge of a word; scripts written without spaces

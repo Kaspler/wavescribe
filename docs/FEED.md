@@ -40,7 +40,8 @@ Utterance fields:
   beside it, Whisper heard the station's language and the text is its transcript.
 - `rules`: the alert rules this utterance tripped.
 - `node.id`: the sending machine's id, random, made at its first start and kept in its
-  `config/ui.toml`. It says nothing about the machine.
+  `config/ui.toml`. It says nothing about the machine. The commands' `--json` carry it too,
+  once Wavescribe has started in that folder.
 - `"via"`: only on a line the sender took from another machine: the ids of the machines it
   passed through before the sender, the one that heard it first. Wavescribe refuses a pushed
   or followed line that already passed through it, or through more than 8 machines, so two
@@ -129,7 +130,7 @@ checks it like a real one and keeps nothing.
 | `GET /feed/v1/alerts` | Recent alerts (`?since=<epoch>`). |
 | `GET /feed/v1/catches` | What band watches caught, newest first, each with the words heard in it, in the shape `wavescribe radio catches --json` gives ([AGENT_TOOLS.md](AGENT_TOOLS.md)) but without your notes: `?hours=` (24; 0 for everything kept), `?mhz=` with `?width_khz=` either side, `?stations=`, `?limit=` (100 by default, up to 500). Only catches on radio whose text may leave this machine ([RADIO.md](RADIO.md)). |
 | `GET /feed/v1/stations` | Stations: language, translation languages, running, connected, last heard, lag. |
-| `GET /feed/v1/node` | This machine: name, URL, version, feed version, translation languages. |
+| `GET /feed/v1/node` | This machine: `name`, `url`, `id`, `version`, `feed_version`, `stations` (how many it shows you), `translation_languages`, `store` (whether history is kept) and `ask` (whether Ask works). |
 | `GET /healthz` | `{"ok": true}` once models are loaded (503 before). It needs no token. |
 | `GET /metrics` | Prometheus text: stations running and connected, utterances, queues, drops, lag, outputs, memory footprint, free disk, power draw. |
 
@@ -178,7 +179,7 @@ an EventSource on such a page.
 
 | Who | The page's data: what was said, alerts, catches, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
 |---|---|---|---|---|
-| This machine | yes | yes, no token | yes | yes; behind a proxy only with `wavescribe token` (below) |
+| This machine | yes, no token; behind a proxy as through it, unless the request carries the control key (`wavescribe token`, the agent tools) | yes, no token; behind a proxy likewise | yes; behind a proxy likewise | yes; behind a proxy only with the control key (`wavescribe token`, the agent tools) |
 | The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
 | Through a proxy (`serve --behind-proxy`, or a request carrying a proxy's header) | a `read` token, unless `serve --public-read` | always a `read` token | only with `--allow-remote-ask`, and a `read` token unless `--public-read` | never |
 

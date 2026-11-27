@@ -243,6 +243,10 @@ each station's language. Read them, fix any that are wrong, and save.
   about every 45 seconds.
 - **Try a sentence**, as the radio would say it, to see which word rules would fire. Nothing is
   raised.
+- **Its own words:** in `config/alerts.toml`, a keyword rule can list its own words per language
+  instead of (or beside) topics from a keyword pack:
+  `terms = { es = ["corte de agua"], de = ["Wasser abgestellt"] }`. They match as pack words do
+  (case, accents and plurals don't matter), on stations whose language starts with that code.
 - **Patterns:** in `config/alerts.toml`, a keyword rule can match regular expressions as well as
   words, such as a road and its number: `regex = ['\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b']`. They
   ignore case and work in any language, but match the text exactly as written otherwise (no
