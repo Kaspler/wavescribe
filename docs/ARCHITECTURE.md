@@ -1065,7 +1065,9 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   log and webhooks, never spoken, and the alert's delivery state is left as it was. One
   utterance that trips several rules is announced once, by its most severe alert; the others are
   marked `covered` (the page shows them as "+ water, hazards" on the lead card). This also holds
-  when an alert escalates while its previous delivery is still in flight, and for reminders.
+  when an alert escalates while its previous delivery is still in flight, and for reminders. An
+  escalation that comes just as a delivery has recorded its outcome is announced once, by
+  itself: the finishing delivery sees the alert pending again and leaves it alone.
   Every alert event handed on (the page, `/feed/v1/events`, webhooks, the agent tools) carries
   `change`: `new` (its first announcement), `escalated` (announced again, more serious),
   `reminder`, `ended` (a station alert is over), or `update` (a mention folded in, a

@@ -960,7 +960,9 @@ class Alerter:
                 log.exception("alert outputs failed")
         with self._lock:  # it got more serious while this delivery was in flight
             done = max(_rank(severity), _rank(alert.covered_severity))
-            again = not back and _rank(alert.severity) > done
+            # Pending again already: the mention that made it more serious came after this
+            # delivery's outcome was recorded above, and was sent to be announced itself.
+            again = not back and _rank(alert.severity) > done and alert.status != "pending"
             if again:
                 alert.status = "pending"
         if again:

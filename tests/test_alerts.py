@@ -425,6 +425,30 @@ def test_escalation_during_a_delivery_is_still_announced_once(tmp_path: Path) ->
     assert alerter._open["conflict"].covered_severity == "medium"
 
 
+def test_escalation_as_a_delivery_finishes_is_announced_once(tmp_path: Path) -> None:
+    # The mention that makes an alert more serious comes when a delivery has recorded its
+    # outcome and hasn't yet looked whether the alert rose meanwhile: that mention is sent to
+    # be announced itself, and the delivery must not announce it a second time.
+    from wavescribe.rules import Hit
+
+    alerter, actions, _clock, _seen, pushed, tries = quiet(tmp_path, severity="medium")
+    said = result("a", "Corte de água em Lisboa.", 1000.0)
+
+    def delivered(payload, _severity, _text, _checked) -> None:
+        pushed.append(payload["change"])
+        if len(pushed) == 1:
+            alerter.on_hits(said, [Hit("water", "critical", ["corte de água"], [], [])])
+
+    alerter.on_delivered = delivered
+    alerter.on_transcript(said)
+    alerter.drain()
+    assert tries == ["medium", "critical"] and pushed == ["new", "escalated"]
+    assert [c[1] for c in actions.calls if c[0] == "notify"] == [
+        "MEDIUM · water · a", "CRITICAL · water · a",
+    ]  # fmt: skip
+    alerter.close()
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
