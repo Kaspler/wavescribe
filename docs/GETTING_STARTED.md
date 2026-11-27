@@ -354,7 +354,7 @@ usually one), and lines are translated between them. So how long it takes depend
 much was said, how fast the Mac is and how much the stations are talking right now: a few
 minutes for a full one, from a few seconds to a minute for `--now`. A rule in your own words
 doesn't stop it: the model reads the stations' recent speech for the rule between a digest's
-calls, up to a minute later than usual, and skips none of it. When translation is running
+calls, a minute or so later than usual, and skips none of it. When translation is running
 behind, a digest waits up to two minutes for it and then takes turns with it. While two
 digests are being made, the next ones wait in line (four at most). One that isn't made
 within ten minutes says what kept the model busy, by name (the stations being translated,
@@ -467,7 +467,7 @@ each station's language. Read them, fix any that are wrong, and save.
     refused, with the rule's name; a rule takes 20 patterns at most, of 200 characters each.
 - **Describe it in your words:** say what you want to hear about in one sentence (*"residents
   are told to leave their homes"*), with no keywords at all. The model reads each station's recent speech
-  about every 45 seconds, when it has a free moment: up to a minute later while it is busy
+  about every 45 seconds, when it has a free moment: a minute or so later while it is busy
   translating or writing a summary, never skipping a line.
 - **Try a sentence**, as the radio would say it, to see which word rules would fire. Nothing is
   raised. In the Terminal: `uv run wavescribe alerts check "la carretera está cortada"
