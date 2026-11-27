@@ -1182,3 +1182,22 @@ def test_a_new_output_with_a_name_in_use_is_refused_and_the_old_one_kept(tmp_pat
                      "headers": {"Authorization": "•••"}})  # fmt: skip
     assert app.settings.get("output")[0]["headers"] == {"Authorization": "Bearer abc"}
     assert app.settings.get("output")[0]["url"] == "http://hub.test/v2"
+
+
+@pytest.mark.parametrize("batch_s", [0, 5])
+def test_a_test_push_is_answered_and_leaves_no_station_behind(central: App, batch_s: int) -> None:
+    from tests.test_outputs import Recorder, outputs
+
+    rec = Recorder()
+    outs = outputs([{"id": "central", "url": "http://central.test/feed/v1/ingest",
+                     "events": ["utterance"], "batch_s": batch_s}], rec)  # fmt: skip
+    assert outs.test(outs.configs()[0])["ok"]
+    sample = rec.json()
+    before = {s.id for s in central.config.stations}
+    assert central.ingest(sample) == {"accepted": 0, "rejected": 0, "test": 1}
+    assert {s.id for s in central.config.stations} == before
+    assert not central.settings.get("station") and central.store.last_id() == 0
+    # It is checked as a real one would be, so the button still finds what is wrong.
+    bad = {**(sample["events"][0] if batch_s else sample), "t_start": "yesterday"}
+    assert central.ingest(bad) == {"accepted": 0, "rejected": 1, "test": 0}
+    outs.close()

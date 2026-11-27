@@ -864,8 +864,10 @@ class App:
 
         A push token reaches only the stations pushing made. An event whose id here belongs to
         any other station is refused, as is one that would take the pushed stations past their
-        caps, or whose values don't check out (``read_utterance``). Returns how many events
-        were taken and how many were refused."""
+        caps, or whose values don't check out (``read_utterance``). An event marked ``test``
+        (the sender's Test button) is checked the same way and never kept: no station, no
+        text. Returns how many events were taken and how many were refused, and how many
+        tests passed when there were any."""
         from wavescribe.remote import MAX_NAME_CHARS, BadEvent, read_utterance, to_result
 
         if not isinstance(batch, dict):
@@ -880,6 +882,8 @@ class App:
         if len(events) > MAX_BATCH_EVENTS:
             refused["too many events in one batch"] = len(events) - MAX_BATCH_EVENTS
         wanted: list[tuple[Heard, str]] = []
+        tests = [ev for ev in events[:MAX_BATCH_EVENTS] if isinstance(ev, dict) and ev.get("test")]
+        tested = 0
         with self._lock:  # one batch at a time decides which stations exist
             made = {s.id: s.remote_station for s in self.config.stations if s.remote == "push"}
             saved = {s.get("id") for s in self.settings.get("station") or []}
@@ -896,6 +900,9 @@ class App:
                     heard = read_utterance(ev)
                 except BadEvent as e:
                     refused[str(e)] += 1
+                    continue
+                if ev.get("test"):
+                    tested += 1  # it would have been taken; that is all a test asks
                     continue
                 remote_id = slug(heard.station_id)
                 sid = push_id(node, remote_id)
@@ -938,7 +945,8 @@ class App:
         if refused:
             event(log, "ingest_refused", level=logging.WARNING, node=node, taken=taken,
                   refused=dict(refused))  # fmt: skip
-        return {"accepted": taken, "rejected": sum(refused.values())}
+        counts = {"accepted": taken, "rejected": sum(refused.values())}
+        return {**counts, "test": tested} if tests else counts
 
     def _unmakeable(self, entries: list[dict[str, Any]]) -> set[str]:
         """The ids of the stations a push brought that the config refuses. They are built

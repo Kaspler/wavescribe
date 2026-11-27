@@ -98,6 +98,10 @@ Alert fields:
 A batch, used by pushes that batch utterances, is
 `{"type": "batch", "version": 1, "node": {…}, "events": [ … ]}`.
 
+The sample an output's *Test* button sends, utterance or alert, also carries `"test": true`.
+Real events never have it. Drop a test event or only log it: a Wavescribe that takes pushes
+checks it like a real one and keeps nothing.
+
 ## Pull: `/feed/v1`
 
 | Request | What it returns |
@@ -303,7 +307,10 @@ Each of a place's stations appears on the central server the first time it sends
 of the place's name and gets a short hash of both names, so two long names never share an id. A push only writes into stations that pushes made:
 an event whose id would land on any other station here is refused. One place can make 25
 stations and all places together 100. The answer is `{"accepted": n, "rejected": m}` with status
-200; the log says why events were refused. An event is refused whole if a value is out of
+200; the log says why events were refused. When the push held test events (the *Test* button),
+it is `{"accepted": 0, "rejected": m, "test": k}`, with `k` the test events that would have been
+taken. Those make no station and store nothing (an older central server takes them as real, as
+a station named `<place>-test`). An event is refused whole if a value is out of
 bounds: `t_start` older than 7 days or more than 10 minutes ahead of this machine's clock,
 `duration` outside 0–600 s, text over 4,000 characters, a language that isn't a BCP-47 tag. A
 `t_start` up to 10 minutes ahead is taken as a clock that runs fast and stored as the time the

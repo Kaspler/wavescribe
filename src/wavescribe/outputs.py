@@ -435,7 +435,8 @@ class Outputs:
         return entry
 
     def test(self, config: OutputConfig) -> dict[str, Any]:
-        """Send one sample event now (no retries) and report what came back."""
+        """Send one sample event now (no retries) and report what came back. It is marked
+        ``"test": true``: a Wavescribe that takes pushes answers it and keeps nothing."""
         node = self._node()
         now = time.time()
         sample: dict[str, Any]
@@ -446,6 +447,7 @@ class Outputs:
                  "quote": "This is a test alert from Wavescribe.", "terms": ["test"]},
                 {}, node,
             )  # fmt: skip
+            sample["test"] = True
         else:
             sample = utterance_event(
                 {"id": None, "station": "test", "t_start": now, "duration": 1.0,
@@ -453,6 +455,7 @@ class Outputs:
                  "translations": {}},
                 {}, node,
             )  # fmt: skip
+            sample["test"] = True
         return self.send(config, [sample], attempts=1)
 
     def status(self) -> dict[str, dict[str, Any]]:
