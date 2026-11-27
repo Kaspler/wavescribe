@@ -1,8 +1,9 @@
 // The dial's geometry: one bar for everything a receiver tunes, on which the popular bands stay
-// legible, receivers never vanish, and a receiver sent to a band looks where its stations are.
+// legible, receivers never vanish, a channel counts as heard only where the server hears it, and
+// a receiver sent to a band looks where its stations are.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandAt, bandOfWindow, dragCentre, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks } from "../src/manage/dial.ts";
+import { bandAt, bandOfWindow, dragCentre, hears, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks, usable, width } from "../src/manage/dial.ts";
 
 const band = (id, start_mhz, stop_mhz, mode, privacy) => ({ id, start_mhz, stop_mhz, mode, privacy, tunable: true });
 // A European band plan's shape, as /api/manage/radio sends it.
@@ -123,6 +124,39 @@ test("a frequency is put on its band's raster, and never past the band", () => {
   assert.equal(onRaster(null, 1200.12345), 1200.123, "outside every band: to the kHz");
 });
 
+// A receiver centred on 90.5 MHz at 2.4 MS/s, as span_mhz gives it.
+const AT_90_5 = [89.3, 91.7];
+
+test("broadcast FM is heard from 120 kHz inside the edges, a narrow channel from 60 kHz", () => {
+  assert.deepEqual(usable(AT_90_5, "wfm").map((f) => +f.toFixed(6)), [89.42, 91.58], "the server's 'outside 89.42 to 91.58 MHz'");
+  assert.deepEqual(usable(AT_90_5, "nfm").map((f) => +f.toFixed(6)), [89.36, 91.64]);
+  assert.deepEqual(usable(AT_90_5, "am").map((f) => +f.toFixed(6)), [89.36, 91.64]);
+  assert.deepEqual(usable(AT_90_5, null).map((f) => +f.toFixed(6)), [89.36, 91.64], "an unknown mode: the narrower margin");
+});
+
+test("a channel on the limit is heard, a kHz further out isn't", () => {
+  assert.equal(hears(AT_90_5, 91.58, "wfm"), true);
+  assert.equal(hears(AT_90_5, 91.581, "wfm"), false);
+  assert.equal(hears(AT_90_5, 89.42, "wfm"), true);
+  assert.equal(hears(AT_90_5, 89.419, "wfm"), false);
+  assert.equal(hears(AT_90_5, 91.64, "nfm"), true);
+  assert.equal(hears(AT_90_5, 91.641, "nfm"), false);
+});
+
+test("a narrow channel on the spike at the centre isn't heard; broadcast FM is", () => {
+  assert.equal(hears(AT_90_5, 90.5, "wfm"), true);
+  assert.equal(hears(AT_90_5, 90.5, "nfm"), false);
+  assert.equal(hears(AT_90_5, 90.5125, "nfm"), true, "a 12.5 kHz channel's width away");
+  assert.equal(hears(AT_90_5, 90.51, "nfm", 25), false, "a 25 kHz channel needs 25 kHz");
+  assert.equal(hears(AT_90_5, 90.509, "am"), true, "an 8.33 kHz channel");
+});
+
+test("the width is the edges' difference, whatever the sample rate", () => {
+  assert.equal(+width(AT_90_5).toFixed(6), 2.4);
+  assert.equal(+width([145.02, 145.98]).toFixed(6), 0.96);
+  assert.deepEqual(usable([145.02, 145.98], "nfm").map((f) => +f.toFixed(6)), [145.08, 145.92], "0.96 MS/s");
+});
+
 test("Look here tunes the strongest station heard in the band, else the band's middle, on its raster", () => {
   assert.equal(lookAt(FM, [heard(88.1, 12), heard(102.4, 37), heard(91.9, 32)]), 102.4);
   assert.equal(lookAt(FM, []), 97.8, "the middle of 87.5 to 108, on the 100 kHz raster");
@@ -132,10 +166,11 @@ test("Look here tunes the strongest station heard in the band, else the band's m
 });
 
 test("a receiver that stays where it is looks inside what it hears, clear of its centre", () => {
-  const win = { lo: 143.8, hi: 146.2 };
-  assert.equal(lookAt(TWO_M, [heard(147, 30), heard(145.5, 9)], win), 145.5);
-  assert.equal(lookAt(TWO_M, [heard(145.0, 20)], win), 145.25, "a station on the centre spike is passed over");
-  assert.equal(lookAt(FM, [], { lo: 101.3, hi: 103.7 }), 102.8, "nothing heard there: near the middle, on the raster");
+  const span = [143.8, 146.2];
+  assert.equal(lookAt(TWO_M, [heard(147, 30), heard(145.5, 9)], span), 145.5);
+  assert.equal(lookAt(TWO_M, [heard(145.0, 20)], span), 145.25, "a station on the centre spike is passed over");
+  assert.equal(lookAt(TWO_M, [heard(146.15, 30), heard(145.5, 9)], span), 145.5, "nor one inside its edges but not heard there");
+  assert.equal(lookAt(FM, [], [101.3, 103.7]), 102.8, "nothing heard there: near the middle, on the raster");
 });
 
 test("the frequency tuned puts the dongle's centre where the receiver should look", () => {
@@ -146,6 +181,8 @@ test("the frequency tuned puts the dongle's centre where the receiver should loo
 
 test("a receiver dragged onto the dial lands on a frequency it can look at", () => {
   assert.equal(dragCentre(scale.x(446.1), scale, BANDS, 2.4), 446.1, "a band narrower than the window: its middle");
+  assert.equal(dragCentre(scale.x(144.3), scale, BANDS, 2.4), 145, "2 m, heard whole from its middle at 2.4 MS/s");
+  assert.equal(dragCentre(scale.x(144.3), scale, BANDS, 1.92), 144.3, "not at 1.92 MS/s: where the pointer is");
   assert.equal(dragCentre(scale.x(98.64), scale, BANDS, 2.4), 98.6, "to 100 kHz");
   assert.equal(dragCentre(0, scale, BANDS, 2.4), 25.2, "never past the tuner's end");
   assert.equal(dragCentre(1, scale, BANDS, 2.4), 1764.8);

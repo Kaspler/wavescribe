@@ -3,6 +3,7 @@
 // the wheel; tuning, polling and zoom stay with whoever holds the receiver (Listen's tuner).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Band, fmtMhz } from "./bands";
+import type { Span } from "./dial";
 
 /** One picture of what a receiver hears: the power of each bin from start_hz to stop_hz. */
 export interface Spectrum {
@@ -27,9 +28,8 @@ export interface Marker {
 export interface ScopeProps {
   /** The latest spectrum; null while the receiver has sent none, which leaves the scope blank. */
   spectrum: Spectrum | null;
-  /** What the receiver hears, in MHz: the scale until the first spectrum arrives. */
-  centerMhz: number;
-  spanMhz: number;
+  /** What the receiver takes in, its edges in MHz: the scale until the first spectrum arrives. */
+  span: Span;
   /** A zoomed part of it, in MHz, or null for all of it. */
   view: [number, number] | null;
   /** The tuning: where it is, its demodulation (how frequencies are written) and channel width. */
@@ -60,7 +60,7 @@ const niceStep = (span: number) => [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1
 
 /** The spectrum and its waterfall, on the instrument's dark band. The orange line and shading
  * are the tuning and its channel; a click tunes, the wheel and arrow keys step. */
-export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, channelKhz, stepKhz, band, markers, onTune, onStep, inWords }: ScopeProps) {
+export function Scope({ spectrum: s, span: edges, view, tunedMhz, mode, channelKhz, stepKhz, band, markers, onTune, onStep, inWords }: ScopeProps) {
   const spec = useRef<HTMLCanvasElement>(null);
   const fall = useRef<HTMLCanvasElement>(null);
   const span = useRef<string>("");
@@ -80,7 +80,7 @@ export function Scope({ spectrum: s, centerMhz, spanMhz, view, tunedMhz, mode, c
     ro.observe(c);
     return () => ro.disconnect();
   }, []);
-  const range = useMemo(() => (s ? [s.start_hz / 1e6, s.stop_hz / 1e6] : view || [centerMhz - spanMhz / 2, centerMhz + spanMhz / 2]), [s, view, centerMhz, spanMhz]);
+  const range = useMemo(() => (s ? [s.start_hz / 1e6, s.stop_hz / 1e6] : view || edges), [s, view, edges]);
   const at = (clientX: number) => {
     const r = spec.current!.getBoundingClientRect();
     return range[0] + ((clientX - r.left) / r.width) * (range[1] - range[0]);

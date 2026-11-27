@@ -13,7 +13,7 @@ import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
-import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
+import { type Receiver, bandAt as narrowestAt, bandOfWindow, hears, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 import { addedToast } from "./added";
@@ -77,9 +77,16 @@ const snapToBand = (bands: Any[], mhz: number): number => onRaster(bandAt(bands,
 /** The narrowest band of the plan holding `mhz` (the server decides; this is for hints). */
 const bandAt = (bands: Any[], mhz: number): Any | null => narrowestAt(bands as Band[], mhz);
 
+/** The radio view (`/api/manage/radio`), as far as the page decides on it; the rest passes through. */
+export interface RadioView {
+  receivers: Receiver[];
+  bands: Band[];
+  [field: string]: Any;
+}
+
 /** The radio view and the scan in progress, shared by the pages about radio. */
 export function useRadio() {
-  const { data: v, error, reload } = useLoad(() => get("/radio"));
+  const { data: v, error, reload } = useLoad(() => get<RadioView>("/radio"));
   const [job, setJob] = useState<Any | null>(null);
   const running = !!job && !["done", "error"].includes(job.phase);
   useEffect(() => { if (v?.scan) setJob(v.scan); }, [v]);
@@ -219,7 +226,7 @@ export function Responsibility() {
 // -- finding: sweep a band, list what's there ---------------------------------------------------
 
 function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, onWatched }: {
-  v: Any; job: Any; running: boolean; onJob: (j: Any) => void; onAdd: (t: Any) => void; reload: () => Promise<void>; tuner: Tuner;
+  v: RadioView; job: Any; running: boolean; onJob: (j: Any) => void; onAdd: (t: Any) => void; reload: () => Promise<void>; tuner: Tuner;
   /** The watch stations, or null where this Wavescribe can't watch a band. */
   watches: Any[] | null;
   /** A band asked for from elsewhere on the page. */
@@ -314,7 +321,8 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const send = (id: string, mhz: number, mode: string | null, play: boolean, pause = false) => {
     const r = rxs.find((x) => x.id === id);
     if (!r) return listenTo(mhz, mode);
-    const inside = mhz > r.lo + 0.12 && mhz < r.hi - 0.12;
+    // Where it hears the channel already, listening goes on beside its stations; else it moves.
+    const inside = hears(r.span, mhz, mode || bandAt(v.bands, mhz)?.mode);
     if (r.holders.length && !inside && !pause) { setMoving({ id, mhz, mode, play }); return; }
     setMoving(null);
     setDevice(id);
@@ -328,7 +336,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
    * inside what it hears, which pauses nothing. */
   const lookHere = (b: Band) => {
     const there = me && me.holders.length > 0 && bandOfWindow(v.bands, me.lo, me.hi)?.id === b.id;
-    send(device, lookAt(b, heardIn(v.heard, b), there ? me : null), b.mode, false);
+    send(device, lookAt(b, heardIn(v.heard, b), there ? me.span : null), b.mode, false);
   };
   // A free receiver to offer instead: one already on the band first.
   const free = rxs.filter((r) => r.id !== moving?.id && r.state === "idle")
@@ -900,15 +908,17 @@ const DOES = [
   { value: "translate", label: "Transcribe and translate" },
 ];
 
-function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner; onDone: () => Promise<void> }) {
+function AddFromAir({ v, pre, tuner, onDone }: { v: RadioView; pre: Any; tuner: Tuner; onDone: () => Promise<void> }) {
   // Where a receiver is tuned now: by hand, where the tuner has it; else where it is set.
-  const centreOf = (r: Any) => tuner.receivers.find((l) => l.id === r.id && l.open)?.center_mhz ?? r.center_mhz;
-  const fits = (r: Any, mhz: number) => Math.abs(mhz - centreOf(r)) <= r.span_mhz / 2 - 0.12;
+  const tunedNow = (r: Receiver) => tuner.receivers.find((l) => l.id === r.id && l.open) ?? r;
   const f: number = pre.mhz;
   const band = bandAt(v.bands, f);
   const [mode, setMode] = useState<string>(pre.mode && band && pre.mode !== band.mode ? pre.mode : "");
+  const effMode = mode || band?.mode || "nfm";
+  // Whether a receiver hears the new station where it is tuned now, or would have to move.
+  const fits = (r: Receiver) => hears(tunedNow(r).span_mhz, f, effMode, band?.channel_khz);
   const pickRx = () =>
-    (v.receivers.find((r: Any) => fits(r, f) && r.busy_code !== "scan") || v.receivers.find((r: Any) => !r.busy_code) || v.receivers[0])?.id || "";
+    (v.receivers.find((r) => fits(r) && r.busy_code !== "scan") || v.receivers.find((r) => !r.busy_code) || v.receivers[0])?.id || "";
   const [device, setDevice] = useState<string>(() => pre.device || pickRx());
   const [name, setName] = useState(pre.name || "");
   const [does, setDoes] = useState("translate");
@@ -937,9 +947,8 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
   const [askedCls, setAskedCls] = useState<string | null>(null);
   const cls: string | null = askedCls || pre.privacy || band?.privacy || null;
   const needsAck = !!cls && !!v.policies[cls]?.needs_ack;
-  const rx = v.receivers.find((r: Any) => r.id === device);
+  const rx = v.receivers.find((r) => r.id === device);
   const live = tuner.receivers.find((r) => r.id === device && r.open);
-  const effMode = mode || band?.mode || "nfm";
   const called = name.trim() || pre.name || `${fmtMhz(f, effMode)} MHz`;
   const submit = async (confirmed = false) => {
     if (does !== "listen" && !lang.trim()) { document.getElementById("rd-lang")?.focus(); return; }
@@ -999,12 +1008,12 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
                     options={[["", band?.mode ? `From the band plan (${band.mode.toUpperCase()})` : "From the band plan"], ["wfm", "WFM (broadcast FM)"], ["nfm", "NFM (walkie-talkies, marine, amateur)"], ["am", "AM (aircraft, medium wave)"]]} />
           </Field>
           {v.receivers.length > 1 && (
-            <Field id="rd-rx" label="Receiver" hint={rx && !fits(rx, f) ? `Moves receiver ${rxName(rx.id)} to ${fmtMhz(f, effMode)} MHz.` : "The receiver that tunes it."}>
+            <Field id="rd-rx" label="Receiver" hint={rx && !fits(rx) ? `Moves receiver ${rxName(rx.id)} to ${fmtMhz(f, effMode)} MHz.` : "The receiver that tunes it."}>
               <Select id="rd-rx" value={device} onChange={(e) => { setDevice(e.target.value); setAsked(null); }}
-                      options={v.receivers.map((r: Any) => {
+                      options={v.receivers.map((r) => {
                         const by = tuner.receivers.find((l) => l.id === r.id);
                         const doing = by?.open ? ["tuned by hand"] : (by?.holders || []);
-                        return [r.id, `${rxName(r.id)} · ${centreOf(r).toFixed(2)} MHz${doing.length ? ` · ${doing.join(", ")}` : ""}`];
+                        return [r.id, `${rxName(r.id)} · ${tunedNow(r).center_mhz.toFixed(2)} MHz${doing.length ? ` · ${doing.join(", ")}` : ""}`];
                       })} />
             </Field>
           )}

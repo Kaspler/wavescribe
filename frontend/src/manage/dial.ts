@@ -1,6 +1,8 @@
 // The dial's geometry: where a frequency sits on the one bar that holds everything a receiver
-// tunes, where each band and receiver is drawn on it, and where a receiver is sent to look. Pure
-// functions of the band plan the server sends, so they can be tested without a page.
+// tunes, where each band and receiver is drawn on it, where in what a receiver takes in a channel
+// is heard, and where a receiver is sent to look. Pure functions of what the server sends, so
+// they can be tested without a page.
+import type { Any } from "./api";
 import type { Band } from "./bands";
 
 /** What an RTL-SDR's tuner reaches, in MHz (TUNER_RANGE_HZ in radio/bandplan.py). */
@@ -202,6 +204,78 @@ export function marks(windows: { id: string; lo: number; hi: number }[], scale: 
   return placed;
 }
 
+// -- what a receiver hears -----------------------------------------------------------------------
+
+// Every view of a receiver gives `span_mhz` as its two edges, [lo, hi] in MHz: its centre ± half
+// its sample rate. A channel is heard only some way inside those edges, and that rule is here
+// once, as the server applies it (`hears` in config.py, `margin_hz` and `off_centre` in
+// dsp/__init__.py).
+
+/** A receiver's edges, [lo, hi] in MHz, as `span_mhz` gives them. */
+export type Span = [number, number];
+
+/** One of a receiver's stations, as the radio and receivers views list them. */
+export interface RxStation {
+  id: string;
+  name: string;
+  mhz: number;
+  running: boolean;
+  /** Why the receiver, tuned as it is, doesn't hear it; null when it does. */
+  out_of_reach: string | null;
+  /** Where starting it moves the receiver, while it is out of reach; null when no centre hears
+   * it, or it isn't out of reach. */
+  reach_center_mhz: number | null;
+}
+
+/** A receiver as `/api/manage/radio` and `/api/manage/receivers` give it, where it is set; the
+ * fields this page doesn't decide on pass through. */
+export interface Receiver {
+  id: string;
+  center_mhz: number;
+  span_mhz: Span;
+  stations: RxStation[];
+  [field: string]: Any;
+}
+
+/** A receiver as the hand tuner sees it (`/api/manage/live`): where the dongle is tuned now, which
+ * may be where listening by hand moved it. Open, it also carries what it is tuned to and hears. */
+export interface LiveReceiver {
+  id: string;
+  open: boolean;
+  center_mhz: number;
+  span_mhz: Span;
+  holders: string[];
+  [field: string]: Any;
+}
+
+/** How far inside a receiver's edges a channel must sit to be heard, in MHz. Broadcast FM keeps
+ * half the demodulator's 240 kHz working rate from the edge (CHANNEL_STOP_HZ), so the whole
+ * 200 kHz channel is inside; a narrow channel keeps 60 kHz from it, clear of where the dongle's
+ * own filter rolls off (NARROW_MARGIN_HZ). */
+export const edgeMargin = (mode: string | null | undefined) => (mode === "wfm" ? 0.12 : 0.06);
+
+/** The part of a receiver's span in which a channel of `mode` is heard. */
+export function usable(span: Span, mode: string | null | undefined): Span {
+  const m = edgeMargin(mode);
+  return [span[0] + m, span[1] - m];
+}
+
+/** Whether a channel at `mhz` keeps clear of the spike at the centre of a dongle tuned to
+ * `centre` (off_centre): broadcast FM always does, a narrow channel from a channel's width away. */
+export const clearOfCentre = (mhz: number, centre: number, mode: string | null | undefined, channelKhz?: number | null) =>
+  mode === "wfm" || Math.abs(mhz - centre) >= (channelKhz || (mode === "am" ? 8.33 : 12.5)) / 1000 - 1e-9;
+
+/** Whether a receiver whose edges are `span` hears a channel of `mode` at `mhz`: inside the
+ * usable part, and for a narrow channel clear of the spike at its centre. The edges come rounded
+ * to the Hz, so a channel on the limit counts as inside, as it does for the server. */
+export function hears(span: Span, mhz: number, mode: string | null | undefined, channelKhz?: number | null): boolean {
+  const [lo, hi] = usable(span, mode);
+  return mhz >= lo - 1e-6 && mhz <= hi + 1e-6 && clearOfCentre(mhz, (span[0] + span[1]) / 2, mode, channelKhz);
+}
+
+/** How wide a span is, in MHz. */
+export const width = (span: Span) => span[1] - span[0];
+
 // -- where a receiver looks ----------------------------------------------------------------------
 
 /** A band as far as its raster goes: its channels, or the step its channels sit on. */
@@ -220,29 +294,16 @@ export function onRaster(band: RasterBand | null | undefined, mhz: number): numb
   return round3(mhz);
 }
 
-/** How far from the edges of what a dongle hears a channel must sit (CHANNEL_STOP_HZ and
- * NARROW_MARGIN_HZ in dsp/__init__.py), in MHz. */
-export const edgeMargin = (mode: string | null | undefined) => (mode === "wfm" ? 0.12 : 0.06);
-
-/** Whether a channel at `mhz` keeps clear of the spike at the centre of a dongle tuned to
- * `centre` (off_centre in dsp/__init__.py): broadcast FM always does, a narrow channel from a
- * channel's width away. */
-export const clearOfCentre = (mhz: number, centre: number, mode: string | null | undefined, channelKhz?: number | null) =>
-  mode === "wfm" || Math.abs(mhz - centre) >= (channelKhz || (mode === "am" ? 8.33 : 12.5)) / 1000 - 1e-9;
-
 /** Where Look here tunes a receiver in a band: always on the band's raster, so the frequency the
  * page shows is the one the receiver is on. The strongest station heard in the band, else the
  * band's middle. A receiver that should stay where it is (it follows stations in that band, and
- * moving it would pause them) is given its `window`: the strongest heard inside it, else a
- * channel near its middle, clear of the dongle's own spike at its centre. */
-export function lookAt(band: RasterBand, heard: { mhz: number; snr_db?: number | null }[], window?: { lo: number; hi: number } | null): number {
-  const centre = window ? (window.lo + window.hi) / 2 : 0;
-  const m = edgeMargin(band.mode);
-  const fits = (f: number) => f >= band.start_mhz && f <= band.stop_mhz
-    && (!window || (f >= window.lo + m && f <= window.hi - m && clearOfCentre(f, centre, band.mode, band.channel_khz)));
+ * moving it would pause them) is given its `span`: the strongest heard where it hears them, else
+ * a channel near its middle, clear of the dongle's own spike at its centre. */
+export function lookAt(band: RasterBand, heard: { mhz: number; snr_db?: number | null }[], span?: Span | null): number {
+  const fits = (f: number) => f >= band.start_mhz && f <= band.stop_mhz && (!span || hears(span, f, band.mode, band.channel_khz));
   const best = heard.filter((e) => fits(e.mhz)).sort((a, b) => (b.snr_db ?? 0) - (a.snr_db ?? 0))[0];
   if (best) return onRaster(band, best.mhz);
-  if (window) return onRaster(band, centre + (OFF_CENTRE_MHZ[band.mode || "nfm"] ?? 0.25));
+  if (span) return onRaster(band, (span[0] + span[1]) / 2 + (OFF_CENTRE_MHZ[band.mode || "nfm"] ?? 0.25));
   return onRaster(band, (band.start_mhz + band.stop_mhz) / 2);
 }
 
@@ -253,13 +314,14 @@ export const centreBelow = (mhz: number, mode: string | null | undefined) => +(m
 /** The frequency to tune so that the server, moving the dongle for it, centres it on `centre`. */
 export const lookTune = (centre: number, mode: string | null | undefined) => round3(centre + (OFF_CENTRE_MHZ[mode || "nfm"] ?? 0.25));
 
-/** Where a receiver dragged to `x` looks: on a band narrower than its window, the band's middle;
- * otherwise the frequency under the pointer, to 100 kHz, kept inside the tuner's range. */
-export function dragCentre(x: number, scale: Scale, bands: DialBand[], spanMhz: number): number {
+/** Where a receiver `widthMhz` wide (its span's), dragged to `x`, looks: on a band it hears whole
+ * from the band's middle, that middle; otherwise the frequency under the pointer, to 100 kHz,
+ * kept inside the tuner's range. */
+export function dragCentre(x: number, scale: Scale, bands: DialBand[], widthMhz: number): number {
   const f = scale.mhz(x);
   const b = bandAt(onDial(bands), f);
-  if (b && b.stop_mhz - b.start_mhz <= spanMhz - 0.24) return round3((b.start_mhz + b.stop_mhz) / 2);
-  const half = spanMhz / 2;
+  if (b && b.stop_mhz - b.start_mhz <= widthMhz - 2 * edgeMargin(b.mode)) return round3((b.start_mhz + b.stop_mhz) / 2);
+  const half = widthMhz / 2;
   return round3(Math.min(TUNER_MHZ[1] - half, Math.max(TUNER_MHZ[0] + half, Math.round(f * 10) / 10)));
 }
 

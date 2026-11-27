@@ -6,7 +6,7 @@ import { ActButton, Button, toast } from "../components/ui";
 import { type Any, ApiError, post } from "./api";
 import { and } from "./bands";
 import { watchCentre, watchWindow } from "./catches";
-import { bandAt, centreBelow } from "./dial";
+import { bandAt, centreBelow, width } from "./dial";
 import { rxName } from "./Receivers";
 
 /** Where receiver `rx` hears station `s` again: a watch's window where the server tunes a watch,
@@ -14,7 +14,7 @@ import { rxName } from "./Receivers";
 function centreFor(rx: Any, s: Any, bands: Any[], watch: unknown, mode?: string | null): number {
   const spec = watch as string | number[] | null | undefined;
   const b = spec == null ? null : typeof spec === "string" ? bands.find((x) => x.id === spec) : bandAt(bands, spec[0]);
-  return b && spec != null ? watchCentre(watchWindow(b, spec), rx.span_mhz) : centreBelow(s.mhz, mode || bandAt(bands, s.mhz)?.mode);
+  return b && spec != null ? watchCentre(watchWindow(b, spec), width(rx.span_mhz)) : centreBelow(s.mhz, mode || bandAt(bands, s.mhz)?.mode);
 }
 
 /** `rx`, `s`: the receiver and its station as /radio lists them. `watch`: the station's watch,

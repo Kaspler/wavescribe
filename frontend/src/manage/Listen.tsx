@@ -7,7 +7,7 @@ import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Tabl
 import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
 import { addedToast } from "./added";
 import { and, fmtMhz } from "./bands";
-import { bandAt } from "./dial";
+import { type LiveReceiver, bandAt, hears, usable } from "./dial";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
 import { Scope, snap } from "./Scope";
@@ -137,14 +137,15 @@ interface TunedProps {
 }
 
 function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
-  const { st, dev, close, blocked, setSt: onPoll } = t;
+  const { dev, close, blocked, setSt: onPoll } = t;
+  const st = t.st!;
   const band = st.band;
   const [zoom, setZoom] = useState<Zoom>(() => (st.mode === "wfm" ? "full" : "400"));
   const wide = st.mode === "wfm";
   useEffect(() => { setZoom(wide ? "full" : "400"); }, [wide]); // a narrow channel is lost in the whole band
   const [view, setView] = useState<[number, number] | null>(null);
 
-  const lo = st.center_mhz - st.span_mhz / 2, hi = st.center_mhz + st.span_mhz / 2;
+  const [lo, hi] = st.span_mhz;
   // A zoomed view stays put while the tuning moves inside it, and follows when it leaves.
   useEffect(() => {
     if (zoom === "full") { setView(null); return; }
@@ -174,11 +175,11 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
           <p className="m-trouble">{st.error ? `Receiver ${rxName(dev)} stopped: ${st.error}. Tune again to restart it.` : `Receiver ${rxName(dev)} has stopped sending: reconnecting…`}</p>
         )}
 
-        <Scope spectrum={st.spectrum || null} centerMhz={st.center_mhz} spanMhz={st.span_mhz} view={view} tunedMhz={st.mhz} mode={st.mode}
+        <Scope spectrum={st.spectrum || null} span={st.span_mhz} view={view} tunedMhz={st.mhz} mode={st.mode}
                channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={band} markers={markers} onTune={steps.to} onStep={steps.step} />
         <div className="lv-under">
           <Segmented label="Zoom" value={zoom} onChange={setZoom} options={[...ZOOMS]} />
-          <span className="m-hint">Click to tune, scroll or use the arrow keys to step. Receiver {rxName(dev)} hears {lo.toFixed(2)} to {hi.toFixed(2)} MHz.</span>
+          <span className="m-hint">Click to tune, scroll or use the arrow keys to step. Receiver {rxName(dev)} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz.</span>
         </div>
         {st.paused?.length > 0 && (
           <p className="m-hint">
@@ -194,18 +195,20 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
 
 // -- scanning --------------------------------------------------------------------------------
 
-function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: Any; radio: Any; dev: string; view: [number, number] | null; stepKhz: number; onPoll: (s: Any) => void }) {
+function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: LiveReceiver; radio: Any; dev: string; view: [number, number] | null; stepKhz: number; onPoll: (s: Any) => void }) {
   const band = st.band && st.band.mode === st.mode ? st.band : null;
   const [source, setSource] = useState<string>(band ? "band" : "view");
   const [threshold, setThreshold] = useState(10);
   const [hold, setHold] = useState(2);
-  const margin = 0.06;
-  const lo = st.center_mhz - st.span_mhz / 2 + margin, hi = st.center_mhz + st.span_mhz / 2 - margin;
-  const heard: number[] = (radio?.heard || []).filter((e: Any) => e.mode === st.mode && e.mhz >= lo && e.mhz <= hi).map((e: Any) => e.mhz);
+  // Only channels the receiver hears where it is tuned: inside its edges and, being narrow, off
+  // the spike at its centre, as the server scans them.
+  const [lo, hi] = usable(st.span_mhz, st.mode);
+  const heardHere = (f: number) => hears(st.span_mhz, f, st.mode, st.channel_khz);
+  const heard: number[] = (radio?.heard || []).filter((e: Any) => e.mode === st.mode && heardHere(e.mhz)).map((e: Any) => e.mhz);
   const lists: Record<string, number[]> = {
-    band: band ? raster(Math.max(lo, band.start_mhz), Math.min(hi, band.stop_mhz), band.step_khz || stepKhz, band) : [],
+    band: band ? raster(Math.max(lo, band.start_mhz), Math.min(hi, band.stop_mhz), band.step_khz || stepKhz, band).filter(heardHere) : [],
     heard,
-    view: raster(view ? view[0] : lo, view ? view[1] : hi, stepKhz, null),
+    view: raster(view ? Math.max(lo, view[0]) : lo, view ? Math.min(hi, view[1]) : hi, stepKhz, null).filter(heardHere),
   };
   const freqs = lists[source] || [];
   const inBand = band ? raster(band.start_mhz, band.stop_mhz, band.step_khz || stepKhz, band).length : 0;
@@ -274,7 +277,7 @@ function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: Any; radio: 
 
 /** Keeps what is tuned as a station. Its language is named, or detected among any the model
  * tells apart: this route takes no list of the languages it mostly is. */
-function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; onKept: () => Promise<void> }) {
+function Keep({ st, radio, dev, onKept }: { st: LiveReceiver; radio: Any; dev: string; onKept: () => Promise<void> }) {
   const [does, setDoes] = useState<string>("translate");
   // Until the person chooses, the language follows what is tuned, once the receivers are known.
   const [chosen, setLang] = useState<string | null>(null);

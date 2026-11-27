@@ -5,6 +5,7 @@ import { S } from "../lib/live";
 import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act, toast } from "../components/ui";
 import { type Any, ApiError, del, docUrl, get, post, useLoad } from "./api";
 import { and } from "./bands";
+import { type Receiver, type Span, usable } from "./dial";
 
 // The reading view loads it on its own when a column offers the move: it stays its own piece.
 const MoveStation = lazy(() => import("./MoveStation"));
@@ -212,7 +213,10 @@ function DeviceForm({ pre, onDone, onCancel }: { pre: Any; onDone: () => Promise
 
 const RATES: [string, string][] = [["960000", "0.96 MS/s"], ["1200000", "1.2 MS/s"], ["1440000", "1.44 MS/s"], ["1920000", "1.92 MS/s"], ["2400000", "2.4 MS/s"]];
 
-function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
+/** How far either side of its centre a receiver hears a channel, in MHz, for saying so. */
+const reach = ([lo, hi]: Span) => +((hi - lo) / 2).toFixed(2);
+
+function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
   const [center, setCenter] = useState(String(d.center_mhz));
   const [gain, setGain] = useState(String(d.gain_db));
   const [rate, setRate] = useState(String(d.sample_rate));
@@ -263,7 +267,7 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
   const over = d.clipped > 0.001;
   return (
     <Section id={`dv-${d.id}`} title={`Receiver ${rxName(d.id)}`}
-             description={`Hears ${d.span_mhz[0]}–${d.span_mhz[1]} MHz around its centre.`}
+             description={`Takes in ${+d.span_mhz[0].toFixed(3)}–${+d.span_mhz[1].toFixed(3)} MHz around its centre.`}
              actions={<>
                {d.running ? <Tag tone="good">running</Tag> : <Tag tone="muted">idle</Tag>}
                {over && <Tag tone="warn">overload {(d.clipped * 100).toFixed(2)}%</Tag>}
@@ -271,7 +275,8 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
                {d.origin === "page" && <Tag tone="accent">added here</Tag>}
              </>}>
       <div className="m-form m-form-4">
-        <Field id={`c-${d.id}`} label="Centre (MHz)" hint="The middle of what it hears: stations up to about 1 MHz either side are heard.">
+        <Field id={`c-${d.id}`} label="Centre (MHz)"
+               hint={`The middle of what it takes in: FM stations up to ${reach(usable(d.span_mhz, "wfm"))} MHz either side are heard, narrow channels up to ${reach(usable(d.span_mhz, "nfm"))} MHz.`}>
           <Input id={`c-${d.id}`} type="number" step={0.05} value={center} onChange={(e) => setCenter(e.target.value)} />
         </Field>
         <Field id={`g-${d.id}`} label="Gain (dB)" hint="How much it amplifies, 0–49.6. Too much overloads it and adds false signals; too little loses weak stations.">

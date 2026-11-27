@@ -8,7 +8,7 @@ import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import { agoWords } from "../lib/time";
 import type { Any } from "./api";
 import { type Band, and, bandWords } from "./bands";
-import { type Segment, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks } from "./dial";
+import { type LiveReceiver, type Receiver, type Segment, type Span, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks, width as widthOf } from "./dial";
 import { rxName } from "./Receivers";
 import { type Marker, Scope } from "./Scope";
 import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps } from "./tuner";
@@ -253,7 +253,9 @@ export function BandCard({ band, kept, policies, heard, children }: { band: Band
 /** What a receiver is doing, as the dial draws it and says it. */
 export interface RxStatus {
   id: string;
-  /** Its window: what it hears now, or, while it scans, the range it sweeps. */
+  /** What it takes in, where it is tuned now. */
+  span: Span;
+  /** Its window as drawn: its span, or, while it scans, the range it sweeps. */
   lo: number;
   hi: number;
   state: "idle" | "hand" | "stations" | "testing" | "scanning" | "trouble";
@@ -268,11 +270,10 @@ export interface RxStatus {
 /** A receiver's state from what the radio view (`r`: what holds it, as `busy_code`, its stations,
  * the scan) and the tuner (`live`: where the dongle is tuned now, whether it is tuned by hand and
  * answering) say about it. The tuner's word on listening by hand is the newer one. */
-export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStatus {
-  const centre = live?.center_mhz ?? r.center_mhz;
+export function rxStatus(r: Receiver, live: LiveReceiver | undefined, job: Any | null): RxStatus {
   const span = live?.span_mhz ?? r.span_mhz;
-  const running = (r.stations || []).filter((s: Any) => s.running).map((s: Any) => s.name);
-  const base = { id: r.id, lo: centre - span / 2, hi: centre + span / 2, holders: running };
+  const running = r.stations.filter((s) => s.running).map((s) => s.name);
+  const base = { id: r.id, span, lo: span[0], hi: span[1], holders: running };
   const scan = job && job.device === r.id && !["done", "error"].includes(job.phase) ? job : null;
   if (scan || r.busy_code === "scan") {
     const since = agoWords(scan?.started);
@@ -323,7 +324,7 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
   const placed = marks(rxs.map((r) => ({ id: r.id, lo: r.lo, hi: r.hi })), scale, width, 40);
   const rows = Math.max(1, ...placed.map((m) => m.row + 1));
   const by = Object.fromEntries(rxs.map((r) => [r.id, r]));
-  const span = (id: string) => by[id].state === "scanning" ? 2.4 : by[id].hi - by[id].lo;
+  const span = (id: string) => widthOf(by[id].span);
   return (
     <div className="dl-rxs" style={{ height: rows * TAB_ROW }}>
       {placed.map((m) => {
@@ -342,7 +343,7 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
                            top: rows * TAB_ROW + TO_TRACK - 3, height: TRACK + 6 }} />
             <button type="button" className="dl-rx-tab" style={{ left, top: m.row * TAB_ROW }}
                     aria-pressed={m.id === chosen}
-                    aria-label={`Receiver ${rxName(m.id)}, ${r.words}, ${r.state === "scanning" ? "over" : "hearing"} ${+r.lo.toFixed(2)} to ${+r.hi.toFixed(2)} MHz${band ? ` in ${bandWords(band).name}` : ""}`}
+                    aria-label={`Receiver ${rxName(m.id)}, ${r.words}, ${r.state === "scanning" ? "over" : "taking in"} ${+r.lo.toFixed(2)} to ${+r.hi.toFixed(2)} MHz${band ? ` in ${bandWords(band).name}` : ""}`}
                     title={centre != null ? `Look at ${mhzText(centre)} with Receiver ${rxName(m.id)}` : `Receiver ${rxName(m.id)}: ${r.words}. Drag along the dial to move it.`}
                     onClick={() => { if (!dragging) onChoose(m.id); }}
                     onPointerDown={(e) => {
@@ -392,7 +393,7 @@ export function dialMarkers(heard: Any[], signals: Any[], lo: number, hi: number
  * spectrum and waterfall, where a click listens. `signals`: what a scan found in the window, for
  * the lines that aren't transmissions. */
 export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[]; signals: Any[]; onAdd: (pre: Any) => void }) {
-  const st = t.st;
+  const st = t.st!;
   useLivePoll(t, null);
   const steps = useSteps(t, null);
   const name = rxName(t.dev);
@@ -421,12 +422,12 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
       {!st.connected && (st.error || st.reconnects > 0) && (
         <p className="m-trouble">{st.error ? `Receiver ${name} stopped: ${st.error}. Look here again to restart it.` : `Receiver ${name} has stopped sending: reconnecting…`}</p>
       )}
-      <Scope spectrum={st.spectrum || null} centerMhz={st.center_mhz} spanMhz={st.span_mhz} view={null} tunedMhz={st.mhz} mode={st.mode}
+      <Scope spectrum={st.spectrum || null} span={st.span_mhz} view={null} tunedMhz={st.mhz} mode={st.mode}
              channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={st.band} markers={dialMarkers(heard, signals, steps.lo, steps.hi)}
              onTune={(mhz) => t.tune(steps.keep({ mhz: +mhz.toFixed(5) }), true)} onStep={steps.step}
              inWords="The table below lists what has been found in this band, strongest first." />
       <p className="m-hint">
-        Receiver {name} hears {steps.lo.toFixed(2)} to {steps.hi.toFixed(2)} MHz. Click a signal, or anywhere, to listen there; the arrow
+        Receiver {name} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz. Click a signal, or anywhere, to listen there; the arrow
         keys step. Nothing heard here is kept until you add it as a station.
         {st.paused?.length > 0 && ` ${and(st.paused)} ${st.paused.length === 1 ? "waits" : "wait"} until you let the receiver go.`}
       </p>

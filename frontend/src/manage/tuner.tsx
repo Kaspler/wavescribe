@@ -8,7 +8,7 @@ import { S } from "../lib/live";
 import { useTopics } from "../lib/store";
 import { ApiError, type Any, del, get, post, useEvery, useLoad } from "./api";
 import { and, bandLine, fmtMhz } from "./bands";
-
+import { type LiveReceiver, type Span, hears, usable } from "./dial";
 import { rxName } from "./Receivers";
 import { snap } from "./Scope";
 
@@ -97,15 +97,16 @@ export class Player {
 }
 
 /** A receiver tuned by hand from the page (radio/live.py): the receivers, the one in use, what it
- * is tuned to, the question the server asked before it would tune (acknowledge, busy), and the
- * sound. Listen's tuner and the dial on Find, On the air share it, so a receiver tuned on one is
+ * is tuned to (`st`, while it is open: the views of an open receiver below, and those drawn from
+ * them, are drawn only then), the question the server asked before it would tune (acknowledge,
+ * busy), and the sound. Listen's tuner and the dial on Find, On the air share it, so a receiver tuned on one is
  * tuned on the other. `from`: which of the two this is. `first`: a frequency to tune and play as
  * soon as a receiver is chosen. */
 export function useTuner(from: "find" | "listen", first: () => Any | null = () => null) {
   const { data: all, error, reload } = useLoad(() => get("/live"));
-  const receivers: Any[] = all?.receivers || [];
+  const receivers: LiveReceiver[] = all?.receivers || [];
   const [dev, setDevState] = useState<string>("");
-  const [st, setSt] = useState<Any | null>(null);
+  const [st, setSt] = useState<LiveReceiver | null>(null);
   const [ask, setAsk] = useState<{ code: string; message: string; body: Any; holders?: string[]; dev: string } | null>(null);
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -129,8 +130,8 @@ export function useTuner(from: "find" | "listen", first: () => Any | null = () =
       return;
     }
     const cur = receivers.find((r) => r.id === dev);
-    const hears = (r: Any) => Math.abs(asked.mhz - r.center_mhz) < r.span_mhz / 2 - 0.06;
-    const pick = receivers.find((r) => r.id === asked.device) || (st?.open ? cur : null) || receivers.find(hears)
+    const holds = (r: LiveReceiver) => hears(r.span_mhz, asked.mhz, asked.mode);
+    const pick = receivers.find((r) => r.id === asked.device) || (st?.open ? cur : null) || receivers.find(holds)
       || receivers.find((r) => !r.holders.length) || cur || receivers[0];
     setAsked(null);
     moveTo(pick.id, { mhz: asked.mhz, mode: asked.mode });
@@ -256,12 +257,14 @@ export function useLivePoll(t: Tuner, view: [number, number] | null) {
 /** Moving the tuning of an open receiver: to a frequency, by steps of the band's raster, and to
  * the next signal either way (`seek`), which moves the dongle along at the edge of what it hears. */
 export function useSteps(t: Tuner, view: [number, number] | null) {
-  const st = t.st;
+  const st = t.st!;
   const band = st.band;
   const usual = () => (band?.step_khz && band.mode === st.mode ? band.step_khz : STEPS[st.mode][0]);
   const [stepKhz, setStepKhz] = useState<number>(usual);
   useEffect(() => { setStepKhz(usual()); }, [st.mode, band?.id]);
-  const lo = st.center_mhz - st.span_mhz / 2, hi = st.center_mhz + st.span_mhz / 2;
+  const [lo, hi] = st.span_mhz;
+  // Where a channel of the mode tuned is heard, for saying so: a little inside the edges.
+  const heard: Span = usable(st.span_mhz, st.mode);
   const keep = (m: Any) => ({ mode: st.mode, squelch_db: st.squelch_db, ...m });
   const to = (mhz: number) => t.tune(keep({ mhz: +mhz.toFixed(5) }));
   const step = (n: number) => to(snap(st.mhz + (n * stepKhz) / 1000, stepKhz, band));
@@ -287,14 +290,14 @@ export function useSteps(t: Tuner, view: [number, number] | null) {
   };
 
   const steps = [...new Set([...(band?.step_khz && band.mode === st.mode ? [band.step_khz] : []), ...STEPS[st.mode]])];
-  return { stepKhz, setStepKhz, steps, keep, to, step, seek, lo, hi };
+  return { stepKhz, setStepKhz, steps, keep, to, step, seek, lo, hi, heard };
 }
 export type Steps = ReturnType<typeof useSteps>;
 
 /** The tuning in large type, editable (Enter tunes, the arrow keys step), what is there (RDS,
  * the band and its channel) and the signal meter. */
 export function TunedHead({ t, steps }: { t: Tuner; steps: Steps }) {
-  const st = t.st;
+  const st = t.st!;
   const band = st.band;
   const [entry, setEntry] = useState(fmtMhz(st.mhz, st.mode));
   const [editing, setEditing] = useState(false);
@@ -343,7 +346,7 @@ export function TunedHead({ t, steps }: { t: Tuner; steps: Steps }) {
 
 /** Step and seek, demodulation, squelch, gain, and the sound. */
 export function TuneControls({ t, steps, play }: { t: Tuner; steps: Steps; play: () => void }) {
-  const st = t.st;
+  const st = t.st!;
   const { stepKhz, setStepKhz, keep, step, seek } = steps;
   const tune = t.tune;
   const isNarrow = st.mode !== "wfm";
