@@ -171,8 +171,10 @@ The answers come only from what your stations said. If they didn't cover somethi
 so rather than guessing, but check the quoted moments before acting on an answer.
 
 **What did I miss?** When you've been away, a digest gives a few points the local model picked
-out of what was said, each with the station that said it and the moments it rests on. With
-Wavescribe running, in another Terminal window:
+out of what was said, each with the station that said it and the moments it rests on.
+Digests are experimental: a point can still run two stories together, add a detail no one said
+or cite the wrong moment, so read its moments before you rely on it. With Wavescribe running,
+in another Terminal window:
 
 ```sh
 uv run wavescribe digest                                    # stations heard in the last hour
