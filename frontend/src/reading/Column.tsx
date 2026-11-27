@@ -14,7 +14,7 @@ import { Icon } from "../components/Icon";
 import { WatchNotes } from "../components/Overload";
 import { Button, Lamp, cx } from "../components/ui";
 import { V } from "../lib/view";
-import { bandWords } from "../manage/bands";
+import { bandWords, placeWords } from "../manage/bands";
 
 const FLASH_MS = 2400; // how long a line asked for by a link stays marked
 const PAGES_BACK = 20; // how far "Load earlier" may page back to reach such a line
@@ -392,7 +392,7 @@ const ParaView = memo(function ParaView({ para, st, shown, src, channel }: { par
         <time className="ts num" title={hms(para.start)}>{whenLabel(para.start)}</time>
       )}
       <div className="para-body">
-        {channel && <p className="para-ch num">{channelText(para.utts[0])}</p>}
+        {channel && <p className="para-ch num">{channelText(para.utts[0], placeWords)}</p>}
         <p className="para-text" dir={dirOf(shown)} onClick={onClick}
            onMouseOver={src ? (e) => setLinked(keyOf(e)) : undefined} onMouseLeave={src ? () => setLinked(null) : undefined}>
           {para.utts.map((u, i) => (

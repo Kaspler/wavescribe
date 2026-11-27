@@ -6,12 +6,13 @@ import { overloadOf, warningBeside } from "../lib/overload";
 import { useTopics } from "../lib/store";
 import { hm, isoTime } from "../lib/time";
 import type { Overload } from "../lib/types";
+import { placeWords } from "../manage/bands";
 import { channelText } from "../reading/channels";
 import { Icon } from "./Icon";
 
 /** When it was last seen, on which channel where known, and what to do, in the server's words. */
 export function OverloadNote({ o }: { o: Overload }) {
-  const where = channelText({ freq_hz: o.freq_hz });
+  const where = channelText({ freq_hz: o.freq_hz }, placeWords);
   return (
     <p className="ovl-note">
       <Icon name="info" size={14} />

@@ -22,7 +22,10 @@ export interface Catch {
   duration: number;
   mode: string;
   band: string | null;
-  /** The band's name, with the channel number where it has one. */
+  /** Its number in the band's channel list; null where the band has none. */
+  channel: number | null;
+  /** The plan's name for the band, with the channel number where it has one: what is said where
+   * the page has no name for the band (bands.ts, placeWords). */
   label: string;
   snr_db: number;
   peak_db: number;
@@ -51,6 +54,7 @@ export interface Spot {
   mhz: number;
   mode: string;
   band: string | null;
+  channel: number | null;
   label: string;
   privacy: string;
   catches: Catch[];
@@ -91,7 +95,7 @@ export function groupCatches(list: Catch[], notes: Note[] = []): Spot[] {
     if (!s) {
       const n = noted.get(c.freq_hz);
       s = {
-        freq_hz: c.freq_hz, mhz: c.mhz, mode: c.mode, band: c.band, label: c.label, privacy: c.privacy, catches: [], last: c.t_start,
+        freq_hz: c.freq_hz, mhz: c.mhz, mode: c.mode, band: c.band, channel: c.channel ?? null, label: c.label, privacy: c.privacy, catches: [], last: c.t_start,
         name: (n ? n.name : c.name) || "", note: (n ? n.note : c.note) || "", tags: (n ? n.tags : c.tags) || [],
       };
       spots.set(c.freq_hz, s);

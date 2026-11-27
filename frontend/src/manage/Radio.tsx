@@ -9,7 +9,7 @@ import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
-import { type Band, and, bandLabel, bandLine, bandWords, fmtMhz, labelWords } from "./bands";
+import { type Band, and, bandLabel, bandLine, bandWords, fmtMhz, placeWords } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
@@ -684,8 +684,9 @@ function Region({ v, reload, held }: { v: Any; reload: () => Promise<void>; held
 
 function ScanProgress({ job, bands }: { job: Any; bands: Band[] }) {
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-  // A band scanned is called as the page calls it; a range is said as the server says it.
-  const what = labelWords({ band: job.band, label: job.what }, bands);
+  // A band scanned (the job names its band) is called as the page calls it; a range is said as
+  // the server says it.
+  const what = placeWords({ band: job.band, channel: null, label: job.what }, bands);
   let text: string;
   switch (job.phase) {
     case "starting": text = "Starting…"; break;
@@ -719,7 +720,7 @@ function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (devic
       <p>
         {result.phase === "error"
           ? <>{who} couldn't scan: {result.error}.</>
-          : <>{who} heard nothing {result.what ? `on ${labelWords({ band: result.band, label: result.what }, v.bands)}` : "in its last scan"}. Is its antenna connected?</>}
+          : <>{who} heard nothing {result.what ? `on ${placeWords({ band: result.band, channel: null, label: result.what }, v.bands)}` : "in its last scan"}. Is its antenna connected?</>}
         {choices ? " Try another receiver:" : " Check the antenna and its cable, or raise the gain under Settings, Receivers."}
       </p>
       {choices && (
@@ -743,8 +744,10 @@ function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (devic
 
 /** One signal a scan found, as far as this page decides on it; its other fields pass through. */
 interface Signal {
-  /** The band plan's id of its band, and what it is in the plan's words (labelWords). */
+  /** The band plan's id of its band, its number in the band's channel list, and what it is in
+   * the plan's words (placeWords). */
   band?: string | null;
+  channel?: number | null;
   label?: string | null;
   spur?: boolean;
   /** Set with `spur` on a narrow line at a multiple of 2.4 MHz: another receiver's clock. */
@@ -771,7 +774,7 @@ function SignalRow({ s, bands, station, onAdd, common, onListen = listenTo }: {
 }) {
   const rds = s.rds || {};
   const name = s.user_name || rds.ps || "";
-  const what = [s.label !== common && (labelWords(s, bands) || "Unlisted"), rds.pty && rds.pty_name].filter(Boolean).join(" · ");
+  const what = [s.label !== common && (placeWords(s, bands) || "Unlisted"), rds.pty && rds.pty_name].filter(Boolean).join(" · ");
   const clock = s.spur && s.clock_hz != null;
   return (
     <tr>
@@ -1113,7 +1116,7 @@ export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
               const playing = playingMhz != null && Math.abs(playingMhz - e.mhz) < 0.003;
               const f = fmtMhz(e.mhz, e.mode);
               const name = e.user_name || e.name;
-              const label = labelWords(e, v.bands) || "Unlisted";
+              const label = placeWords(e, v.bands) || "Unlisted";
               const kind = e.privacy !== "broadcast" && (CLASS_WORD[e.privacy] || e.privacy);
               return (
                 <li key={e.freq_hz} className={cx("ls-row", playing && "is-playing")}>
@@ -1202,7 +1205,7 @@ function Heard({ v, onAdd, reload }: { v: Any; onAdd: (t: Any) => void; reload: 
               )}
             </td>
             <td>
-              <span className="rd-what">{[labelWords(e, v.bands) || "Unlisted", e.rds?.pty && e.rds?.pty_name].filter(Boolean).join(" · ")}</span>
+              <span className="rd-what">{[placeWords(e, v.bands) || "Unlisted", e.rds?.pty && e.rds?.pty_name].filter(Boolean).join(" · ")}</span>
               {e.privacy !== "broadcast" && <Tag tone="muted">{CLASS_WORD[e.privacy] || e.privacy}</Tag>}
               {bandLine(e.band) && <span className="rd-sub">{bandLine(e.band)}</span>}
             </td>

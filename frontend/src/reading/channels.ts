@@ -1,17 +1,22 @@
-// Where a column's lines were heard, as the server names it (`freq_hz` and `label` on each
-// utterance). Plain functions, so they can be tested without a page.
+// Where a column's lines were heard, from what the server says of each utterance (`freq_hz`,
+// and the plan's `band`, `channel` and `label`). Plain functions, so they can be tested without a
+// page.
 
-interface Heard {
+export interface Heard {
   freq_hz?: number | null;
+  band?: string | null;
+  channel?: number | null;
   label?: string | null;
 }
 
-/** "446.00625 MHz · PMR446 walkie-talkies, channel 1": the frequency, and the band plan's name
- * for it where the server has one. Null for a line with no frequency (a stream's). */
-export function channelText(u: Heard): string | null {
+/** "446.00625 MHz · Walkie-talkies, channel 1": the frequency, and what `named` calls it (the
+ * band as the page calls it with the channel's number: bands.ts, placeWords). Null for a line
+ * with no frequency (a stream's). */
+export function channelText(u: Heard, named: (u: Heard) => string): string | null {
   if (u.freq_hz == null) return null;
   const mhz = (u.freq_hz / 1e6).toFixed(5).replace(/(\.\d{3}\d*?)0+$/, "$1");
-  return u.label ? `${mhz} MHz · ${u.label}` : `${mhz} MHz`;
+  const where = named(u);
+  return where ? `${mhz} MHz · ${where}` : `${mhz} MHz`;
 }
 
 /** For each paragraph, whether it says its channel: in a watch's column the first of each run of

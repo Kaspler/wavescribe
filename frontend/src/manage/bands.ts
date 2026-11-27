@@ -155,13 +155,30 @@ export const bandLabel = (b: { id: string; name: string }): string => {
   return w.label || w.name;
 };
 
-/** What a scan or a watch says a frequency is, with its band called as the page calls it. `label`
- * is the plan's band name, then the channel where the band numbers its channels ("Marine VHF,
- * channel 16"); `band` is that band's id. "" where it says nothing. */
-export function labelWords(e: { band?: string | null; label?: string | null }, bands: { id: string; name: string }[]): string {
+/** The channel at `mhz` in a band's channel list, 1-based, within 2 kHz as the server finds it
+ * (bandplan.channel_number); null off the list, or for a band without one. */
+export function channelAt(b: { channels_mhz?: number[] }, mhz: number | null | undefined): number | null {
+  if (mhz == null || !b.channels_mhz?.length) return null;
+  const i = b.channels_mhz.findIndex((c) => Math.abs(c - mhz) <= 0.002);
+  return i < 0 ? null : i + 1;
+}
+
+/** What a frequency is, in the page's words: its band as the page calls it, then the channel's
+ * number where the band numbers its channels ("Boats and ports, channel 16"), from the server's
+ * `band` (the plan's id) and `channel`; a row that doesn't carry `channel` (what a scan heard
+ * before) finds it in the band's list at `mhz`. Without `bands`, only a band the page has words
+ * for is named. The plan's `label` stands where there is no band, or one the page can't name
+ * (scanning a range, say "88 to 90 MHz"); "" where nothing is known. */
+export function placeWords(
+  e: { band?: string | null; channel?: number | null; label?: string | null; mhz?: number | null },
+  bands: { id: string; name: string; channels_mhz?: number[] }[] = [],
+): string {
   const b = e.band ? bands.find((x) => x.id === e.band) : undefined;
-  if (!e.label || !b || !e.label.startsWith(b.name)) return e.label || "";
-  return bandLabel(b) + e.label.slice(b.name.length);
+  const own = e.band ? WORDS[e.band] : undefined;
+  const name = b ? bandLabel(b) : own ? own.label || own.name : null;
+  if (!name) return e.label || "";
+  const n = e.channel !== undefined ? e.channel : b ? channelAt(b, e.mhz) : null;
+  return n != null ? `${name}, channel ${n}` : name;
 }
 
 /** 98.6 for broadcast FM; 446.00625, 118.050 for channels (at least three decimals). */

@@ -65,9 +65,12 @@ export interface Utterance {
   flags?: string[];
   hits?: Hit[];
   /** Where it was heard: the channel a watch caught it on, or a radio station's own frequency
-   * (null for a stream), and the band plan's name for it, with the channel number where the
-   * band has a list. */
+   * (null for a stream); the band plan's id for it (null off the plan) and its number in that
+   * band's channel list (null where the band has none); and the plan's name for it, said only
+   * where the page has none (reading/channels.ts). */
   freq_hz?: number | null;
+  band?: string | null;
+  channel?: number | null;
   label?: string | null;
 }
 

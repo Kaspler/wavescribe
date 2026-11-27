@@ -9,7 +9,7 @@ import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { addedToast } from "./added";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
-import { type Band, and, bandWords, fmtMhz, labelWords } from "./bands";
+import { type Band, and, bandWords, fmtMhz, placeWords } from "./bands";
 import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, groupCatches, voiceWord, windowWords } from "./catches";
 import { Refusal } from "./Refusal";
 import { type Refused, refused } from "./refusals";
@@ -244,7 +244,7 @@ export function Caught({ bands, watches, keptNothing, onAdd, onChooseBand }: {
         <p className="m-loading">{error ? `Couldn't load what was caught: ${error}` : "Loading…"}</p>
       ) : spots.length ? (
         <ul className="m-list cg-list">
-          {spots.map((s) => <SpotRow key={s.freq_hz} s={s} label={labelWords(s, bands)} band={s.band ? name(s.band) : null} onAdd={onAdd} onNoted={reloadNotes} />)}
+          {spots.map((s) => <SpotRow key={s.freq_hz} s={s} label={placeWords(s, bands)} band={s.band ? name(s.band) : null} onAdd={onAdd} onNoted={reloadNotes} />)}
         </ul>
       ) : watches.length || all.length ? (
         <p className="m-empty">
