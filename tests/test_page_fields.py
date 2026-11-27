@@ -7,10 +7,13 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 from tests.test_radio_watch_log import TWO_M, catch, words
 from tests.test_retune import running, stations, two_metres_centre
 from tests.test_store import result
 from wavescribe.radio.bandplan import apply_policies, channel_label
+from wavescribe.radio.watch import WatchError, plan_window
 from wavescribe.segment import Utterance
 
 SLICE = {"id": "slice", "name": "Slice", "device": "a", "watch": [145.5, 145.6],
@@ -129,4 +132,60 @@ def test_what_a_watch_caught_comes_with_its_translations_where_its_words_may_go(
         assert store._db.execute("SELECT count(*) FROM translations").fetchone()[0] == 3
     finally:
         apply_policies()
+        r.close()
+
+
+def test_a_watch_too_wide_says_so_with_the_slice_that_fits(tmp_path: Path) -> None:
+    with pytest.raises(WatchError) as said:
+        plan_window("marine", "cept", rate=2_400_000)
+    r = running(tmp_path, stations(two_metres_centre()))
+    try:
+        body = {"name": "Ships", "device": "a", "watch": "marine", "language": "auto"}
+        status, err = r.call("POST", "/api/manage/stations", body)
+        assert status == 400 and err["code"] == "too_wide"
+        assert err["error"] == f"station 'ships' (ships): {said.value}"  # the words as they were
+        assert err["slice_mhz"] == [156.0, 157.425]
+        assert "e.g. 156.000:157.425 (58 channels)" in err["error"]
+        assert all(s.id != "ships" for s in r.app.config.stations)
+    finally:
+        r.close()
+
+
+def test_other_refusals_of_a_watch_or_a_tune_have_a_code(tmp_path: Path) -> None:
+    r = running(tmp_path, stations(two_metres_centre(), RPT))
+    try:
+        watch = {"name": "W", "device": "a", "language": "auto"}
+        station = {"name": "S", "device": "a", "language": "de-DE"}
+        for body, code, words in [
+            ({**watch, "watch": "fm"}, "bad_mode", "a watch listens for narrowband voice"),
+            ({**watch, "watch": "nowhere"}, "unknown_band", "no band 'nowhere' in the band plan"),
+            ({**watch, "watch": [146.0, 145.0]}, "bad_window", "the start must be below the stop"),
+            ({**watch, "watch": "2m", "threshold_db": 1}, "bad_threshold", "'threshold_db' must"),
+            ({**station, "mhz": 145.5, "mode": "ssb"}, "bad_mode", "'mode' must be one of"),
+            ({**station, "mhz": 145.5, "channel_khz": 1}, "bad_channel", "'channel_khz' must"),
+            ({**station, "mhz": "abc"}, "bad_frequency", "must be a frequency in MHz"),
+            ({**station, "mhz": 145.5, "device": "z"}, "no_receiver", "unknown device 'z'"),
+        ]:
+            status, err = r.call("POST", "/api/manage/stations", body)
+            assert status == 400 and err["code"] == code and words in err["error"], (body, err)
+        status, err = r.call("POST", "/api/manage/stations", {**station, "mhz": 446.00625})
+        assert status == 400 and err["code"] == "acknowledge" and err["privacy"] == "private"
+        assert err["error"].endswith("Set acknowledge = true to confirm you may receive it where "
+                                     "you are (docs/RADIO.md)")  # fmt: skip
+        # A change that would tune a station where its receiver doesn't hear it.
+        status, err = r.call("POST", "/api/manage/stations/rpt", {"mhz": 432.5})
+        assert status == 400 and err["code"] == "out_of_reach"
+        assert err["error"].startswith("Receiver A doesn't hear Repeater where it is tuned now")
+
+        tune = {"device": "a", "language": "de-DE"}
+        for body, code, words in [
+            ({**tune, "mhz": 2000}, "out_of_band", "The receiver tunes 24 to 1766 MHz, no higher."),
+            ({**tune, "mhz": "abc"}, "bad_frequency", "'abc' isn't one: give a frequency in MHz"),
+            ({**tune, "mhz": 99.5, "device": "z"}, "no_receiver", "There is no receiver 'z'."),
+            ({**tune, "mhz": 99.5, "mode": "ssb"}, "refused", "'mode' must be one of"),  # as ever
+        ]:
+            status, err = r.call("POST", "/api/manage/radio/tune", body)
+            assert status == 400 and err["code"] == code and words in err["error"], (body, err)
+        assert [s.id for s in r.app.config.stations] == ["stream", "ham2m", "rpt"]
+    finally:
         r.close()

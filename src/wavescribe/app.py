@@ -38,6 +38,7 @@ from wavescribe.pipeline import (
     plan_available,
     plan_station,
 )
+from wavescribe.refusal import Refusal
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
 from wavescribe.rules import LlmRule, parse_rule
 from wavescribe.settings import (
@@ -124,8 +125,9 @@ def _differing(over: dict[str, Any], s: Station, file: Station | None) -> list[s
     return sorted(k for k in over if k not in plain or getattr(s, k) != getattr(file, k))
 
 
-class ChangeError(ValueError):
-    """A change from the page that can't be applied; the message is shown to the user."""
+class ChangeError(Refusal):
+    """A change from the page that can't be applied; the message is shown to the user, and a
+    technical refusal has a ``code`` beside it for the page (wavescribe/refusal.py)."""
 
 
 def slug(text: str) -> str:
@@ -752,7 +754,7 @@ class App:
         mutate(draft)
         config, errors = effective_config(self.base, draft)
         if sid in errors:
-            raise ChangeError(errors[sid])
+            raise ChangeError.of(errors[sid])
         bad = {k: v for k, v in errors.items() if k.startswith("device:")}
         if bad:
             raise ChangeError(next(iter(bad.values())))
@@ -760,7 +762,7 @@ class App:
         prev = next((s for s in self.config.stations if s.id == sid), None)
         moved = prev is None or not prev.out_of_reach or prev.sdr != station.sdr
         if station.out_of_reach and moved and not station.disabled:
-            raise ChangeError(station.out_of_reach)
+            raise ChangeError(station.out_of_reach, "out_of_reach")
         return station
 
     def _acknowledgement(self, sid: str) -> object:

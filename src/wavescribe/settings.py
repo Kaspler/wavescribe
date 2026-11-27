@@ -46,6 +46,7 @@ from wavescribe.config import (
     build_station,
     radio_policy,
 )
+from wavescribe.refusal import said
 
 log = logging.getLogger(__name__)
 
@@ -250,7 +251,7 @@ def _build(
     try:
         station = build_station(merged, f"station {sid!r}", devices, region)
     except ConfigError as e:
-        errors[sid] = str(e)
+        errors[sid] = said(e)  # its code kept beside the words, for the page (refusal.py)
         if fallback is None:
             return None
         station = fallback  # the base definition still works
@@ -263,7 +264,7 @@ def _build(
                 hz, width = fallback.sdr.policed(region)  # a watch: its strictest channel
                 radio_policy(hz, fallback.sdr.mode, region, confirmed, where, width)
             except ConfigError as unconfirmed:
-                errors[sid] = str(unconfirmed)
+                errors[sid] = said(unconfirmed)
                 return replace(fallback, disabled=True)
     return replace(
         station,

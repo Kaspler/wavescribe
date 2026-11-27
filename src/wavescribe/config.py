@@ -28,6 +28,7 @@ from wavescribe.dsp import (
     supported_rate,
 )
 from wavescribe.languages import translation_targets
+from wavescribe.refusal import Refusal
 
 if TYPE_CHECKING:
     from wavescribe.radio.watch import Watch
@@ -56,8 +57,12 @@ DEFAULT_STATIONS_PATH = Path("config/stations.toml")
 EXAMPLE_STATIONS_PATH = Path("config/stations.example.toml")
 
 
-class ConfigError(ValueError):
-    """The configuration file is missing, malformed or inconsistent."""
+class ConfigError(Refusal):
+    """The configuration file is missing, malformed or inconsistent. A technical refusal of a
+    radio station or watch has a ``code`` beside the sentence (wavescribe/refusal.py):
+    ``bad_frequency``, ``out_of_band``, ``bad_mode``, ``bad_channel``, ``bad_squelch``,
+    ``no_receiver``, ``acknowledge`` (with ``privacy``), and for a watch ``unknown_band``,
+    ``bad_window``, ``no_channels``, ``bad_threshold`` and ``too_wide`` (with ``slice_mhz``)."""
 
 
 @dataclass(frozen=True)
@@ -284,7 +289,7 @@ def _frequencies(d: Mapping[str, Any], key: str, where: str) -> tuple[float, ...
     several = value if isinstance(value, list | tuple) else [value]
     if not all(_is_number(f) for f in several):
         raise ConfigError(f"{where}: '{key}' must be a frequency in MHz or a list of them, "
-                          "e.g. 99.0 or [99.0, 94.4]")  # fmt: skip
+                          "e.g. 99.0 or [99.0, 94.4]", "bad_frequency")  # fmt: skip
     return tuple(float(f) for f in several)
 
 
@@ -343,10 +348,13 @@ def _check_serial(serial: str, where: str) -> None:
 def _check_mhz(mhz: object, where: str, tunable: bool = False) -> None:
     try:
         hz = frequency_hz(mhz)
-        if tunable:
-            check_tunable(hz)
     except ValueError as e:
-        raise ConfigError(f"{where}: {e}") from e
+        raise ConfigError(f"{where}: {e}", "bad_frequency") from e
+    if tunable:
+        try:
+            check_tunable(hz)
+        except ValueError as e:
+            raise ConfigError(f"{where}: {e}", "out_of_band") from e
 
 
 def _pick_frequency(fm_mhz: tuple[float, ...], device: SdrDevice, mode: str = "wfm") -> int | None:
@@ -434,7 +442,7 @@ def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: obj
     privacy = band.privacy if band else "private"
     what = band.name if band else "a frequency no band plan lists"
     if mode not in MODES:
-        raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}")
+        raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}", "bad_mode")
     if POLICIES[privacy].needs_ack and not acknowledged(acknowledge, privacy):
         extra = (" It carries a digital service: Wavescribe has no digital decoder, so you will "
                  "hear noise.") if privacy == "digital" else ""  # fmt: skip
@@ -444,7 +452,9 @@ def radio_policy(freq_hz: float, mode: str, region: str | None, acknowledge: obj
         raise ConfigError(
             f"{where}: {mhz} MHz is {what} ({privacy} radio). Laws on receiving it "
             f"differ by country.{extra} {confirm or 'Set acknowledge = true'} to confirm you "
-            "may receive it where you are (docs/RADIO.md)"
+            "may receive it where you are (docs/RADIO.md)",
+            "acknowledge",
+            privacy=privacy,
         )
     return privacy, band.id if band else None
 
@@ -588,9 +598,10 @@ def build_station(
         device = (devices or {}).get(device_id)
         if device is None:
             known = ", ".join(devices or {}) or "none"
-            raise ConfigError(f"{where}: unknown device {device_id!r} (known: {known})")
+            raise ConfigError(f"{where}: unknown device {device_id!r} (known: {known})",
+                              "no_receiver")  # fmt: skip
         if mode not in MODES:
-            raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}")
+            raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}", "bad_mode")
         deemphasis = d.get("deemphasis_us", 50.0)
         if not isinstance(deemphasis, int | float) or deemphasis <= 0:
             raise ConfigError(f"{where}: 'deemphasis_us' must be a positive number (50 or 75)")
@@ -598,17 +609,19 @@ def build_station(
         squelch = d.get("squelch_db")
         for key, value in (("channel_khz", channel), ("squelch_db", squelch)):
             if value is not None and not isinstance(value, int | float):
-                raise ConfigError(f"{where}: '{key}' must be a number")
+                code = "bad_channel" if key == "channel_khz" else "bad_squelch"
+                raise ConfigError(f"{where}: '{key}' must be a number", code)
         if channel and not MIN_CHANNEL_HZ <= channel * 1e3 <= MAX_CHANNEL_HZ:
             raise ConfigError(f"{where}: 'channel_khz' must be {MIN_CHANNEL_HZ / 1e3:g} to "
-                              f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25")  # fmt: skip
+                              f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25",
+                              "bad_channel")  # fmt: skip
         watch, watch_width = None, None
         if d.get("watch") is not None:
             watch, mode, watch_width, out_of_reach = _plan_watch(d, device, region, where, name)
             freq = watch.middle_hz
         elif not freqs:
             raise ConfigError(f"{where}: give the frequency it is on: mhz, or fm_mhz for "
-                              "broadcast FM")  # fmt: skip
+                              "broadcast FM", "bad_frequency")  # fmt: skip
         else:
             # The frequency nearest the centre among those the device hears. None heard: the
             # station is kept, out of reach, until the device is tuned where it hears one.
@@ -708,7 +721,8 @@ def _plan_watch(
     spec, channel = d["watch"], d.get("channel_khz")
     threshold = d.get("threshold_db", THRESHOLD_DB)
     if not _is_number(threshold) or not 3 <= threshold <= 40:
-        raise ConfigError(f"{where}: 'threshold_db' must be 3 to 40 (dB over the noise floor)")
+        raise ConfigError(f"{where}: 'threshold_db' must be 3 to 40 (dB over the noise floor)",
+                          "bad_threshold")  # fmt: skip
     try:
         watch, mode, width = plan_window(
             tuple(spec) if isinstance(spec, list) else spec,
@@ -719,7 +733,7 @@ def _plan_watch(
             threshold_db=threshold,
         )
     except WatchError as e:
-        raise ConfigError(f"{where}: {e}") from None
+        raise ConfigError(f"{where}: {e}", e.code, **e.extra) from None
     unheard = None
     if missing := outside(watch, device.center_hz, device.sample_rate, width):
         from wavescribe.radio.words import receiver_name

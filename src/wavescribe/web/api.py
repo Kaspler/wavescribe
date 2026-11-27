@@ -4,7 +4,9 @@ handler refuses other addresses before a request gets here, and changes need the
 ``X-Wavescribe`` header, which another website's form can't send.
 
 Each route is (method, pattern) -> handler(app, match, query, body) -> JSON-able. A
-``ChangeError`` or ``AdminError`` becomes a 400 with its message for the page to show.
+``ChangeError`` or ``AdminError`` becomes a 400 with its message for the page to show, and the
+``code`` of a technical refusal beside it (wavescribe/refusal.py), so the page needn't judge from
+the words.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from wavescribe import admin
+from wavescribe import admin, refusal
 from wavescribe.admin import AdminError
 from wavescribe.app import ChangeError
 from wavescribe.config import ConfigError
@@ -52,7 +54,7 @@ def dispatch(app: App, method: str, path: str, query: dict[str, str], body: Any)
         except RadioError as e:  # carries what the page needs to ask (acknowledge, retune)
             return 400, {"error": str(e), "code": e.code, **e.extra}
         except (ChangeError, AdminError, ConfigError, ModelError) as e:
-            return 400, {"error": str(e)}
+            return 400, {"error": str(e), **refusal.fields(e)}
         except (KeyError, TypeError, ValueError, AttributeError) as e:  # a field of the wrong type
             return 400, {"error": f"bad request: {e}"}
     return (405 if matched_path else 404), {"error": "no such endpoint"}

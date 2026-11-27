@@ -32,12 +32,15 @@ from wavescribe.radio.bandplan import (
     privacy_of,
     region_band,
 )
+from wavescribe.refusal import Refusal
 
 log = logging.getLogger(__name__)
 
 
-class WatchError(ValueError):
-    """A window a watch can't listen to, and what would work instead."""
+class WatchError(Refusal):
+    """A window a watch can't listen to, and what would work instead. Its ``code``:
+    ``unknown_band``, ``bad_window``, ``bad_mode``, ``no_channels``, or ``too_wide`` with
+    ``slice_mhz``, the ``[start, stop]`` the sentence offers instead."""
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,8 @@ def plan_window(
             f"hears at once, about {usable_mhz(rate):g} MHz: watch a slice of it, "
             f"e.g. {a:.3f}:{b:.3f} ({n} channels)."
             + (f" Part of it is another kind of radio: {others}. A watch is kept as the "
-               "strictest kind of radio in it." if others else "")
+               "strictest kind of radio in it." if others else ""),
+            "too_wide", slice_mhz=[a, b],
         )  # fmt: skip
     return watch, planned, width
 
@@ -218,7 +222,8 @@ def _plan(
         except KeyError:
             raise WatchError(
                 f"no band {spec!r} in the band plan (wavescribe radio bands lists them), "
-                "or give a range in MHz, e.g. 446.0:446.2"
+                "or give a range in MHz, e.g. 446.0:446.2",
+                "unknown_band",
             ) from None
         # As the region uses it, where it does (CB is FM in the CEPT countries, AM elsewhere).
         band = region_band(spec, region) or band
@@ -228,11 +233,13 @@ def _plan(
         if not pair or any(isinstance(x, bool) or not isinstance(x, int | float) for x in spec):
             raise WatchError(
                 "'watch' is two frequencies in MHz, e.g. [446.0, 446.2], or a band id from "
-                '`wavescribe radio bands`, e.g. "pmr446"'
+                '`wavescribe radio bands`, e.g. "pmr446"',
+                "bad_window",
             )
         lo, hi = round(spec[0] * 1e6), round(spec[1] * 1e6)
         if lo >= hi:
-            raise WatchError(f"{spec[0]}-{spec[1]} MHz: the start must be below the stop")
+            raise WatchError(f"{spec[0]}-{spec[1]} MHz: the start must be below the stop",
+                             "bad_window")  # fmt: skip
         band = lookup((lo + hi) / 2, region)
         label = f"{mhz_text(lo / 1e6)}-{mhz_text(hi / 1e6)} MHz"
         key = (float(spec[0]), float(spec[1]))
@@ -240,7 +247,8 @@ def _plan(
     if mode not in DEFAULT_CHANNEL_HZ:
         raise WatchError(
             f"a watch listens for narrowband voice (nfm or am), not {mode}: "
-            "broadcast stations talk all the time, so tune them instead"
+            "broadcast stations talk all the time, so tune them instead",
+            "bad_mode",
         )
     step = band.step_hz if band is not None and band.step_hz else DEFAULT_CHANNEL_HZ[mode]
     width = channel_hz or (band.channel_hz if band is not None and band.channel_hz else None)
@@ -252,7 +260,8 @@ def _plan(
         first, last = math.ceil((lo - start) / step - 1e-9), math.floor((hi - start) / step + 1e-9)
         channels = [round(start + n * step) for n in range(first, last + 1)]
     if not channels:
-        raise WatchError(f"{label} has no channel on the {step / 1e3:g} kHz raster")
+        raise WatchError(f"{label} has no channel on the {step / 1e3:g} kHz raster",
+                         "no_channels")  # fmt: skip
     return Watch(key, tuple(channels), step, threshold_db, region, label), mode, float(width)
 
 

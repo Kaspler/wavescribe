@@ -34,6 +34,7 @@ from wavescribe.radio.bandplan import (
 )
 from wavescribe.radio.catalog import Catalog
 from wavescribe.radio.words import joined, receiver_name, sentence, them
+from wavescribe.refusal import Refusal
 
 if TYPE_CHECKING:
     from wavescribe.app import App
@@ -41,13 +42,14 @@ if TYPE_CHECKING:
 HELD_TTL_S = 3.0  # how long a reading of which programs hold the dongles is reused
 
 
-class RadioError(ValueError):
-    """Something the page asked for can't be done; the message says why."""
+class RadioError(Refusal):
+    """Something the page asked for can't be done; the message says why, and ``code`` (with
+    the fields in ``extra``) what the page needs to ask or show (wavescribe/refusal.py)."""
 
-    def __init__(self, message: str, code: str | None = None, **extra: Any) -> None:
-        super().__init__(message)
-        self.code = code
-        self.extra = extra
+
+def _coded(e: Exception) -> RadioError:
+    """A refusal from below as the page is answered: the sentence, with its code if it has one."""
+    return RadioError(sentence(str(e)), getattr(e, "code", None), **getattr(e, "extra", {}))
 
 
 class RadioService:
@@ -236,7 +238,7 @@ class RadioService:
     def _device(self, device_id: str) -> Any:
         d = next((x for x in self.app.config.devices if x.id == device_id), None)
         if d is None:
-            raise RadioError(f"There is no receiver {device_id!r}.")
+            raise RadioError(f"There is no receiver {device_id!r}.", "no_receiver")
         return d
 
     def start_scan(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -405,9 +407,12 @@ class RadioService:
         region, _ = self.region()
         try:
             freq = frequency_hz(raw.get("mhz"))
+        except ValueError as e:
+            raise RadioError(sentence(str(e)), "bad_frequency") from e
+        try:
             check_tunable(freq)
         except ValueError as e:
-            raise RadioError(sentence(str(e))) from e
+            raise RadioError(sentence(str(e)), "out_of_band") from e
         mhz = freq / 1e6
         band = lookup(freq, region)
         mode = raw.get("mode") or (band.mode if band and band.mode else "nfm")
@@ -477,14 +482,14 @@ class RadioService:
             self.app._check_draft(lambda draft: self._draft(draft, d, centre, station),
                                   station["id"])  # fmt: skip
         except ValueError as e:
-            raise RadioError(sentence(str(e))) from e
+            raise _coded(e) from e
         carried = live.close(d.id, resume=False) if by_hand else None
         try:
             if centre != d.center_hz:
                 update_device(self.app, d.id, {"center_mhz": centre / 1e6}, retune=True)
             view = self.app.add_station(station)
         except (AdminError, ValueError) as e:
-            raise RadioError(sentence(str(e))) from e
+            raise _coded(e) from e
         finally:
             self._resume(carried)  # what the hand tuner paused, where it is still heard
         start_error = None
@@ -548,7 +553,7 @@ class RadioService:
                 best = (score, c, kept)
         if best is None:
             raise RadioError(f"Receiver {receiver_name(d.id)} can't be tuned to hear "
-                             f"{mhz_text(freq / 1e6)} MHz.")  # fmt: skip
+                             f"{mhz_text(freq / 1e6)} MHz.", "out_of_band")  # fmt: skip
         _, c, kept = best
         return c, [s for s in others if s not in kept]
 

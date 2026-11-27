@@ -679,6 +679,21 @@ changes and the answer is a 400 with code `retune` (`retune_question`: `unfit`, 
 hand-set centre leaves stations out. A receiver tuned by hand is let go first, and what it paused
 starts again where it is still heard.
 
+**Codes beside refusals** (`refusal.py`). A refusal the page may act on carries a `code` beside
+its sentence, in the 400's JSON, so the page needn't judge from the words (which stay as they
+are). `Refusal` is the base of `ConfigError`, `ChangeError`, `RadioError` and `WatchError`;
+where a refusal travels as its sentence alone (the page's config errors, `effective_config`),
+`said()` keeps the code beside the words and `Refusal.of()` raises it again. Besides the
+questions (`acknowledge` with `privacy`, `busy` with `holders`, `scanning`, `language`,
+`retune`) and `refused` (a mode `/radio/tune` refuses), a radio station, a watch or a tune is
+refused with: `bad_frequency` (not a frequency in MHz, or none given), `out_of_band` (a
+frequency no receiver tunes, or one this receiver can't be tuned to hear), `bad_mode`,
+`bad_channel` and `bad_squelch` (`channel_khz`, `squelch_db`), `no_receiver`, `out_of_reach` (a
+change that would tune a station where its receiver doesn't hear it), and for a watch
+`unknown_band`, `bad_window` (not two frequencies, or the start not below the stop),
+`no_channels` (none on the band's raster in the range), `bad_threshold`, and `too_wide` with
+`slice_mhz: [start, stop]`, the slice that fits that the sentence offers.
+
 **Stations a receiver doesn't hear.** Whether a receiver hears a station is one rule for every
 kind (`config.heard_by`): one of its frequencies inside the window and, for a narrow channel,
 clear of the centre's spike; every channel of a watch inside the window. A station that fails it
