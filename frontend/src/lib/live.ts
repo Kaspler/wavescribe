@@ -4,6 +4,7 @@ import { takeAlert } from "./alerts";
 import { fetchRead, onWanted, streamWantsToken, ticketed, wanted } from "./auth";
 import { sameLang } from "./lang";
 import { P, setPrefs } from "./prefs";
+import { switchOnFor } from "./startRefusal";
 import { emit } from "./store";
 import { type Conn, type Env, type Shared, type Sink, share } from "./tabs";
 import type { Alert, Live, PageState, Station, Status, Utterance } from "./types";
@@ -42,6 +43,9 @@ export const S = {
   fresh: new Set<string>(), // utterance keys that just arrived, for a brief highlight
   reading: new Set<string>(), // stations whose column is scrolled back: don't trim them
   notice: "" as string, // one line of trouble shown under the header
+  /** The station whose Start the notice says was refused because it is switched off on the page
+   * (code switched_off): the notice offers to switch it on. */
+  switchOn: null as string | null,
   /** A station whose Start was pressed in a station list while its receiver is tuned where it
    * doesn't hear it (`startThere`). */
   startThere: null as string | null,
@@ -49,8 +53,9 @@ export const S = {
 
 export const running = (id: string) => !!S.live[id] && !S.live[id].stopping;
 
-export function setNotice(text: string) {
+export function setNotice(text: string, switchOn: string | null = null) {
   S.notice = text;
+  S.switchOn = switchOn;
   emit("notice");
 }
 
@@ -62,7 +67,10 @@ export async function post(url: string, body?: unknown): Promise<boolean> {
       headers: { "X-Wavescribe": "1", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) setNotice((await r.json().catch(() => ({}))).error || r.statusText);
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      setNotice(data.error || r.statusText, switchOnFor(url, data));
+    }
     return r.ok;
   } catch {
     setNotice("Couldn't reach Wavescribe: is it still running?");
@@ -330,6 +338,13 @@ export function connect() {
 /** Starts a station in its own mode: one started only to play is written down from now on. */
 export async function startStation(id: string) {
   if (await post(`/api/stations/${id}/start`)) await stationsChanged().catch(() => {});
+}
+
+/** "Switch it on", where Start was refused because the station is switched off on the page: on,
+ * then started, as Start was pressed for. */
+export async function switchOnAndStart(id: string) {
+  setNotice("");
+  if (await post(`/api/manage/stations/${encodeURIComponent(id)}`, { disabled: null })) await startStation(id);
 }
 
 /** Start, pressed in a station list on a station its receiver doesn't hear where it is tuned:

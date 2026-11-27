@@ -93,6 +93,9 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
   // The kind of radio to confirm: the band's, or the one the server names when it asks.
   const [ackFor, setAckFor] = useState<string | null>(needsAck ? band.privacy : null);
   const [trouble, setTrouble] = useState<Refused | null>(null);
+  // A watch of this window switched off on the page, whose start was refused for it, and how it
+  // was to start: "Switch it on" switches it on and starts it so.
+  const [off, setOff] = useState<{ id: string; want: Want } | null>(null);
   // The server's question before a move leaves stations out; nothing has changed while it is asked.
   const [asked, setAsked] = useState<(Want & { question: string; stops: string[] }) | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -110,6 +113,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
   const name = bandWords(band).name;
   const start = async ({ dev, spec }: Want, confirmed = false) => {
     setTrouble(null);
+    setOff(null);
     setAsked(null);
     const mine = watches.find((w) => w.device === dev && sameWindow(w.watch, spec));
     let made: Any = null;
@@ -129,6 +133,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
       if (no.code === "retune" && !confirmed) { setAsked({ dev, spec, question: no.text, stops: no.stops }); return; }
       if (no.privacy && no.privacy !== ackFor) { setAckFor(no.privacy); setAck(false); }
       setTrouble(no);
+      if (no.code === "switched_off" && mine) setOff({ id: mine.id, want: { dev, spec } });
       return;
     }
     if ((made || again)?.live_closed) liveClosed(dev);
@@ -174,7 +179,12 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
           </Refusal>
         ) : (
           <Refusal raw={trouble.text}>
-            {other && trouble.code !== "acknowledge" && (
+            {off && (
+              <ActButton size="sm" variant="secondary" icon="power" run={async () => { await post(`/stations/${off.id}`, { disabled: null }); await start(off.want); }}>
+                Switch it on
+              </ActButton>
+            )}
+            {other && trouble.code !== "acknowledge" && !off && (
               <ActButton size="sm" variant="secondary" disabled={unconfirmed} run={() => start({ dev: other, spec: band.id })}>Use Receiver {rxName(other)}</ActButton>
             )}
           </Refusal>

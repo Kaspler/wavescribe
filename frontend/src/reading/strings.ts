@@ -55,6 +55,7 @@ export const T = {
   stationOff: "This station is stopped.",
   start: "Start",
   startStation: (name: string) => `Start ${name}`,
+  switchOn: "Switch it on",
   startAndListenHint: "Plays it without writing it down; Start writes it down",
   playingOnly: "playing only; Start to write it down",
   startWriting: (name: string) => `Start writing down ${name}`,

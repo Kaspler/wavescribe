@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { wanted } from "./lib/auth";
-import { S, running, setNotice } from "./lib/live";
+import { S, running, setNotice, switchOnAndStart } from "./lib/live";
 import { visible } from "./lib/prefs";
 import { MAX_COLS, go, movedHash, parse, setCols, useHash } from "./lib/router";
 import { useTopics } from "./lib/store";
@@ -76,11 +76,13 @@ function Notice() {
   useTopics("notice", "conn");
   const lost = S.conn === "reconnecting" || S.conn === "blocked";
   const text = S.conn === "blocked" ? T.tooManyTabs : lost ? T.connectionLost : S.notice;
+  const off = lost ? null : S.switchOn;
   if (!text) return null;
   return (
     <div className={`notice${lost ? " is-lost" : ""}`} role="status">
       <Icon name={S.conn === "reconnecting" ? "refresh" : "info"} />
       <span>{text}</span>
+      {off && S.manage && <Button size="sm" variant="secondary" icon="power" onClick={() => switchOnAndStart(off)}>{T.switchOn}</Button>}
       {!lost && <Button size="sm" variant="ghost" icon="close" aria-label="Dismiss" onClick={() => setNotice("")} />}
     </div>
   );
