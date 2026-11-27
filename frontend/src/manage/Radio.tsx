@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { type Any, docUrl, ApiError, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
+import { type Any, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
@@ -14,6 +14,7 @@ import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, R
 import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
+import { type Following, addOnAir, planFor } from "./onair";
 import { Ask, type Tuner, useTuner } from "./tuner";
 
 const REGION_NAMES: Record<string, string> = {
@@ -146,7 +147,8 @@ export function OnTheAir() {
     <>
       <Finder v={v} job={job} running={running} onJob={setJob} onAdd={openAdd} reload={reload} tuner={tuner}
               watches={canWatch ? watches : null} want={want} onWatched={async () => { await reloadStations(); await reload(); await refreshPage(); }} />
-      {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} onDone={async () => { setAdd(null); await reload(); }} />}
+      {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} tuner={tuner} watches={canWatch ? watches : null}
+                          onDone={async () => { setAdd(null); await Promise.all([reload(), reloadStations(), tuner.reload()]); }} />}
       {canWatch && <Caught bands={v.bands} watches={watches} keptNothing={keptNothing} onAdd={openAdd} onChooseBand={firstWatch} />}
       <Heard v={v} onAdd={openAdd} reload={reload} />
     </>
@@ -240,6 +242,10 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
     ["custom", "A range of my own…"],
   ];
   const pause = !!rx?.busy.length;
+  // What a scan on it interrupts, in words: listening by hand ends, stations and the spectrum
+  // monitor wait for it (the tuner's view leaves listening by hand out of what holds it).
+  const byHand = !!tuner.receivers.find((l) => l.id === device && l.open);
+  const holding: string[] = tuner.receivers.find((l) => l.id === device)?.holders ?? rx?.busy ?? [];
   const scanWhat = chosen && kindOf(chosen) === "text" ? "Find stations here" : chosen ? `Scan ${bandWords(chosen).name}` : band === "all" ? "Scan everything" : "Scan this range";
   /** Scans on receiver `on`: the band chosen, or `only` in one sweep. */
   const start = async (on = device, only?: string) => {
@@ -347,7 +353,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
         ) : (chosen ? kindOf(chosen) === "text" : true) && (
           <ActButton variant={fresh ? "secondary" : "primary"} icon="search" disabled={!rx || running || !v.tools.rtl_power || (band === "custom" && !(+lo < +hi))}
                      run={() => start()}>
-            {pause ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
+            {holding.length ? `Pause and ${scanWhat.replace(/^\w/, (c) => c.toLowerCase())}` : scanWhat}
           </ActButton>
         )}
         {chosen && onTheDial && me && me.state !== "scanning" && !liveHere && (
@@ -371,7 +377,11 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
           </span>
         )}
         {pause && !running && (
-          <span className="m-hint rd-inline">Receiver {rxName(rx.id)} is running {rx.busy.join(", ")}. The scan pauses {rx.busy.length === 1 ? "it" : "them"} and starts {rx.busy.length === 1 ? "it" : "them"} again when it ends.</span>
+          <span className="m-hint rd-inline">
+            {byHand && `Receiver ${rxName(rx.id)} is tuned by hand: the scan lets it go.`}
+            {byHand && holding.length > 0 && " "}
+            {holding.length > 0 && `${byHand ? "It is also running" : `Receiver ${rxName(rx.id)} is running`} ${and(holding)}. The scan pauses ${holding.length === 1 ? "it" : "them"} and starts ${holding.length === 1 ? "it" : "them"} again when it ends.`}
+          </span>
         )}
       </div>
       {next && !running && (
@@ -831,7 +841,20 @@ const DOES = [
   { value: "translate", label: "Transcribe and translate" },
 ];
 
-function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promise<void> }) {
+/** The stations a receiver follows now, and those listening by hand paused, which follow again
+ * once it lets go: what a new station on it must sit beside. A watch needs its whole window. */
+function followingOn(v: Any, rx: Any, live: Any | undefined, watches: Any[] | null): Following[] {
+  const paused: string[] = live?.paused || [];
+  return ((rx?.stations || []) as Any[]).filter((s) => s.running || paused.includes(s.name)).map((s) => {
+    const w = watches?.find((x) => x.id === s.id && x.watch != null);
+    const b = w && typeof w.watch === "string" ? v.bands.find((x: Any) => x.id === w.watch) : null;
+    const ends: number[] | null = w ? (b ? [b.start_mhz, b.stop_mhz] : w.watch) : null;
+    const mode = (f: number) => (w ? w.mode || b?.mode || "nfm" : bandAt(v.bands, f)?.mode || "nfm");
+    return { id: s.id, name: s.name, channels: (ends || [s.mhz]).map((f: number) => ({ mhz: f, mode: mode(f) })) };
+  });
+}
+
+function AddFromAir({ v, pre, tuner, watches, onDone }: { v: Any; pre: Any; tuner: Tuner; watches: Any[] | null; onDone: () => Promise<void> }) {
   const fits = (r: Any, mhz: number) => Math.abs(mhz - r.center_mhz) <= r.span_mhz / 2 - 0.12;
   const f: number = pre.mhz;
   const band = bandAt(v.bands, f);
@@ -844,7 +867,8 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
   const [lang, setLang] = useState<string>(() => localLang(v));
   const [to, setTo] = useState<string[]>(v.defaults.translate_to || []);
   const [ack, setAck] = useState(false);
-  const [retune, setRetune] = useState<Any | null>(null);
+  // The stations adding it would stop, named before anything changes.
+  const [stop, setStop] = useState<string[] | null>(null);
   useEffect(() => {
     // With no speech model downloaded yet, a new station starts by listening: transcription can follow.
     get("/models").then((m) => {
@@ -855,22 +879,30 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
   const cls = band ? band.privacy : "private";
   const needsAck = !!v.policies[cls]?.needs_ack;
   const rx = v.receivers.find((r: Any) => r.id === device);
+  const live = tuner.receivers.find((r) => r.id === device && r.open);
+  const following = followingOn(v, rx, live, watches);
   const effMode = mode || band?.mode || "nfm";
-  const submit = async (force = false) => {
-    try {
-      const st = await post("/radio/tune", {
+  // Said before anything is pressed: the stations it would stop, or those it keeps beside it.
+  const plan = rx ? planFor({ mhz: f, mode: effMode }, following, rx.span_mhz, rx.center_mhz) : null;
+  const stops = stop || plan?.stops || [];
+  const called = name.trim() || pre.name || `${fmtMhz(f, effMode)} MHz`;
+  const submit = async (confirmed = false) => {
+    const r = await addOnAir({
+      body: {
         device, mhz: f, mode: mode || undefined, name: name.trim() || undefined, language: lang.trim(), translate_to: does === "translate" ? to : [],
-        acknowledge: ack, retune: force, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
-      });
-      setRetune(null);
-      await refreshPage();
-      toast(does === "listen" ? `${st.name} added: play it under Listen` : `Transcribing ${st.name}: it's on the reading page`);
-      await onDone();
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "retune") setRetune(e.message);
-      else throw e;
-    }
+        acknowledge: ack, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
+      },
+      mode: effMode, centre: rx.center_mhz, span: rx.span_mhz, following, confirmed,
+      live: !!live, letGo: () => (tuner.dev === device ? tuner.close() : del(`/live/${device}`)),
+    });
+    if ("wouldStop" in r) { setStop(r.wouldStop); return; }
+    setStop(null);
+    await refreshPage();
+    if (r.trouble) toast(`${r.station.name} was added and didn't start: ${r.trouble}`, true);
+    else toast(does === "listen" ? `${r.station.name} added: play it under Listen` : `Transcribing ${r.station.name}: it's on the reading page`);
+    await onDone();
   };
+  const beside = stops.length ? [] : (plan?.keeps || []).map((s) => s.name);
   return (
     <Section id="rd-tune" title={`Add ${fmtMhz(f, effMode)} MHz as a station`}
              description="It runs all the time, beside the other stations, within what its kind of radio allows.">
@@ -901,8 +933,12 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
           </Field>
           {v.receivers.length > 1 && (
             <Field id="rd-rx" label="Receiver" hint={rx && !fits(rx, f) ? `Moves receiver ${rxName(rx.id)} to ${fmtMhz(f, effMode)} MHz.` : "The receiver that tunes it."}>
-              <Select id="rd-rx" value={device} onChange={(e) => { setDevice(e.target.value); setRetune(null); }}
-                      options={v.receivers.map((r: Any) => [r.id, `${rxName(r.id)} · ${r.center_mhz.toFixed(2)} MHz${r.busy.length ? ` · ${r.busy.join(", ")}` : ""}`])} />
+              <Select id="rd-rx" value={device} onChange={(e) => { setDevice(e.target.value); setStop(null); }}
+                      options={v.receivers.map((r: Any) => {
+                        const by = tuner.receivers.find((l) => l.id === r.id);
+                        const doing = by?.open ? ["tuned by hand"] : (by?.holders || []);
+                        return [r.id, `${rxName(r.id)} · ${r.center_mhz.toFixed(2)} MHz${doing.length ? ` · ${doing.join(", ")}` : ""}`];
+                      })} />
             </Field>
           )}
         </div>
@@ -915,20 +951,20 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
           </Check>
         </p>
       )}
-      {retune && (
-        <div className="m-panel rd-retune">
-          <p className="m-line">{retune}</p>
-          <div className="m-actions">
-            <ActButton variant="primary" run={() => submit(true)}>Retune and add</ActButton>
-            <Button variant="ghost" onClick={() => setRetune(null)}>Keep it as it is</Button>
-          </div>
-        </div>
+      {stops.length > 0 ? (
+        <p className="m-line" role="status">
+          Receiver {rxName(device)} can't hear {called} and {and(stops)} at once: adding it stops {stops.length === 1 ? "that station" : "them"}{live ? ", and listening by hand" : ""}.
+        </p>
+      ) : live && (
+        <p className="m-line" role="status">
+          Receiver {rxName(device)} will follow {called}{beside.length ? ` beside ${and(beside)}` : ""} from now; listening by hand stops.
+        </p>
       )}
       <div className="m-actions">
-        <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || !!rx?.scanning} run={() => submit(false)}>
-          Add as a station
+        <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || !!rx?.scanning} run={() => submit(stops.length > 0)}>
+          {stops.length ? `Stop ${stops.length === 1 ? stops[0] : "them"} and add` : "Add as a station"}
         </ActButton>
-        <Button variant="ghost" onClick={() => onDone()}>Cancel</Button>
+        <Button variant="ghost" onClick={() => onDone()}>{stops.length ? "Keep it as it is" : "Cancel"}</Button>
       </div>
     </Section>
   );

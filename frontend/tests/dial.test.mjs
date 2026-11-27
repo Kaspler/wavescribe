@@ -2,7 +2,7 @@
 // legible, receivers never vanish, and a receiver sent to a band looks where its stations are.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandAt, bandOfWindow, dragCentre, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks } from "../src/manage/dial.ts";
+import { bandAt, bandOfWindow, centreFor, dragCentre, labelRows, lookAt, lookTune, makeScale, marks, onRaster, segments, ticks } from "../src/manage/dial.ts";
 
 const band = (id, start_mhz, stop_mhz, mode, privacy) => ({ id, start_mhz, stop_mhz, mode, privacy, tunable: true });
 // A European band plan's shape, as /api/manage/radio sends it.
@@ -156,4 +156,15 @@ test("a window is said to be on the band at its centre, else the one it shows mo
   assert.equal(bandOfWindow(BANDS, 96.8, 99.2).id, "fm");
   assert.equal(bandOfWindow(BANDS, 106.9, 109.3).id, "fm", "half out of the band");
   assert.equal(bandOfWindow(BANDS, 1200, 1202.4), null, "outside the plan");
+});
+
+test("a receiver following stations is set where it hears the new one beside them all", () => {
+  const fm = (mhz) => ({ mhz, mode: "wfm" });
+  assert.equal(centreFor([fm(98), fm(98.8)], 2.4, 98.5), 98.5, "where it is, when that hears them");
+  assert.equal(centreFor([fm(98), fm(99.5)], 2.4, 90.5), 98.42, "else as near to where it is as hears them");
+  assert.equal(centreFor([fm(98), fm(100.5)], 2.4, 98), null, "2.5 MHz apart: one receiver can't hear both");
+  const ch = (mhz) => ({ mhz, mode: "nfm" });
+  assert.equal(centreFor([ch(145.5), ch(145.6)], 2.4, 145.5), 145.4875, "never on a narrow channel: its centre spike would hold the squelch open");
+  const c = centreFor([ch(144.0), ch(146.0)], 2.4, 145.0);
+  assert.ok(c != null && c >= 144.92 && c <= 145.08, "a watch's two ends: about its middle");
 });

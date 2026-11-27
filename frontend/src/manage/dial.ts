@@ -276,4 +276,43 @@ export function bandOfWindow<B extends DialBand>(bands: B[], lo: number, hi: num
   return best;
 }
 
+// -- where a receiver is set to follow several stations ------------------------------------------
+
+/** A channel a receiver must hear: its frequency in MHz, its mode, and its width when not the
+ * mode's usual one. */
+export interface Channel {
+  mhz: number;
+  mode: string | null;
+  channelKhz?: number | null;
+}
+
+/** A centre for a dongle `spanMhz` wide that hears every channel, each clear of the edges its
+ * filter rolls off at and of the spike at its centre (in_band and off_centre in
+ * dsp/__init__.py): `prefer` (where the dongle is set now) when that does, else the one nearest
+ * to it that does. Null when no centre hears them all. Worked in whole Hz, as the server
+ * checks it. */
+export function centreFor(channels: Channel[], spanMhz: number, prefer: number): number | null {
+  if (!channels.length) return prefer;
+  const hz = (mhz: number) => Math.round(mhz * 1e6);
+  const half = hz(spanMhz) / 2;
+  let lo = -Infinity, hi = Infinity;
+  for (const c of channels) {
+    const reach = half - hz(edgeMargin(c.mode));
+    lo = Math.max(lo, hz(c.mhz) - reach);
+    hi = Math.min(hi, hz(c.mhz) + reach);
+  }
+  if (lo > hi) return null;
+  const clear = (at: number) => channels.every((c) => clearOfCentre(c.mhz, at / 1e6, c.mode, c.channelKhz));
+  // Where the answer can be: the preferred centre held inside the range, the range's ends, and
+  // a channel's width either side of each narrow channel, the nearest the centre may come to it.
+  const tries = [Math.min(hi, Math.max(lo, hz(prefer))), lo, hi];
+  for (const c of channels) {
+    if (c.mode === "wfm") continue;
+    const away = hz((c.channelKhz || (c.mode === "am" ? 8.33 : 12.5)) / 1000);
+    tries.push(hz(c.mhz) - away, hz(c.mhz) + away);
+  }
+  const fine = tries.filter((t) => t >= lo && t <= hi && clear(t)).sort((a, b) => Math.abs(a - hz(prefer)) - Math.abs(b - hz(prefer)));
+  return fine.length ? fine[0] / 1e6 : null;
+}
+
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
