@@ -544,15 +544,18 @@ class WebHub:
 
 def _radio_fields(s: Station) -> dict[str, Any]:
     """What ``/api/state`` says of a station's radio: its receiver (``device``), the band id or
-    ``[lo_mhz, hi_mhz]`` it watches (``watch``) and the languages a watch transcribes (an
-    empty list: any it tells), its privacy class, and why its receiver doesn't hear it where
-    that is tuned (``out_of_reach``). None where they don't apply (a stream, a fixed frequency)."""
+    ``[lo_mhz, hi_mhz]`` it watches (``watch``) and the languages a watch or a station in
+    language ``auto`` transcribes (an empty list: any it tells), its privacy class, and why its
+    receiver doesn't hear it where that is tuned (``out_of_reach``). None where they don't
+    apply (a stream, a fixed frequency, a station in one language)."""
     t = s.sdr
     watch = t.watch if t is not None else None
     spec, languages = None, None
     if watch is not None:
         spec = watch.spec if isinstance(watch.spec, str) else list(watch.spec)
-        languages = list(s.languages) if s.language == AUTO_LANGUAGE else [s.language]
+        languages = [s.language]
+    if s.language == AUTO_LANGUAGE:
+        languages = list(s.languages)
     return {
         "device": t.device.id if t is not None else None,
         "watch": spec,

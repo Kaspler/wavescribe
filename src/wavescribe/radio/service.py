@@ -460,6 +460,8 @@ class RadioService:
             "name": name, "language": language, "device": d.id, "mhz": [mhz],
             "translate_to": targets,
         }  # fmt: skip
+        if language == "auto" and raw.get("languages"):  # the ones it may be (asr/language.py)
+            station["languages"] = list(raw["languages"])
         if mode == "wfm":
             station["fm_mhz"] = [mhz]
             del station["mhz"]

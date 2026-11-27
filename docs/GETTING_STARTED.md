@@ -114,7 +114,9 @@ is where stations are found and added:
 - **On the air:** what your receiver finds; see [section 9](#9-use-a-radio-receiver-sdr).
 
 Each station has a **language** (what it speaks) and a **mode**, both changed later under
-Settings → **Stations**:
+Settings → **Stations**. When you don't know the language, or a station switches between
+several, language `auto` has Whisper tell each line's; it needs a Whisper model and is slower
+than a station in one known language. The modes:
 
 - **Listen only:** you can play it; nothing is written down and no model is needed.
 - **Transcribe:** written down and checked for alerts.

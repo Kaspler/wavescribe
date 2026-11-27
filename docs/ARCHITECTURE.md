@@ -208,8 +208,9 @@ translation, and the settings say so.
 mode and whether it runs (`available`, with `reason` when it can't), its radio, so the page
 needn't work that out: `device` (its receiver's id; null for a stream or another machine's
 station), `watch` (what a watch listens to: the band id, or `[lo_mhz, hi_mhz]` for a range; null
-for any other station), `languages` (the languages a watch transcribes: its own, or those
-language `auto` is narrowed to, `[]` for any Whisper tells; null for any other station),
+for any other station), `languages` (the languages a watch or a station in language `auto`
+transcribes: a watch's own, or those `auto` is narrowed to, `[]` for any Whisper tells; null for
+any other station),
 `privacy` (its class, radio/bandplan.py) and `out_of_reach` (why its receiver doesn't hear it
 where that is tuned, the sentence `reason` gives unless the station is switched off; null when
 it is heard).

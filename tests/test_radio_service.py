@@ -143,6 +143,18 @@ def test_a_channel_on_the_receivers_centre_moves_the_receiver(radio: Running) ->
     assert radio.app.config.get(st["id"]).sdr.freq_hz == 445_850_000
 
 
+def test_a_station_found_on_the_air_can_be_in_any_language(radio: Running) -> None:
+    """Who talks on a channel isn't always known: language "auto" tells each line's."""
+    body = {"device": "x", "mhz": 445.85, "mode": "nfm", "language": "auto",
+            "languages": ["es", "en"], "acknowledge": True}  # fmt: skip
+    status, st = radio.call("POST", "/api/manage/radio/tune", body)
+    assert status == 200, st
+    station = radio.app.config.get(st["id"])
+    assert station.language == "auto" and station.languages == ("es", "en")
+    [shown] = [s for s in radio.call("GET", "/api/state")[1]["stations"] if s["id"] == st["id"]]
+    assert shown["languages"] == ["es", "en"] and shown["watch"] is None
+
+
 def test_scanning_a_busy_receiver_pauses_its_stations(radio: Running, monkeypatch) -> None:
     body = {"device": "x", "mhz": 446.00625, "language": "es-ES", "acknowledge": True}
     st = radio.call("POST", "/api/manage/radio/tune", body)[1]

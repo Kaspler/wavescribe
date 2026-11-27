@@ -257,9 +257,15 @@ def test_a_change_of_region_keeps_a_watchs_class_by_its_strictest_channel(
         r.close()
 
 
-def test_language_auto_is_for_watches_and_round_trips() -> None:
-    with pytest.raises(ConfigError, match="'auto' is for watches"):
-        build_station({"id": "x", "language": AUTO, "stream": "https://e.x/s"}, "test")
+def test_language_auto_suits_any_station_and_round_trips() -> None:
+    """A station whose language isn't known (found on the air, or an internet station that
+    switches language) transcribes each line in the language heard, as a watch does."""
+    for d in ({"id": "x", "language": AUTO, "stream": "https://e.x/s"},
+              {"id": "x", "language": AUTO, "languages": ["es", "en"], "device": "a",
+               "mhz": 145.5, "mode": "nfm", "acknowledge": True}):  # fmt: skip
+        s = build_station(d, "test", {"a": DEVICE}, "cept")
+        assert s.language == AUTO and s.languages == tuple(d.get("languages", ()))
+        assert build_station(station_dict(s), "again", {"a": DEVICE}, "cept") == s
     with pytest.raises(ConfigError, match="'languages' narrows language 'auto'"):
         build_station(
             {"id": "x", "language": "en", "languages": ["en"], "stream": "https://e.x/s"}, "test"

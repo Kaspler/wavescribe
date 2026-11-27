@@ -291,8 +291,9 @@ How it works:
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 
-**Language `auto`** (the default for `radio watch`) lets Whisper tell the language of each
-utterance: not everyone on a band speaks the same one. `languages` narrows the choice to the
+**Language `auto`** (the default for `radio watch`, and a choice for any station whose language
+you don't know) lets Whisper tell the language of each utterance: not everyone on a band speaks
+the same one. `languages` narrows the choice to the
 ones you expect, which helps with short and noisy utterances. Speech clearly in none of them is
 still taken as the language heard, because told the wrong language Whisper translates instead of
 transcribing. Language `auto` needs a Whisper model (`uv run wavescribe models fetch

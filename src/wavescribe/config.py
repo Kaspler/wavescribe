@@ -566,9 +566,7 @@ def build_station(
         raise ConfigError(f"{where}: 'language' is required (here or in [defaults])")
     from wavescribe.asr.language import AUTO
 
-    if language == AUTO and d.get("watch") is None:
-        raise ConfigError(f"{where}: language 'auto' is for watches: give this station's own")
-    if language != AUTO:
+    if language != AUTO:  # auto: each utterance in the language heard (asr/language.py)
         _check_language(language, where)
     languages = _languages(d, "languages", where)
     if languages and language != AUTO:
