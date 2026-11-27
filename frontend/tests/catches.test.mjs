@@ -1,7 +1,7 @@
 // "Caught here": what watches caught, grouped by frequency and filtered.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandsIn, filterCatches, groupCatches, fitsOneReceiver, hasSpeech, hearsWindow, sliceIn, talksNowAndThen, technical, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
+import { bandsIn, filterCatches, groupCatches, fitsOneReceiver, hasSpeech, hearsWindow, talksNowAndThen, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
 
 const NOW = 1_800_000_000;
 const caught = (id, freq_hz, ago, more = {}) => ({
@@ -56,13 +56,6 @@ test("a band can be watched when its channels talk now and then", () => {
   assert.equal(talksNowAndThen({ mode: "wfm", privacy: "broadcast" }), false);
   assert.equal(talksNowAndThen({ mode: "am", privacy: "broadcast" }), false);
   assert.equal(talksNowAndThen({ mode: null, privacy: "digital" }), false);
-});
-
-test("what the server's refusals offer is read out of them", () => {
-  assert.deepEqual(sliceIn("Airband is 19.00 MHz wide, and a watch covers what one receiver hears at once, about 2.2 MHz: watch a slice of it, e.g. 126.400:128.600"), [126.4, 128.6]);
-  assert.equal(sliceIn("no band 'x' in the band plan (wavescribe radio bands lists them), or give a range in MHz, e.g. 446.0:446.2"), null);
-  assert.ok(technical("station 'w' (w): device 'b' doesn't hear all of PMR446"), "ids in quotes go under Details");
-  assert.ok(!technical("Receiver A is scanning: wait for it, or stop the scan."), "a sentence is said as it is");
 });
 
 test("a window in words", () => {

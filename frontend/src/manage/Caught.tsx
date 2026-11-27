@@ -11,8 +11,9 @@ import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, and, bandWords, fmtMhz } from "./bands";
-import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, fitsOneReceiver, groupCatches, hearsWindow, sliceIn, technical, voiceWord, watchCentre, watchWindow, windowWords } from "./catches";
+import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, fitsOneReceiver, groupCatches, hearsWindow, voiceWord, watchCentre, watchWindow, windowWords } from "./catches";
 import { Refusal } from "./Refusal";
+import { type Refused, refused } from "./refusals";
 import { rxName } from "./Receivers";
 
 let known: Promise<boolean> | null = null;
@@ -89,7 +90,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
   onCancel: () => void;
 }) {
   const [ack, setAck] = useState(false);
-  const [trouble, setTrouble] = useState<{ raw: string; slice: [number, number] | null } | null>(null);
+  const [trouble, setTrouble] = useState<Refused | null>(null);
   // The server's question before a move leaves stations out; nothing has changed while it is asked.
   const [asked, setAsked] = useState<(Want & { question: string; stops: string[] }) | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -108,8 +109,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
         await post(`/receivers/${dev}`, { center_mhz: watchCentre(win, rx.span_mhz), retune: confirmed });
       } catch (e) {
         if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ dev, spec, question: e.message, stops: e.data.holders || [] }); return; }
-        const raw = (e as Error).message;
-        setTrouble({ raw, slice: null });
+        setTrouble(e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message));
         return;
       }
     }
@@ -128,8 +128,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
       }
     } catch (e) {
       for (const h of stopped) await post(`/stations/${h.id}/start`).catch(() => {});
-      const raw = (e as Error).message;
-      setTrouble({ raw, slice: sliceIn(raw) });
+      setTrouble(e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message));
       return;
     }
     toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
@@ -162,13 +161,13 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
       {asked && <p className="m-line" role="status">{asked.question}</p>}
       {trouble && (
         trouble.slice ? (
-          <Refusal raw={trouble.raw} said={`${name} is ${width} MHz wide, more than one receiver hears at once. Watch a slice of it instead:`}>
+          <Refusal raw={trouble.text} said={`${name} is ${width} MHz wide, more than one receiver hears at once. Watch a slice of it instead:`}>
             <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: device, spec: trouble.slice! })}>
               Watch {trouble.slice[0].toFixed(3)}–{trouble.slice[1].toFixed(3)} MHz
             </ActButton>
           </Refusal>
         ) : (
-          <Refusal raw={trouble.raw} said={technical(trouble.raw) ? `Receiver ${rxName(device)} couldn't start watching ${name}.` : undefined}>
+          <Refusal raw={trouble.text}>
             {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: other, spec: band.id })}>Use Receiver {rxName(other)}</ActButton>}
           </Refusal>
         )

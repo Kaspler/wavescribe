@@ -1,6 +1,6 @@
-// What watches caught (GET /api/catches), grouped by frequency for "Caught here", and the few
-// things the page reads out of the server's answers when it starts a watch. Plain functions,
-// so they can be tested without a page.
+// What watches caught (GET /api/catches), grouped by frequency for "Caught here", and a watch's
+// window and where a receiver is tuned for it. Plain functions, so they can be tested without a
+// page.
 
 /** Words heard in a catch, as the store has them. */
 export interface Said {
@@ -110,16 +110,6 @@ export const voiceWord = (v: boolean | null) => (v === true ? "voice" : v === fa
  * talks all the time, and isn't digital, which gives only noise. What a watch can listen to. */
 export const talksNowAndThen = (b: { mode: string | null; privacy: string }) =>
   (b.mode === "nfm" || b.mode === "am") && b.privacy !== "broadcast" && b.privacy !== "digital";
-
-/** The slice a refusal of a too-wide window offers ("… watch a slice of it, e.g. 144.900:147.100"). */
-export function sliceIn(message: string): [number, number] | null {
-  const m = /slice of it, e\.g\. (\d+(?:\.\d+)?):(\d+(?:\.\d+)?)/.exec(message);
-  return m ? [+m[1], +m[2]] : null;
-}
-
-/** Whether the server's words are its own shorthand (ids in quotes, setting names) rather than a
- * sentence for the person: those go under Details, below one the page writes. */
-export const technical = (message: string) => /'[a-z0-9_.-]+'|\b[a-z]+_[a-z_]+\b/.test(message);
 
 /** A watch's window as a receiver must hear it, in MHz: its first and last channel, the step
  * between channels and a channel's width. */

@@ -7,10 +7,10 @@ import { playLive } from "../lib/audio";
 import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { type Any, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
+import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
-import { talksNowAndThen, technical } from "./catches";
+import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
@@ -18,6 +18,7 @@ import { MODE_HINT } from "./Stations";
 import { type AddResult, addOnAir } from "./onair";
 import { MoveThere } from "./MoveThere";
 import { Refusal } from "./Refusal";
+import { refused } from "./refusals";
 import { Ask, type Tuner, useTuner } from "./tuner";
 
 const REGION_NAMES: Record<string, string> = {
@@ -910,8 +911,11 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
       if (!has("vad") || !has("asr")) setDoes("listen");
     }).catch(() => {});
   }, []);
-  const cls = band ? band.privacy : "private";
-  const needsAck = !!v.policies[cls]?.needs_ack;
+  // The kind of radio it is, as the server said where it was heard; else the band plan's, until
+  // the server asks to confirm another when it is added.
+  const [askedCls, setAskedCls] = useState<string | null>(null);
+  const cls: string | null = askedCls || pre.privacy || band?.privacy || null;
+  const needsAck = !!cls && !!v.policies[cls]?.needs_ack;
   const rx = v.receivers.find((r: Any) => r.id === device);
   const live = tuner.receivers.find((r) => r.id === device && r.open);
   const effMode = mode || band?.mode || "nfm";
@@ -926,7 +930,9 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
         acknowledge: ack, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
       }, confirmed);
     } catch (e) {
-      setTrouble((e as Error).message);
+      const no = e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message);
+      if (no.privacy && no.privacy !== cls) { setAskedCls(no.privacy); setAck(false); }
+      setTrouble(no.text);
       return;
     }
     if ("question" in r) { setAsked(r); return; }
@@ -951,7 +957,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
              description="It runs all the time, beside the other stations, within what its kind of radio allows.">
       <p className="m-hint">
         {band ? <><strong>{band.name}</strong>{band.channels_mhz?.length ? `, channel ${band.channels_mhz.findIndex((c: number) => Math.abs(c - f) < 0.002) + 1 || "off-raster"}` : ""}. {bandLine(band.id)} </> : "No band plan lists this frequency. "}
-        {policyLine(cls, v.policies)}
+        {cls && policyLine(cls, v.policies)}
       </p>
       <div className="m-mode">
         <Segmented label="What Wavescribe does with it" value={does} onChange={setDoes} options={DOES} />
@@ -1006,7 +1012,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
         <p className="m-line" role="status">Receiver {rxName(device)} will follow {called} from now; listening by hand stops.</p>
       )}
       {trouble && (
-        <Refusal raw={trouble} said={technical(trouble) ? `Receiver ${rxName(device)} couldn't take ${called}.` : undefined}>
+        <Refusal raw={trouble}>
           {other && <Button size="sm" variant="secondary" onClick={() => { setDevice(other); setTrouble(null); setAsked(null); }}>Use Receiver {rxName(other)}</Button>}
         </Refusal>
       )}
