@@ -3,6 +3,8 @@
 // alerts; "Keep as a station" makes it one (radio/live.py).
 import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
+import { overloadOf } from "../lib/overload";
+import { OverloadNote } from "../components/Overload";
 import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
 import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
 import { addedToast } from "./added";
@@ -162,15 +164,19 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
   const steps = useSteps(t, view);
   const markers: Any[] = (radio?.receivers || []).find((r: Any) => r.id === dev)?.stations || [];
   const isNarrow = st.mode !== "wfm";
+  // A transmitter close by, as the server says it, while it lasts and 10 minutes after; lighter
+  // clipping than it reports keeps the page's own line.
+  const ovl = overloadOf(st.overload);
   return (
     <>
       <Section id="lv-tuned" title="Tune by hand" actions={<Button icon="stop" onClick={close}>Stop listening</Button>}>
         <RxSwitch ids={ids} value={dev} onChange={onRx}
                   note={st.holders?.length ? `Shared with ${st.holders.join(", ")}: a frequency outside its band, or another gain, needs it to itself.` : null} />
         <TunedHead t={t} steps={steps} />
+        {ovl && <OverloadNote o={ovl} />}
         <TuneControls t={t} steps={steps} play={play} />
         {blocked && <p className="m-trouble">The browser held the sound back: press Play.</p>}
-        {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain.</p>}
+        {!ovl && st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain.</p>}
         {!st.connected && (st.error || st.reconnects > 0) && (
           <p className="m-trouble">{st.error ? `Receiver ${rxName(dev)} stopped: ${st.error}. Tune again to restart it.` : `Receiver ${rxName(dev)} has stopped sending: reconnecting…`}</p>
         )}

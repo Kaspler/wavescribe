@@ -378,7 +378,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 /* A receiver overloaded by a transmitter close by (components/Overload.tsx): a note about the
    reception in the server's words, quiet, never in an alert's colour. What keeps a watch deaf
    meanwhile is a lamp's trouble, so it takes that ink. */
-.ovl { display: grid; gap: 4px; margin-top: 4px; }
-.ovl-note { display: flex; align-items: flex-start; gap: 6px; max-width: var(--measure); font-size: var(--t-sm); line-height: 1.4; color: var(--ink-2); text-wrap: pretty; }
+.ovl { display: grid; }
+.ovl-note { display: flex; align-items: flex-start; gap: 6px; max-width: var(--measure); margin-top: 4px; font-size: var(--t-sm); line-height: 1.4; color: var(--ink-2); text-wrap: pretty; }
 .ovl-note svg { flex: none; margin-top: 2px; color: var(--ink-3); }
-.ovl-warning { max-width: var(--measure); font-size: var(--t-sm); line-height: 1.4; color: var(--trouble-ink); text-wrap: pretty; }
+.ovl-warning { max-width: var(--measure); margin-top: 4px; font-size: var(--t-sm); line-height: 1.4; color: var(--trouble-ink); text-wrap: pretty; }

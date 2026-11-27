@@ -4,7 +4,8 @@
 // on it (ReceiverMarks), and one tuned by hand shows what it sees live (LiveView). The geometry
 // lives in dial.ts.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { WatchNotes } from "../components/Overload";
+import { OverloadNote, WatchNotes } from "../components/Overload";
+import { overloadOf } from "../lib/overload";
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import { agoWords } from "../lib/time";
 import type { Any } from "./api";
@@ -398,6 +399,9 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
   const steps = useSteps(t, null);
   const name = rxName(t.dev);
   const play = () => { t.stopPlayer(); t.startPlayer(st.audio); };
+  // A transmitter close by, as the server says it (the same note as a watch's), while it lasts
+  // and 10 minutes after; lighter clipping than it reports keeps the page's own line.
+  const ovl = overloadOf(st.overload);
   // Opened by a button that goes away with it (Look here, Pause and look): the focus goes on to
   // what can be done here, not back to the top of the page.
   const box = useRef<HTMLDivElement>(null);
@@ -408,6 +412,7 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
   return (
     <div className="dl-view" role="group" aria-label={`What Receiver ${name} hears now`} ref={box}>
       <TunedHead t={t} steps={steps} />
+      {ovl && <OverloadNote o={ovl} />}
       <div className="m-actions">
         {t.playing
           ? <Button variant="secondary" icon="mute" onClick={t.stopPlayer}>Mute</Button>
@@ -418,7 +423,7 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
         <ActButton variant="ghost" run={t.close}>Let Receiver {name} go</ActButton>
       </div>
       {t.blocked && <p className="m-trouble">The browser held the sound back: press Listen.</p>}
-      {st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain under Tuning.</p>}
+      {!ovl && st.clipped > 0.001 && <p className="m-trouble">The receiver is overloaded (its converter clips): lower the gain under Tuning.</p>}
       {!st.connected && (st.error || st.reconnects > 0) && (
         <p className="m-trouble">{st.error ? `Receiver ${name} stopped: ${st.error}. Look here again to restart it.` : `Receiver ${name} has stopped sending: reconnecting…`}</p>
       )}
