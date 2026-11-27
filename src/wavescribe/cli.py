@@ -528,11 +528,19 @@ def cmd_alerts(args: argparse.Namespace) -> int:
                 return 1
             print(to_cap(alert))
             return 0
+        context = event_context(store, args.config) if args.json else None
         alerts = store.alerts(limit=args.limit)
-        if args.json:
+        if context is not None:
             from wavescribe.events import alert_event
+            from wavescribe.web.feed import CONTEXT
 
-            print_events(reversed(alerts), alert_event)
+            def event(a: dict[str, Any], *named: Any) -> dict[str, Any]:
+                # With the utterances just before it on its station, as the feed has it.
+                seg = a.get("segment_id")
+                before = store.context(seg, before=CONTEXT, after=0) if seg is not None else []
+                return alert_event(a, *named, context=[u for u in before if u["id"] != seg])
+
+            print_events(reversed(alerts), event, context)
             return 0
         for a in reversed(alerts):
             stamp = local_time(a["first_at"], "%Y-%m-%d %H:%M")
@@ -571,28 +579,43 @@ def open_store(args: argparse.Namespace) -> Store | None:
     )
 
 
-def print_events(rows: Iterable[dict[str, Any]], event: Callable[..., dict[str, Any]]) -> None:
-    """Stored utterances or alerts (``--json``) as the feed sends them, one JSON object a line.
+def event_context(store: Store, stations_file: Path | None) -> tuple[dict[str, Any], dict]:
+    """The stations and node that stored utterances and alerts are printed with (``--json``),
+    as the feed sends them.
 
-    Stations are named as a running server names them: the stations file with the page's
-    changes. There is no URL, so no audio links: nothing here knows the address a server would
-    be reached at."""
+    Stations are named as a running server names them: the stations file (``stations_file``,
+    else the one serve reads by default) with the page's changes. One that file doesn't have,
+    because there is none here or the station has gone from it, is named as the store kept it
+    when Wavescribe last started it, with the class its newest line was heard under; one the
+    store doesn't know either, by its id, as the feed names one it doesn't know. A stations
+    file asked for by name that can't be read is an error. There is no URL, so no audio links:
+    nothing here knows the address a server would be reached at."""
     from wavescribe.config import ConfigError, load_stations, resolve_stations_path
-    from wavescribe.events import to_json
     from wavescribe.settings import Settings, effective_config
 
-    stations: dict[str, Any] = {}
-    node = {"name": "wavescribe", "url": None}
     try:
-        settings = Settings()
-        config, _ = effective_config(load_stations(resolve_stations_path()), settings.data)
+        page = Settings().data
+    except ConfigError:  # a broken config/ui.toml: no page changes
+        page = {}
+    stations: dict[str, Any] = dict(store.stations())
+    try:
+        config, _ = effective_config(load_stations(resolve_stations_path(stations_file)), page)
     except ConfigError:
-        pass  # each station is then named by its id, as the feed names one it doesn't know
+        if stations_file is not None:
+            raise
     else:
-        stations = {s.id: s for s in config.stations}
-        node["name"] = (settings.get("node") or {}).get("name") or node["name"]
+        stations.update({s.id: s for s in config.stations})
+    return stations, {"name": (page.get("node") or {}).get("name") or "wavescribe", "url": None}
+
+
+def print_events(rows: Iterable[dict[str, Any]], event: Callable[..., dict[str, Any]],
+                 context: tuple[dict[str, Any], dict]) -> None:  # fmt: skip
+    """Stored utterances or alerts as the feed sends them, one JSON object a line, with the
+    stations and node of ``event_context``."""
+    from wavescribe.events import to_json
+
     for row in rows:
-        print(to_json(event(row, stations, node)))
+        print(to_json(event(row, *context)))
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -603,12 +626,15 @@ def cmd_search(args: argparse.Namespace) -> int:
         print(f"wavescribe: nothing stored yet ({path} doesn't exist)", file=sys.stderr)
         return 1
     store = Store(path)
-    hits = store.search(" ".join(args.query), station_id=args.station, limit=args.limit)
-    if args.json:
+    try:
+        context = event_context(store, args.config) if args.json else None
+        hits = store.search(" ".join(args.query), station_id=args.station, limit=args.limit)
+    finally:
+        store.close()
+    if context is not None:
         from wavescribe.events import utterance_event
 
-        print_events(reversed(hits), utterance_event)
-        store.close()
+        print_events(reversed(hits), utterance_event, context)
         return 0 if hits else 1
     bold, plain = ("\033[1m", "\033[0m") if sys.stdout.isatty() else ("[", "]")
     for h in reversed(hits):  # oldest first, so the newest ends up next to the prompt
@@ -617,7 +643,6 @@ def cmd_search(args: argparse.Namespace) -> int:
         print(f"[{stamp}] {h['station']:<10} {_lang(h['field_lang'])}  {snippet}")
     if not hits:
         print("no matches", file=sys.stderr)
-    store.close()
     return 0 if hits else 1
 
 
@@ -764,6 +789,16 @@ def add_json_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def add_names_arg(p: argparse.ArgumentParser, default: Any = None) -> None:
+    """--config for the commands that print stored lines with ``--json``: the stations file
+    whose names, languages and classes they carry."""
+    p.add_argument(
+        "--config", type=Path, default=default,
+        help="stations TOML that --json names stations from, as serve's --config (default: the "
+        "one serve reads; a station not in it goes by the name it was stored with)",
+    )  # fmt: skip
+
+
 def add_settings_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--settings", type=Path, default=DEFAULT_SETTINGS,
@@ -877,10 +912,12 @@ def build_parser() -> argparse.ArgumentParser:
     alerts.set_defaults(func=cmd_alerts, alerts_command="list", limit=20, alerts=None,
                         settings=DEFAULT_SETTINGS)  # fmt: skip
     add_json_arg(alerts)
+    add_names_arg(alerts)
     alerts_sub = alerts.add_subparsers(dest="alerts_command", metavar="ACTION")
     p = alerts_sub.add_parser("list", help="the latest alerts (default)")
     p.add_argument("--limit", type=at_least_one, default=20, help="at most this many (20)")
     add_json_arg(p)
+    add_names_arg(p, default=argparse.SUPPRESS)  # `alerts --config X list` keeps X
     p = alerts_sub.add_parser("cap", help="one alert as a CAP 1.2 XML document")
     p.add_argument("id", type=int, help="the alert's number, as `alerts list` shows it (#12)")
     p = alerts_sub.add_parser("check", help="which rules a sentence would trigger (dry run)")
@@ -920,6 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--station", help="only this station (its id)")
     p.add_argument("--limit", type=at_least_one, default=30, help="at most this many (30)")
     add_json_arg(p)
+    add_names_arg(p)
     p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("record", help="save a station's stream to a local WAV clip")

@@ -25,6 +25,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +53,18 @@ SCHEMA_VERSION = 7  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kin
 # 5: segments.privacy; 6: the class on every row, alerts.privacy; 7: catches, segments.freq_hz
 # Snippet markers around matches; the page turns them into <mark>.
 HIT_START, HIT_END = "\x02", "\x03"
+
+
+@dataclass(frozen=True)
+class KeptStation:
+    """A station as the store keeps it (``Store.stations``), read as ``events.station_ref``
+    reads a configured one."""
+
+    id: str
+    name: str
+    language: str
+    privacy: str | None
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS stations (
@@ -542,6 +555,18 @@ class Store:
                 "DO UPDATE SET name = excluded.name, language = excluded.language",
                 (station.id, station.name, station.language),
             )
+
+    def stations(self) -> dict[str, KeptStation]:
+        """The stations as Wavescribe last started them here (``add_station``), each with the
+        class its newest stored line was heard under (None before rows carried one, or with
+        nothing stored): what names a station when no stations file has it."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, name, language, (SELECT s.privacy FROM segments s "
+                "WHERE s.station_id = stations.id ORDER BY s.t_start DESC LIMIT 1) AS privacy "
+                "FROM stations"
+            ).fetchall()
+        return {r["id"]: KeptStation(r["id"], r["name"], r["language"], r["privacy"]) for r in rows}
 
     def add_transcript(self, result: Result, *, prune: bool = True) -> int | None:
         """Store an utterance and its source-language text; sets ``result.segment_id``.

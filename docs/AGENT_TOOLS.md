@@ -147,11 +147,18 @@ non-zero:
 | `wavescribe digest --json` | one line: what the `digest` tool returns (with `--now`, the `now` tool); it asks the running Wavescribe, like `follow` |
 
 `search` and `alerts` print utterances and alerts in the shapes of [FEED.md](FEED.md), without
-`audio_url` and `cap_url`: a command doesn't know the address the page is reached at.
-`digest --json` asks the running Wavescribe, so its utterances and alerts carry those links
-when that Wavescribe knows its own address. Its `--now`, `--minutes`, `--since`, `--stations`,
-`--language` and `--speak` are as in `wavescribe digest --help`. `follow` prints the feed's
-events as they come.
+`audio_url` and `cap_url`: a command doesn't know the address the page is reached at. They read
+this machine's store, so they carry everything kept, as the `search` tool does; an alert's
+`context` holds up to two utterances stored just before its first mention, on its station. Each
+`station` is named as `serve` names it: from the stations file, `--config FILE` as `serve`
+takes it (by default the one `serve` reads), with the page's changes. A station that file
+doesn't have, because none is found in the current folder or the station has gone from it, is
+named as Wavescribe last started it, with the `privacy` class its newest line was heard under;
+one the store has no name for, by its id, with `language` null and no `privacy`. A `--config`
+file that can't be read fails, saying why. `digest --json` asks the running Wavescribe, so its
+utterances and alerts carry those links when that Wavescribe knows its own address. Its
+`--now`, `--minutes`, `--since`, `--stations`, `--language` and `--speak` are as in
+`wavescribe digest --help`. `follow` prints the feed's events as they come.
 
 ```sh
 $ uv run wavescribe search água --json | jq -r '.time + "  " + .station.name + "  " + .translations.en'

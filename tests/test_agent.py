@@ -2,6 +2,7 @@
 """Agent tools: ``--json`` on the read commands, ``wavescribe follow`` and the MCP adapter, run
 as their own processes against a real server with fake models."""
 
+import dataclasses
 import io
 import json
 import os
@@ -227,6 +228,7 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
         'stream = "http://example.test/a"\n'
     )
     store = Store(tmp_path / "data" / "wavescribe.db")
+    before = stored(store, "a", "Boa tarde, são nove horas", ago=90)
     seg = stored(store, "a", "Corte de água amanhã", en="Water cut tomorrow")
     stored(store, "a", "Previsão de chuva", ago=30)
     alert_on(store, "a", "Corte de água amanhã", seg, ["broadcast"])
@@ -254,6 +256,9 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
         assert alert["type"] == "alert" and alert["rule"] == "water"
         assert alert["text"] == "Corte de água amanhã" and alert["segment_id"] == seg
         assert alert["station"]["name"] == "Rádio A" and alert["severity"] == "high"
+        [said] = alert["context"]  # what was said just before, as the feed carries it
+        assert said["id"] == before and said["text"] == "Boa tarde, são nove horas"
+        assert said["station"] == "a" and said["translations"] == {}
 
     models = lines(["models", "list", "--json"])
     assert models and all(
@@ -274,6 +279,45 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
         json.dumps({"version": 1, "entries": {"99000000": heard}})
     )
     assert lines(["radio", "heard", "--json"]) == [heard]
+
+
+def test_json_names_stations_from_the_stations_file_or_as_the_store_kept_them(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no config/ here: serve ran with --config elsewhere
+    store = Store(tmp_path / "data" / "wavescribe.db")
+    store.add_station(dataclasses.replace(station("a"), name="Rádio A"))
+    seg = stored(store, "a", "Corte de água amanhã")
+    stored(store, "x", "Água fria", ago=30)  # from a station the store never had set up
+    alert_on(store, "a", "Corte de água amanhã", seg, ["broadcast"])
+    store.close()
+    elsewhere = tmp_path / "elsewhere.toml"
+    elsewhere.write_text('[[station]]\nid = "a"\nname = "Rádio Alfa"\nlanguage = "pt-PT"\n'
+                         'stream = "http://example.test/a"\n')  # fmt: skip
+
+    def named(argv: list[str]) -> dict[str, dict]:
+        assert main(argv) == 0
+        rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        return {s["id"]: s for row in rows for s in row.get("stations") or [row["station"]]}
+
+    # Without a stations file: as Wavescribe last started it, in the class it was heard in.
+    found = named(["search", "água", "--json"])
+    assert found["a"] == {"id": "a", "name": "Rádio A", "language": "pt-PT",
+                          "privacy": "broadcast"}  # fmt: skip
+    assert found["x"] == {"id": "x", "name": "x", "language": None}  # by its id, as the feed
+    assert named(["alerts", "--json"])["a"]["name"] == "Rádio A"
+    # --config names them from that file, as serve --config does.
+    assert named(["search", "água", "--json", "--config", str(elsewhere)])["a"]["name"] == (
+        "Rádio Alfa")  # fmt: skip
+    for argv in (["alerts", "--json", "--config", str(elsewhere)],
+                 ["alerts", "--config", str(elsewhere), "list", "--json"],
+                 ["alerts", "list", "--json", "--config", str(elsewhere)]):  # fmt: skip
+        assert named(argv)["a"]["name"] == "Rádio Alfa", argv
+    # A file asked for by name that isn't there is an error, not a quiet fallback.
+    for argv in (["search", "água"], ["alerts"]):
+        assert main([*argv, "--json", "--config", str(tmp_path / "nope.toml")]) == 1
+        out, err = capsys.readouterr()
+        assert out == "" and "nope.toml: not found" in err
 
 
 # -- follow -----------------------------------------------------------------------------------
