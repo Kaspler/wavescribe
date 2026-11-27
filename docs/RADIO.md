@@ -33,6 +33,14 @@ frequency heard here. Each receiver stands on the dial as the window it hears, w
 and a lamp; the line under the dial says in words what each one is doing: idle, tuned by hand,
 following stations, scanning, or not answering.
 
+The dial is stretched so that small bands stay legible, so a window's width on it says little:
+2.4 MHz looks wide on FM and thin on TV. The line under it says it in MHz for the chosen
+receiver, against the band it is on: "Receiver A hears about 2.2 MHz at once: about a tenth of
+the FM radio band (87.5–108 MHz)", all of a band, the part of one at its edge and how far past,
+or outside every band. The band's card draws the band to scale, with that window on it. Another
+line says whose band plan names the bands, "Bands for Europe (CEPT), from this Mac's region",
+with **Change** to set it (see [Band plans and regions](#band-plans-and-regions)).
+
 Choose a band to read what it is, when it is busy and the antenna it wants. Then:
 
 - **Find stations here** sweeps the band with the receiver chosen under *Receiver*: once for
@@ -59,8 +67,10 @@ One receiver is live at a time. For a band without it, the page shows the band f
 scan that covered it, with how long ago that was. With nothing found yet, the page offers one
 button: FM, the easiest radio to hear; after that it suggests a band to try next. On a phone the
 dial is a list of bands, with the receivers on their rows. Another range, and how long to watch,
-are under *Advanced*; while a receiver is live, its frequency, mode, step and gain are under
-*Tuning*. From a terminal:
+are under *Advanced*. While a receiver is live, its frequency has the step and the up and down
+buttons beside it, and the arrow keys step while you are in that view (see
+[Listening by hand](#listening-by-hand)); its mode, squelch and gain are under *Tuning*. From a
+terminal:
 
 ```sh
 uv run wavescribe radio bands                 # the band plan for your region
@@ -128,14 +138,31 @@ an error too: it never reports a band it didn't hear.
 
 **Listen** → **Tune by hand** is a receiver you tune yourself, like a hand-held scanner:
 nothing is written down, stored or checked for alerts. Pick a receiver and type a frequency,
-press a band (FM, airband, marine, amateur, PMR446...) or **Listen** beside anything on
-**Find**. Then:
+press one of the **Bands where you are** or **Listen** beside anything on **Find**. Each band
+there says what is heard on it, the kind of radio it is (broadcast, amateur, utility or private)
+and whether it asks you to confirm first; the line under them says whose band plan they come
+from. Then:
 
+- **The step**, beside the frequency, starts at the band's raster: 100 kHz on FM, 12.5 kHz on
+  most narrow channels, 8.33 kHz in the airband. Where the band plan lists the band's channels
+  (PMR446, FRS) it starts at **Channels**: each step goes to the next channel of the list, round
+  from the last to the first, and the frequency reads "Channel 8 · 446.09375 MHz". The list has
+  other steps from 5 to 100 kHz. A run of steps past a band's edge keeps its raster.
+- **The up and down buttons** beside it step once per press and go on stepping while held; with
+  Shift, ten steps. On a phone they are a fingertip wide.
+- **The keys** step too, wherever the focus is: ↑ or → up, ↓ or ← down, ten steps with Shift;
+  Page Up and Page Down go to the next or previous channel where the band lists its channels,
+  else ten steps (Fn+↑ and Fn+↓ on a Mac keyboard without those keys). A text field, a radio
+  button, and a slider or list you reached with Tab keep the arrow keys; a slider or button you
+  used with the mouse gives them back to the tuning. On the dial's live view under **Find** they
+  step while you are in that view. A line under the frequency and the shortcuts list (`?`) say
+  the same. Steps in quick succession retune a few times a second, to the last one, and the new
+  frequency is announced to a screen reader once it settles.
 - **The spectrum and waterfall** show what the dongle hears; the orange line is where you are
-  tuned and the shaded band the channel you hear. Click a signal to tune it, scroll or use the
-  arrow keys to step, and zoom to 400, 100 or 25 kHz to see narrow channels. The waterfall shows
-  radio that comes and goes: walkie-talkies and aircraft are short bursts.
-- **‹ and ›** seek to the next signal down or up the band; **−** and **+** step one channel.
+  tuned and the shaded band the channel you hear. Click a signal to tune it, scroll to step, and
+  zoom to 400, 100 or 25 kHz to see narrow channels. The waterfall shows radio that comes and
+  goes: walkie-talkies and aircraft are short bursts.
+- **Seek** (‹ and ›) goes to the next signal down or up the band.
 - **Squelch** silences the channel between transmissions. Left at *auto*, it opens on any
   carrier by itself; move it to set a level. **Gain** changes the dongle's amplification (try
   lower if strong stations bleed into others).
@@ -516,7 +543,9 @@ Until you choose a region, the band list follows this computer's region setting,
 frequency takes the strictest class any region gives it (FM broadcast excepted): a computer set
 to US English may well be in Europe, where 446 MHz is walkie-talkies rather than amateur radio.
 Set your region with `[radio] region = "2"` in the stations file, or on the page (Settings →
-**Receivers** → **Your region** → **Band plan**). Where a region
+**Receivers** → **Your region** → **Band plan**). The dial and Listen's **Bands where you are**
+end with a line naming the region they show, and where it came from when it wasn't chosen on the
+page; its **Change** leads to that setting. Where a region
 has its own version of a band, the usual name finds it: `airband` is the Americas' `airband-25`
 (a 25 kHz raster), `fm` their `fm-americas`, `2m` their `2m-wide`. To add a band,
 add a `[[band]]` to `bands.toml`: it's data, not code. A frequency that no plan for your region

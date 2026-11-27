@@ -160,7 +160,7 @@ what is newer and less tried.
 - [FM stations named from their RDS](docs/RADIO.md#finding-stations); `radio rds` shows one
   station's name, programme type and radiotext live.
 - [The dial](docs/RADIO.md#finding-stations) on the page: the bands a receiver can tune, what each
-  one is, and what was heard on it.
+  one is, what was heard on it, and how much of a band each receiver hears at once.
 - [Band plans by region](docs/RADIO.md#band-plans-and-regions) (Europe, Africa and the Middle East,
   the Americas, Asia-Pacific, Japan): `radio bands`.
 - [A list of everything your scans heard](docs/RADIO.md#finding-stations), kept on the Mac:
@@ -171,6 +171,8 @@ what is newer and less tried.
   live spectrum to test the antenna.
 - [Listening by hand](docs/RADIO.md#listening-by-hand): spectrum and waterfall, click to tune, seek,
   squelch, gain; nothing is stored.
+- [Stepping as on a radio](docs/RADIO.md#listening-by-hand): the arrow keys and up and down buttons
+  step by the band's raster or channel by channel, ten at a time with Shift.
 - [A scanner](docs/RADIO.md#listening-by-hand) over a band's channels that stops where someone
   talks, and can skip a busy channel.
 - [Any frequency kept as a station](docs/RADIO.md#keeping-a-frequency-as-a-station), or transcribed

@@ -185,6 +185,18 @@ rewritten.
 | `Esc` | Close the alerts, search, Ask, Listen, Find or Settings |
 | `?` | The list of shortcuts |
 
+While a radio receiver is tuned by hand (section 9), the arrow keys tune it, as on a radio:
+
+| Key | What it does |
+|---|---|
+| `↑` or `→` | One step up |
+| `↓` or `←` | One step down |
+| `Shift` with them | Ten steps |
+| `Page Up`, `Page Down` | The next or previous channel where the band has a channel list, else ten steps |
+
+A text field, and a slider or list you reached with Tab, keep the arrow keys; one you used with
+the mouse gives them back ([RADIO.md](RADIO.md#listening-by-hand)).
+
 ## 6. Search and ask
 
 Type in the field at the top (**Search or ask**):
@@ -515,7 +527,8 @@ left alone.
 4. **Listen** beside a station tunes the receiver to it, there on the page: a spectrum and
    waterfall show what the receiver hears, with the stations marked by name, and a click on a
    signal tunes it. **Listen** → **Tune by hand** has the same receiver, with seek and a
-   scanner. Nothing you listen to there is written down.
+   scanner; the arrow keys, or the up and down buttons beside the frequency, step it by the
+   band's raster or channel by channel. Nothing you listen to there is written down.
 5. **Add as a station** beside a station keeps it: it runs all the time, written down,
    translated and watched by your alerts, like any other station.
 
@@ -526,7 +539,7 @@ of its channels and lists it under **Caught here**
 ([RADIO.md](RADIO.md#catching-radio-that-only-talks-now-and-then)).
 
 One dongle hears a window about 2.2 MHz wide, so it can carry two to five FM stations that sit
-close together. For stations spread across the band, use more dongles
+close together; the line under the dial says how much of the band that is. For stations spread across the band, use more dongles
 ([HARDWARE.md](HARDWARE.md#planning-frequencies)).
 
 Wavescribe can tune any frequency: aircraft, ships, radio amateurs, walkie-talkies. Before it
