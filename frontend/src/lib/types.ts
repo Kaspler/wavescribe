@@ -185,6 +185,8 @@ export interface PageState {
   /** The languages (primary subtags) in which a rule that listens for topics has a word list;
    * null when no rule that is on listens for topics, or alerts are off (reading/rulesNote.ts). */
   topic_languages?: string[] | null;
+  /** How a command is typed in this install: "uv run wavescribe" or "wavescribe". */
+  invocation?: string | null;
   status: Status;
   node: { name: string; url: string };
   manage: boolean;

@@ -17,6 +17,11 @@ const WORK: Record<string, string> = {
 };
 /** "40 s", "2 min": about how long, for a wait that is only a guess. */
 const roughly = (s: number) => (s < 60 ? `${Math.max(1, Math.round(s))} s` : `${Math.round(s / 60)} min`);
+/** A command as it is typed in this install (/api/state's `invocation`): "uv run wavescribe" in a
+ * Wavescribe folder, "wavescribe" where it is installed as a package; a server that doesn't say
+ * runs from a folder. */
+const typed = (invocation: string | null | undefined, rest: string) =>
+  `${(typeof invocation === "string" && invocation.trim()) || "uv run wavescribe"} ${rest}`;
 /** Why a line has no translation, by the reason its flag gives (T.noTranslationWhy). */
 const NO_TRANSLATION: Record<string, string> = {
   declined: "No translation: the model couldn't translate this line.",
@@ -183,7 +188,7 @@ export const T = {
   // on the Wavescribe machine, so the command comes first.
   tokenBody: {
     ask: "Ask its owner for a read token. They make one on the Wavescribe machine with",
-    command: "wavescribe token make",
+    command: (invocation?: string | null) => typed(invocation, "token make"),
     or: "(or under Settings → Connections when it isn't behind a proxy). This browser keeps the token, so it is asked for once.",
   },
   tokenLabel: "Read token",

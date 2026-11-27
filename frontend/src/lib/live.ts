@@ -38,6 +38,8 @@ export const S = {
   mtModel: null as string | null,
   /** /api/state's topic_languages: where the rules that listen for topics have a word list. */
   topicLanguages: null as string[] | null,
+  /** /api/state's invocation: how a command is typed in this install, for hints. */
+  invocation: null as string | null,
   noncommercial: [] as string[],
   node: { name: "", url: "" },
   utts: {} as Record<string, Utterance[]>,
@@ -115,6 +117,7 @@ export async function loadState() {
   S.digestCode = state.digest_code ?? null;
   S.mtModel = state.mt_model;
   S.topicLanguages = Array.isArray(state.topic_languages) ? state.topic_languages : null;
+  S.invocation = typeof state.invocation === "string" ? state.invocation : null;
   S.noncommercial = state.noncommercial || [];
   S.node = state.node;
   if (P.lang === null) {

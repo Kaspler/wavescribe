@@ -23,7 +23,7 @@ c1f941226ded5c45c76bdd3007c5c625c4233db2 frontend/src/lib/auth.ts
 24e330099aba625b1f03ec3d42ede07681fdfe10 frontend/src/lib/behind.ts
 78964179ef6ac422cba1e970ffe31ad05ce01642 frontend/src/lib/hold.ts
 020871396212aef7b099bd985e99026da79e74e4 frontend/src/lib/lang.ts
-d2d0b4a06753560ac3b789c512b0215d67cb0f9b frontend/src/lib/live.ts
+5db59740c27b8d2bce2ffd358663c4854601047e frontend/src/lib/live.ts
 a04d139bb226ed6d8b99a15f3bfd9a8ea8e1de20 frontend/src/lib/models.ts
 0369275092c8e6bcd4c7958bc02a5fee98272b59 frontend/src/lib/overload.ts
 95f2893de08f896f27650e8091d1ed7f03936fb4 frontend/src/lib/prefs.ts
@@ -33,7 +33,7 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 3d86f63457b8be9c677f79282bd7a73479d07e77 frontend/src/lib/store.ts
 1c27bea7df915d4bc19a165dcb6b50698ccc6cad frontend/src/lib/tabs.ts
 5b5f12f3274ddcd6310d6bd84136dd56f4461959 frontend/src/lib/time.ts
-f67ef5594f772ab41e3208fd6517327244285f83 frontend/src/lib/types.ts
+38ac959b8cda632d022b6cb13cbf224ccadc98ba frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
 e5942fb47a739fd7e8706dc0f5c46f2a6ba4609c frontend/src/manage/AlertRules.tsx
@@ -86,7 +86,7 @@ bf38f81ec2aa75ca002b22ede6cd5d76a97e653e frontend/src/reading/Search.tsx
 26334172637c075356b12c7cf4ff56cb5c13e568 frontend/src/reading/Settings.tsx
 815974d53021dd857b5c14f65d70d67ad8245b01 frontend/src/reading/StationMenu.tsx
 a073128037b866ec48d3c95f36c9113a1978a5de frontend/src/reading/Summary.tsx
-a9eee1bdcd799caa4deb2fe5bf5e37bfc641cb75 frontend/src/reading/TokenGate.tsx
+7f8aa64cadb11a5a64750361bf318bbc5ff384b7 frontend/src/reading/TokenGate.tsx
 8f92e929fad369085e34fab30007703247e2f8bf frontend/src/reading/alertText.ts
 fee9d1df9af77766a5aa5da33d32dced8d18a73e frontend/src/reading/aloud.ts
 cd13e6e1e44a731d3c09934f19f40af51a25e138 frontend/src/reading/channels.ts
@@ -95,7 +95,7 @@ ec577ee16ba49abe4ed61b980cd80b2c229a6d56 frontend/src/reading/colNote.ts
 9cb05e074e89362e29959129713c58ce23f76a3d frontend/src/reading/held.ts
 d7dccf2f1987ff7e6903b4834722e6dc6c4168e9 frontend/src/reading/reading.css
 06f63790b2abf799932d1835103ae44b256ae7d0 frontend/src/reading/rulesNote.ts
-3d512aa2c61c278abcdb73e9cae0183f6decd22f frontend/src/reading/strings.ts
+424bce4e7c4835cbbf2e19f3b44ab03216bb90ed frontend/src/reading/strings.ts
 c4e6fb591a2d83f663ef2465067a345bf5a983e3 frontend/src/reading/summaries.ts
 e525eba01feec9afa78f202473013a94f6e268c7 frontend/src/reading/text.tsx
 b72fa0e883100643d3252a59f3d9fd253d66d71e frontend/src/styles/base.css
@@ -117,6 +117,7 @@ ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
 1529aca37ae80e84524f10c0d33f06e2c49c2b05 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 d551a2df95c0a9ebd58fde325d160571d4b19bc1 frontend/tests/hold.test.mjs
+b0c6552f3421cdf84b442353bc41536363b6c286 frontend/tests/invocation.test.mjs
 20042eec724f4882d254fb7ff510ecddf205973d frontend/tests/langs.test.mjs
 4877b9499a77a0434fd5fb673c6c24228b93788f frontend/tests/leftOut.test.mjs
 2654de62bc7f54d28ea43bc59abe5be9b682eb93 frontend/tests/models.test.mjs
