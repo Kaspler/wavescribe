@@ -58,6 +58,20 @@ def detects_languages(entry: ModelEntry, path: Path | None) -> bool:
     return entry.capability == "asr" and path is not None and can_detect(entry, path)
 
 
+def _advice(registry: ModelRegistry) -> str:
+    """What to do about a chosen model that can't serve language ``auto``: choose an installed
+    one that tells languages apart, or, with none installed, fetch one (``NEEDS``)."""
+    ready = []
+    for entry in registry.chain("asr"):
+        path = registry.local_path(entry) if entry.backend == "mlx-audio" else None
+        if path is not None and detects_languages(entry, path):
+            ready.append(entry.id)
+    if not ready:
+        return NEEDS
+    return (f"choose one that tells languages apart ({', '.join(ready)} is installed), or give "
+            "the one language spoken")  # fmt: skip
+
+
 def plan_detecting(
     registry: ModelRegistry, station: Station, asr_model: str | None = None
 ) -> tuple[ModelEntry, Path]:
@@ -79,9 +93,10 @@ def plan_detecting(
         detects = detects_languages(entry, path)
         if not detects or unknown:
             if chosen and not detects:
-                raise CannotDetect(f"{entry.id} can't tell languages; {NEEDS}")
+                raise CannotDetect(f"{entry.id} can't tell languages; {_advice(registry)}")
             if chosen:
-                raise ModelError(f"{entry.id} doesn't know {', '.join(unknown)}; {NEEDS}")
+                raise ModelError(f"{entry.id} doesn't know {', '.join(unknown)}; "
+                                 f"{_advice(registry)}")  # fmt: skip
             continue
         try:
             registry.check_license(entry)

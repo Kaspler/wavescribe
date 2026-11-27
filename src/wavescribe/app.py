@@ -695,7 +695,9 @@ class App:
         plays and isn't written down until it is stopped or started again without it."""
         station = self.config.get(sid)
         if sid in self.unavailable:
-            raise ChangeError(self.unavailable[sid])
+            why = self.unavailable[sid]
+            code = {SWITCHED_OFF: "switched_off", UNCONFIRMED: "unconfirmed"}.get(why)
+            raise ChangeError(why, code)  # the page offers to switch it on, or to confirm
         held = station.sdr and getattr(self, "_live", None) and self._live.holds(
             station.sdr.device.id)  # fmt: skip
         if held:

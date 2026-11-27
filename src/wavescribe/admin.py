@@ -349,7 +349,7 @@ def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
                 "signal_db": status.get(s.id, {}).get("signal_db"),
                 "clipped": status.get(s.id, {}).get("clipped"),
                 # Why the receiver, tuned as it is, doesn't hear it; None when it does.
-                "out_of_reach": s.out_of_reach,
+                "out_of_reach": None if s.disabled else s.out_of_reach,  # as /api/state
                 "reach_center_mhz": reach_center_mhz(s, app.config.stations, status),
             } for s in stations],
         })  # fmt: skip

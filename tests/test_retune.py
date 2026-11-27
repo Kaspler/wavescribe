@@ -135,7 +135,8 @@ def test_starting_a_station_its_receiver_doesnt_hear_moves_it_and_asks_first(
         assert ask["holders"] == [] and ask["center_mhz"] == 432.25
         assert ask["error"] == (
             "Receiver A moves to 432.25 MHz to hear Far, where it no longer hears Two metres or "
-            "Repeater. They stay in your stations, unavailable until the receiver hears them again."
+            "Repeater. None of them is running now. They stay in your stations, unavailable "
+            "until the receiver hears them again."
         )
         assert r.app.settings.snapshot() == before  # nothing changed while it asks
         status, err = r.call("POST", "/api/manage/stations/far/start", {"retune": "yes"})
@@ -181,7 +182,8 @@ def test_a_stopped_watch_asks_before_a_retune_leaves_it_out(tmp_path: Path) -> N
         assert ask["holders"] == [] and ask["center_mhz"] == 99.2
         assert ask["error"] == (
             "Receiver A moves to 99.2 MHz to hear 99.5 MHz, where it no longer hears Two "
-            "metres. It stays in your stations, unavailable until the receiver hears it again."
+            "metres. It isn't running now. It stays in your stations, unavailable until the "
+            "receiver hears it again."
         )
         assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
         assert len(r.app.config.stations) == 2  # nothing was added
@@ -344,6 +346,8 @@ def test_add_from_a_receiver_tuned_by_hand_asks_for_stations_it_leaves_out(tmp_p
         assert ask["unfit"] == [{"id": walkies["id"], "name": walkies["name"], "running": False}]
         assert r.app.live.is_open("x")  # nothing changed while it asks
         assert "445.85" not in ask["error"]  # never the centre it was set to before
+        assert ask["holders"] == [] and "It isn't running now." in ask["error"]
+        assert ask["error"].endswith("Listening by hand on Receiver X ends.")
 
         status, added = r.call("POST", "/api/manage/radio/tune", {**body, "retune": True})
         assert status == 200 and added["running"] is True and added["live_closed"] is True

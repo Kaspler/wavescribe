@@ -348,7 +348,8 @@ def test_auto_needs_a_model_that_tells_languages_apart(tmp_path: Path) -> None:
         )
     # Skips the one that isn't Whisper, and the Whisper that only knows English.
     assert plan_detecting(registry, s)[0].id == "whisper-x"
-    with pytest.raises(ModelError, match="m can't tell languages"):
+    # One that can is installed, so the refusal says to choose it, not to fetch one.
+    with pytest.raises(ModelError, match=r"m can't tell languages; choose one .*whisper-x is ins"):
         plan_detecting(registry, s, "m")
     with pytest.raises(ModelError, match="whisper-en can't tell languages"):
         plan_detecting(registry, watch_station(), "whisper-en")

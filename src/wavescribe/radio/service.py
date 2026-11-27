@@ -111,7 +111,8 @@ class RadioService:
                 "center_mhz": d.center_hz / 1e6, "span_mhz": span_mhz(d),
                 "busy": busy, "busy_code": code, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
-                              "running": s.id in running, "out_of_reach": s.out_of_reach,
+                              "running": s.id in running,
+                              "out_of_reach": None if s.disabled else s.out_of_reach,
                               "reach_center_mhz": reach_center_mhz(
                                   s, self.app.config.stations, running)}
                              for s in on if s.sdr],
@@ -577,7 +578,8 @@ class RadioService:
         hand = live.centre(d.id) if by_hand else None
         centre, unfit = place(hand, running)
         if unfit and not retune:
-            raise retune_question(d.id, centre, unfit, running, freq_hz=freq_hz, heard=heard)
+            raise retune_question(d.id, centre, unfit, running, freq_hz=freq_hz, heard=heard,
+                                  by_hand=by_hand)  # fmt: skip
         return centre, unfit, running, by_hand
 
     @staticmethod
@@ -779,13 +781,14 @@ def reach_center_mhz(s: Any, stations: Any = (), running: Any = ()) -> float | N
 
 
 def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: set[str], *,
-                    freq_hz: int | None = None,
-                    heard: str | None = None) -> RadioError:  # fmt: skip
+                    freq_hz: int | None = None, heard: str | None = None,
+                    by_hand: bool = False) -> RadioError:  # fmt: skip
     """What a retune asks before it leaves stations out (code ``retune``): the stations the
     receiver wouldn't hear from ``centre_hz``, which of them stop now, and that they stay
     listed. The page shows it and sends the same request again with ``retune: true``.
     ``holders`` names the running ones, ``unfit`` all of them, ``center_mhz`` where it goes.
-    ``freq_hz`` (a frequency) or ``heard`` (a station's name) is what the receiver moves for."""
+    ``freq_hz`` (a frequency) or ``heard`` (a station's name) is what the receiver moves for;
+    ``by_hand``: listening by hand on that receiver ends with the move."""
     rx, at = receiver_name(device_id), mhz_text(centre_hz / 1e6)
     if centre_hz % 1000:  # between two channels of a watch: said to the kHz, kept exact
         at = f"about {mhz_text(round(centre_hz, -3) / 1e6)}"
@@ -794,11 +797,15 @@ def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: s
     target = heard or (f"{mhz_text(freq_hz / 1e6)} MHz" if freq_hz is not None else None)
     why = f" to hear {target}" if target else ""  # one sentence, whatever moves it
     said = f"Receiver {rx} moves to {at} MHz{why}, where it no longer hears {joined(names, 'or')}."
+    one = len(names) == 1
     if stops:
         said += f" Retuning it stops {joined(stops)}."
-    one = len(names) == 1
+    else:  # only stations that aren't running: nothing playing is cut off
+        said += " It isn't running now." if one else " None of them is running now."
     said += (f" {'It stays' if one else 'They stay'} in your stations, unavailable until the "
              f"receiver hears {them(names)} again.")  # fmt: skip
+    if by_hand:
+        said += f" Listening by hand on Receiver {rx} ends."
     return RadioError(
         said, "retune", holders=stops, center_mhz=centre_hz / 1e6,
         unfit=[{"id": s.id, "name": s.name, "running": s.id in running} for s in unfit],

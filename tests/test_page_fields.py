@@ -61,6 +61,14 @@ def test_both_views_agree_and_a_station_switched_off_is_in_nobodys_way(tmp_path:
         assert state["far"]["out_of_reach"] and state["off"]["out_of_reach"] is None
         assert r.call("DELETE", "/api/manage/stations/nowhere") == (
             404, {"error": "no station 'nowhere'", "code": "not_found"})  # fmt: skip
+        assert r.call("POST", "/api/manage/stations/off/start", {}) == (
+            400, {"error": "switched off on the page", "code": "switched_off"})  # fmt: skip
+        radio = r.call("GET", "/api/manage/radio")[1]
+        listed = {s["id"]: s for rx in radio["receivers"] for s in rx["stations"]}
+        receivers = r.call("GET", "/api/manage/receivers")[1]
+        listed2 = {s["id"]: s for d in receivers["devices"] for s in d["stations"]}
+        for lists in (listed, listed2):  # one rule with /api/state: off is in nobody's way
+            assert lists["far"]["out_of_reach"] and lists["off"]["out_of_reach"] is None
     finally:
         r.close()
 
@@ -166,7 +174,8 @@ def test_adding_a_station_its_receiver_doesnt_hear_asks_as_a_tune_does(tmp_path:
         assert ask["holders"] == [] and ask["center_mhz"] == 432.25
         assert ask["error"] == (
             "Receiver A moves to 432.25 MHz to hear Far, where it no longer hears Two metres. "
-            "It stays in your stations, unavailable until the receiver hears it again."
+            "It isn't running now. It stays in your stations, unavailable until the receiver "
+            "hears it again."
         )
         assert r.app.settings.snapshot() == before  # nothing changed while it asks
         assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
