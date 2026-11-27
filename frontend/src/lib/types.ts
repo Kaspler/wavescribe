@@ -101,10 +101,15 @@ export interface Alert {
 }
 
 /** A receiver overloaded by a transmitter close by, as the server reports it: when it was last
- * seen (epoch seconds), the channel on top where known, and what to do, in its own words. */
+ * seen (epoch seconds), where the transmitter was, and what to do, in its own words. */
 export interface Overload {
   t: number;
+  /** The channel it was caught on (`on_channel` true); off the channels, the transmitter's own
+   * frequency to the kHz, where nothing was caught; null where that isn't clear or known. */
   freq_hz: number | null;
+  /** Whether the transmitter was on one of the watch's channels: true, false, or null where no
+   * one channel stood out, and for the hand tuner, which doesn't say. */
+  on_channel: boolean | null;
   message: string;
 }
 
