@@ -61,7 +61,7 @@ dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 cd991cc8d9ac21eb246ad56b656c52953ce32c18 frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
-ce63599971e621a20fb0bcd3ad41a3004884b99a frontend/src/manage/manage.css
+5ac2545cab8bf3e71263ce87bc2ce1cf7cbdec7f frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts

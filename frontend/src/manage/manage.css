@@ -22,7 +22,10 @@
 .m-nav a.is-current { background: var(--raised); color: var(--ink); box-shadow: 0 0 0 1px var(--rule), 0 1px 2px rgb(0 0 0 / 0.06); }
 .m-nav a.is-current svg { color: var(--accent); }
 
-.m-body { min-height: 0; overflow-y: auto; background: var(--surface); outline: none; }
+/* Positioned, so that what is hidden inside it (a box's real input, a table's caption) belongs to
+   the pane that scrolls. Placed against the page instead, it lengthens the page itself, and
+   focusing a box low in the pane scrolls the whole page, the header out of the window. */
+.m-body { position: relative; min-height: 0; overflow-y: auto; background: var(--surface); outline: none; }
 .m-page { max-width: 1040px; padding: var(--s8) var(--s10) 96px; }
 /* The notices of what the page is built from: there when wanted, quieter than any page. */
 .m-nav a.m-nav-foot { display: inline-block; height: auto; margin-top: var(--s6); padding: 0 10px; background: none; box-shadow: none; color: var(--ink-3); font-size: var(--t-sm); font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
