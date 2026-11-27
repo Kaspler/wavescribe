@@ -109,7 +109,7 @@ def test_radio_rds_starts_rtl_sdr_with_the_receivers_settings(
 @pytest.mark.parametrize(
     ("trouble", "message"),
     [
-        ("FAKE_RTL_BUSY", "dongle 00001234 is busy: another program has it open"),
+        ("FAKE_RTL_BUSY", "receiver A is busy: another program has it open"),
         ("FAKE_RTL_MISSING", "rtl_sdr gave no samples: No matching devices found."),
         ("PATH", "rtl_sdr isn't installed"),
     ],
@@ -119,6 +119,7 @@ def test_radio_rds_says_why_it_heard_nothing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:  # fmt: skip
     monkeypatch.setenv(trouble, str(tmp_path))  # as PATH: a folder with no rtl_sdr in it
+    monkeypatch.setattr("wavescribe.radio.cli.serve_pid", lambda: None)  # no serve holds it
     assert main(["radio", "rds", *receiver[0]]) == 1
     err = capsys.readouterr().err
     assert message in err and "groups" not in err

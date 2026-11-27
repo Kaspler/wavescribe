@@ -19,6 +19,10 @@ dongles**): **Use it** makes one a receiver (gain 30 dB; the same page changes i
 gain, and its sample rate under *Advanced*, where *Test the antenna* shows its live spectrum).
 Listing the dongles opens none of them, so a running station is never disturbed. In a stations file, a
 receiver is a `[[device]]` with an `id` and the dongle's `serial` (docs/HARDWARE.md).
+Messages and the `radio` commands' output name a receiver by its id (`receiver A`), never by
+its serial, so you can paste them anywhere; a dongle no receiver uses shows only the last
+digits of its serial (`…1234`). The full serials are under Settings → **Receivers**, in
+`wavescribe doctor` and in the logs.
 
 ## Finding stations
 
@@ -102,7 +106,8 @@ keeps them under Show more.
 **One program per dongle.** A dongle opens in one process at a time. A scan with a receiver
 that is running stations (or the spectrum monitor) pauses them for the scan and starts them again
 when it ends; the page says which before you start the scan. From a terminal,
-`wavescribe radio scan` needs the receiver free: stop `serve`, or scan with another dongle.
+`wavescribe radio scan` needs the receiver free. When `serve` has it open, the command says so:
+scan from the page instead (Find → On the air), stop `serve`, or scan with another dongle.
 
 ## Listening by hand
 

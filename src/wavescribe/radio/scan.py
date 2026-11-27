@@ -76,7 +76,18 @@ IF_MAX_HZ = 4_600_000
 
 
 class ScanError(RuntimeError):
-    """The scan couldn't run: no rtl_power, a busy dongle, a bad range."""
+    """The scan couldn't run: no rtl_power, a busy dongle, a bad range. Messages name no
+    dongle: the caller knows which receiver it gave, and a serial has no place in them."""
+
+
+class Busy(ScanError):
+    """Another process has the dongle open."""
+
+    def __init__(self) -> None:
+        super().__init__(BUSY)
+
+
+BUSY = "the receiver is busy: another program has it open"
 
 
 class Cancelled(ScanError):
@@ -259,7 +270,7 @@ def sweep(
     text = "".join(err)
     if not rows:
         if _busy(text):
-            raise ScanError(f"dongle {serial} is busy: another program has it open")
+            raise Busy()
         raise ScanError(f"rtl_power found nothing to report: {text.strip()[-300:] or 'no output'}")
     sw = _assemble(rows, start_hz, stop_hz, bin_hz, 0.0)
     _unlocked(sw, err, rows)
@@ -419,7 +430,7 @@ def _run(
             if not ready:
                 if time.monotonic() - heard > stall_s:
                     raise ScanError(
-                        f"rtl_power on dongle {serial} stopped reporting (nothing for "
+                        f"rtl_power stopped reporting (nothing for "
                         f"{stall_s:.0f} s), so it was stopped. Try again; if it keeps "
                         "happening, unplug the dongle and plug it in again"
                     )
@@ -713,7 +724,7 @@ def name_fm(
                 proc.kill()
             proc.wait()
         if got == 0 and _busy(err.decode(errors="replace")):
-            raise ScanError(f"dongle {serial} is busy: another program has it open")
+            raise Busy()
         for f in members:
             info = decoders[f].info
             if info.pi is not None or info.groups:

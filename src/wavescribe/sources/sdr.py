@@ -34,6 +34,7 @@ from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.dsp.rds import RdsDecoder
 from wavescribe.dsp.wfm import WfmDemodulator, iq_from_u8
 from wavescribe.log import event
+from wavescribe.radio.words import receiver_name
 from wavescribe.sources import SourceHealth
 
 log = logging.getLogger(__name__)
@@ -391,11 +392,20 @@ def shared_device(config: SdrDevice, **kwargs: object) -> RtlSdrDevice:
         if device is None:
             device = _devices[config.serial] = RtlSdrDevice(config, **kwargs)  # type: ignore[arg-type]
         elif device.config != config:
+            now, asked = _setup(device.config), _setup(config)
+            differ = [k for k in now if now[k] != asked[k]] or list(now)
             raise ValueError(
-                f"dongle {config.serial} is already in use as {device.config}; "
-                f"a station can't retune it to {config}"
+                f"Receiver {receiver_name(config.id)} is already in use at "
+                f"{', '.join(now[k] for k in differ)}: a station can't retune it to "
+                f"{', '.join(asked[k] for k in differ)} while it is."
             )
         return device
+
+
+def _setup(c: SdrDevice) -> dict[str, str]:
+    """A dongle's settings in words, for a message (its serial is in none)."""
+    return {"centre": f"{c.center_hz / 1e6:g} MHz", "gain": f"{c.gain_db:g} dB gain",
+            "rate": f"{c.sample_rate / 1e6:g} MS/s", "ppm": f"{c.ppm} ppm"}  # fmt: skip
 
 
 class SdrChannelSource:

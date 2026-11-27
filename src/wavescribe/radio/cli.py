@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from wavescribe.radio.bandplan import (
     AUTO,
@@ -17,6 +18,7 @@ from wavescribe.radio.bandplan import (
     mhz_text,
     region_bands,
 )
+from wavescribe.radio.words import masked_serial, receiver_name
 
 
 def _region(args: argparse.Namespace, config: Any = None) -> str:
@@ -42,20 +44,66 @@ def _config(args: argparse.Namespace) -> Any:
     return config
 
 
-def resolve_receiver(name: str, config: Any) -> tuple[str, float, int]:
-    """A receiver by its id in the config (``a``) or by serial: (serial, gain, ppm)."""
+class Receiver(NamedTuple):
+    serial: str
+    gain_db: float
+    ppm: int
+    name: str  # how output names it: "receiver A", never by its serial (people paste output)
+
+
+def resolve_receiver(name: str, config: Any) -> Receiver:
+    """A receiver by its id in the config (``a``) or by serial."""
     if config is not None:
         for d in config.devices:
             if name in (d.id, d.serial):
-                return d.serial, d.gain_db, d.ppm
+                return Receiver(d.serial, d.gain_db, d.ppm, f"receiver {receiver_name(d.id)}")
     from wavescribe.sources.sdr import list_dongles
 
     serials = [d["serial"] for d in list_dongles()]
     if name in serials:
-        return name, 30.0, 0
+        return Receiver(name, 30.0, 0, f"the dongle {masked_serial(name)}")
     known = ", ".join([d.id for d in config.devices] if config else []) or "none in the config"
-    raise ValueError(f"no receiver {name!r} (configured: {known}; plugged in: "
-                     f"{', '.join(serials) or 'none'})")  # fmt: skip
+    plugged = ", ".join(masked_serial(s) for s in serials) or "none"
+    where = "; Settings → Receivers and `wavescribe doctor` show their serials" if serials else ""
+    raise ValueError(f"no receiver {name!r} (configured: {known}; plugged in: {plugged}"
+                     f"{where})")  # fmt: skip
+
+
+# A `wavescribe serve` on this machine, however it was started: uv run, its script, python -m.
+SERVE = re.compile(r"(?:^|[\s/])wavescribe(?:\.__main__)?\s+serve(?:\s|$)")
+
+
+def serve_pid() -> int | None:
+    """The process id of a `wavescribe serve` running here (not this process), from ps."""
+    import os
+    import subprocess
+
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True,
+                             timeout=5).stdout  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if pid.isdigit() and int(pid) != os.getpid() and SERVE.search(command):
+            return int(pid)
+    return None
+
+
+def busy(rx: Receiver, on_the_page: str) -> Exception:
+    """Why ``rx`` can't be opened, in words to act on. The program holding it is most often
+    Wavescribe's own server, which a scan from the page pauses for as long as it takes."""
+    from wavescribe.radio.scan import ScanError
+
+    pid = serve_pid()
+    if pid is not None:
+        return ScanError(
+            f"{rx.name} is busy: Wavescribe itself has it open (`wavescribe serve`, process "
+            f"{pid}). Do it from the page instead: {on_the_page}. Or stop serve, or use another "
+            "receiver"
+        )
+    return ScanError(f"{rx.name} is busy: another program has it open (an SDR program, or "
+                     "another rtl_ tool). Close it, or use another receiver")  # fmt: skip
 
 
 def cmd_bands(args: argparse.Namespace) -> int:
@@ -90,13 +138,17 @@ def _parse_range(spec: str, region: str) -> tuple[int, int, str]:
     return lo_hz, hi_hz, next((b.name for b in region_bands(region) if b.id == spec), spec)
 
 
+FIND = "Find → On the air, which pauses the receiver's stations for the scan"
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     from wavescribe.radio.catalog import Catalog
-    from wavescribe.radio.scan import Progress, fit_range, scan
+    from wavescribe.radio.scan import Busy, Progress, fit_range, scan
 
     config = _config(args)
     region = _region(args, config)
-    serial, gain, ppm = resolve_receiver(args.receiver, config)
+    rx = resolve_receiver(args.receiver, config)
+    serial, gain, ppm = rx.serial, rx.gain_db, rx.ppm
     if args.gain is not None:
         gain = args.gain
     if args.ppm is not None:
@@ -105,7 +157,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     start, stop, cut = fit_range(start, stop)  # a range partly out of reach is said, not hidden
     if cut:
         print(f"# {cut}", file=sys.stderr)
-    print(f"# scanning {what} on {serial} at {gain:g} dB gain, region {region}", file=sys.stderr)
+    print(f"# scanning {what} on {rx.name} at {gain:g} dB gain, region {region}", file=sys.stderr)
     t0 = time.time()
     last = [""]
 
@@ -117,11 +169,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
             last[0] = line
 
     catalog = Catalog()
-    _old_spurs(catalog, serial, args.receiver)
-    sw, signals = scan(serial, start, stop, region, gain_db=gain, ppm=ppm, rds=not args.no_rds,
-                       rds_seconds=args.rds_seconds, min_snr_db=args.min_snr,
-                       watch_s=args.watch * 60, spurs=catalog.spurs(serial),
-                       on_progress=progress)  # fmt: skip
+    _old_spurs(catalog, rx, args.receiver)
+    try:
+        sw, signals = scan(serial, start, stop, region, gain_db=gain, ppm=ppm,
+                           rds=not args.no_rds, rds_seconds=args.rds_seconds,
+                           min_snr_db=args.min_snr, watch_s=args.watch * 60,
+                           spurs=catalog.spurs(serial), on_progress=progress)  # fmt: skip
+    except Busy:
+        raise busy(rx, FIND) from None
     if sys.stderr.isatty():
         sys.stderr.write("\r" + " " * 40 + "\r")
     device = next((d.id for d in config.devices if d.serial == serial), None) if config else None
@@ -141,12 +196,12 @@ def _warn(sw: Any) -> None:
         print(f"# warning: {w}", file=sys.stderr)
 
 
-def _old_spurs(catalog: Any, serial: str, receiver: str) -> None:
+def _old_spurs(catalog: Any, rx: Receiver, receiver: str) -> None:
     """Spurs learnt by an earlier version, at about 87 kHz bins, miss narrow lines."""
-    info = catalog.spur_info().get(serial)
+    info = catalog.spur_info().get(rx.serial)
     if info and info.get("count") and not info.get("bin_hz"):
-        print(f"# {serial}'s spurs were learnt by an earlier version, which missed narrow ones: "
-              f"learn them again with `wavescribe radio spurs {receiver} --learn`",
+        print(f"# {rx.name}'s spurs were learnt by an earlier version, which missed narrow "
+              f"ones: learn them again with `wavescribe radio spurs {receiver} --learn`",
               file=sys.stderr)  # fmt: skip
 
 
@@ -170,26 +225,30 @@ def _signal_line(s: dict[str, Any]) -> str:
     return line + (f"  · {' · '.join(extra)}" if extra else "")
 
 
+LEARN = "Settings → Receivers, Learn under the receiver's own signals"
+
+
 def cmd_spurs(args: argparse.Namespace) -> int:
     from wavescribe.radio.catalog import Catalog
-    from wavescribe.radio.scan import Progress, fit_range, learn_spurs
+    from wavescribe.radio.scan import Busy, Progress, fit_range, learn_spurs
 
     config = _config(args)
-    serial, gain, ppm = resolve_receiver(args.receiver, config)
+    rx = resolve_receiver(args.receiver, config)
+    serial, gain, ppm = rx.serial, rx.gain_db, rx.ppm
     if args.ppm is not None:
         ppm = args.ppm
     catalog = Catalog()
     if args.forget:
         catalog.forget_spurs(serial)
-        print(f"Forgot receiver {serial}'s spurs.")
+        print(f"Forgot {rx.name}'s spurs.")
         return 0
     if not args.learn:
         freqs = catalog.spurs(serial)
         if not freqs:
-            print(f"No spurs learnt for {serial}. Disconnect its antenna, then run "
+            print(f"No spurs learnt for {rx.name}. Disconnect its antenna, then run "
                   f"`wavescribe radio spurs {args.receiver} --learn`.")  # fmt: skip
         else:
-            _old_spurs(catalog, serial, args.receiver)
+            _old_spurs(catalog, rx, args.receiver)
         for f in freqs:
             print(f"{f / 1e6:10.5f} MHz")
         return 0
@@ -197,7 +256,7 @@ def cmd_spurs(args: argparse.Namespace) -> int:
     start, stop, cut = fit_range(start, stop)
     if cut:
         print(f"# {cut}", file=sys.stderr)
-    print(f"# learning {serial}'s own signals over {what}: is its antenna disconnected?",
+    print(f"# learning {rx.name}'s own signals over {what}: is its antenna disconnected?",
           file=sys.stderr)  # fmt: skip
 
     def progress(p: Progress) -> None:
@@ -205,13 +264,16 @@ def cmd_spurs(args: argparse.Namespace) -> int:
             sys.stderr.write(f"\r  sweep {p.done}/{p.total}   ")
             sys.stderr.flush()
 
-    sw, freqs = learn_spurs(serial, start, stop, gain_db=args.gain or gain, ppm=ppm,
-                            on_progress=progress)  # fmt: skip
+    try:
+        sw, freqs = learn_spurs(serial, start, stop, gain_db=args.gain or gain, ppm=ppm,
+                                on_progress=progress)  # fmt: skip
+    except Busy:
+        raise busy(rx, LEARN) from None
     if sys.stderr.isatty():
         sys.stderr.write("\r" + " " * 30 + "\r")
     _warn(sw)
     catalog.save_spurs(serial, freqs, start, stop)
-    print(f"# {len(freqs)} spurs kept; scans with {serial} will flag them", file=sys.stderr)
+    print(f"# {len(freqs)} spurs kept; scans with {rx.name} will flag them", file=sys.stderr)
     for f in freqs:
         print(f"{f / 1e6:10.5f} MHz")
     return 0
@@ -236,14 +298,26 @@ def cmd_heard(args: argparse.Namespace) -> int:
     if args.json:
         from wavescribe.events import to_json
 
+        config = _config(args)
+        ids = {d.serial: d.id for d in config.devices} if config is not None else {}
         for e in entries:
-            print(to_json(e))
+            print(to_json(shareable(e, ids)))
         return 0
     for e in entries:
         ago = (time.time() - e["last_heard"]) / 3600
         mark = "  (not heard in the last scan)" if e.get("missing") else ""
         print(_signal_line(e) + f"  · last heard {ago:.1f} h ago{mark}")
     return 0
+
+
+def shareable(entry: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
+    """A heard entry for output: the receiver that heard it by its id from the config (by a
+    masked serial when no receiver uses that dongle any more), and no serial."""
+    out = {k: v for k, v in entry.items() if k != "serial"}
+    serial = entry.get("serial")
+    if serial and not out.get("device"):
+        out["device"] = ids.get(serial) or masked_serial(serial)
+    return out
 
 
 def cmd_rds(args: argparse.Namespace) -> int:
@@ -262,7 +336,8 @@ def cmd_rds(args: argparse.Namespace) -> int:
     from wavescribe.sources.sdr import device_arg, ppm_args
 
     config = _config(args)
-    serial, gain, ppm = resolve_receiver(args.receiver, config)
+    rx = resolve_receiver(args.receiver, config)
+    serial, gain, ppm = rx.serial, rx.gain_db, rx.ppm
     if args.ppm is not None:
         ppm = args.ppm
     rate, freq = 2_400_000, round(args.mhz * 1e6)
@@ -308,7 +383,7 @@ def cmd_rds(args: argparse.Namespace) -> int:
         listener.join(2)
         text = said.decode(errors="replace").strip()
         if _busy(text):
-            raise ScanError(f"dongle {serial} is busy: another program has it open")
+            raise busy(rx, "Listen → Tune by hand shows its RDS")
         raise ScanError(f"rtl_sdr gave no samples: {text[-300:] or 'and no reason'}")
     info = dec.info
     print(f"# {info.groups} groups, {info.bad_blocks} bad blocks, {info.corrected} corrected; "
@@ -324,7 +399,8 @@ def cmd_tune(args: argparse.Namespace) -> int:
 
     config = _config(args)
     region = _region(args, config)
-    serial, gain, ppm = resolve_receiver(args.receiver, config)
+    rx = resolve_receiver(args.receiver, config)
+    serial, gain, ppm = rx.serial, rx.gain_db, rx.ppm
     if args.ppm is not None:
         ppm = args.ppm
     mode = args.mode
@@ -350,7 +426,7 @@ def cmd_tune(args: argparse.Namespace) -> int:
     policy = POLICIES[privacy]
     if policy.text_days == 0:
         args.no_store = True
-    print(f"# {mhz_text(args.mhz)} MHz {mode} on {serial}: {privacy} radio"
+    print(f"# {mhz_text(args.mhz)} MHz {mode} on {rx.name}: {privacy} radio"
           + ("" if policy.text_days is None else
              " (live only, nothing stored)" if policy.text_days == 0 else
              f" (text kept {policy.text_days:g} days, no audio)"), file=sys.stderr)  # fmt: skip

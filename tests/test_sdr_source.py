@@ -169,8 +169,11 @@ def test_a_channel_whose_demodulator_raises_fails_loudly_and_can_start_again(
 def test_a_dongle_cannot_be_retuned_by_another_station() -> None:
     a = SdrDevice("a", "00000777", CENTER, 20.0)
     assert shared_device(a) is shared_device(a)
-    with pytest.raises(ValueError, match="already in use"):
+    with pytest.raises(ValueError) as e:
         shared_device(SdrDevice("a", "00000777", CENTER + 1_000_000, 20.0))
+    mhz = CENTER / 1e6
+    assert str(e.value) == (f"Receiver A is already in use at {mhz:g} MHz: a station can't "
+                            f"retune it to {mhz + 1:g} MHz while it is.")  # no serial  # fmt: skip
 
 
 def test_open_source_prefers_the_sdr() -> None:

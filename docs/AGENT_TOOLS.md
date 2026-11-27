@@ -120,7 +120,7 @@ non-zero:
 | `wavescribe search WORDS --json` | an utterance, oldest first; exits 1 when nothing matches |
 | `wavescribe alerts --json` (or `alerts list --json`) | an alert, oldest first |
 | `wavescribe models list --json` | a model: id, capability, licence, tier, size, languages, accepted, installed |
-| `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json` |
+| `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json`, with the receiver that heard it as `device` (its id) in place of the dongle's serial |
 | `wavescribe doctor --json` | a check (`"type": "check"`: group, check, status `ok`, `warn`, `fail` or `skip`, summary, fix, details), then one `"type": "summary"`; exits 1 when something is broken |
 | `wavescribe service status --json` | one line: the background service, installed, loaded, running, pid, last exit, options and logs; exits 3 when it isn't running |
 | `wavescribe follow` | a live utterance or alert, until you stop it |
