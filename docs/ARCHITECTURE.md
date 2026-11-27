@@ -1,6 +1,6 @@
 # Architecture
 
-How Wavescribe works today. When the code changes, this file changes in the same commit. Measured
+How Wavescribe works. When the code changes, this file changes in the same commit. Measured
 results are in [MEASUREMENTS.md](MEASUREMENTS.md).
 
 ## Pipeline
@@ -33,14 +33,14 @@ Each interface is a Python protocol with one or more implementations:
 
 | Interface | Responsibility | Implementations |
 |---|---|---|
-| `AudioSource` | PCM 16 kHz mono chunks with timestamps for one station, and its health (connected, reconnects, last data; for radio also signal level and ADC clipping) | `StreamSource` (an ffmpeg subprocess; it reconnects http(s) streams with a backoff that resets after 30 s of audio, logging one warning per try with ffmpeg's reason, which its health keeps as `error` with what to check until audio comes; it paces streams to real time and reads a file once), `SdrChannelSource` (fed by a shared `RtlSdrDevice`, demodulated in `dsp/`); `open_source()` picks the station's dongle when it has one, else its stream |
+| `AudioSource` | PCM 16 kHz mono chunks with timestamps for one station, and its health (connected, reconnects, last data; for radio also signal level and ADC clipping) | `StreamSource` (an ffmpeg subprocess; it reconnects http(s) streams with a backoff that resets after 30 s of audio, logging one warning per try with ffmpeg's reason, which its health keeps as `error` with what to check until audio comes; it paces streams to real time and reads a file once: it reads ffmpeg as fast as it writes and releases 0.512 s chunks at real time; audio that comes late moves the schedule on, and audio held longer than needed (at least 6 s in hand all through a 30 s window, or over 60 s at all) is let go at once, so a burst adds no lasting delay and nothing is dropped; on the example stations the hold settles at 2–3 s for Icecast and one segment for HLS, and `source_pace` logs each let-go), `SdrChannelSource` (fed by a shared `RtlSdrDevice`, demodulated in `dsp/`); `open_source()` picks the station's dongle when it has one, else its stream |
 | SDR device | Owns one dongle: tuning, manual gain, sample rate; fans IQ out to its channels | `RtlSdrDevice` (an `rtl_sdr` subprocess pipe, shared per serial), `SpectrumMonitor` (a dongle running with no station, for its spectrum) |
 | `Gate` | Whether a finished utterance is speech worth transcribing or music | `YamnetGate` (YAMNet on LiteRT, CPU) |
 | `Segmenter` | Turns speech into utterances of about 2–20 s | `VadSegmenter` driven by `SileroVad` (Silero's ONNX model on onnxruntime; no torch) |
 | `Transcriber` | utterance → text + language + confidence | `ParakeetMlx` (default for European languages), `MlxAudioTranscriber` (Whisper, Qwen3-ASR, Voxtral, Nemotron through mlx-audio) |
-| Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it; and a line that is nothing but what models write over silence and music, subtitle credits and video sign-offs ("Thanks for watching!", "Untertitel im Auftrag des ZDF", "字幕由Amara.org社区提供"), from `asr/junk.toml`, which lists them for many languages and applies every one to every station (ignoring case, accents and punctuation; anything else said keeps the line). A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **Re-check** (`asr/recheck.py`): when a Whisper model that covers the station's language is installed and the station isn't transcribed by Whisper already, Whisper's language identification listens to a flagged line's audio again. If it hears the station's language, Whisper transcribes the line in that language and, if its text passes these checks, it replaces the flagged text (model: the Whisper's id, flags: `rechecked`); if it hears another language, the line stays as it was, with `rechecked` added. Re-checks run on the ASR thread behind every live utterance; at most 3 per station and 8 in all wait, one that waited over 60 s is skipped, and a line that finds no room stays flagged (`recheck_skipped` in the log). With no such Whisper installed nothing changes, and one log line at start names the model that would do it. **The alert watchlist never goes into the ASR prompt** (bandwatch's lesson) | — |
+| Filter | Checks ASR output before anything else sees it (`check_transcript()` in `asr/checks.py`). **Drops** what can't be speech: over 35 chars/s, a zlib ratio above 2.4, or a phrase repeated 4+ times over 40% of the words with fewer than three other words beside it; and a line that is nothing but what models write over silence and music, subtitle credits and video sign-offs ("Thanks for watching!", "Untertitel im Auftrag des ZDF", "字幕由Amara.org社区提供"), from `asr/junk.toml`, which lists them for many languages and applies every one to every station (ignoring case, accents and punctuation; anything else said keeps the line). A repeated phrase inside a message ("Atención, atención, atención, atención. Evacuen…") is kept and flagged `repetition`. A dropped loop is still read by the keyword rules; a hit is kept as a low alert and never announced. **Flags** text clearly in another language than the station's (py3langid, ≥ 20 characters, p(station language) < 0.05): kept, stored with the flag, shown dimmed. **Re-check** (`asr/recheck.py`): when a Whisper model that covers the station's language is installed and the station isn't transcribed by Whisper already, Whisper's language identification listens to a flagged line's audio again. If it hears the station's language, Whisper transcribes the line in that language and, if its text passes these checks, it replaces the flagged text (model: the Whisper's id, flags: `rechecked`); if it hears another language, the line stays as it was, with `rechecked` added. Re-checks run on the ASR thread behind every live utterance; at most 3 per station and 8 in all wait, one that waited over 60 s is skipped, and a line that finds no room stays flagged (`recheck_skipped` in the log). With no such Whisper installed nothing changes, and one log line at start names the model that would do it. **The alert watchlist never goes into the ASR prompt** | — |
 | `Translator` | text → text in a target language | `LlmTranslator` (Qwen3.5 through mlx-lm, the default; TranslateGemma opt-in), `MadladTranslator` (MADLAD-400 through CTranslate2, CPU, the fallback) |
-| Reply check | Keeps only a reply that translates the line (`check_reply()` in `translate/checks.py`), for station lines and alert translations alike. The prompt gives the model one fixed reply for text it can't translate, `[[untranslatable]]`; a reply that carries it is no translation (`declined`). Shape, in any language: a reply of several lines to a line of one keeps the one line that translates, after a heading ("Here is the translation:") and notes are cut, and is no translation when none or two are left (`remark`); a reply that is only a bracketed note, to a line without brackets, is a `remark`; a reply longer than 3 times its original plus 30 characters (a character of a script written without spaces counting 3) is `too_long`. Wording, only in the languages of `translate/remarks.toml` (German, English, Spanish, French, Portuguese, Ukrainian): a reply that talks about recognition errors, the source text or translating it is a `remark`, unless the line itself says such things; and a bracketed part worded as a note ("[missing word]", "(possibly a misrecognition)") is cut out and the rest kept. Other brackets stay: in real translations they were mostly the speaker's aside, an abbreviation, or a word the translator filled in. A reply that fails is never re-asked or repaired: the line keeps its words alone, with the flag `untranslated:<target>:<why>` (`declined`, `remark`, `too_long`, `empty`, or `failed` when the model raised), and it counts in `dropped` (not as the machine falling behind) | — |
+| Reply check | Keeps only a reply that translates the line (`check_reply()` in `translate/checks.py`), for station lines and alert translations alike. The prompt gives the model one fixed reply for text it can't translate, `[[untranslatable]]`; a reply that carries it is no translation (`declined`). Shape, in any language: a reply of several lines to a line of one keeps the one line that translates, after a heading ("Here is the translation:") and notes are cut, and is no translation when none or two are left (`remark`); a reply that is only a bracketed note, to a line without brackets, is a `remark`; a reply longer than 3 times its original plus 30 characters (a character of a script written without spaces counting 3) is `too_long`. Wording, only in the languages of `translate/remarks.toml` (German, English, Spanish, French, Portuguese, Ukrainian): a reply that talks about recognition errors, the source text or translating it is a `remark`, unless the line itself says such things; and a bracketed part worded as a note ("[missing word]", "(possibly a misrecognition)") is cut out and the rest kept. Other brackets stay: they are mostly the speaker's aside, an abbreviation, or a word the translator filled in. A reply that fails is never re-asked or repaired: the line keeps its words alone, with the flag `untranslated:<target>:<why>` (`declined`, `remark`, `too_long`, `empty`, or `failed` when the model raised), and it counts in `dropped` (not as the machine falling behind) | — |
 | Rules | Evaluate source-language text and emit hits (`rules/`) | `KeywordRule` in a `RuleSet` (per-language packs or the rule's own terms per language, regular expressions, a station filter, `verify` and `unverified`); `LlmRule` checked by `LlmRuleChecker` (below); `SilenceRule` and `TrafficRule`, about a station rather than its words, checked by `StationWatch` (`alerts/watch.py`) on `Pipeline.status` |
 | `Actions` | Deliver an alert (`alerts/actions.py`) | `MacActions`: `notify` (a macOS notification through `osascript`, with the sound `[delivery] notify_sound` names, Glass by default, or none for ""), `speak:<lang>` (macOS `say`, one voice per language), `log` (an `alert` line at info level: an alert is the program working, a warning is something to fix; the console shows it with `-v`); `LogOnlyActions` elsewhere. Webhooks go through `Outputs` |
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an alert that hasn't got there is also a row in the store's `outbox`, written before the first try and deleted after the delivery, so the next run sends what a restart or crash left (at least once: each alert delivery carries the same random id on every try, `X-Wavescribe-Delivery` and the JSON's `delivery_id`), and it is given up when older than the output's `alert_max_age_hours` (24, at most 168); utterances, and everything under `--no-store`, wait in memory only; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
@@ -48,7 +48,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Asker` | Answers a question about what was said (`ask.py`) | The translation LLM plans a search (stations, time range, words in the translation and station languages), FTS5 finds excerpts, and the LLM answers in the question's language citing them as [n]. Runs on the translation thread through `Pipeline.request_llm` |
 | `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], one call at a time through `Pipeline.request_llm`, behind live translation (for two minutes at most, then in turns with it) and ahead of the LLM rules' passes, giving way between tokens to alerts and questions; digests asked for meanwhile wait in line; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`, or the page's in its place); a digest is cancelled by its request id through the same give-way path |
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md`. Around each download (`modelfetch.py`): the total and a free-disk check first; the download in a thread of its own, so Ctrl-C and SIGTERM stop the command at once (the library's worker threads can't be interrupted, so the process leaves without them and removes the part-files they were writing); a failure as one sentence. The downloads Wavescribe makes itself check certificates against the system trust store (`httpclient.trust_store`, the truststore package), as the Hugging Face library's client does. `models remove` (`modelremove.py`) deletes what a model put on disk through the library's own cache code (`scan_cache_dir` and its deletion plans), so a file in the cache-wide shared store goes only when nothing else links to it; it touches only the repository and revision the registry pins, and of that revision only the files the registry asks for when another program added others; a model from a URL goes with its folder under `models/`, and a `local:` model is never removed | `ModelRegistry` (`registry.py`) |
-| Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes | — |
+| Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes, which are ambiguous | — |
 
 ## Process model
 
@@ -59,7 +59,7 @@ owns the translator and the LLM jobs (alert translations first, then the checks 
 matches, then questions, then the continuous backlog, then a digest's calls, then the LLM
 rules' passes; the last two wait a bounded time, see Overload). Each thread loads its model itself, because MLX arrays are bound
 to the thread that created them. The translation thread waits until the ASR models are loaded:
-loading two backends at once raced on shared imports (mlx-audio and mlx-lm both import
+loading two backends at once races on shared imports (mlx-audio and mlx-lm both import
 transformers). Utterances from a station that is already in every target language skip the
 translation queue, and a run in which no station needs translating loads no translator.
 
@@ -201,9 +201,8 @@ output doesn't depend on block boundaries; the first block after a restart start
 demodulator and is marked as a discontinuity. A station whose demodulator or RDS decoder raises
 is restarted by the pipeline like any failed source; the dongle and its other stations go on.
 Health adds the station's power in dBFS and the
-share of 8-bit samples at the ADC's limits (overload), logged as `sdr_level` every 30 s. A
-separate process per dongle isn't needed: demodulation costs about 6% of one core per station
-([MEASUREMENTS.md](MEASUREMENTS.md)). The rtl tools read `-d` as a device index before a serial (C `strtol`,
+share of 8-bit samples at the ADC's limits (overload), logged as `sdr_level` every 30 s. Demodulation
+costs about 6% of one core per station ([MEASUREMENTS.md](MEASUREMENTS.md)). The rtl tools read `-d` as a device index before a serial (C `strtol`,
 base 0), so a serial like the factory `00000001` is replaced by the dongle's index from the USB
 listing each time a dongle is opened (`device_arg()`).
 
@@ -216,9 +215,7 @@ serves `index.html`, the hashed files under `/assets/` (cached for a year, since
 change with their content), the icon and the bundle's licence notices, and nothing else.
 Stations can be started and stopped at runtime. **Listen** streams the station's decoded 16 kHz
 PCM over a plain `fetch`, and the page plays it with the Web Audio API, so you hear exactly what
-is transcribed. A first version re-encoded to MP3 for an `<audio>` element, but embedded WebKit
-views wouldn't play the endless stream; raw PCM (32 KB/s) avoids the browsers' media players and
-needs no encoder. It costs nothing when nobody listens and works unchanged for SDR sources.
+is transcribed. Raw PCM (32 KB/s) avoids the browsers' media players and needs no encoder. It costs nothing when nobody listens and works unchanged for SDR sources.
 
 The reading view has three parts. **The station list** down the left lists every station like
 the panel of a receiver: a lamp (filled green for speech, a ring when quiet, amber for trouble,
@@ -237,8 +234,7 @@ right on wide screens (1600px and up) and float over the columns on narrower one
 reader has them open; a new alert raises a short notice when the rail is closed, and *Show in
 the transcript* opens the alert's station at its line (paging back if it is older than what is
 loaded) and marks it for a moment. Phones show a list of stations with the last two lines of
-each (Start on those that are off), and open one transcript at a time. The design tokens are in `frontend/src/styles/tokens.css`. Continuous text was chosen over a ticker because moving
-text at speech pace is hard to read and whatever the reader misses is gone. Each viewer picks a
+each (Start on those that are off), and open one transcript at a time. The design tokens are in `frontend/src/styles/tokens.css`. Each viewer picks a
 display language, text size, theme, and which stations to show; these live in that browser
 only. A station not translated into the viewer's language falls back to its first
 translation, and the settings say so.
@@ -314,7 +310,7 @@ words), `sources` (the numbered excerpts), `text` (the answer as the model write
 1. **Plan.** The translation LLM (Qwen3.5-9B) turns the question into one line of JSON:
    stations, from/to, 3–8 search words, and whether it is an overview with no topic. The prompt
    lists each station with its language and when it was last heard, plus ready-made reference
-   times ("30 min ago …", "yesterday …"), because the model got clock arithmetic wrong without
+   times ("30 min ago …", "yesterday …"), because the model gets clock arithmetic wrong without
    them. Search words are asked for in the translation languages, since every translated
    utterance is stored in them too, plus the languages of any stations named. A reply cut off
    mid-way is parsed field by field; one that lists (nearly) every station means all of them.
@@ -332,7 +328,7 @@ The job waits behind alert translations and the checks of keyword matches, and r
 the continuous backlog, which pauses for the few seconds an answer takes; a digest's call
 under way stops for it, and an LLM rule's pass waits for it. The plan and the answer are one
 job that nothing stops once it has begun, so a question is never crowded out by work that
-keeps coming, as a digest's longer calls were. Alerts never wait for it: they don't use
+keeps coming. Alerts never wait for it: they don't use
 translation.
 
 **Digests.** `POST /api/digest` (`wavescribe digest`, the agent tools `digest` and `now`) takes
@@ -351,22 +347,19 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    (about 10 s each on a recent Mac), each station whole in one of them, and each prompt in
    parts of the window of about 4,000 characters, as many as it fills, rounded: asked for five
    points from fifty excerpts, oldest first, a small model writes about the first stories it
-   reads (a real twenty-minute digest of one station had every point in its first seven
-   minutes), and reading a prompt in three calls costs about what one does. A part asks for a
+   reads, and reading a prompt in three calls costs about what one does. A part asks for a
    few one-line points (notes) in the reader's language, the most important first, each
    citing the excerpts it rests on as `[n]`; the stations a point names come from those
    excerpts, never from the model's words. It is told to leave out advertising and sponsorship
    and the station's promotion of itself (programmes and when they are on, trailers, jingles,
    contests), which fill much of a station's airtime and read like news to a small model, and
-   to answer `NONE` when that is all there was; the choice below is told so too. On real
-   transcripts the model still wrote ad notes for a part that held an ad break (it listed every
-   excerpt), which the choice then left out. Nothing checks it: no cheap test tells an
-   advert from news (the existing ones, idents of under three words and the ASR's junk
-   phrases, catch almost none of them). A range (`[1-23]`) is read whole. A point that cites none of them is
+   to answer `NONE` when that is all there was; the choice below is told so too. The model
+   can still write ad notes for a part that holds an ad break, which the choice then leaves
+   out. Nothing checks it: no cheap test tells an advert from news. A range (`[1-23]`) is read whole. A point that cites none of them is
    dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
    folded words of four letters or more, compared by their first six, numbers, and pairs of
    characters in scripts written without spaces; checked only when one of the lines has text in
-   the reader's language). Sharing a word let through what a small model most often gets
+   the reader's language). Sharing a word lets through what a small model most often gets
    wrong: a name from another story or from what it knows, a figure no one said. So every name
    and number a point states (`stated`) must also be in one of the excerpts it keeps, in any
    of its texts or in the station's name and time it was shown with. A name is a word with a
@@ -389,8 +382,8 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    matter most, by number, from the notes shown one from each part in turn, the latest part
    first, each with the time of what it rests on, since a small model favours what it reads
    first; of two that matter as much, it is asked for the later. When it picks fewer than
-   five, the digest has fewer points: the notes it left out, it left out on purpose (on real
-   transcripts, mostly advertising and trailers), so nothing makes the number up. Only a reply
+   five, the digest has fewer points: the notes it left out, it left out on purpose, so
+   nothing makes the number up. Only a reply
    that names no note is replaced, by the notes in the order shown. A part keeps six notes at
    most, twice those asked for, spread over the model's list from its first to its last: that
    bounds the choice's prompt when a model lists every excerpt, and filters nothing. When a
@@ -417,8 +410,8 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    question, a model load) and stops, to start again from scratch behind it; a call that has
    stopped three times isn't started a fourth, and the digest is refused. It never stops for
    an LLM rule's pass: one is queued for each station every 45 s, about as often as a call
-   ends, and stopping for them, a digest of three stations with one LLM rule on was never
-   made. A pass waits for the call under way and goes before the next. Reading a prompt
+   ends, and stopping for them, a digest of three stations with one LLM rule on would never
+   be made. A pass waits for the call under way and goes before the next. Reading a prompt
    can't be stopped, so an alert's translation can still wait that long: about 10 s for a full
    prompt on a recent Mac. When the queue is full, a digest's call that still waits behind
    the station lines takes nobody's place, is the first thing other work takes the place of,
@@ -488,9 +481,7 @@ it in which nothing was heard). Those are judged from the store (`Digester.gaps`
 not from when this run started, since a run started a minute ago reads what an earlier one
 wrote down. The store keeps no record of when a station was listened to, only the lines
 (`Store.heard`), and a stretch without lines is a station playing music as often as Wavescribe
-not running: on a day of three talk and news stations, each went 3 to 25 minutes without a
-line several times while another was being written down, yet all together never for 4
-minutes, apart from a restart. So the lines of every station the asker may see count, whichever
+not running. So the lines of every station the asker may see count, whichever
 the digest is about, and only a stretch with none from any of them can be one nobody listened
 in. It is one when it lasts longer than the shortest limit of the stations heard until it
 began; a station's limit (`quiet_limits`) is half as long again as its longest pause of the
@@ -503,8 +494,7 @@ Each is cut to the window and named when it takes over ten minutes of it ("Nothi
 between 16:50 and 17:05", "before", "after"; more than three are counted). Known limits: a
 restart shorter than the limit isn't named; with one station, an earlier run's hour of music
 is; and a stretch of this run in which a station dropped or the machine slept isn't, as
-nothing in the store tells it from silence. A record of when each station was listened to
-would settle all three. The alerts
+nothing in the store tells it from silence. The alerts
 announced in the window come with it in the words they were announced in: each incident once,
 at the time it was announced (first, or when it got more serious; the first mention of one
 whose delivery reached nobody, which the store keeps no time for), about what was said, medium
@@ -558,8 +548,8 @@ swapped in place; retention applies at once: a change to retention or to a class
 checks every minute).
 
 **Listen, Find and Settings.** Beside Read, the page's `#/listen`, `#/add/<page>` and
-`#/settings/<page>` views (older `#/manage/<tab>` and `#/radio/<page>` links are redirected to
-their new homes), a separate chunk of the built page that loads only when it's opened (still no
+`#/settings/<page>` views (`#/manage/<tab>` and `#/radio/<page>` links are redirected to
+them), a separate chunk of the built page that loads only when it's opened (still no
 CDNs). Each control has one home; where a second entry point helps, it is a link to that home.
 
 **Listen** plays every station, from the internet or a receiver, from one list with one volume
@@ -593,7 +583,7 @@ reads a playlist or follows another Wavescribe.
   40 + 16 tokens per word asked for (3 per term, 6 to 20) and two minutes for the whole
   request; the words of a cut reply that are whole are kept, and a word not in its language's
   script (that of the language's own name in CLDR, or of any script CLDR has it in) is left
-  out. The answer has `terms` ({language: words}, as before), `languages` ({language: {words,
+  out. The answer has `terms` ({language: words}), `languages` ({language: {words,
   why, dropped, message}}, `why` one of `cut`, `unreadable`, `busy`, `timeout`, `no_llm`,
   `none`, `script`, or null), `count`, `empty`, `message`, `note` and `at`; with no word at all
   it is a 400 whose `error` says why: `code` `no_suggestions` with the same fields beside it,
@@ -757,6 +747,8 @@ per-user launchd LaunchAgent, `~/Library/LaunchAgents/io.github.kaspler.wavescri
 `caffeinate -i <the environment's python> -m wavescribe serve <options>` in the Wavescribe
 folder, at login and at install:
 
+- The project environment's Python runs directly, not `uv run`, so a restart never syncs or
+  reaches the network.
 - `caffeinate -i` holds an idle-sleep assertion while serve runs. It passes SIGTERM on to serve
   and exits with serve's exit code (checked), so launchd stops it cleanly and still sees a
   crash. It doesn't prevent clamshell sleep.
@@ -786,7 +778,7 @@ warn, fail (exit code 1) or skip, with a next step for each problem, as text or 
 - receivers: RTL2832U dongles from macOS's USB registry (`ioreg -p IOUSB`, never opened) against
   each `[[device]]` serial; duplicate serials are flagged;
 - free disk against the retention limits (speech audio cap, text at about 7.75 MB a day per
-  station from the soak, models still to download), and whether `data/` is writable;
+  station, models still to download), and whether `data/` is writable;
 - the port: its listener from `lsof` and `ps` (this machine's service, another Wavescribe, or
   another program), then serve's own probe bind. `serve` and `service install` word a taken
   port the same way (`doctor.port_taken`): a Wavescribe already running, with its page's
@@ -867,11 +859,10 @@ a group is demodulated at once from that recording, until each has a stable name
 A **watch** repeats the sweep, keeps the maximum per bin and counts the sweeps each channel was
 busy in. **Spurs** are learnt per serial with the antenna disconnected: lines in both of two
 sweeps at bins of at most 6 kHz (`SPUR_BIN_HZ`: 512-bin FFTs, 5.47 kHz over a whole-range hop).
-The default 86.8 kHz bins of a whole-range sweep buried narrow lines under 12 dB more noise.
+The default 86.8 kHz bins of a whole-range sweep bury narrow lines under 12 dB more noise.
 rtl_power reads 16 384 bytes per hop whatever the bin, so the finer sweep takes no longer, and
-still averages 16 FFTs per bin; at 2048 bins it would average 4, and on synthetic noise a 6 dB
-margin then finds thousands of lines over the whole range. Each entry in `spurs.json` records its
-`bin_hz`; entries without one are from earlier versions and should be learnt again.
+still averages 16 FFTs per bin. Each entry in `spurs.json` records its `bin_hz`; entries
+without one should be learnt again.
 
 **Band plans and privacy** (`radio/bands.toml`, `radio/bandplan.py`). Each band has edges,
 regions (`cept`, ITU 1-3, `jp`), a mode (and `region_mode` where a region's differs: CB is NFM
@@ -907,7 +898,7 @@ digital signals are not kept. The last 20 scans' spectra are in `data/radio/scan
 its time, the receiver that made it (`device` id and `serial`), `what` it was asked to scan (the
 band's name, "the whole tuner range", or "88 to 108 MHz"; `wavescribe radio scan` labels its
 scans the same way), its length and the signals found. The page gets the latest as
-`last_scan` in `GET /api/manage/radio`; one saved before scans recorded `device` and `what` has
+`last_scan` in `GET /api/manage/radio`; one saved without `device` and `what` has
 them as null, and its `device` is filled in from its serial while a receiver has that serial.
 
 **The page** (`radio/service.py`, `/api/manage/radio…`): one background scan at a time. A
@@ -1021,7 +1012,7 @@ dongle's thread, each block goes to an
 the middle 80 % of its width against a noise floor kept per bin, which follows the bin only while
 its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins (±1.5 kHz) are left
 out, and so are a learnt spur's, as far again as half the bin it was learnt at (a list without
-`bin_hz`, from an earlier version, isn't used). Two frames 8 dB over the floor start a transmission; 1.2 s under it less 3 dB end it;
+`bin_hz` isn't used). Two frames 8 dB over the floor start a transmission; 1.2 s under it less 3 dB end it;
 under 0.3 s it is counted, not kept; after 120 s it ends with reason `carrier` and its bins' floors
 jump to its level. A start 20 dB under a busy channel within three channels, or under its own mirror
 about the centre (a receiver shows a weaker mirror of strong signals), is suppressed. While half the
@@ -1064,11 +1055,11 @@ and starts nothing new as off the channels meanwhile.
 Measured on synthetic IQ at 2.4 MS/s: such a transmitter stands 10 to 14 dB over every other signal
 with a product 10 dB under it on a channel, and 25 to 33 dB without; the same noise, slopes, combs,
 USB clicks and carrier clipping from outside the window never more than 2 dB (those that clip are
-now overloads off the channels with no frequency, by the rule above); on-channel overloads, with the
+overloads off the channels with no frequency, by the rule above); on-channel overloads, with the
 radio up to 3 kHz off its channel, never a frame off the channels. It costs 30 to 60 µs per
 overloaded frame (20 a second), a few per cent of the detector, and nothing otherwise; counting the
 clipping per FFT costs nothing while the converter doesn't clip (16 ms per second of IQ for 16
-channels, before and after). One overload is one transmitter: its channel
+channels, with it and without). One overload is one transmitter: its channel
 (when it starts) or its frequency off the channels (when sure) is fixed until the overload is over,
 no other channel starts in it, and `deaf_reason` stays `overload` from then on, though a frame may
 have no channel on top. Deafness of 3 s or more, and an overload off the channels at once (no catch
@@ -1128,8 +1119,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   matches as written, without stemming, for words whose stem a common word shares (Snowball
   stems *tornado* like *torna*, "becomes"). `near = ["local"]` raises a rule's severity one level
   when a place from the pack is named in the same utterance. Text the ASR checks flagged as
-  another language never rises above `low` (Parakeet answering in English turned cured ham into
-  "nuclear sabotage", and Snowball stems *sabotage* like *sabotagem*). The `repetition` flag
+  another language never rises above `low`. The `repetition` flag
   doesn't cap severity. A flagged line Whisper is about to re-check (`Result.rechecking`) is
   read by the keyword and LLM rules once, when the verdict is in (`Pipeline(on_rechecked=…)`):
   replaced by Whisper's text in the station's language, it can raise an alert at full
@@ -1146,8 +1136,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   group or possessive repeat is allowed). Each reads one utterance, at most 2,000 characters,
   and a pattern that takes over 50 ms of CPU on one is named in the log. The cost is this
   thread's CPU time (`time.thread_time()`), not the clock: on a loaded machine the clock also
-  counts the wait for a CPU, and the example pattern, a few microseconds of work, was named as
-  taking 139 ms. Overlapping alternatives inside a repeat (`(a|ab)+`) are not detected.
+  counts the wait for a CPU. Overlapping alternatives inside a repeat (`(a|ab)+`) are not detected.
 - **Station alerts** (`kind = "silence"` or `"traffic"`, `alerts/watch.py`): no second monitor. Every 5 s
   `StationWatch` reads `Pipeline.status()`, the snapshot the page shows, and a running, transcribed
   station is silent while its source is down or reconnecting, has sent nothing for 15 s, or its
@@ -1197,8 +1186,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   announces it. One whose actions ran but reached nobody (every notify and speak failed: a
   notification that times out, a voice that isn't installed) is tried again at a mention 5
   minutes later, then 10, 20, 40 and 60, as `change: update`, without sending its webhooks
-  again. Tried at every mention, as it first was, notifications that timed out announced one
-  story 19 times in ten minutes in testing, webhooks included.
+  again.
 - **Delivery:** the severity's actions come from `[actions]` in `config/alerts.toml`. Translations
   for the notification language and each `speak:<lang>` are requested ahead of the station
   backlog (`Pipeline.request_translation`, queue priority 0), and delivery waits at most
@@ -1216,7 +1204,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   low, its quote is also translated into its stations' `alert_languages` (`stations.toml`),
   asked for after the delivery's own translations and never waited for, so the page, CAP and
   webhooks carry it in those languages whoever is notified in them.
-- **Delivery state** (bandwatch's lesson): `pending`, then `delivered`, `partial`, `failed`,
+- **Delivery state:** `pending`, then `delivered`, `partial`, `failed`,
   `logged` (log only) or `covered`. `delivered_at` is set only when an action that reaches a
   person confirmed it, and each action's outcome is stored (`actions`).
 - **CAP 1.2:** `wavescribe alerts cap <id>` and `GET /api/alerts/<id>.cap` render an alert as a
@@ -1272,7 +1260,7 @@ boundaries, so search works the same in languages written without spaces (Japane
 Thai). It ignores case and accents, and it needs no per-language stemmer, which keeps the store
 language-agnostic. Words shorter than 3 characters can't use a trigram index, so a query
 containing one falls back to `LIKE`. Query text is always quoted, so FTS operators in a query are
-searched as plain text. The index finds each word as a substring, which alone made "eau" find
+searched as plain text. The index finds each word as a substring, which alone makes "eau" find
 "niveau"; `search.py` then keeps the rows where every word starts a word (after a space,
 punctuation or the start), so a word also finds its inflections that add letters at the end
 ("agua" finds "águas"). It folds case and accents as the keyword rules do (`rules/text.py`):
@@ -1293,7 +1281,7 @@ it back to 16 kHz PCM with ffmpeg.
 index cost about 5.5 bytes per character (measured on real transcripts), so four talk stations
 with one translation add about 11 GB a year. Forever would break the bounded-disk rule, so
 text is kept for `--text-days` (default 365). Speech can't arrive faster than real time, so an age
-limit is also a hard size limit, with no feedback loop. A byte cap was tried first and dropped:
+limit is also a hard size limit, with no feedback loop. Text has no byte cap:
 FTS5 frees index pages only when it merges segments (even with `secure-delete`, which is on),
 so the file size lags behind deletions and a "delete until under N GB" loop over-deletes. Speech
 audio is kept for `--audio-days` (default 7) and capped at `--audio-max-gb` (default 2 GB), oldest
@@ -1311,31 +1299,31 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | Python 3.12 via uv | ML wheels (MLX, onnxruntime, LiteRT, CTranslate2) lag new Pythons | Deps support 3.13+ |
 | An `rtl_sdr` pipe, **never pyrtlsdr** | pyrtlsdr is GPL-3.0 (an import would bind us), and ≥0.4 fails against Homebrew librtlsdr | — |
 | ffmpeg as a subprocess only | The Homebrew build is GPL-3.0-or-later | — |
-| Own channelizer (numpy/scipy), not SDR++ multi-VFO or GNU Radio | SDR++ multi-VFO with audio sinks hangs on macOS (#1702); GNU Radio's Homebrew formula is deprecated | — |
-| An **ASR chain per language** (MODELS.md), with Parakeet-TDT-0.6B-v3 first for European languages | CC-BY-4.0; ~60× real time on Apple Silicon; its training data includes European Portuguese. Whisper large-v3-turbo (MIT, about 100 languages) covers the rest, and other registered models can be put in the chain. | Bake-off results per language |
+| Own channelizer (numpy/scipy) | Every channel of a dongle is cut from its one `rtl_sdr` pipe, in-process | — |
+| An **ASR chain per language** (MODELS.md), with Parakeet-TDT-0.6B-v3 first for European languages | Parakeet is CC-BY-4.0 and ~60× real time on Apple Silicon; Whisper large-v3-turbo (MIT, about 100 languages) covers the rest | Bake-off results per language |
 | Alerts on **source-language** text | Translation is the slowest and least reliable stage, so alerts mustn't wait for it or depend on it | Never |
-| **Qwen3.5-9B** (4-bit, mlx-lm, GPU) for continuous translation, alerts and secondary languages; **MADLAD-400** (CTranslate2, CPU) as the fallback | MADLAD was the plan because CPU translation would leave the GPU to ASR, but Qwen3.5 measured 2.2× faster and better, and Parakeet keeps the GPU 95% idle anyway. Apache-2.0, 201 / 419 languages. The prompt names languages from CLDR, because bare codes are ambiguous. TranslateGemma is opt-in only (Gemma Terms of Use). | Power measured on battery; a better small model |
+| **Qwen3.5-9B** (4-bit, mlx-lm, GPU) for continuous translation, alerts and secondary languages; **MADLAD-400** (CTranslate2, CPU) as the fallback | Qwen3.5 measured 2.2× faster than MADLAD and better (MEASUREMENTS.md), and Parakeet leaves the GPU 95% idle | Power measured on battery; a better small model |
 | Avoid **Hunyuan-MT, NLLB, SeamlessM4T, MMS** and unlicensed fine-tunes | Their licences exclude the EU, forbid commercial use, or don't exist (LICENSING.md) | — |
-| Silero VAD, then **YAMNet** on each utterance | Silero alone treats singing as speech. inaSpeechSegmenter was the plan, but 0.7.6 no longer runs on current TensorFlow, Keras 3 or NumPy 2 (three separate breakages), and TensorFlow alone is a 1.6 GB install. YAMNet (Apache-2.0) on LiteRT is a 4 MB model and a ~60 MB install, classifies 3 minutes of audio in 0.16 s of one CPU core, and separated songs from talk on Portuguese radio (MODELS.md). Gating whole utterances after the VAD, instead of frames before it, keeps the segmenter unchanged and costs ~2–6 ms per utterance | Lyrics leak too often (the soak test logs every verdict) |
+| Silero VAD, then **YAMNet** on each utterance | Silero alone treats singing as speech; YAMNet (Apache-2.0) on LiteRT is a 4 MB model and costs ~2–6 ms per utterance | Lyrics leak too often (every verdict is logged) |
 | SQLite FTS5 | Zero-ops, offline, searchable | — |
-| **Live streams paced in the source**, not by ffmpeg's `-re` | An HLS stream arrives a whole segment (6–10 s) at a time, and HLS and Icecast servers send 10–20 s at once on connect. Passed on as it came, the page's player dropped most of each burst and utterances shared one time. `StreamSource` reads ffmpeg as fast as it writes and releases 0.512 s chunks at real time: audio that comes late moves the schedule on, and audio held longer than needed (at least 6 s in hand all through a 30 s window, or over 60 s at all) is let go at once, so a burst adds no lasting delay and nothing is dropped. With `-re` the backlog would sit in the socket, where it can't be bounded or logged and a server with a faster clock eventually drops the reader. On the example stations the hold settles at 2–3 s for Icecast and one segment for HLS (`source_pace` logs each let-go) | The delay matters more than smooth listening, or a stream needs more than 6 s of slack |
-| **GPL tools only as separate processes** (ffmpeg's Homebrew build, `rtl_sdr`, `rtl_power`, `rtl_test`) | Keeps the code Apache-2.0. They run as subprocesses over pipes; never link or vendor them. | — |
+| **Live streams paced in the source** | An HLS stream arrives a whole segment (6–10 s) at a time, and HLS and Icecast servers send 10–20 s at once on connect: passed on as it comes, the page's player drops most of each burst and utterances share one time | The delay matters more than smooth listening, or a stream needs more than 6 s of slack |
+| **GPL tools only as separate processes** (ffmpeg's Homebrew build, `rtl_sdr`, `rtl_power`, `rtl_test`) | Keeps the code Apache-2.0 | — |
 | **Alerts as CAP 1.2** (Common Alerting Protocol) events | The standard emergency-alert format, so Wavescribe plugs into alert hubs, dashboards and any other CAP consumer | — |
-| **One announcement per sentence; one alert per incident** | A real bulletin sentence tripped four rules and would have spoken four times. Repeats of a story fold into one alert; only a rise in severity speaks again, an hourly reminder notifies without speaking, and a quiet `cooldown_minutes` ends the incident. A delivery that reached nobody is retried with a growing wait, not at every mention (2026-11-27: 19 announcements of one story in ten minutes while notifications timed out) | The soak shows missed escalations or too much noise |
-| **Confirm before announcing: `min_mentions`, weak topics, `=` terms** | From the soak: the first rules would have spoken 17 false critical alerts a day. A real event is repeated on every bulletin and names places; a passing reference is said once. Tuned with `alerts replay` on 35.6 h of four stations: 0 spoken, ~4 notifications a day, and synthetic emergencies still escalate | A real event is announced late or missed (replay it) |
+| **One announcement per sentence; one alert per incident** | One bulletin sentence can trip several rules, and every repeat of a story would announce it again | Missed escalations or too much noise |
+| **Confirm before announcing: `min_mentions`, weak topics, `=` terms** | A real event is repeated on every bulletin and names places; a passing reference is said once | A real event is announced late or missed (replay it) |
 | **Speak only checked translations, else a fixed phrase** | A translator that answers in the wrong language, or invents content (MADLAD into Ukrainian), must never be read aloud | — |
-| **A fixed reply for "can't translate"; a remark is never stored as a translation** | Given garbled recognition, the LLM can write about the text instead ("the meaning is unclear due to recognition errors", "(a term that may be a misrecognition)"), which would read as if the station had said it. The check uses the reply's shape first because the target can be any language; the phrase lists are a second guard for the languages that have one | A real translation is left out (the flag counts them per reason) |
-| **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout; an overlay keeps both, and a broken change can be skipped without losing the file's station | — |
-| **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams. LAN viewers can't make the machine reach out | — |
+| **A fixed reply for "can't translate"; a remark is never stored as a translation** | Given garbled recognition, the LLM can write about the text instead, which would read as if the station had said it | A real translation is left out (the flag counts them per reason) |
+| **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout | — |
+| **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams | — |
 | **The feed is text and metadata only; audio stays where it was recorded** | Broadcast audio is copyrighted, and text is ~1,000× smaller over a constrained uplink | — |
-| **LLM rules batch per station every ~45 s, on source text** | One prompt per batch rather than per utterance keeps the LLM's share of the GPU small (not measured on a long run), and the alert path stays independent of translation | Missed or late events in the soak |
-| **Overload is shown and shed, never hidden: urgent work displaces station backlog, translations over 5 minutes late are skipped** | Seen in testing with five translated stations on a loaded machine: the translation queue stayed full of station lines, LLM rule checks were turned away and logged once each, and nothing on the page said so. Displacing the least urgent station entry keeps rule checks and alert translations running whatever the backlog; skipping stale translations stops one slow model from pushing every line later; `behind_s`, `dropped` and `load` say what is happening, counted per station over ten minutes and logged once a minute | Pausing translation while text is behind, if displacement and skipping aren't enough on a soak |
-| **The page is React + TypeScript + Vite, and the built page is committed** | A framework with a build was chosen over keeping plain JS or vendoring Preact + htm, and React because most contributors already know it; at this size its overhead doesn't matter if the transcript list is virtualised. Committing `src/wavescribe/web/dist/` keeps Node off the running machine. The build works offline from `package-lock.json` and a cache, bundles every asset (no CDN or web fonts), and every dependency is in LICENSING.md first. `scripts/commit_checks.py` enforces the built page and the licence entries on every commit | — |
-| **Own NFM/AM demodulators and RDS decoder** (`dsp/`), not rtl_airband and redsea | A dongle opens in one process at a time: rtl_airband would own a whole dongle, while our channels share one `rtl_sdr` pipe with the FM stations. redsea has no Homebrew formula and pulls in liquid-dsp and LGPL libsndfile. Each part is a few hundred lines of numpy/scipy, tested on synthetic IQ; broadcast FM and RDS also on air, NFM and AM not yet | A band needs a demodulator we don't have (digital voice is out of scope) |
-| **`rtl_power` for scans**, as a subprocess | GPL-2.0 like the other rtl tools, already installed with librtlsdr, and fast: the FM band in 3 s, the tuner's whole range in about 30 s | A device without rtl tools (Airspy) |
-| **Privacy classes from the band plan, enforced in the store, feed, outputs and alerts; the user sets what is kept** | Laws on radio that isn't broadcast differ by country, and Wavescribe can't know which apply. The defaults are cautious (private channels live only; airband, marine and amateur text kept a few days; no audio, no words exported); any frequency can be tuned once the user confirms they may receive it, and what is kept is theirs to set and their responsibility (README, RADIO.md). There is no digital decoder and no decryption | A default turns out wrong for most users |
-| **The station list comes from your own scans**, not a downloaded register | National registers and community lists mostly forbid redistribution or derived works (LICENSING.md, *Radio data*); a scan describes what this antenna actually receives | An openly licensed register worth importing |
-| **The background service is a per-user LaunchAgent running serve through `caffeinate -i`** | An agent runs in the user's session, so notifications, `say` and the user's model cache work, and it needs no root; a LaunchDaemon has neither. `caffeinate` with serve as its child holds the idle-sleep assertion exactly as long as serve runs, passes SIGTERM on and returns serve's exit code. The project environment's Python runs directly, not `uv run`, so a restart never syncs or reaches the network | A Mac app (it would register itself as a login item) |
-| **Doctor never opens a receiver and never uses the network** | Opening a dongle disturbs the Wavescribe using it, and the self-check must be safe to run at any time, offline. Dongles are read from the USB registry; models from the caches | — |
-| **Alerts on their way to an output are kept in the store (the `outbox` table), delivered at least once with a delivery id, and given up after `alert_max_age_hours`** | An alert that was raised and not yet delivered was lost with the process: the receiver was away, or Wavescribe restarted in between. `Outputs` already has the store, for the delivery log and an alert's context, and the store has one connection behind a lock that the output threads write through, so the outbox is a table in it: one file, one writer, pruned with the rest, and nothing kept under `--no-store`, alerts included. Exactly once needs the receiver's help, so it gets an id to tell a repeat by. An old alert arriving as news does more harm than a missed one, hence the age limit, which with the per-output cap bounds the table. Utterances stay in memory: the pull feed's resume is there for gaps in the text | A receiver needs order or exactly-once delivery |
+| **LLM rules batch per station every ~45 s, on source text** | One prompt per batch keeps the LLM's share of the GPU small (not measured on a long run) | Missed or late events |
+| **Overload is shown and shed, never hidden: urgent work displaces station backlog, translations over 5 minutes late are skipped** | Displacing the least urgent station entry keeps rule checks and alert translations running whatever the backlog | Displacement and skipping aren't enough |
+| **The page is React + TypeScript + Vite, and the built page is committed** | Most contributors already know React; committing `src/wavescribe/web/dist/` keeps Node off the running machine | — |
+| **Own NFM/AM demodulators and RDS decoder** (`dsp/`) | A dongle opens in one process at a time, so its channels share one `rtl_sdr` pipe with the FM stations | A band needs a demodulator we don't have (digital voice is out of scope) |
+| **`rtl_power` for scans**, as a subprocess | Already installed with librtlsdr, and fast: the FM band in 3 s, the tuner's whole range in about 30 s | A device without rtl tools (Airspy) |
+| **Privacy classes from the band plan, enforced in the store, feed, outputs and alerts; the user sets what is kept** | Laws on radio that isn't broadcast differ by country, and Wavescribe can't know which apply | A default turns out wrong for most users |
+| **The station list comes from your own scans**, not a downloaded register | National registers and community lists mostly forbid redistribution or derived works (LICENSING.md, *Radio data*) | An openly licensed register worth importing |
+| **The background service is a per-user LaunchAgent running serve through `caffeinate -i`** | An agent runs in the user's session, so notifications, `say` and the user's model cache work, and it needs no root | — |
+| **Doctor never opens a receiver and never uses the network** | Opening a dongle disturbs the Wavescribe using it, and the self-check must be safe to run at any time, offline | — |
+| **Alerts on their way to an output are kept in the store (the `outbox` table), delivered at least once with a delivery id, and given up after `alert_max_age_hours`** | In the store, an undelivered alert survives a restart: one file, one writer, pruned with the rest | A receiver needs order or exactly-once delivery |
 | Build the glue, reuse components | No existing project covers the use case | A project appears that does |
