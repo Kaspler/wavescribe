@@ -691,7 +691,8 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   that matched in the original text, or underlines the utterance when a translation is shown.
   `wavescribe alerts` lists alerts; `wavescribe alerts check "<text>" --language pt-PT` shows what
   a sentence would trigger (with the rules `serve` runs: alerts.toml plus the page's changes, as
-  for `listen`, `test` and `replay`); `wavescribe alerts test` sends a notification and speaks each voice;
+  for `listen`, `test` and `replay`; `--settings` points `check`, `test` and `replay` at the page
+  settings `serve --settings` uses); `wavescribe alerts test` sends a notification and speaks each voice;
   `wavescribe alerts replay --alerts <draft.toml>` runs every stored transcript through a draft
   rule file with the real `Alerter` (cooldown, folding, confirmation, one announcement per
   sentence), a clock that follows the recordings, and actions that do nothing. It prints what

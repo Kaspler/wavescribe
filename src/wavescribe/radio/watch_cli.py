@@ -229,6 +229,8 @@ def cmd_note(args: argparse.Namespace) -> int:
 
 
 def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any, ppm: Any) -> None:
+    from wavescribe.cli import at_least_one  # loaded already: it builds these parsers
+
     p = rsub.add_parser(
         "watch", help="watch a whole band and transcribe whatever is said on any channel"
     )
@@ -260,11 +262,11 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
         help="confirm you may listen to this radio here (docs/RADIO.md)",
     )
     p.add_argument("--minutes", type=float, help="stop after this long (default: Ctrl-C)")
-    p.add_argument("-v", "--verbose", action="store_true")
-    p.add_argument("--no-translate", action="store_true")
+    p.add_argument("-v", "--verbose", action="store_true", help="log pipeline events to stderr")
+    p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--no-gate", action="store_true", help="transcribe music too")
-    p.add_argument("--asr")
-    p.add_argument("--translator")
+    p.add_argument("--asr", metavar="MODEL", help="ASR model id (default: first in the chain)")
+    p.add_argument("--translator", metavar="MODEL", help="translation model id")
     add_store_args(p)
     add_alert_args(p)
     common(p)
@@ -274,12 +276,12 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
     p.add_argument("--mhz", type=float, help="one channel only")
     p.add_argument("--width", type=float, default=0.0, help="with --mhz: kHz either side")
     p.add_argument("--hours", type=float, default=24.0, help="this far back (0: all)")
-    p.add_argument("--limit", type=int, default=100)
+    p.add_argument("--limit", type=at_least_one, default=100, help="at most this many (100)")
     p.add_argument("--json", action="store_true", help="one JSON object per line (experimental)")
     p.set_defaults(func=cmd_catches)
 
     p = rsub.add_parser("note", help="name a frequency, note something about it, tag it")
-    p.add_argument("mhz", type=float)
+    p.add_argument("mhz", type=float, help="the frequency in MHz, e.g. 446.00625")
     p.add_argument("--name", help="what to call it (also its name in `radio heard`)")
     p.add_argument("--note", help="anything worth remembering about it")
     p.add_argument("--tag", nargs="*", help="tags, e.g. family hiking")

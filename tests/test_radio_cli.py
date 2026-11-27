@@ -127,7 +127,7 @@ def test_no_output_names_a_dongle_by_its_serial(
 
     monkeypatch.setattr("wavescribe.radio.scan.scan", lambda *_a, **_k: (None, []))
     monkeypatch.setattr("wavescribe.radio.catalog.Catalog.record", lambda *_a, **_k: None)
-    assert main(["radio", "scan", "a", "fm"]) == 0
+    assert main(["radio", "scan", "a", "fm", "--region", "cept"]) == 0
     assert main(["radio", "spurs", "a"]) == 0
     assert main(["radio", "spurs", "a", "--forget"]) == 0
     out = capsys.readouterr()
@@ -165,7 +165,7 @@ def test_a_busy_receiver_says_when_wavescribe_itself_holds_it(
         raise Busy()
 
     monkeypatch.setattr("wavescribe.radio.scan.scan", held)
-    assert main(["radio", "scan", "a", "fm"]) == 1
+    assert main(["radio", "scan", "a", "fm", "--region", "cept"]) == 1
     assert capsys.readouterr().err.splitlines()[-1] == f"wavescribe: {said}"
 
 

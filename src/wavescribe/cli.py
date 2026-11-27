@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from wavescribe.store import Store
 
 DATA_DIR = Path("data")
+DEFAULT_SETTINGS = Path("config/ui.toml")  # settings.DEFAULT_SETTINGS_PATH, without its imports
 NC_HELP = "acknowledge that a restricted model is for non-commercial use only"
 
 
@@ -374,7 +375,7 @@ def _alerts_replay(args: argparse.Namespace, db: Path) -> int:
     from wavescribe.alerts.replay import replay
     from wavescribe.store import Store
 
-    config, path = _alert_config(args.alerts)
+    config, path = _alert_config(args.alerts, args.settings)
     if config is None:
         print("wavescribe: no alert rules (config/alerts.toml, or rules made on the page)",
               file=sys.stderr)  # fmt: skip
@@ -391,10 +392,9 @@ def _alerts_replay(args: argparse.Namespace, db: Path) -> int:
     )
     per_day = 24 / report.hours if report.hours else 0.0
     sev = report.by_severity()
-    loud = sum(n for s, n in sev.items() if s != "low")
-    print("alerts: " + (", ".join(f"{n} {s}" for s, n in sev.items() if n) or "none")
-          + (f"; above low (what [actions] can announce): {loud * per_day:.1f} a day"
-             if per_day else ""))  # fmt: skip
+    print("alerts: " + (", ".join(f"{n} {s}" for s, n in sev.items() if n) or "none"))
+    if per_day:
+        print(_announced_per_day(config.actions, sev, per_day))
     for (s, rule), n in sorted(report.announced.items(), key=lambda kv: -kv[1]):
         terms = report.terms.get(rule, {})
         top = ", ".join(f"{t} x{c}" for t, c in terms.most_common(5))
@@ -407,10 +407,27 @@ def _alerts_replay(args: argparse.Namespace, db: Path) -> int:
     return 0
 
 
-def _alert_config(explicit: Path | None) -> tuple[Any, Path | None]:
+def _announced_per_day(
+    actions: dict[str, tuple[str, ...]], by_severity: dict[str, int], per_day: float
+) -> str:
+    """How many alerts a day would reach someone (a notification, a voice, a webhook), as the
+    rules' severities are set to deliver them; the rest are only logged."""
+    loud = [s for s, n in by_severity.items() if n and set(actions.get(s, ())) - {"log"}]
+    quiet = [s for s, n in by_severity.items() if n and s not in loud]
+    out = f"announced: {sum(by_severity[s] for s in loud) * per_day:.1f} alerts a day"
+    if loud:
+        out += f" ({', '.join(loud)})"
+    if quiet:
+        out += f"; only logged: {', '.join(quiet)}"
+    return out
+
+
+def _alert_config(
+    explicit: Path | None, settings: Path = DEFAULT_SETTINGS
+) -> tuple[Any, Path | None]:
     """The rules `wavescribe serve` runs: alerts.toml (or its example) with the page's changes
-    from config/ui.toml laid over it (its own rules, file rules it switched off, its delivery
-    settings). (None, None) when there is neither."""
+    from ``settings`` (config/ui.toml) laid over it (its own rules, file rules it switched off,
+    its delivery settings). (None, None) when there is neither."""
     from wavescribe.alerts import (
         DEFAULT_KEYWORDS_DIR,
         merge_page,
@@ -421,7 +438,7 @@ def _alert_config(explicit: Path | None) -> tuple[Any, Path | None]:
     from wavescribe.settings import Settings
 
     path = resolve_alerts_path(explicit)
-    page = Settings().get("alerts") or {}
+    page = Settings(settings).get("alerts") or {}
     if path is None and not page.get("rule"):
         return None, None
     merged, rules, disabled = merge_page(read_alerts(path) if path else {}, page)
@@ -432,7 +449,7 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     from wavescribe.store import Store
 
     if args.alerts_command == "check":
-        config, _ = _alert_config(args.alerts)
+        config, _ = _alert_config(args.alerts, args.settings)
         if config is None:
             print("wavescribe: no alert rules (config/alerts.toml, or rules made on the page)",
                   file=sys.stderr)  # fmt: skip
@@ -459,7 +476,7 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     if args.alerts_command == "test":
         from wavescribe.alerts.actions import platform_actions
 
-        config, _ = _alert_config(args.alerts)  # with the voices chosen on the page
+        config, _ = _alert_config(args.alerts, args.settings)  # with the page's voices
         actions = platform_actions()
         installed = actions.voices()
         actions.notify("Wavescribe test", "Alerts can reach this screen.")
@@ -728,6 +745,25 @@ def add_json_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def add_settings_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--settings", type=Path, default=DEFAULT_SETTINGS,
+        help=f"where the page keeps its changes, as serve's --settings (default: "
+        f"{DEFAULT_SETTINGS})",
+    )  # fmt: skip
+
+
+def at_least_one(text: str) -> int:
+    """An argparse type: a whole number from 1 up."""
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"give a whole number from 1 up, not {text!r}")
+    return n
+
+
 def add_alert_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
     p.add_argument("--no-alerts", action="store_true", help="no keyword alerts")
@@ -753,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--non-commercial", action="store_true", help=NC_HELP)
     p.set_defaults(func=cmd_models_fetch, network=True)
     p = models_sub.add_parser("accept", help="accept an opt-in or restricted model's licence")
-    p.add_argument("id")
+    p.add_argument("id", help="the model's id, as `models list` shows it")
     p.add_argument("--license", required=True, help="the licence id, as `models list` shows it")
     p.add_argument("--non-commercial", action="store_true", help=NC_HELP)
     p.set_defaults(func=cmd_models_accept)
@@ -793,10 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
         "machine's (read-only, feed tokens required)",
     )  # fmt: skip
     p.add_argument("--open", action="store_true", help="open the page in the default browser")
-    p.add_argument(
-        "--settings", type=Path, default=Path("config/ui.toml"),
-        help="where the page keeps its changes (default: config/ui.toml)",
-    )  # fmt: skip
+    add_settings_arg(p)
     p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--asr", metavar="MODEL", help="ASR model id (default: first in the chain)")
     p.add_argument("--translator", metavar="MODEL", help="translation model id")
@@ -812,27 +845,31 @@ def build_parser() -> argparse.ArgumentParser:
         description="Recent alerts, CAP export, rule and voice checks. Alerts can be missed, "
         "late or wrong: they are a help, never the only warning where safety is at stake.",
     )
-    alerts.set_defaults(func=cmd_alerts, alerts_command="list", limit=20, alerts=None)
+    alerts.set_defaults(func=cmd_alerts, alerts_command="list", limit=20, alerts=None,
+                        settings=DEFAULT_SETTINGS)  # fmt: skip
     add_json_arg(alerts)
     alerts_sub = alerts.add_subparsers(dest="alerts_command", metavar="ACTION")
     p = alerts_sub.add_parser("list", help="the latest alerts (default)")
-    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--limit", type=at_least_one, default=20, help="at most this many (20)")
     add_json_arg(p)
     p = alerts_sub.add_parser("cap", help="one alert as a CAP 1.2 XML document")
-    p.add_argument("id", type=int)
+    p.add_argument("id", type=int, help="the alert's number, as `alerts list` shows it (#12)")
     p = alerts_sub.add_parser("check", help="which rules a sentence would trigger (dry run)")
-    p.add_argument("text", nargs="+")
+    p.add_argument("text", nargs="+", help="the sentence, as it would be said on the radio")
     p.add_argument("--language", required=True, help="BCP-47 tag of the text, e.g. pt-PT")
-    p.add_argument("--alerts", type=Path, help="alert rules TOML")
+    p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
+    add_settings_arg(p)
     p = alerts_sub.add_parser(
         "replay", help="run stored transcripts through the rules: what would have been announced"
     )
     p.add_argument("--alerts", type=Path, help="alert rules TOML (try a draft before using it)")
+    add_settings_arg(p)
     p.add_argument("--hours", type=float, help="only the last HOURS (default: everything)")
     p.add_argument("--examples", type=int, default=0, help="also show the last N announcements")
     p = alerts_sub.add_parser("test", help="send a test notification and speak each voice")
     p.add_argument("--language", help="only this voice's language")
-    p.add_argument("--alerts", type=Path, help="alert rules TOML")
+    p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
+    add_settings_arg(p)
 
     from wavescribe.radio.cli import add_parser as add_radio_parser
 
@@ -849,16 +886,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "query", nargs="+", help="words to find, at the start of a word (*word: anywhere in one)"
     )
-    p.add_argument("--station", help="only this station")
-    p.add_argument("--limit", type=int, default=30)
+    p.add_argument("--station", help="only this station (its id)")
+    p.add_argument("--limit", type=at_least_one, default=30, help="at most this many (30)")
     add_json_arg(p)
     p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("record", help="save a station's stream to a local WAV clip")
-    p.add_argument("station")
-    p.add_argument("--minutes", type=float, default=15.0)
+    p.add_argument("station", help="station id from the config")
+    p.add_argument("--minutes", type=float, default=15.0, help="how long to record (15)")
     p.add_argument("--out", type=Path, help="default: data/bakeoff/<station>-<time>.wav")
-    p.add_argument("--config", type=Path)
+    p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("bakeoff", help="compare ASR models on recorded clips")
@@ -870,7 +907,21 @@ def build_parser() -> argparse.ArgumentParser:
     from wavescribe.agent.cli import add_parser as add_agent_parser
 
     add_agent_parser(sub)
+    _describe(parser)
     return parser
+
+
+def _describe(parser: argparse.ArgumentParser) -> None:
+    """Every command's own --help opens with what it does: its line in the list above it, where
+    it has no longer description."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            helps = {a.dest: a.help for a in action._choices_actions}
+            for name, child in action.choices.items():
+                if not child.description and helps.get(name):
+                    text = str(helps[name])
+                    child.description = text[0].upper() + text[1:] + "."
+                _describe(child)
 
 
 def install_stop_signals() -> None:

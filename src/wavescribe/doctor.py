@@ -814,7 +814,8 @@ class Doctor:
             self.add(g, "voices", SKIP, "alerts are off or don't load")
             return
         if not alerts.voices:
-            self.add(g, "voices", SKIP, "no spoken alerts set up ([speak.<language>])")
+            self.add(g, "voices", SKIP, "no spoken alerts set up (Settings → Alerts, "
+                     "Voices for spoken alerts)")  # fmt: skip
             return
         spoken = {a.split(":", 1)[1] for acts in alerts.actions.values() for a in acts
                   if a.startswith("speak:")}  # fmt: skip

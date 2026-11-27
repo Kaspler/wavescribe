@@ -443,6 +443,12 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
         p.add_argument("--ppm", type=int, help="the dongle's crystal error in parts per million "
                        "(default: the receiver's, else 0)")  # fmt: skip
 
+    def receiver(p: argparse.ArgumentParser) -> None:
+        p.add_argument("receiver", help="receiver id from the config (e.g. a) or its serial")
+
+    def gain(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--gain", type=float, help="tuner gain in dB (default: the receiver's)")
+
     def common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
         p.add_argument("--region", choices=REGIONS, help="band plan region (default: from the "
@@ -453,10 +459,10 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
     p.set_defaults(func=cmd_bands)
 
     p = rsub.add_parser("scan", help="find signals in a band (FM stations named by RDS)")
-    p.add_argument("receiver", help="receiver id from the config (e.g. a) or its serial")
+    receiver(p)
     p.add_argument("range", nargs="?", default="fm",
                    help="a band id (see `radio bands`), START:STOP in MHz, or all")  # fmt: skip
-    p.add_argument("--gain", type=float, help="tuner gain in dB (default: the receiver's)")
+    gain(p)
     ppm(p)
     p.add_argument("--no-rds", action="store_true", help="don't decode FM station names")
     p.add_argument("--rds-seconds", type=float, default=12.0,
@@ -469,12 +475,12 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
     p.set_defaults(func=cmd_scan)
 
     p = rsub.add_parser("spurs", help="the receiver's own signals, learnt with no antenna")
-    p.add_argument("receiver")
+    receiver(p)
     p.add_argument("range", nargs="?", default="all", help="where to look (default: all)")
     p.add_argument("--learn", action="store_true",
                    help="sweep now (antenna disconnected) and keep what shows up")  # fmt: skip
-    p.add_argument("--forget", action="store_true")
-    p.add_argument("--gain", type=float)
+    p.add_argument("--forget", action="store_true", help="forget the spurs learnt for it")
+    gain(p)
     ppm(p)
     common(p)
     p.set_defaults(func=cmd_spurs)
@@ -485,31 +491,36 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
     p.set_defaults(func=cmd_heard)
 
     p = rsub.add_parser("rds", help="live RDS from one FM station: name, type, radiotext")
-    p.add_argument("receiver")
-    p.add_argument("mhz", type=float)
-    p.add_argument("--seconds", type=float, default=30.0)
-    p.add_argument("--gain", type=float)
+    receiver(p)
+    p.add_argument("mhz", type=float, help="the station's frequency in MHz, e.g. 98.6")
+    p.add_argument("--seconds", type=float, default=30.0, help="how long to listen (30)")
+    gain(p)
     ppm(p)
     common(p)
     p.set_defaults(func=cmd_rds)
 
-    p = rsub.add_parser("tune", help="listen to and transcribe one frequency")
-    p.add_argument("receiver")
-    p.add_argument("mhz", type=float)
+    p = rsub.add_parser(
+        "tune", help="listen to and transcribe one frequency",
+        description="Listen to one frequency on a receiver and print what is said, as `listen` "
+        "does for a station; nothing is saved as a station (Find on the page keeps one). "
+        "Radio that isn't broadcast or amateur asks for --acknowledge. See docs/RADIO.md.",
+    )  # fmt: skip
+    receiver(p)
+    p.add_argument("mhz", type=float, help="the frequency in MHz, e.g. 446.00625")
     p.add_argument("--language", required=True, help="what's spoken, as BCP-47 (e.g. es-ES)")
     p.add_argument("--translate", nargs="*", help="translate into these languages")
     p.add_argument("--mode", choices=("wfm", "nfm", "am"), help="default: from the band plan")
     p.add_argument("--squelch", type=float, help="fixed squelch level in dBFS (default: auto)")
-    p.add_argument("--gain", type=float)
+    gain(p)
     ppm(p)
     p.add_argument("--acknowledge", action="store_true",
                    help="confirm you may listen to this radio here (docs/RADIO.md)")  # fmt: skip
-    p.add_argument("--duration", type=float)
-    p.add_argument("-v", "--verbose", action="store_true")
-    p.add_argument("--no-translate", action="store_true")
+    p.add_argument("--duration", type=float, help="stop after this many seconds")
+    p.add_argument("-v", "--verbose", action="store_true", help="log pipeline events to stderr")
+    p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--no-gate", action="store_true", help="transcribe songs too")
-    p.add_argument("--asr")
-    p.add_argument("--translator")
+    p.add_argument("--asr", metavar="MODEL", help="ASR model id (default: first in the chain)")
+    p.add_argument("--translator", metavar="MODEL", help="translation model id")
     add_store_args(p)
     add_alert_args(p)
     common(p)

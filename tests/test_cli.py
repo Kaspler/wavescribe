@@ -17,6 +17,37 @@ def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "usage: wavescribe" in capsys.readouterr().out
 
 
+def test_every_command_and_option_says_what_it_is_for() -> None:
+    import argparse
+
+    from wavescribe.cli import build_parser
+
+    missing = []
+
+    def walk(parser: argparse.ArgumentParser, path: str) -> None:
+        if not parser.description:
+            missing.append(path)
+        for a in parser._actions:
+            if isinstance(a, argparse._SubParsersAction):
+                for name, child in a.choices.items():
+                    walk(child, f"{path} {name}")
+            elif not a.help:
+                missing.append(f"{path} {'/'.join(a.option_strings) or a.dest}")
+
+    walk(build_parser(), "wavescribe")
+    assert missing == []
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "ten"])
+def test_a_limit_below_one_is_refused(limit: str, capsys: pytest.CaptureFixture[str]) -> None:
+    for command in (["search", "water"], ["alerts", "list"]):
+        with pytest.raises(SystemExit) as exc:
+            main([*command, "--limit", limit])
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert f"argument --limit: give a whole number from 1 up, not '{limit}'" in err
+
+
 def test_signals_stop_the_process_even_when_sigint_was_inherited_ignored() -> None:
     import signal
     import subprocess

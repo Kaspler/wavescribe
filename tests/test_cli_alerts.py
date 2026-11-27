@@ -62,3 +62,39 @@ def test_listen_counts_every_kind_of_rule_as_serve_does(project: Path, capsys) -
         assert "LLM rules are checked under serve only" in err  # listen runs no LLM for them
     finally:
         alerter.close()
+
+
+def test_check_and_replay_read_the_page_settings_serve_was_given(project: Path, capsys) -> None:
+    """serve --settings elsewhere: check and replay take the same option, so they answer with
+    that page's rules, not the default file's."""
+    from tests.test_store import result
+    from wavescribe.store import Store
+
+    elsewhere = project / "other-ui.toml"
+    elsewhere.write_text(
+        '[[alerts.rule]]\nid = "bridge"\nseverity = "high"\n'
+        '[alerts.rule.terms]\nes = ["puente cerrado"]\n',
+        encoding="utf-8",
+    )
+    said = ["alerts", "check", "--language", "es", "El puente cerrado"]
+    assert main(said) == 1  # config/ui.toml has no such rule
+    assert main([*said, "--settings", str(elsewhere)]) == 0
+    assert "bridge" in capsys.readouterr().out
+
+    (project / "data").mkdir()
+    store = Store(project / "data" / "wavescribe.db")
+    store.add_transcript(result("a", "El puente cerrado hasta mañana", 1000.0, lang="es"))
+    store.close()
+    capsys.readouterr()
+    assert main(["alerts", "replay", "--settings", str(elsewhere)]) == 0
+    assert "1 high" in capsys.readouterr().out
+
+
+def test_replay_says_what_its_rate_counts() -> None:
+    from wavescribe.cli import _announced_per_day
+
+    actions = {"high": ("notify", "speak:en", "log"), "medium": ("notify",), "low": ("log",)}
+    by_severity = {"critical": 0, "high": 2, "medium": 1, "low": 5}
+    said = _announced_per_day(actions, by_severity, 24 / 6)
+    assert said == "announced: 12.0 alerts a day (high, medium); only logged: low"
+    assert "[" not in said
