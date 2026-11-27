@@ -518,7 +518,7 @@ class App:
                 "privacy_region": s.privacy_region,
                 # As /api/state says them: why its receiver doesn't hear it, and where it would.
                 "out_of_reach": None if s.disabled else s.out_of_reach,
-                "reach_center_mhz": reach_center_mhz(s),
+                "reach_center_mhz": reach_center_mhz(s, self.config.stations, running),
                 "error": self.config_errors.get(s.id),
                 "asr_model": planned[0].id if planned else None,
                 "asr_choice": s.asr_model,

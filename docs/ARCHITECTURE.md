@@ -216,12 +216,13 @@ any other station),
 `privacy` (its class, radio/bandplan.py), `out_of_reach` (why its receiver doesn't hear it
 where that is tuned, the sentence `reason` gives unless the station is switched off; null when
 it is heard) and `reach_center_mhz` (the centre that brings it back: the shared planner's
-answer for it, `radio/service.py` `reach_centre`, whatever other stations that would leave out
-and leaving the hand tuner aside; null when it isn't out of reach, is switched off, or no centre
-hears it). `GET /api/manage/stations` gives each station `out_of_reach` and `reach_center_mhz`
+answer for it, `radio/service.py` `reach_centre`, which keeps the receiver's other stations
+where a centre can and still answers where none can, leaving the hand tuner aside; null when it
+isn't out of reach, is switched off, or no centre hears it). `GET /api/manage/stations` gives each station `out_of_reach` and `reach_center_mhz`
 the same way, and so do the stations listed under each receiver in `GET /api/manage/radio`
-and `GET /api/manage/receivers`. Starting the station moves its receiver there, asking first
-when that leaves others out (*Radio*, below).
+and `GET /api/manage/receivers`. Starting the station moves its receiver there (unless the
+hand tuner has it somewhere that also hears it), asking first when that leaves others out
+(*Radio*, below).
 
 It binds to 127.0.0.1 by default. `--lan` binds every interface and prints the LAN addresses for
 phones and tablets; requests that don't come from the machine itself are read-only (they can read

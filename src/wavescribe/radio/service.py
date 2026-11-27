@@ -112,7 +112,8 @@ class RadioService:
                 "busy": busy, "busy_code": code, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
                               "running": s.id in running, "out_of_reach": s.out_of_reach,
-                              "reach_center_mhz": reach_center_mhz(s)}
+                              "reach_center_mhz": reach_center_mhz(
+                                  s, self.app.config.stations, running)}
                              for s in on if s.sdr],
             })  # fmt: skip
         return out
@@ -676,32 +677,44 @@ class RadioService:
     def _place(self, d: Any, hears_it: Callable[[Any], bool], usual: int, grid: range,
                by_hand: int | None, running: set[str],
                what: str) -> tuple[int, list[Any]]:  # fmt: skip
-        """The planner of ``_centre_for``: the first place, in its order (``_candidates``), from
-        which receiver ``d`` hears the new station (``hears_it``) and every station it has;
-        else the best."""
-        from dataclasses import replace
+        """``_plan`` with the stations receiver ``d`` has now."""
+        return _plan(d, hears_it, usual, grid, by_hand, _kept_on(self.app.config.stations, d),
+                     running, what)  # fmt: skip
 
-        from wavescribe.config import heard_by
 
-        others = [s for s in self.app.config.stations
-                  if s.sdr and s.sdr.device.id == d.id and not s.disabled
-                  and not s.out_of_reach]  # fmt: skip
-        best: tuple[tuple[int, int], int, list[Any]] | None = None
-        for c in _candidates(d, by_hand, usual, grid):
-            at = replace(d, center_hz=c)
-            if not hears_it(at):
-                continue
-            kept = [s for s in others if heard_by(s, at)]
-            if len(kept) == len(others):
-                return c, []
-            score = (sum(s.id in running for s in kept), len(kept))
-            if best is None or score > best[0]:
-                best = (score, c, kept)
-        if best is None:
-            raise RadioError(f"Receiver {receiver_name(d.id)} can't be tuned to hear {what}.",
-                             "out_of_band")  # fmt: skip
-        _, c, kept = best
-        return c, [s for s in others if s not in kept]
+def _kept_on(stations: Any, d: Any) -> list[Any]:
+    """The stations on receiver ``d`` a move must try to keep: those it hears, switched on."""
+    return [s for s in stations
+            if s.sdr and s.sdr.device.id == d.id and not s.disabled
+            and not s.out_of_reach]  # fmt: skip
+
+
+def _plan(d: Any, hears_it: Callable[[Any], bool], usual: int, grid: range, by_hand: int | None,
+          others: list[Any], running: Any, what: str) -> tuple[int, list[Any]]:  # fmt: skip
+    """The planner of ``_centre_for``: the first place, in its order (``_candidates``), from
+    which receiver ``d`` hears the new station (``hears_it``) and every one of ``others``;
+    else the one that keeps the most running stations, then the most stations. Also the
+    stations it leaves out. Code ``out_of_band`` when no place hears the new station."""
+    from dataclasses import replace
+
+    from wavescribe.config import heard_by
+
+    best: tuple[tuple[int, int], int, list[Any]] | None = None
+    for c in _candidates(d, by_hand, usual, grid):
+        at = replace(d, center_hz=c)
+        if not hears_it(at):
+            continue
+        kept = [s for s in others if heard_by(s, at)]
+        if len(kept) == len(others):
+            return c, []
+        score = (sum(s.id in running for s in kept), len(kept))
+        if best is None or score > best[0]:
+            best = (score, c, kept)
+    if best is None:
+        raise RadioError(f"Receiver {receiver_name(d.id)} can't be tuned to hear {what}.",
+                         "out_of_band")  # fmt: skip
+    _, c, kept = best
+    return c, [s for s in others if s not in kept]
 
 
 def _candidates(d: Any, by_hand: int | None, usual: int, grid: range) -> Iterator[int]:
@@ -737,28 +750,31 @@ def _station_places(s: Any) -> tuple[int, range, str]:
             f"{mhz_text(t.freq_hz / 1e6)} MHz")  # fmt: skip
 
 
-def reach_centre(s: Any) -> int | None:
+def reach_centre(s: Any, stations: Any = (), running: Any = ()) -> int | None:
     """Where station ``s``'s receiver, which doesn't hear it where it is tuned (``out_of_reach``),
-    hears it again: the planner's answer for it (``_place``: the same places in the same order,
-    ``heard_by``), whatever other stations that leaves out, and leaving the hand tuner aside.
-    None when the station is heard, switched off (in nobody's way, and its reach says nothing),
-    or no centre hears it. The page shows it as ``reach_center_mhz``; starting the station
-    (``RadioService.start_station``) moves there, or asks first when that leaves others out."""
-    from dataclasses import replace
-
+    hears it again: the planner's answer for it (``_plan``, with ``stations`` the configured
+    ones and ``running`` the ids that run), whether or not that leaves others out, and leaving
+    the hand tuner aside. So it is where starting the station
+    (``RadioService.start_station``) moves the receiver, asking first when that leaves others
+    out. None when the station is heard, switched off (in nobody's way, and its reach says
+    nothing), or no centre hears it. The page shows it as ``reach_center_mhz``."""
     from wavescribe.config import heard_by
 
     if s.sdr is None or not s.out_of_reach or s.disabled:
         return None
     d = s.sdr.device
-    usual, grid, _ = _station_places(s)
-    return next((c for c in _candidates(d, None, usual, grid)
-                 if heard_by(s, replace(d, center_hz=c))), None)  # fmt: skip
+    usual, grid, what = _station_places(s)
+    try:
+        centre, _ = _plan(d, lambda at: heard_by(s, at), usual, grid, None,
+                          _kept_on(stations, d), set(running), what)  # fmt: skip
+    except RadioError:
+        return None
+    return centre
 
 
-def reach_center_mhz(s: Any) -> float | None:
+def reach_center_mhz(s: Any, stations: Any = (), running: Any = ()) -> float | None:
     """``reach_centre`` in MHz, as the page gets it."""
-    c = reach_centre(s)
+    c = reach_centre(s, stations, running)
     return c / 1e6 if c is not None else None
 
 

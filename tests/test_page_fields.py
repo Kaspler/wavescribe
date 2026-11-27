@@ -357,6 +357,34 @@ def test_every_view_of_a_station_says_where_its_receiver_hears_it_again(tmp_path
         r.close()
 
 
+def test_where_a_station_is_heard_again_is_where_starting_it_moves_the_receiver(
+    tmp_path: Path,
+) -> None:
+    """The usual place for 99.5 (99.2) would lose 98.1; a place a little further down hears
+    both, so that is the centre the views give, and starting the station goes there unasked."""
+    from dataclasses import replace
+
+    from wavescribe.config import heard_by
+
+    near = {"id": "near", "name": "Near", "device": "a", "mhz": 98.1}
+    up = {"id": "up", "name": "Up", "device": "a", "mhz": 99.5}
+    raw = stations(98.0, near, up)
+    raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]
+    r = running(tmp_path, raw)
+    try:
+        [s] = [s for s in r.call("GET", "/api/state")[1]["stations"] if s["id"] == "up"]
+        centre = s["reach_center_mhz"]
+        assert centre is not None and 98.9 < centre < 99.2  # not 99.2: that loses Near
+        d = r.app.config.devices[0]
+        at = replace(d, center_hz=round(centre * 1e6))
+        assert all(heard_by(x, at) for x in r.app.config.stations if x.sdr)
+        status, moved = r.call("POST", "/api/manage/stations/up/start")
+        assert status == 200 and moved["unfit"] == [], moved
+        assert moved["receiver"] == {"id": "a", "center_mhz": centre, "moved": True}
+    finally:
+        r.close()
+
+
 def test_the_add_forms_get_the_stations_files_defaults(tmp_path: Path) -> None:
     raw = stations(98.0)
     r = running(tmp_path, raw)

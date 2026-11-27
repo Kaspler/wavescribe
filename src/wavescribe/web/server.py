@@ -440,7 +440,7 @@ class WebHub:
                     "asr_model": entry[0].id if entry else ("remote" if s.remote else None),
                     "kind": "remote" if s.remote else "sdr" if s.sdr else "stream",
                     "disabled": s.disabled,
-                    **_radio_fields(s),
+                    **_radio_fields(s, self.config.stations, running),
                 }
             )
         recent = self.history(exports=exports)
@@ -544,13 +544,14 @@ class WebHub:
             self.publish("status", self.status())
 
 
-def _radio_fields(s: Station) -> dict[str, Any]:
+def _radio_fields(s: Station, stations: Any = (), running: Any = ()) -> dict[str, Any]:
     """What ``/api/state`` says of a station's radio: its receiver (``device``), the band id or
     ``[lo_mhz, hi_mhz]`` it watches (``watch``) and the languages a watch or a station in
     language ``auto`` transcribes (an empty list: any it tells), its privacy class, why its
     receiver doesn't hear it where that is tuned (``out_of_reach``) and the centre that brings it
-    back (``reach_center_mhz``, radio/service.py ``reach_centre``). None where they don't apply
-    (a stream, a fixed frequency, a station in one language)."""
+    back (``reach_center_mhz``, radio/service.py ``reach_centre``: ``stations`` and the
+    ``running`` ids are what that planner tries to keep). None where they don't apply (a
+    stream, a fixed frequency, a station in one language)."""
     from wavescribe.radio.service import reach_center_mhz
 
     t = s.sdr
@@ -565,7 +566,7 @@ def _radio_fields(s: Station) -> dict[str, Any]:
         "privacy": s.privacy,
         # A station switched off is in nobody's way, and its reach says nothing until it is on.
         "out_of_reach": None if s.disabled else s.out_of_reach,
-        "reach_center_mhz": reach_center_mhz(s),
+        "reach_center_mhz": reach_center_mhz(s, stations, running),
     }
 
 
