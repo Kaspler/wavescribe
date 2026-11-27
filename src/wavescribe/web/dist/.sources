@@ -32,7 +32,7 @@ fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
-94d85ee2ed8c7b007d3f58c82f727ec9ce8e8c73 frontend/src/manage/Caught.tsx
+21768436394dd3d9b93a33754178b63d5288f963 frontend/src/manage/Caught.tsx
 5f63524d4a72ed1cd3766799d9b17e45b168edcd frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 709b343b531273c53b5e6f6af8ae6e0e3e21f4e8 frontend/src/manage/Internet.tsx

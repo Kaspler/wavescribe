@@ -53,6 +53,7 @@ export const bandNamer = (bands: Band[]) => (id: string) => {
 export const watchWords = (w: Any, bands: Band[]) => windowWords(w.watch, bandNamer(bands));
 
 const WHAT_IT_DOES = "Listens to every channel of the band at once and turns whatever is said into text, with its channel. One receiver is busy with it while it runs.";
+// Said once, where what was caught is listed (Caught here, just below the watch panel).
 const CAN_MISS = "It can miss a transmission that is weak, very short, or under another one.";
 
 /** Whether two watch windows are the same: a band's id, or a range in MHz. */
@@ -143,7 +144,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
            // Escape closes the panel; the page's own Escape (back to reading) must not run too.
            if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
          }}>
-      <p id="rd-watch-h" className="m-line">{WHAT_IT_DOES} {CAN_MISS}</p>
+      <p id="rd-watch-h" className="m-line">{WHAT_IT_DOES}</p>
       {stops.length > 0 && (
         <p className="m-line">
           Receiver {rxName(device)} is {and([...(byHand ? ["tuned by hand"] : []), ...(holders.length ? [`following ${and(holders.map((h) => h.name))}`] : [])])}.
