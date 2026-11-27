@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from tests.test_pipeline import ENTRY, FakeTranslator
-from tests.test_radio_watch_detect import BELOW, FS, PMR, Burst, air, dominant_hz
+from tests.test_radio_watch_detect import BELOW, FS, PMR, T0, Burst, air, dominant_hz
 from tests.test_segmenter import EnergyVad
 from wavescribe.asr import Transcript
 from wavescribe.asr.language import AUTO, likeliest, plan_detecting, transcribe_any
@@ -194,8 +194,14 @@ def test_a_change_of_region_keeps_a_watchs_class_by_its_strictest_channel(
         r.app.settings.update(lambda d: d.setdefault("radio", {}).update(region="cept"))
         dongle = {"id": "w", "serial": "00001234", "center_mhz": 433.00625, "gain_db": 30}
         assert r.call("POST", "/api/manage/receivers", dongle)[0] == 200
-        body = {"id": "edge", "name": "Edge", "device": "w", "watch": [432.0, 434.0],
-                "language": "en", "acknowledge": True}  # fmt: skip
+        body = {
+            "id": "edge",
+            "name": "Edge",
+            "device": "w",
+            "watch": [432.0, 434.0],
+            "language": "en",
+            "acknowledge": True,
+        }
         status, st = r.call("POST", "/api/manage/stations", body)
         assert status == 200 and st["privacy"] == "private"
         # ITU Region 1 has the 433 MHz devices band too: nothing to keep stricter than it is.
@@ -517,6 +523,38 @@ def test_each_catch_is_transcribed_on_its_own_in_the_language_heard() -> None:
     assert {c.station_id for c in caught} == {"walkies"}
     assert {c.privacy for c in caught} == {"private"}
     assert caught[0].band == "pmr446" and caught[0].label == "PMR446 walkie-talkies, channel 2"
+
+
+def test_a_silence_alert_takes_a_watchs_quiet_air_for_what_it_is() -> None:
+    from wavescribe.alerts.watch import quiet
+
+    station = watch_station()
+    start = time.time() - 2.0  # air that ends now: the receiver is sending
+    blocks = [(iq, start + t_end - T0) for iq, t_end in air(2.0, [])]
+    pipeline = Pipeline(
+        [station],
+        Plan(vad=(ENTRY, Path()), asr={station.id: (ENTRY, Path())}, mt=None),
+        lambda _r: None,
+        source_factory=lambda st: WatchSource(st.id, st.sdr, device=FakeDevice(blocks)),
+        vad_factory=lambda _path: EnergyVad(),
+        transcriber_factory=lambda _e, _p: Speaker(),
+    )
+    runner = threading.Thread(target=pipeline.run, daemon=True)
+    runner.start()
+    status: dict = {}
+    try:
+        deadline = time.monotonic() + 10
+        while status.get("last_data_age") is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+            status = pipeline.status()["stations"].get(station.id, {})
+    finally:
+        pipeline.stop(drain=True)
+        runner.join(10)
+    # Nothing on the air: no audio level at all, yet no silence. Station alerts read it as a
+    # narrowband channel's quiet, where only an outage counts.
+    assert status["connected"] and status["squelch_open"] is False
+    assert quiet(status, -50.0) is None
+    assert quiet({**status, "squelch_open": None}, -50.0) == "dead air"
 
 
 def test_a_watch_only_listened_to_says_its_catches_werent_checked() -> None:

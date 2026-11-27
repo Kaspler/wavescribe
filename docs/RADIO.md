@@ -249,6 +249,10 @@ words are shown while `radio watch` runs and never written down, so `radio catch
 A 2 m watch keeps both for 7 days, on this machine only. Notes on frequencies (`radio note`) stay
 on this machine and are its heard list's names too.
 
+**Alerts.** Alert rules read a watch's words like any station's. A silence alert
+(`kind = "silence"`) on a watch goes off only when the receiver stops sending: a quiet band is
+what a watch hears most of the time.
+
 Limits:
 
 - **A watch covers what one receiver hears at once**, about 2.2 MHz. A wider band is refused

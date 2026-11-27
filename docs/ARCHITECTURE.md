@@ -550,9 +550,10 @@ and digital need the acknowledgement once per receiver. A receiver nobody polls 
 closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`), listen-only
 or transcribed.
 
-**Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`). A station whose
-`SdrTuning` carries a `Watch` (the channels of one window) gets a `WatchSource` instead of a
-channel: one more consumer of the shared pipe. On the dongle's thread, each block goes to an
+**Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`; not the station
+alerts' `StationWatch`, below). A station whose `SdrTuning` carries a `Watch` (the channels of one
+window) gets a `WatchSource` instead of a channel: one more consumer of the shared pipe. On the
+dongle's thread, each block goes to an
 `IqHistory` (the last 2 s as the dongle's 8-bit samples, about 10 MB) and an `ActivityDetector`:
 4096-point FFTs averaged into frames (29 of them, 49.5 ms, at 2.4 MS/s), each channel's power over
 the middle 80 % of its width against a noise floor kept per bin, which follows the bin only while
@@ -581,13 +582,14 @@ so once the catch's audio has been read it is published (`watch.publish`) with `
 or null where nothing looked for speech in it (a watch only listened to); the store and the command
 line subscribe. In the ASR worker, language `auto` runs `transcribe_any` (`asr/language.py`) with a
 model whose wrapper says it can tell languages (`MlxAudioTranscriber.tells_languages`: a
-multilingual Whisper, by its config): Whisper's language probabilities, narrowed to the station's
-`languages` unless those together are under 10 %, then the station is replaced by one in that
-language for the checks, translation, alerts and the store. `plan_centre` puts a window narrower
-than about 0.9 MHz wholly above the centre (lowest channel − 250 kHz), so its mirror falls outside;
-a wider one is centred between two channels, and a window is planned as it will be tuned, so a slice
-suggested for a band too wide fits after centring. The class of a watch is its strictest channel's,
-under whatever region is chosen (`SdrTuning.policed_hz`).
+multilingual Whisper, by its config): Whisper's language probabilities (`identify_language`, as the
+re-check has them), narrowed to the station's `languages` unless those together are under 10 %, then
+the station is replaced by one in that language for the checks, translation, alerts and the store.
+`plan_centre` puts a window narrower than about 0.9 MHz wholly above the centre (lowest channel −
+250 kHz), so its mirror falls outside; a wider one is centred between two channels, and a window is
+planned as it will be tuned, so a slice suggested for a band too wide fits after centring. The class
+of a watch is its strictest channel's, each channel's being the strictest its edges reach at the
+watch's channel width, under whatever region is chosen (`SdrTuning.policed`).
 
 ### Alerts
 
@@ -627,8 +629,8 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   group or possessive repeat is allowed). Each reads one utterance, at most 2,000 characters,
   and a pattern slower than 50 ms on one is named in the log. Overlapping alternatives inside a
   repeat (`(a|ab)+`) are not detected.
-- **Station alerts** (`kind = "silence"` or `"traffic"`, `alerts/watch.py`): no second monitor. Every 5 s the
-  watch reads `Pipeline.status()`, the snapshot the page shows, and a running, transcribed
+- **Station alerts** (`kind = "silence"` or `"traffic"`, `alerts/watch.py`): no second monitor. Every 5 s
+  `StationWatch` reads `Pipeline.status()`, the snapshot the page shows, and a running, transcribed
   station is silent while its source is down or reconnecting, has sent nothing for 15 s, or its
   audio level (the RMS of the latest chunk) is below `level_db` (default −50 dBFS) at every
   reading. After `after_minutes` (default 5) it raises one alert through the Alerter
@@ -639,9 +641,9 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   back on … after 12 minutes", the alert's `reason`) through notify, log and webhooks, never
   spoken, and the alert closes, so the next silence is a new alert. Listen-only, switched-off
   and stopped stations never alert (a station stopped while silent ends its alert quietly), the
-  watch waits while the models load (sources aren't read then), and a narrowband channel is
-  silent between calls by design, so only its outages count. The alert's text is Wavescribe's
-  own, in English like the page, with no words heard: delivery translates it for
+  `StationWatch` waits while the models load (sources aren't read then), and a narrowband channel
+  or a watch is silent between calls by design, so only its outages count. The alert's text is
+  Wavescribe's own, in English like the page, with no words heard: delivery translates it for
   `notify_language` and each `speak:<lang>` like a quote, and speaks it without the voice's
   `intro`. With no station rules the status isn't read at all.
 - **Traffic announcements** (`kind = "traffic"`, opt-in): an FM station's RDS turning on TA with
