@@ -127,6 +127,8 @@ export interface PageState {
   store: boolean;
   mt_model: string | null;
   ask: string | null;
+  /** Why Ask is off, as a code: no_store, no_llm, not_set_up, remote_off, or unavailable. */
+  ask_code?: string | null;
   noncommercial: string[];
   audio_rate: number;
   recent: Utterance[];

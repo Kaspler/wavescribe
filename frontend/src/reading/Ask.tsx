@@ -115,7 +115,7 @@ export function sendQuestion(q: string) {
 
 /** Why Ask is unavailable, in the reader's terms: on another device, mostly because the owner
  * keeps asking to the Wavescribe machine (it runs that machine's model). */
-const askOff = (why: string) => (!S.manage && /another machine/i.test(why) ? T.askOffHere : `Ask isn't available: ${why}`);
+const askOff = (why: string) => (!S.manage && S.askCode === "remote_off" ? T.askOffHere : `Ask isn't available: ${why}`);
 
 function examples(): string[] {
   const names = S.stations.filter((s) => S.live[s.id]).map((s) => s.name);

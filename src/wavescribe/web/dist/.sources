@@ -20,7 +20,7 @@ fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 6393956f39e5c9bf33fd16582ee192e7e97e6bf6 frontend/src/lib/auth.ts
 24e330099aba625b1f03ec3d42ede07681fdfe10 frontend/src/lib/behind.ts
 6a6e3a207df7659ad576f6eaf6d17f7dce22c430 frontend/src/lib/lang.ts
-6ff1dc3c889b75fd24f21c3845b8a64183d4ab0a frontend/src/lib/live.ts
+62759505977a555dff61903efaa2a7d6cf2c6241 frontend/src/lib/live.ts
 8cb06a62db1ea1495bab343fc5f12299c9900a7a frontend/src/lib/models.ts
 95f2893de08f896f27650e8091d1ed7f03936fb4 frontend/src/lib/prefs.ts
 2c42a7ae4887a3451f772d3d0271cdc6e633f4c6 frontend/src/lib/router.ts
@@ -28,7 +28,7 @@ fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 3d86f63457b8be9c677f79282bd7a73479d07e77 frontend/src/lib/store.ts
 1c27bea7df915d4bc19a165dcb6b50698ccc6cad frontend/src/lib/tabs.ts
 5b5f12f3274ddcd6310d6bd84136dd56f4461959 frontend/src/lib/time.ts
-91c31a7c05beac46d1edb4e8b1a016d17cceed69 frontend/src/lib/types.ts
+54dfdffaa4ae9cf1199e9476dbd9445b4b8e0473 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
@@ -56,7 +56,7 @@ d81863a3f529a6fc902277d4350f901d619b4e57 frontend/src/manage/dial.ts
 72cacacd8fc528b3a84e148a414fa6bcfe04962f frontend/src/manage/onair.ts
 d85319e428bfa37bd8d241a022385b8c4eb61cb5 frontend/src/manage/tuner.tsx
 30f92bb42bc128bf05810914dc9cd98c04ccf7f8 frontend/src/reading/Alerts.tsx
-2160b4cdc48aa72e2518a4ea99ad9e069fe15783 frontend/src/reading/Ask.tsx
+cbbf8d5dac6fa39a2cc5a2602ffa005fed7cc656 frontend/src/reading/Ask.tsx
 6a0689d3cf51da439df61e351bd4a4966b390f3c frontend/src/reading/Column.tsx
 6c819d07ebd142ce6f632e2c99fa0dd96b6fa6fa frontend/src/reading/FirstRun.tsx
 934f52fc68294474a6dbfa532419154318101c17 frontend/src/reading/Header.tsx
