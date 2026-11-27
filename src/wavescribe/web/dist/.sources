@@ -32,7 +32,7 @@ e00621249cbda3ff7637b3c1c1d640379057b5b5 frontend/src/lib/lang.ts
 f65f633114b3cd6701573a244d346afd038733f6 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
-3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
+e5b60da0dfe4cbaab415608017231c7c251fefa8 frontend/src/manage/AlertRules.tsx
 86d4f4c53379b5a086150fbb307f2ae2fb7c01ec frontend/src/manage/Caught.tsx
 71965b8842e074cd6b44da91b56c6bad0dd8ec55 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx

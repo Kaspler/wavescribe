@@ -56,6 +56,15 @@ function RulesPage() {
       </Section>
       <TryRules stations={v.stations} />
       <Delivery v={v} reload={reload} />
+      <Section id="al-sum" title="Summaries on a schedule">
+        {/* No route reads or writes [digest]: the page names where it is set, and no more. */}
+        <p className="m-line">
+          A summary of what was said every hour, or every few minutes, shown as a notification without the alerts' sound
+          and read aloud if asked: it is set in <code>[digest]</code> in {v.file ? v.file.split(/[\\/]/).pop() : "alerts.toml"}, which
+          Wavescribe reads when it starts. This page doesn't show or change it. A summary at any time is under Summary on the
+          reading page.
+        </p>
+      </Section>
     </>
   );
 }
