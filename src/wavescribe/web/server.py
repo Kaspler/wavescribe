@@ -227,11 +227,13 @@ class WebHub:
                 self._alerts.popitem(last=False)
         self.publish("alert", alert)
 
-    def alerts(self, exports: Exports | None = None) -> list[dict[str, Any]]:
-        """Recent alerts, newest first; as they may leave this machine when ``exports`` is
-        given."""
+    def alerts(
+        self, exports: Exports | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Recent alerts, newest first, ``limit`` at most (without a store, those in memory);
+        as they may leave this machine when ``exports`` is given."""
         if self.store is not None:
-            alerts = self.store.alerts(limit=RECENT_ALERTS)
+            alerts = self.store.alerts(limit=limit or RECENT_ALERTS)
         else:
             with self._lock:
                 alerts = list(reversed(self._alerts.values()))

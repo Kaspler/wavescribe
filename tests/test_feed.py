@@ -148,6 +148,42 @@ def test_a_client_that_reconnects_gets_each_line_it_missed_once_and_finished(
         store.close()
 
 
+def test_a_client_stopped_in_the_middle_of_a_replay_resumes_where_it_was(tmp_path: Path) -> None:
+    server, hub, store = feed_server(tmp_path)
+    try:
+        said = ["um", "dois", "três", "quatro", "cinco"]
+        lines = [transcribed(hub, "ab"[i % 2], text) for i, text in enumerate(said)]
+        for r in lines:
+            finish(hub, store, r)
+        # Catching up from the start, it handles two lines and is killed.
+        first = FeedStream(server, path="/feed/v1/events?events=utterance&since=0")
+        got = [first.next(), first.next()]
+        first.close()
+        assert [d["text"] for _, d in got] == said[:2]
+        # Each id says what had gone out by then, not where the replay will end.
+        assert [i for i, _ in got] == [str(r.segment_id) for r in lines[:2]]
+        again = FeedStream(server, {"Last-Event-ID": got[-1][0] or ""})
+        rest = [again.next() for _ in range(3)]
+        again.close()
+        assert [d["text"] for _, d in rest] == said[2:]  # the rest, each once
+        assert rest[-1][0] == str(lines[-1].segment_id)
+
+        # A line still in flight below the replay holds every id back, as it does live.
+        seis = transcribed(hub, "a", "seis")
+        sete = transcribed(hub, "b", "sete")
+        finish(hub, store, sete)
+        late = FeedStream(server, {"Last-Event-ID": str(lines[2].segment_id)})
+        ids = [late.next()[0] for _ in range(3)]  # quatro, cinco, sete
+        late.close()
+        assert [resume_point(i)[0] for i in ids] == [
+            lines[3].segment_id, lines[4].segment_id, seis.segment_id - 1]  # fmt: skip
+        assert sete.segment_id in resume_point(ids[-1])[1]
+    finally:
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
 def open_stream(server: WebServer, path: str, headers: dict[str, str] | None = None):
     """The status of a streaming GET, and its connection (close it)."""
     conn = http.client.HTTPConnection(*server.server_address, timeout=10)
@@ -325,7 +361,7 @@ def test_a_resume_point_lists_at_most_so_many_ids_and_a_client_skips_repeats() -
     assert seen.first({"id": 11, "text": "a"})  # forgotten: it remembers only so many
 
 
-def test_the_feeds_alerts_carry_the_utterances_just_before(tmp_path: Path) -> None:
+def test_the_feeds_alerts_carry_the_utterances_just_before(tmp_path: Path, monkeypatch) -> None:
     from tests.test_app import alert_on
 
     server, hub, store = feed_server(tmp_path)
@@ -345,6 +381,18 @@ def test_the_feeds_alerts_carry_the_utterances_just_before(tmp_path: Path) -> No
         assert live["context"][1]["text"] == "Há uma avaria na rede."
         [listed] = json.loads(http_get(server, "/feed/v1/alerts"))
         assert [c["id"] for c in listed["context"]] == said[:2]
+        # A client catching up reads further back than the recent few a page shows.
+        from wavescribe.web import server as web_server
+
+        for text in ("Estrada cortada.", "Ponte fechada."):
+            r = transcribed(hub, "b", text)
+            finish(hub, store, r)
+            alert_on(store, "b", text, r.segment_id, ["broadcast"])
+        monkeypatch.setattr(web_server, "RECENT_ALERTS", 2)
+        assert len(json.loads(http_get(server, "/feed/v1/alerts"))) == 2
+        assert len(json.loads(http_get(server, "/feed/v1/alerts?since=1"))) == 3
+        soon = time.time() + 3600
+        assert json.loads(http_get(server, f"/feed/v1/alerts?since={soon}")) == []
     finally:
         stream.close()
         hub.close()

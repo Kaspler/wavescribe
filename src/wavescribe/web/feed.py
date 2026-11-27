@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 REPLAY_MAX = 1000  # utterances replayed on (re)connect
+ALERTS_SINCE_MAX = 500  # alerts given to a client catching up with ?since=
 CONTEXT = 2  # utterances before an alert's, in its feed event (as an output's default)
 MAX_INGEST = 2 * 1024 * 1024
 KEEPALIVE_S = 15.0  # a comment line on a live stream after this long without a write
@@ -133,13 +134,18 @@ class Cursor:
         self.cap: int | None = None  # a replay cut at REPLAY_MAX: what lies past it wasn't sent
         self._follows = follows
 
-    def sent(self, seg: int, mark: Mark | None) -> str:
-        """``seg`` went out, queued at ``mark``: the event id to send with it."""
+    def sent(self, seg: int, mark: Mark | None, before: int | None = None) -> str:
+        """``seg`` went out, queued at ``mark``: the event id to send with it. ``before``: in a
+        replay, the id of the next utterance still to come (they go out in the order of their
+        ids), which this id mustn't pass: a client that stops in the middle of a replay
+        resumes from the line it had, not from the replay's end."""
         if mark is not None:
             waiting = [i for i, station in mark.inflight if self._follows(station)]
             self.low = min(waiting) - 1 if waiting else mark.highest
             if self.cap is not None:
                 self.low = min(self.low, self.cap)
+            if before is not None:
+                self.low = min(self.low, before - 1)
         self.ahead = {i for i in self.ahead if i > self.low}
         if seg > self.low:
             self.ahead.add(seg)
@@ -461,7 +467,10 @@ def alerts(h: Handler, query: dict[str, str]) -> None:
         h._json({"error": f"bad parameter: {e}"}, HTTPStatus.BAD_REQUEST)
         return
     leaving = hub.exports()
-    rows = [a for a in hub.alerts(leaving) if (a.get("last_at") or 0) >= since]
+    # Catching up (``since``) reads further back than the recent ones a page shows: a client
+    # that was away for a day would otherwise miss all but the newest few.
+    found = hub.alerts(leaving, ALERTS_SINCE_MAX) if since else hub.alerts(leaving)
+    rows = [a for a in found if (a.get("last_at") or 0) >= since]
     langs = _list(query.get("langs"))
     h._json([alert_event(a, stations_, node_, languages=langs,
                          context=_before(hub, a, leaving)) for a in rows])  # fmt: skip
@@ -570,12 +579,11 @@ def events(h: Handler, query: dict[str, str]) -> None:
         h.end_headers()
         h.wfile.write(b"retry: 3000\n\n")
         stations_, node_ = _context(h)
-        for row in replay:
-            if not leaving.utterance(row):
-                continue
+        replay = [row for row in replay if leaving.utterance(row)]
+        for row, then in zip(replay, [*replay[1:], None], strict=False):  # then: the next
             _write(h, "utterance", utterance_event(row, stations_, node_, languages=langs,
                                                    via=_via(h)(row["station"])),
-                   cursor.sent(row["id"], mark))  # fmt: skip
+                   cursor.sent(row["id"], mark, then["id"] if then else None))  # fmt: skip
         h.wfile.flush()
         next_status = wrote = time.monotonic()
         while True:
