@@ -195,7 +195,9 @@ The local model writes it in the language you ask for (by default, the one your 
 translated into) from what was said, leaving out songs, station idents and repeats. When there
 is more than it can take it reads an even sample, and the second line says so ("a sample: 252
 of 259,200 lines"). Alerts of the time come first, in the words they were announced in. A point
-the model gave without the moments it rests on isn't shown.
+the model gave without the moments it rests on isn't shown. A watch ([RADIO.md](RADIO.md),
+*Catching radio that only talks now and then*) is in a digest only when you name it with
+`--stations`: its lines are short, from many speakers on many channels.
 
 With no points, the digest says why in Wavescribe's own words: nothing was said; a station
 keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines

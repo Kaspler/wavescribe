@@ -376,7 +376,8 @@ class Digester:
         self, body: Mapping[str, Any], exports: Exports | None = None, *, remote: bool = False
     ) -> Request:
         """A request from JSON: ``kind`` ("digest" or "now"), ``stations`` (by default those
-        heard in the window), ``minutes`` or ``since`` (seconds since 1970), ``language``. A
+        heard in the window, but a watch only when named: its lines are short, from many
+        speakers on many channels), ``minutes`` or ``since`` (seconds since 1970), ``language``. A
         station that ``exports`` hides is unknown, as it is everywhere else another machine
         looks. A ``remote`` request (another machine's) covers ``REMOTE_MINUTES`` at most."""
         now = self._clock()
@@ -399,12 +400,16 @@ class Digester:
                     "now is about one station: give one, or none for the station heard last"
                 )
             if not stations:
-                heard = {k: t for k, t in self.store.last_heard().items() if k in known}
+                heard = {
+                    k: t
+                    for k, t in self.store.last_heard().items()
+                    if k in known and not _watch(known[k])
+                }
                 if not heard:
                     raise RequestError("nothing has been heard yet")
                 stations = [max(heard, key=lambda k: heard[k])]
         elif not stations:
-            stations = list(known)
+            stations = [sid for sid, s in known.items() if not _watch(s)]
         if not stations:
             raise RequestError("there is no station to make a digest of")
         longest = MAX_NOW_MINUTES if kind == "now" else MAX_MINUTES
@@ -984,6 +989,11 @@ def _numbers(group: str) -> list[int]:
         elif len(ends) == 2 and ends[0] <= ends[1]:
             out += range(ends[0], min(ends[1], ends[0] + CITED) + 1)
     return out
+
+
+def _watch(station: Station) -> bool:
+    """A watch: every channel of a band at once (radio/watch.py), not one station."""
+    return station.sdr is not None and station.sdr.watch is not None
 
 
 def _announced(alert: Mapping[str, Any], request: Request) -> float | None:

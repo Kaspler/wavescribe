@@ -442,7 +442,11 @@ def test_a_station_that_keeps_no_text_or_isnt_running_is_not_read(tmp_path: Path
     pmr = dataclasses.replace(station("pmr"), name="PMR 3", privacy="private")
     stations = [station("a"), station("b"), pmr]
     d = Digester(
-        store, lambda: stations, lambda run: True, clock=lambda: NOW, running=lambda: {"a"}
+        store,
+        lambda: stations,
+        lambda run, given_up: True,
+        clock=lambda: NOW,
+        running=lambda: {"a"},
     )
     out = d.run(d.request({"minutes": 30, "stations": ["a", "b", "pmr"]})).payload()
     assert out["outcome"] == "nothing_said"
@@ -456,6 +460,23 @@ def test_a_station_that_keeps_no_text_or_isnt_running_is_not_read(tmp_path: Path
     assert out["text"] == "Not read: PMR 3 (its kind of radio keeps no text)."
     # Asked for every station when none was heard: those running, not all those set up.
     assert d.request({"minutes": 30}).stations == ("a",)
+    store.close()
+
+
+def test_a_watch_is_in_a_digest_only_when_named(tmp_path: Path) -> None:
+    from tests.test_radio_watch import watch_station
+
+    store = stocked(tmp_path)
+    walkies = watch_station()
+    # Heard last, under a class whose text is kept (a watch's lines carry their own class).
+    add(store, walkies.id, "Copiado, vou a caminho", NOW - 2 * MIN, privacy="amateur")
+    assert walkies.id in store.count(since=NOW - 3600, until=NOW)
+    d = digester(store, stations=[*STATIONS, walkies])
+    # Its lines are short and from many speakers: not what "every station" means.
+    assert d.request({"minutes": 60}).stations == ("a", "b")
+    assert d.request({"kind": "now"}).stations != (walkies.id,)
+    assert d.request({"minutes": 60, "stations": [walkies.id]}).stations == (walkies.id,)
+    assert d.request({"kind": "now", "stations": [walkies.id]}).stations == (walkies.id,)
     store.close()
 
 
