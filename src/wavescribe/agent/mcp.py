@@ -783,7 +783,8 @@ class Server:
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             rid = message.get("id") if isinstance(message, dict) else None
             return _error(rid, INVALID_REQUEST, "Invalid Request: not a JSON-RPC 2.0 message")
-        method, params = message.get("method"), message.get("params") or {}
+        method, params = message.get("method"), message.get("params")
+        params = {} if params is None else params  # left out; anything else must be an object
         if "id" not in message:
             if method == "notifications/cancelled" and isinstance(params, dict):
                 call = self._cancelled.get(params.get("requestId"))
@@ -830,7 +831,8 @@ class Server:
         }
 
     def _call(self, params: dict[str, Any], cancelled: threading.Event) -> dict[str, Any]:
-        name, args = params.get("name"), params.get("arguments") or {}
+        name, args = params.get("name"), params.get("arguments")
+        args = {} if args is None else args  # none given; [] or "" is checked, and refused
         tool = self.offered.get(name) if isinstance(name, str) else None
         if tool is None:
             raise BadParams(f"no tool {name!r}")

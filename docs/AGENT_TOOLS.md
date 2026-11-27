@@ -86,7 +86,10 @@ token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who may rea
 processes. The control tools work only with the Wavescribe on the same Mac.
 
 Every tool returns one JSON object. A tool that can't do its job returns Wavescribe's reason as
-an error instead.
+an error instead. Arguments that don't fit the tool's schema (one missing, unknown, of the wrong
+type or out of range, or arguments that aren't an object) never reach the tool: the call is
+answered with the JSON-RPC error −32602, *Invalid params*, naming the problem, as the protocol
+revisions below list invalid arguments.
 
 | Tool | What it does | Returns |
 |---|---|---|

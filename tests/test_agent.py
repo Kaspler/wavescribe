@@ -496,14 +496,26 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
         mcp.send(b"{this is not json")
         parse_error = mcp.receive()
         assert parse_error["id"] is None and parse_error["error"]["code"] == -32700
+        # Every argument the schema refuses is a protocol error, as the revisions spoken here
+        # list it, never a tool's error result: arguments that are no object too, even empty.
         for params in (
             {"name": "recent", "arguments": {"limit": "ten"}},
             {"name": "recent", "arguments": {"since": 0}},
+            {"name": "recent", "arguments": {"limit": 0}},
+            {"name": "recent", "arguments": []},
+            {"name": "recent", "arguments": ""},
+            {"name": "recent", "arguments": 0},
             {"name": "search", "arguments": {}},
+            {"name": "search", "arguments": {"query": ""}},
+            {"name": "wait_for_alert", "arguments": {"min_severity": "urgent"}},
             {"name": "start_station", "arguments": {"station": "a"}},
         ):
-            assert mcp.request("tools/call", params)["error"]["code"] == -32602, params
+            error = mcp.request("tools/call", params)["error"]
+            assert error["code"] == -32602 and error["message"].startswith("Invalid params: ")
+        none = mcp.request("tools/call", {"name": "stations", "arguments": None})
+        assert none["result"]["isError"] is False  # null is no arguments
         assert mcp.request("tools/call", ["recent"])["error"]["code"] == -32602
+        assert mcp.request("ping", [])["error"]["code"] == -32602
         mcp.send(
             [
                 {"jsonrpc": "2.0", "id": "x", "method": "ping"},
