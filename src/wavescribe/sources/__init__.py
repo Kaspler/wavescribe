@@ -48,8 +48,14 @@ def open_source(station: Station) -> AudioSource:
         from wavescribe.radio.catalog import Catalog
         from wavescribe.sources.watch import WatchSource
 
-        spurs = Catalog().spurs(station.sdr.device.serial)  # learnt with no antenna
-        return WatchSource(station.id, station.sdr, spurs=spurs, privacy=station.privacy)
+        # Learnt with no antenna. A list an earlier version learnt (no bin_hz: about 87 kHz
+        # bins) can't place a narrow line, so it isn't used: the noise floors learn them.
+        catalog, serial = Catalog(), station.sdr.device.serial
+        bin_hz = (catalog.spur_info().get(serial) or {}).get("bin_hz") or 0.0
+        spurs = catalog.spurs(serial) if bin_hz else []
+        return WatchSource(
+            station.id, station.sdr, spurs=spurs, spur_bin_hz=bin_hz, privacy=station.privacy
+        )
     if station.sdr is not None:
         from wavescribe.sources.sdr import SdrChannelSource
 

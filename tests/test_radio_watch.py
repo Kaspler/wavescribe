@@ -335,6 +335,28 @@ def test_a_watch_made_deaf_by_noise_says_so_in_its_health() -> None:
     assert warnings[-1] is None  # the noise is the floor now
 
 
+def test_a_watch_uses_a_spur_list_only_where_it_says_how_finely_it_was_learnt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from wavescribe.sources import open_source, sdr
+
+    monkeypatch.chdir(tmp_path)  # where the catalogue keeps data/radio/spurs.json
+    monkeypatch.setattr(sdr, "_devices", {})  # the dongle is shared by serial: this test's own
+    station = watch_station()
+    path = tmp_path / "data" / "radio" / "spurs.json"
+    path.parent.mkdir(parents=True)
+    learnt = {"t": 0, "start_hz": 24e6, "stop_hz": 1766e6, "freqs_hz": [PMR[3] + 1_500]}
+    path.write_text(json.dumps({"00001234": learnt}))  # an earlier version's: no bin_hz
+    old = open_source(station)
+    assert isinstance(old, WatchSource) and (old._spurs, old._spur_bin_hz) == ((), 0.0)
+    path.write_text(json.dumps({"00001234": {**learnt, "bin_hz": 6_000}}))
+    new = open_source(station)
+    assert isinstance(new, WatchSource)
+    assert (new._spurs, new._spur_bin_hz) == ((PMR[3] + 1_500,), 6_000)
+
+
 def test_a_watch_that_failed_starts_afresh_when_iterated_again(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

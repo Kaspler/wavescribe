@@ -67,12 +67,19 @@ def air(
 
 
 def catcher(
-    centre: int = BELOW, *, spurs: tuple[int, ...] = (), max_active: int = 4, carrier_s: float = 120
+    centre: int = BELOW,
+    *,
+    spurs: tuple[int, ...] = (),
+    spur_bin_hz: float = 0.0,
+    max_active: int = 4,
+    carrier_s: float = 120,
 ) -> Catcher:
     watch = Watch("pmr446", PMR, 12_500)
     device = SdrDevice("a", "00001234", centre, 30.0, FS)
     tuning = SdrTuning(device, PMR[7], mode="nfm", watch=watch)
-    return Catcher(tuning, spurs=spurs, max_active=max_active, carrier_s=carrier_s)
+    return Catcher(
+        tuning, spurs=spurs, spur_bin_hz=spur_bin_hz, max_active=max_active, carrier_s=carrier_s
+    )
 
 
 def run(c: Catcher, blocks: Iterator[tuple[np.ndarray, float]]) -> list[Catch]:
@@ -144,6 +151,19 @@ def test_the_dongles_own_lines_are_no_catch() -> None:
     # Without the learnt spur it would have been one: the test is not passing by accident.
     [unlearnt] = run(catcher(BETWEEN), air(4.5, [], centre=BETWEEN, extra=own))
     assert unlearnt.freq_hz == PMR[3]
+
+
+def test_a_learnt_spur_is_left_out_as_widely_as_its_bin() -> None:
+    # Learnt at 6 kHz bins, a line listed 1.5 kHz above channel 4 may be 2.5 kHz off that.
+    listed = PMR[3] + 1_500
+
+    def own(t: np.ndarray) -> np.ndarray:
+        return 0.05 * ((t > 1.5) & (t < 3.0)) * np.exp(2j * np.pi * (listed + 2_500 - BELOW) * t)
+
+    assert run(catcher(spurs=(listed,), spur_bin_hz=6_000), air(4.5, [], extra=own)) == []
+    # Taken as exact, the list would have let it through.
+    [unplaced] = run(catcher(spurs=(listed,)), air(4.5, [], extra=own))
+    assert unplaced.freq_hz == PMR[3]
 
 
 def test_a_burst_shorter_than_a_catch_is_counted_not_kept() -> None:

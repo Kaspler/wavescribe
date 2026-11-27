@@ -54,7 +54,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     from wavescribe.cli import cmd_listen
     from wavescribe.config import DEFAULT_SAMPLE_RATE, build_device, build_station, radio_policy
     from wavescribe.radio.catalog import Catalog
-    from wavescribe.radio.cli import _config, _region, resolve_receiver
+    from wavescribe.radio.cli import _config, _old_spurs, _region, resolve_receiver
     from wavescribe.radio.watch import plan_centre, plan_window, subscribe
 
     config = _config(args)
@@ -115,7 +115,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
         f"{args.receiver}; {station.privacy} radio{kept}",
         file=sys.stderr,
     )
-    printer = CatchPrinter(Catalog().notes())
+    catalog = Catalog()
+    _old_spurs(catalog, serial, args.receiver)  # a watch doesn't use such a list
+    printer = CatchPrinter(catalog.notes())
     stop_printing = subscribe(printer)
     args.stations, args.source, args.tuned_stations = ["watch"], None, [station]
     args.realtime = False

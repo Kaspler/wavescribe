@@ -556,8 +556,9 @@ channel: one more consumer of the shared pipe. On the dongle's thread, each bloc
 `IqHistory` (the last 2 s as the dongle's 8-bit samples, about 10 MB) and an `ActivityDetector`:
 4096-point FFTs averaged into frames (29 of them, 49.5 ms, at 2.4 MS/s), each channel's power over
 the middle 80 % of its width against a noise floor kept per bin, which follows the bin only while
-its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins and learnt spurs are
-left out. Two frames 8 dB over the floor start a transmission; 1.2 s under it less 3 dB end it;
+its channel is quiet (down in about 2 s, up in about 20 s). The centre's bins (±1.5 kHz) are left
+out, and so are a learnt spur's, as far again as half the bin it was learnt at (a list without
+`bin_hz`, from an earlier version, isn't used). Two frames 8 dB over the floor start a transmission; 1.2 s under it less 3 dB end it;
 under 0.3 s it is counted, not kept; after 120 s it ends with reason `carrier` and its bins' floors
 jump to its level. A start 20 dB under a busy channel within three channels, or under its own mirror
 about the centre (a receiver shows a weaker mirror of strong signals), is suppressed. While half the

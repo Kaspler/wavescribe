@@ -253,6 +253,26 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
     assert "16 channels" in err and "nothing written down" in err and "00001234" not in err
 
 
+def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe import cli
+    from wavescribe.cli import build_parser
+    from wavescribe.radio import cli as radio_cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "cmd_listen", lambda _a: 0)
+    monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    (tmp_path / "data" / "radio").mkdir(parents=True)
+    old = {"00001234": {"t": 0, "freqs_hz": [PMR[3]]}}  # no bin_hz: an earlier version's
+    (tmp_path / "data" / "radio" / "spurs.json").write_text(json.dumps(old))
+    argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--acknowledge"]
+    args = build_parser().parse_args(argv)
+    assert args.func(args) == 0
+    assert "learn them again with `wavescribe radio spurs a --learn`" in capsys.readouterr().err
+
+
 # -- the routes --------------------------------------------------------------------------------
 
 

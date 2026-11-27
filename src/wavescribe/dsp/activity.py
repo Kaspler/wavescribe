@@ -81,7 +81,8 @@ class _Channel:
 
 class ActivityDetector:
     """Watches ``channels`` (Hz) of a dongle tuned to ``center_hz`` at ``rate`` and reports
-    transmissions on them as they start and end. ``feed`` takes IQ blocks of any length."""
+    transmissions on them as they start and end. ``feed`` takes IQ blocks of any length.
+    ``spurs`` are the dongle's own lines, as learnt at bins ``spur_bin_hz`` wide."""
 
     def __init__(
         self,
@@ -93,6 +94,7 @@ class ActivityDetector:
         step_hz: float | None = None,
         threshold_db: float = THRESHOLD_DB,
         spurs: list[int] | tuple[int, ...] = (),
+        spur_bin_hz: float = 0.0,
         fft: int = FFT,
         hang_s: float = HANG_S,
         min_s: float = MIN_S,
@@ -122,8 +124,10 @@ class ActivityDetector:
         bin_hz = rate / fft
         offsets = (np.arange(fft) - fft // 2) * bin_hz  # each bin's offset from the centre
         excluded = np.abs(offsets) <= GUARD_HZ
+        # A learnt spur is only known to the bin it was learnt at: it may be anywhere in it.
+        spur_guard = GUARD_HZ + spur_bin_hz / 2
         for s in spurs:
-            excluded |= np.abs(offsets - (s - center_hz)) <= GUARD_HZ
+            excluded |= np.abs(offsets - (s - center_hz)) <= spur_guard
         self._weights = np.zeros((len(self.freqs), fft), dtype=np.float64)
         self._mirror = np.zeros_like(self._weights)
         self._owner = np.full(fft, -1)  # the channel each bin is measured for

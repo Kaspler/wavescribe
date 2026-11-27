@@ -72,6 +72,7 @@ class Catcher:
         tuning: SdrTuning,
         *,
         spurs: list[int] | tuple[int, ...] = (),
+        spur_bin_hz: float = 0.0,
         max_active: int = MAX_ACTIVE,
         carrier_s: float = CARRIER_S,
         station_id: str = "",
@@ -96,6 +97,7 @@ class Catcher:
             step_hz=watch.step_hz,
             threshold_db=watch.threshold_db,
             spurs=spurs,
+            spur_bin_hz=spur_bin_hz,
             carrier_s=carrier_s,
         )
         self._history = IqHistory(d.sample_rate, HISTORY_S)
@@ -234,6 +236,7 @@ class WatchSource:
         *,
         device: RtlSdrDevice | None = None,
         spurs: list[int] | tuple[int, ...] = (),
+        spur_bin_hz: float = 0.0,
         privacy: str = "private",
         queue_catches: int = QUEUE_CATCHES,
     ) -> None:
@@ -241,7 +244,7 @@ class WatchSource:
         self.station_id = station_id
         self.tuning = tuning
         self._device = device or shared_device(tuning.device)
-        self._spurs = tuple(spurs)
+        self._spurs, self._spur_bin_hz = tuple(spurs), spur_bin_hz
         self._privacy = privacy
         self._catcher = self._new_catcher()
         self._q: queue.Queue[Catch | None] = queue.Queue(maxsize=queue_catches)
@@ -258,7 +261,11 @@ class WatchSource:
 
     def _new_catcher(self) -> Catcher:
         return Catcher(
-            self.tuning, spurs=self._spurs, station_id=self.station_id, privacy=self._privacy
+            self.tuning,
+            spurs=self._spurs,
+            spur_bin_hz=self._spur_bin_hz,
+            station_id=self.station_id,
+            privacy=self._privacy,
         )
 
     @property
