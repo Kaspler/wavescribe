@@ -73,14 +73,14 @@ aa57750ab020ab74f5ad52a75c8eca3a4877ac5a frontend/src/reading/Column.tsx
 bf38f81ec2aa75ca002b22ede6cd5d76a97e653e frontend/src/reading/Search.tsx
 26334172637c075356b12c7cf4ff56cb5c13e568 frontend/src/reading/Settings.tsx
 cbbc0addcd5737059150d62d922dca1a634a6905 frontend/src/reading/StationMenu.tsx
-3996328d7de03d84b727516a5f3de585e3f9beee frontend/src/reading/Summary.tsx
+efa8a48dd365bbb53fec02a7464d0fa71489670d frontend/src/reading/Summary.tsx
 a9eee1bdcd799caa4deb2fe5bf5e37bfc641cb75 frontend/src/reading/TokenGate.tsx
 8f92e929fad369085e34fab30007703247e2f8bf frontend/src/reading/alertText.ts
 5a49aede1e5cd67fb29e22c3c22e3d8464f55795 frontend/src/reading/channels.ts
 de66099821c99c8ffbed7239c31d542c6694eb3c frontend/src/reading/digest.ts
 9333e45065edd9626cff5ec0d896d60e395d3c30 frontend/src/reading/held.ts
-73f735b9f3c7a6c6b1aa09b48dac4da764b0b410 frontend/src/reading/reading.css
-4d9e874a203cc54da92483463af2add0e648bd21 frontend/src/reading/strings.ts
+8028412c86c8e807e2a2c8133649469dfa6676fc frontend/src/reading/reading.css
+78643b9076ead5a8fc39922a5d6d86a768550770 frontend/src/reading/strings.ts
 c092edf7c8b46dd0c8e49b6eec4cf61c827d1582 frontend/src/reading/summaries.ts
 e525eba01feec9afa78f202473013a94f6e268c7 frontend/src/reading/text.tsx
 b72fa0e883100643d3252a59f3d9fd253d66d71e frontend/src/styles/base.css

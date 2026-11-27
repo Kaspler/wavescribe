@@ -157,7 +157,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
             ))}
             <form className="sum-pick-since" onSubmit={since}>
               <label htmlFor={`${uid}-t`}>{T.sinceTime}</label>
-              <input id={`${uid}-t`} className="input num" type="time" value={time} disabled={busy} required
+              <input id={`${uid}-t`} className="input num" type="time" name="since" autoComplete="off" value={time} disabled={busy} required
                      onChange={(e) => { setTime(e.target.value); setProblem(null); }}
                      aria-invalid={problem ? true : undefined} aria-describedby={problem ? `${uid}-p` : undefined} />
               <Button type="submit" size="sm" variant="secondary" disabled={busy || !time}>{T.summarise}</Button>

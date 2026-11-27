@@ -821,7 +821,7 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
 .sum-alert-words { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink-2); font-size: var(--t-ui); line-height: 1.45; }
 .menu-pick { top: 32px; }
 /* What a station is talking about now, under its column's head. */
-.col-now { margin-top: 8px; padding: 8px 0 0 16px; border-top: 1px solid var(--rule); }
+.col-now { margin-top: 8px; padding: 8px 0 0 16px; border-top: 1px solid var(--rule); animation: pop-in var(--med) var(--ease); transform-origin: top left; }
 .col-now-row { display: flex; align-items: flex-start; gap: 8px; }
 .col-now-row > .btn { flex: none; margin-top: -3px; }
 .col-now-body { flex: 1; min-width: 0; display: grid; gap: 6px; }
