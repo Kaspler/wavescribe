@@ -107,7 +107,8 @@ steps of about 87 kHz, which hide narrow lines (their entries in `spurs.json` ha
 `bin_hz`): learn them again. A signal that disappears when only the antenna is
 disconnected comes in through the antenna: it is either real or interference near it. Narrow
 lines that sit on multiples of 2.4 MHz are another receiver's clock; the scan marks them and
-keeps them under Show more.
+keeps them under Show more, and `radio scan` lists them marked but counts them, and spurs,
+apart from the signals it found.
 
 **One program per dongle.** A dongle opens in one process at a time. A scan with a receiver
 that is running stations (or the spectrum monitor) pauses them for the scan and starts them again

@@ -95,6 +95,39 @@ def test_a_scan_shows_the_sweeps_warnings_and_flags_old_spurs(
     assert "learn them again with `wavescribe radio spurs a --learn`" in err
 
 
+@pytest.mark.parametrize(
+    ("found", "said"),
+    [
+        ([], "# 0 signals in 0 s; kept in data/radio/heard.json"),
+        (["clock"] * 4, "# 0 signals in 0 s, and 4 lines that are probably another receiver's "
+                        "clock; kept in data/radio/heard.json"),
+        (["real", "clock", "spur", "spur"], "# 1 signal in 0 s, and 1 line that is probably "
+         "another receiver's clock and 2 of the receiver's own spurs; kept in "
+         "data/radio/heard.json"),
+    ],
+)  # fmt: skip
+def test_a_scan_counts_clock_lines_and_spurs_apart_from_signals(
+    found: list[str], said: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """An airband scan said "4 signals", all four another receiver's clock."""
+    from wavescribe.radio.scan import Signal
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda *_a: RX)
+    signals = [
+        Signal(122_400_000 + i * 2_400_000, -30.0, 12.0, 2_000.0, mode="am",
+               spur=kind != "real", clock_hz=2_400_029 if kind == "clock" else None)
+        for i, kind in enumerate(found)
+    ]  # fmt: skip
+    monkeypatch.setattr("wavescribe.radio.scan.scan", lambda *_a, **_k: (None, signals))
+    monkeypatch.setattr("wavescribe.radio.catalog.Catalog.record", lambda *_a, **_k: None)
+    monkeypatch.setattr(radio_cli.time, "time", lambda: 1_000.0)
+    assert main(["radio", "scan", "a", "airband"]) == 0
+    out, err = capsys.readouterr()
+    assert err.splitlines()[-1] == said
+    assert len(out.splitlines()) == len(found)  # each still listed, and marked
+
+
 def test_spurs_learnt_at_the_new_resolution_need_no_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:

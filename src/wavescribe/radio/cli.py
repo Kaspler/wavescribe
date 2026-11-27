@@ -185,11 +185,27 @@ def cmd_scan(args: argparse.Namespace) -> int:
     catalog.record(signals, serial=serial, start_hz=start, stop_hz=stop, sweep=sw,
                    device=device, what=what)  # fmt: skip
     _warn(sw)
-    print(f"# {len(signals)} signals in {time.time() - t0:.0f} s; kept in data/radio/heard.json",
+    print(f"# {_found(signals, time.time() - t0)}; kept in data/radio/heard.json",
           file=sys.stderr)  # fmt: skip
     for s in signals:
         print(_signal_line(s.to_dict()))
     return 0
+
+
+def _found(signals: list[Any], took_s: float) -> str:
+    """How many signals a scan found, with lines marked as a receiver's own (another
+    receiver's clock, this one's spurs) counted apart: they are listed, but aren't signals."""
+    clocks = sum(1 for s in signals if s.clock_hz)
+    spurs = sum(1 for s in signals if s.spur and not s.clock_hz)
+    real = len(signals) - clocks - spurs
+    said = f"{real} signal{'' if real == 1 else 's'} in {took_s:.0f} s"
+    apart = []
+    if clocks:
+        apart.append(f"{clocks} line{' that is' if clocks == 1 else 's that are'} probably "
+                     "another receiver's clock")  # fmt: skip
+    if spurs:
+        apart.append(f"{spurs} of the receiver's own spurs")
+    return said + (f", and {' and '.join(apart)}" if apart else "")
 
 
 def _warn(sw: Any) -> None:
