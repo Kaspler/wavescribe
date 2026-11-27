@@ -127,7 +127,7 @@ BAD = [
     ("translations", "en"), ("translations", ["en"]), ("translations", {"en": 5}),
     ("translations", {"not a tag": "x"}), ("translations", {"en": "a" * 4001}),
     ("translations", {f"x{i:02}": "a" for i in range(40)}),
-    ("flags", "lang:es"), ("flags", [5]), ("flags", ["f" * 100]), ("flags", ["f"] * 40),
+    ("flags", "lang:es"), ("flags", [5]), ("flags", ["f" * 100]), ("flags", ["f"] * 60),
     ("flags", {"lang": "es"}),
 ]  # fmt: skip
 

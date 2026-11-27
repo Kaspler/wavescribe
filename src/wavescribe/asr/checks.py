@@ -84,11 +84,11 @@ def is_junk(text: str) -> bool:
     """Whether ``text`` is nothing but subtitle credits, "thanks for watching" and the like
     (``junk.toml``), in any language: what a model writes when it hears no speech. The same
     words inside a longer line don't count."""
-    normal = _normalise(text)
+    normal = normalise(text)
     return bool(normal) and not re.search(r"\w", _junk().sub(" ", normal))
 
 
-def _normalise(text: str) -> str:
+def normalise(text: str) -> str:
     """Lower case, without accents or other marks, and every run of punctuation and spaces as
     one space: how ``junk.toml`` is matched."""
     # Turkish dotless i (U+0131) is written "I" in capitals, which folds back to a dotted "i".
@@ -102,7 +102,7 @@ def _junk() -> re.Pattern[str]:
     """``junk.toml`` as one pattern of whole words: phrases as written, then the patterns."""
     source = resources.files("wavescribe.asr").joinpath("junk.toml")
     raw = tomllib.loads(source.read_text(encoding="utf-8"))
-    phrases = {_normalise(p) for section in raw.values() for p in section.get("phrases", ())}
+    phrases = {normalise(p) for section in raw.values() for p in section.get("phrases", ())}
     patterns = [p for section in raw.values() for p in section.get("patterns", ())]
     # Longest first, so a phrase that contains another is taken whole.
     alternatives = [re.escape(p) for p in sorted(phrases - {""}, key=len, reverse=True)]

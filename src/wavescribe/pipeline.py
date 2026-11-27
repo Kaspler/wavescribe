@@ -48,6 +48,7 @@ from wavescribe.segment import Utterance
 from wavescribe.segment.vad import FrameVad, SileroVad, VadSegmenter
 from wavescribe.sources import AudioSource, open_source
 from wavescribe.translate import Translator, load_translator, unsupported_targets
+from wavescribe.translate.checks import FAILED, check_reply, left_out_flag, without_flag
 
 log = logging.getLogger(__name__)
 
@@ -115,7 +116,9 @@ class Result:
     asr_done_at: float = 0.0
     translations_model: str | None = None
     segment_id: int | None = None  # set by the store when it keeps the utterance
-    flags: tuple[str, ...] = ()  # from the ASR checks, e.g. ("lang:es",)
+    # From the ASR checks, e.g. ("lang:es",), and one per translation that was left out and
+    # why, e.g. "untranslated:en:remark" (translate/checks.py).
+    flags: tuple[str, ...] = ()
     # Whisper is to listen again (asr/recheck.py): what judges the words waits for on_rechecked.
     rechecking: bool = False
 
@@ -1520,11 +1523,19 @@ class Pipeline:
                 for target in current.translation_targets:
                     if target in result.translations:  # it came with this one (another node's)
                         continue
-                    text = self._translate(
-                        translator, result.transcript.text, result.station.language, target
+                    text, why = self._translate(
+                        translator,
+                        result.transcript.text,
+                        result.station.language,
+                        target,
+                        result.station.id,
                     )
+                    # A flag of the machine the line came from is replaced by ours.
+                    result.flags = without_flag(result.flags, target)
                     if text is not None:
                         result.translations[target] = text
+                    else:  # the line keeps its words alone, and says why
+                        result.flags = (*result.flags, left_out_flag(target, why))
             finally:
                 self._mt_doing = None
             mt_ms = _ms(t0)
@@ -1534,24 +1545,37 @@ class Pipeline:
             self._finish(result)
             unload_idle()
 
-    def _translate(self, translator: Translator, text: str, source: str, target: str) -> str | None:
-        """One translation, or None when the model raised: the utterance or alert then goes
-        on without this language."""
+    def _translate(
+        self,
+        translator: Translator,
+        text: str,
+        source: str,
+        target: str,
+        station_id: str | None = None,
+    ) -> tuple[str | None, str]:
+        """One translation, or None and why there is none: the model raised, or its reply
+        wasn't a translation (the model's own remark about the text, its fixed reply for text
+        it can't translate: translate/checks.py). The utterance or alert then goes on without
+        this language; the model is never asked again."""
         try:
             out = translator.translate(text, source, target)
         except Exception as e:
             with self._drop_lock:
                 self._dropped["mt"] += 1
             self._failed("mt", translator.model_id, f"into {target}", e)
-            return None
+            return None, FAILED
         self._worked(translator.model_id, f"into {target}")
-        return out
+        reply = check_reply(out, text)
+        if reply.text is None:
+            self._drop("mt", station_id, reply.why or FAILED)
+            return None, reply.why or FAILED
+        return reply.text, ""
 
     def _run_job(self, translator: Translator, job: TranslationJob) -> None:
         t0 = time.perf_counter()
         out: dict[str, str] = {}
         for target in job.targets:
-            text = self._translate(translator, job.text, job.source, target)
+            text, _ = self._translate(translator, job.text, job.source, target)
             if text is not None:
                 out[target] = text
         self._busy["mt"].append((time.time(), _ms(t0) / 1000))

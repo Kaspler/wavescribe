@@ -40,6 +40,7 @@ from wavescribe.search import match as search_match
 from wavescribe.search import parse as search_terms
 from wavescribe.search import snippet as search_snippet
 from wavescribe.search import spellings as search_spellings
+from wavescribe.translate.checks import is_left_out
 
 if TYPE_CHECKING:
     from wavescribe.alerts import Alert
@@ -832,11 +833,19 @@ class Store:
             )  # fmt: skip
 
     def add_translations(self, result: Result) -> None:
-        """Pipeline observer for finished results: store whatever translations they carry."""
-        if result.segment_id is None or not result.translations:
+        """Pipeline observer for finished results: store whatever translations they carry,
+        and the line's flags when one was left out (``untranslated:en:remark``,
+        translate/checks.py): they say which is missing and why."""
+        left_out = is_left_out(result.flags)
+        if result.segment_id is None or not (result.translations or left_out):
             return
         model = result.translations_model or "?"
         with self._tx() as db:
+            if left_out:
+                db.execute(
+                    "UPDATE transcripts SET flags = ? WHERE segment_id = ?",
+                    (",".join(result.flags), result.segment_id),
+                )
             for lang, text in result.translations.items():
                 db.execute(
                     "INSERT INTO translations (segment_id, lang, text, model, latency_ms) "

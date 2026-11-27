@@ -114,6 +114,19 @@ hour" / "Остання година". A prompt line asking to translate idioms 
 ("Final bulletin", and the Ukrainian changed a present-tense water cut into a future one), so the
 prompt stays as it is.
 
+**Remarks instead of translations.** Given recognition gone wrong, Qwen3.5-9B sometimes writes
+about the text instead of translating it ("I cannot translate this word…", "the meaning is
+unclear due to recognition errors") or adds a note in brackets. The prompt now gives it a fixed
+reply for that, `[[untranslatable]]`, and every reply is checked before it is kept
+(`translate/checks.py`, [ARCHITECTURE.md](ARCHITECTURE.md)). On 32 invented garbled lines and
+fragments in ten languages, greedy, it gave the fixed reply 2 times and an apology once (left
+out by the check), and translated the other 29 as best it could, word for word or with an
+invented meaning, which no check can tell from a translation; 36 invented short ordinary lines
+in 12 languages ("Ja.", "Bonsoir.", a name) were all translated, none refused. With the
+earlier prompt the same lines gave the apology and no fixed reply. Over 25,000 translations
+kept by earlier test runs, the check left out 3, all such remarks (from Portuguese and
+Hebrew), and cut a note out of 8 more.
+
 ## TTS for spoken alerts
 
 | Option | Licence | Notes |

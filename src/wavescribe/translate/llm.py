@@ -12,12 +12,31 @@ from collections.abc import Callable
 from pathlib import Path
 
 from wavescribe.languages import language_name
+from wavescribe.translate.checks import UNTRANSLATABLE
 
+# The last sentence gives the model a reply for text it can't translate, so that it needn't
+# explain in prose, which would be stored as what the station said (translate/checks.py).
 SYSTEM_PROMPT = (
     "You translate radio transcripts. The input comes from automatic speech recognition and may "
     "contain recognition errors: translate the most plausible meaning. Keep names, places and "
-    "numbers. Never add, omit or summarise information. Reply with the translation only."
+    "numbers. Never add, omit or summarise information. Reply with the translation only: no "
+    "notes, no explanations, no apology, nothing in brackets that the text doesn't have. If you "
+    "cannot translate the text (it is too garbled, too short to mean anything, or not in that "
+    f"language), reply with exactly {UNTRANSLATABLE} and nothing else."
 )
+
+
+def messages(text: str, source: str, target: str) -> list[dict[str, str]]:
+    """The chat that asks for ``text`` in ``target``. Languages go by their CLDR names: a bare
+    code is ambiguous to a model ("uk")."""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"Translate from {language_name(source)} ({source}) into "
+            f"{language_name(target)} ({target}):\n\n{text}",
+        },
+    ]
 
 
 class LlmTranslator:
@@ -30,16 +49,11 @@ class LlmTranslator:
         self.last_stats: dict[str, float] = {}
 
     def _prompt(self, text: str, source: str, target: str) -> str:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Translate from {language_name(source)} ({source}) into "
-                f"{language_name(target)} ({target}):\n\n{text}",
-            },
-        ]
         return self._tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, tokenize=False, enable_thinking=False
+            messages(text, source, target),
+            add_generation_prompt=True,
+            tokenize=False,
+            enable_thinking=False,
         )
 
     def translate(self, text: str, source: str, target: str) -> str:

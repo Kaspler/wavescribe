@@ -68,8 +68,9 @@ MAX_TEXT_CHARS = 4000  # 20 s of speech is a few hundred characters
 MAX_NAME_CHARS = 120
 MAX_TAG_CHARS = 35  # the longest tag BCP-47 asks software to handle
 MAX_TRANSLATIONS = 32
-MAX_FLAGS = 16
-MAX_FLAG_CHARS = 40
+# The ASR checks' few, and one per translation left out ("untranslated:<tag>:<why>").
+MAX_FLAGS = 16 + MAX_TRANSLATIONS
+MAX_FLAG_CHARS = 64
 # A line passes from machine to machine (a place pushes to a central server, which pushes on).
 # Each event names the machines it passed through (``via``) and the one sending it
 # (``node.id``). One that passed through this machine before is an echo; past MAX_HOPS it is

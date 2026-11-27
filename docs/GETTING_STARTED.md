@@ -176,6 +176,16 @@ rewritten.
 - **The transcript** shows what was said, with its translation. Until a line's translation
   arrives, its words as heard are shown in grey. A line that isn't translated into the language
   you read in keeps its own words, with a small label naming their language.
+- **A line with no translation** keeps its own words only. Most often the translator was busy
+  and the line waited too long. It can also be a line the local model couldn't translate:
+  speech recognised so badly that the model said so, or answered with a comment about the text
+  ("the meaning is unclear…") instead of a translation. Such a reply is never shown as what the
+  station said; the line is kept with a note of why, which the feed carries as the flag
+  `untranslated:<language>:<why>` (`declined`, `remark`, `too_long`, `empty` or `failed`). A
+  note the model added in brackets ("[missing word]", "(possibly a recognition error)") is taken
+  out of a translation that is otherwise kept. Comments are recognised by their shape in any
+  language, and by their wording only in German, English, Spanish, French, Portuguese and
+  Ukrainian.
 - **"heard as …"** before a line means the speech recognition wrote it in another language
   than the station's: someone may really have spoken that language (a guest, a clip, a song),
   or the recognition slipped and the words may be wrong. It can't tell which, so read such

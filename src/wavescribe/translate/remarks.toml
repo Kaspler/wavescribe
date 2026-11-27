@@ -1,0 +1,90 @@
+# What a translation model writes when it talks about the text instead of translating it: "the
+# text is unclear due to recognition errors", "a coherent translation cannot be provided".
+#
+# Read by translate/checks.py.
+# - `phrases`: a reply that says one of these is not kept as a translation; the line is stored
+#   and shown with its original words alone.
+# - `notes`: words that make a note of a bracketed part ("[missing word]", "(unclear)"). A
+#   bracketed part that says one of these, or one of the phrases, is cut out of the reply and
+#   the rest is kept. Outside brackets they mean nothing: a programme may well say "unclear".
+#   "[sic]" is not listed: in brackets it can as well be a name.
+#
+# Every entry applies to every reply, whatever language was asked for: a model that comments
+# does it in the target language, in the station's, or in English. The sections only keep the
+# file readable. The languages listed here are the only ones in which a remark is recognised
+# by its wording; in any other language only its shape can give it away (see checks.py).
+#
+# Keep the phrases about recognising, transcribing and translating the text itself, which a
+# translator says and a broadcaster hardly ever does. A phrase a programme could say ("the
+# original text", "it makes no sense") stays out: a remark shown as a translation costs one
+# odd line, a list that is too wide costs real translations. A line whose own words say one of
+# these in the station's language keeps its translation: the programme is about the subject.
+#
+# Matching ignores case, accents and other marks, and punctuation, and takes whole words.
+
+[de]
+phrases = ["Erkennungsfehler", "Erkennungsfehlern", "Spracherkennungsfehler",
+           "Transkriptionsfehler", "Transkriptionsfehlern", "falsch erkannt",
+           "nicht übersetzbar", "kann nicht übersetzt werden", "lässt sich nicht übersetzen",
+           "nicht sinnvoll übersetzen", "sinnvolle Übersetzung", "kohärente Übersetzung",
+           "Übersetzung ist nicht möglich", "keine Übersetzung möglich", "Ausgangstext",
+           "Quelltext", "der Text ist unverständlich", "der Text ist unklar",
+           "hier ist die Übersetzung", "Anmerkung des Übersetzers"]
+notes = ["unverständlich", "nicht verständlich", "unklar", "fehlendes Wort",
+         "unbekanntes Wort", "unbekannter Name", "Anmerkung", "Anm"]
+
+[en]
+phrases = ["recognition error", "recognition errors", "misrecognition", "misrecognitions",
+           "misrecognized", "misrecognised", "transcription error", "transcription errors",
+           "mistranscription", "garbled text", "garbled transcription", "text is garbled",
+           "cannot be translated", "can't be translated", "could not be translated",
+           "cannot translate", "unable to translate", "impossible to translate",
+           "not possible to translate", "coherent translation", "meaningful translation",
+           "translation cannot be provided", "translation is not possible",
+           "no translation is possible", "source text", "input text", "provided text",
+           "the text is unclear", "the text is incoherent", "the text is unintelligible",
+           "meaning of the text is unclear", "here is the translation",
+           "here's the translation", "translator's note", "note from the translator"]
+notes = ["inaudible", "unintelligible", "unclear", "indistinct", "illegible", "garbled",
+         "missing word", "missing words", "missing name", "unknown word", "unknown name",
+         "unknown number", "note"]
+
+[es]
+phrases = ["error de reconocimiento", "errores de reconocimiento", "error de transcripción",
+           "errores de transcripción", "no se puede traducir", "no es posible traducir",
+           "imposible de traducir", "imposible traducir", "traducción coherente",
+           "no se puede proporcionar una traducción", "texto de origen", "texto fuente",
+           "el texto es incomprensible", "el texto es ininteligible", "el texto no es claro",
+           "aquí está la traducción", "nota del traductor"]
+notes = ["inaudible", "ininteligible", "incomprensible", "falta una palabra",
+         "palabra desconocida", "nombre desconocido", "nota"]
+
+[fr]
+phrases = ["erreur de reconnaissance", "erreurs de reconnaissance", "erreur de transcription",
+           "erreurs de transcription", "ne peut pas être traduit", "impossible de traduire",
+           "impossible à traduire", "traduction cohérente",
+           "aucune traduction n'est possible", "texte source",
+           "le texte est incompréhensible", "le texte est inintelligible",
+           "le texte n'est pas clair", "voici la traduction", "note du traducteur"]
+notes = ["inaudible", "inintelligible", "incompréhensible", "mot manquant", "mot inconnu",
+         "nom inconnu", "note", "NdT"]
+
+[pt]
+phrases = ["erro de reconhecimento", "erros de reconhecimento", "erro de transcrição",
+           "erros de transcrição", "não pode ser traduzido", "não é possível traduzir",
+           "impossível de traduzir", "impossível traduzir", "tradução coerente",
+           "não é possível fornecer uma tradução", "texto de origem", "texto fonte",
+           "o texto é incompreensível", "o texto é ininteligível", "o texto não é claro",
+           "aqui está a tradução", "nota do tradutor"]
+notes = ["inaudível", "ininteligível", "incompreensível", "palavra em falta",
+         "palavra desconhecida", "nome desconhecido", "nota"]
+
+[uk]
+phrases = ["помилка розпізнавання", "помилки розпізнавання", "помилок розпізнавання",
+           "помилками розпізнавання", "помилки транскрипції", "неможливо перекласти",
+           "не можна перекласти", "не вдається перекласти", "зв'язний переклад",
+           "переклад неможливий", "вихідний текст", "вихідного тексту",
+           "текст незрозумілий", "текст є незрозумілим", "ось переклад",
+           "примітка перекладача"]
+notes = ["нерозбірливо", "незрозуміло", "пропущене слово", "невідоме слово",
+         "невідоме ім'я", "примітка", "прим"]
