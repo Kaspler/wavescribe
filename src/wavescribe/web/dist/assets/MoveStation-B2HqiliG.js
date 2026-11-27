@@ -1,0 +1,1 @@
+export{t as default}from"./MoveThere-D_tOAxor.js";

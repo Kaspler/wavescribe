@@ -1,7 +1,8 @@
 // The language a new radio station is likely to speak, from the person's own radio stations: the
-// one most of those on the same band speak, else most of those on the same receiver. Empty when
-// neither says, and the page asks: the browser's language, or the country's, says nothing about
-// what is spoken on a channel. Plain functions, so they can be tested without a page.
+// one most of those on the same band speak, else most of those on the same receiver, else the
+// stations file's default (`defaults.language`). Empty when none says, and the page asks: the
+// browser's language, or the country's, says nothing about what is spoken on a channel. Plain
+// functions, so they can be tested without a page.
 
 /** One of the person's radio stations: where it is heard and the language set for it. */
 export interface OnAir { device: string; mhz: number; language: string; watch?: unknown }
@@ -21,11 +22,12 @@ export function stationsOnAir(
 
 /** The language for a station at `mhz` on receiver `device`. `bandOf`: the id of the band a
  * frequency is in, null outside every band. A watch, or a station whose language is detected,
- * says nothing about the language. */
-export function spokenLang(kept: OnAir[], at: { mhz: number; device: string }, bandOf: (mhz: number) => string | null): string {
+ * says nothing about the language. `byDefault`: the stations file's default language, if any. */
+export function spokenLang(kept: OnAir[], at: { mhz: number; device: string }, bandOf: (mhz: number) => string | null,
+                           byDefault?: string | null): string {
   const said = kept.filter((s) => s.watch == null && s.language && s.language !== "auto");
   const band = bandOf(at.mhz);
-  return most(band ? said.filter((s) => bandOf(s.mhz) === band) : []) || most(said.filter((s) => s.device === at.device));
+  return most(band ? said.filter((s) => bandOf(s.mhz) === band) : []) || most(said.filter((s) => s.device === at.device)) || byDefault || "";
 }
 
 /** The language most of them speak, the first of those on a tie; "" for none. */

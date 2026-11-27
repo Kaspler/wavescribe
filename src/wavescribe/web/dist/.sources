@@ -35,15 +35,15 @@ c0f4303cc263ae91b0f2250573684335bba0e7a5 frontend/src/lib/types.ts
 21b4f9a073dfae95781352569e7d1a07d07aa01f frontend/src/manage/Caught.tsx
 9d2f9be22ce92e802f39838cae1d37e90a5329d1 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
-03f722037f7357d28133c9904e8bae068778978d frontend/src/manage/Internet.tsx
-a0c9af0d51542f1a6c307d081778412e84339128 frontend/src/manage/Listen.tsx
+dd8b9b2d3cba4c54cea6f144e724fbdba7fe82e8 frontend/src/manage/Internet.tsx
+ca446110283daa110fd7181444657bc17cf8ea10 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 dc4f8cf17da31768e9d65b42775df30addf1b571 frontend/src/manage/MoveStation.tsx
 4386a911e5b3ed5ba6a7677268645a00132698e2 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-eb68fc38596abcbc38704f9c8c59b5f44ce17e82 frontend/src/manage/Radio.tsx
+07199339543df1d3f006f3ad77e8ed7a961d225e frontend/src/manage/Radio.tsx
 49d984d902c2c2e59908a70443616864e072be29 frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
@@ -59,7 +59,7 @@ cd991cc8d9ac21eb246ad56b656c52953ce32c18 frontend/src/manage/dial.ts
 ce63599971e621a20fb0bcd3ad41a3004884b99a frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
-0629371a71a4ba6be7fb5e9afc369350588bba64 frontend/src/manage/spokenLang.ts
+e6ed73dd60af45d78a3329145f07162df9edcd94 frontend/src/manage/spokenLang.ts
 00a4de71688bc4ef7fb00fab56e76af9b79d82e3 frontend/src/manage/tuner.tsx
 30f92bb42bc128bf05810914dc9cd98c04ccf7f8 frontend/src/reading/Alerts.tsx
 cbbf8d5dac6fa39a2cc5a2602ffa005fed7cc656 frontend/src/reading/Ask.tsx
@@ -94,7 +94,7 @@ f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 20042eec724f4882d254fb7ff510ecddf205973d frontend/tests/langs.test.mjs
 44dfbe97e4979802238794a4caff62c2f06dab7b frontend/tests/refusals.test.mjs
 d010ad380d164c82fb88fbb297e703e1e79e7805 frontend/tests/router.test.mjs
-308903e5ee2999a0f5c18b493281f5ef87bbcf86 frontend/tests/spokenLang.test.mjs
+d984f6c5104858f54615228ae2fd61382b96950c frontend/tests/spokenLang.test.mjs
 80b3c255b77e0c157f6e8ceb2aef9cc1f30d54d9 frontend/tests/tabs.test.mjs
 ef8340b9978505f33fddf27c20ae4482786bd7fd frontend/tests/time.test.mjs
 8889f47e8563c6c78225cc7d23c0ce5ecec21f23 frontend/tsconfig.json

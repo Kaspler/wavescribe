@@ -925,7 +925,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: RadioView; pre: Any; tuner: 
   const [does, setDoes] = useState("translate");
   // Until the person chooses, the language follows the frequency and the receiver.
   const [chosen, setLang] = useState<string | null>(null);
-  const lang = chosen ?? spokenLang(stationsOnAir(v.receivers, S.stations), { mhz: f, device }, (m) => bandAt(v.bands, m)?.id ?? null);
+  const lang = chosen ?? spokenLang(stationsOnAir(v.receivers, S.stations), { mhz: f, device }, (m) => bandAt(v.bands, m)?.id ?? null, v.defaults?.language);
   const [langs, setLangs] = useState<string[]>([]);
   // Only as the form opens: not when the field comes back after "Listen only".
   const opening = useRef(true);

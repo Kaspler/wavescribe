@@ -281,7 +281,8 @@ function Keep({ st, radio, dev, onKept }: { st: LiveReceiver; radio: Any; dev: s
   const [does, setDoes] = useState<string>("translate");
   // Until the person chooses, the language follows what is tuned, once the receivers are known.
   const [chosen, setLang] = useState<string | null>(null);
-  const lang = chosen ?? spokenLang(stationsOnAir(radio?.receivers || [], S.stations), { mhz: st.mhz, device: dev }, (m) => bandAt(radio?.bands || [], m)?.id ?? null);
+  const lang = chosen ?? spokenLang(stationsOnAir(radio?.receivers || [], S.stations), { mhz: st.mhz, device: dev }, (m) => bandAt(radio?.bands || [], m)?.id ?? null,
+                                    radio?.defaults?.language);
   const [langs, setLangs] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [retune, setRetune] = useState<string | null>(null);

@@ -28,7 +28,7 @@ export function OnTheInternet() {
   };
   // The new station's form opens under the way it was found.
   const form = (from: string) => pre?.from === from && (
-    <StationForm key={JSON.stringify(pre.p.raw)} pre={pre.p} stations={stations}
+    <StationForm key={JSON.stringify(pre.p.raw)} pre={pre.p} stations={stations} byDefault={data.defaults?.language || ""}
                  onDone={async () => { setPre(null); await reload(); await refreshPage(); }} onCancel={() => setPre(null)} />
   );
   return (
@@ -57,9 +57,13 @@ export function OnTheInternet() {
 
 type Pre = { name?: string; language?: string; detected?: string; translate_to?: string[]; raw: Any; summary?: string };
 
-function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: Any[]; onDone: () => Promise<void>; onCancel: () => void }) {
+/** `byDefault`: the stations file's default language, for a stream that gives no hint of its own;
+ * never the browser's, which says nothing about what a station speaks. */
+function StationForm({ pre, stations, byDefault, onDone, onCancel }: {
+  pre: Pre; stations: Any[]; byDefault: string; onDone: () => Promise<void>; onCancel: () => void;
+}) {
   const [name, setName] = useState(pre.name || "");
-  const [lang, setLang] = useState(pre.language || "");
+  const [lang, setLang] = useState(pre.language || byDefault);
   const [langs, setLangs] = useState<string[]>([]);
   const [targets, setTargets] = useState<string[]>(pre.translate_to || primaryTargets(stations).slice(0, 2));
   const [prio, setPrio] = useState("5");

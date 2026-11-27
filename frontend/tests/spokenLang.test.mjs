@@ -1,5 +1,5 @@
 // A new station's language comes from the person's own stations on the band, then on the
-// receiver, and from nowhere else.
+// receiver, then the stations file's default, and from nowhere else.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spokenFields, spokenLang, stationsOnAir } from "../src/manage/spokenLang.ts";
@@ -17,7 +17,14 @@ test("else the language most of the receiver's stations speak", () => {
   assert.equal(spokenLang(kept, { mhz: 446.00625, device: "b" }, bandOf), "de");
 });
 
+test("else the stations file's default, after what the person's stations say", () => {
+  assert.equal(spokenLang([], { mhz: 99.0, device: "a" }, bandOf, "pt-PT"), "pt-PT");
+  assert.equal(spokenLang([st("b", 145.5, "de")], { mhz: 446.00625, device: "b" }, bandOf, "pt-PT"), "de", "the receiver's stations first");
+  assert.equal(spokenLang([st("a", 90.2, "es-ES")], { mhz: 99.0, device: "b" }, bandOf, "pt-PT"), "es-ES", "the band's first");
+});
+
 test("nothing to go on: empty, for the page to ask", () => {
+  assert.equal(spokenLang([], { mhz: 99.0, device: "a" }, bandOf, null), "", "no default either");
   assert.equal(spokenLang([], { mhz: 99.0, device: "a" }, bandOf), "");
   assert.equal(spokenLang([st("a", 90.2, "pt-PT")], { mhz: 446.00625, device: "b" }, bandOf), "", "another band, another receiver");
   assert.equal(spokenLang([st("a", 90.2, "pt-PT")], { mhz: 1200, device: "b" }, bandOf), "", "outside every band");
