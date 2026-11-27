@@ -139,6 +139,62 @@ def cmd_models_accept(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_models_remove(args: argparse.Namespace) -> int:
+    from wavescribe import modelremove
+    from wavescribe.modelfetch import size_text
+    from wavescribe.registry import ModelRegistry
+
+    if args.all == bool(args.ids):
+        print("wavescribe: name the models to remove, or give --all (not both)", file=sys.stderr)
+        return 2
+    registry = ModelRegistry.load()
+    if args.all:
+        found = [modelremove.plan(registry, e) for e in registry.entries() if e.kind != "local"]
+        removals = [r for r in found if r is not None]
+        if not removals:
+            print("No model is installed: nothing to remove.")
+            return 0
+    else:
+        entries = [registry.get(i) for i in dict.fromkeys(args.ids)]  # an unknown id stops here
+        planned = [(e, modelremove.plan(registry, e)) for e in entries]
+        missing = [e.id for e, r in planned if r is None]
+        if missing:
+            are = "isn't" if len(missing) == 1 else "aren't"
+            print(f"wavescribe: {', '.join(missing)} {are} installed (nothing of "
+                  f"{'it' if len(missing) == 1 else 'them'} is on this disk), so nothing was "
+                  "removed", file=sys.stderr)  # fmt: skip
+            return 1
+        removals = [r for _, r in planned if r is not None]
+    width = max(len(r.id) for r in removals)
+    for r in removals:
+        places = ", ".join(modelremove.where(p) for p in r.places)
+        print(f"{r.id:<{width}}  {size_text(r.size):>10}  {places}")
+        if r.shared >= 1e6:
+            print(f"{'':<{width}}  {'':>10}  (another {size_text(r.shared)} stays: another entry "
+                  "in the Hugging Face cache has the same files)")  # fmt: skip
+    total = size_text(sum(r.size for r in removals))
+    if not args.yes:
+        what = removals[0].id if len(removals) == 1 else f"these {len(removals)} models"
+        try:
+            answer = input(f"Remove {what} ({total}{' in all' * (len(removals) > 1)})? [y/N] ")
+        except EOFError:  # nobody to ask
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing removed.")
+            return 1
+    freed = sum(modelremove.remove(registry, r) for r in removals)
+    credits = DATA_DIR / "THIRD_PARTY_MODELS.md"
+    if credits.exists():
+        credits.write_text(credits_markdown(registry), encoding="utf-8")
+    names = [r.id for r in removals]
+    listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    again = typed(f"models fetch {names[0]}" if len(names) == 1 else "models fetch <id>")
+    print(f"Removed {listed}: {size_text(freed)} freed. To download "
+          f"{'it' if len(names) == 1 else 'one'} again: {again}, or under Settings → Languages "
+          "and models.")  # fmt: skip
+    return 0
+
+
 def credits_markdown(registry: ModelRegistry) -> str:
     """Attribution for every installed model (CC-BY and friends require it)."""
     lines = ["# Third-party models", "",
@@ -850,7 +906,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"wavescribe {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    models = sub.add_parser("models", help="list and download models")
+    models = sub.add_parser("models", help="list, download and remove models")
     models_sub = models.add_subparsers(dest="models_command", metavar="ACTION", required=True)
     p = models_sub.add_parser("list", help="show registered models, licences, install state")
     add_json_arg(p)
@@ -871,6 +927,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_models_accept)
     p = models_sub.add_parser("credits", help="attribution for the installed models (Markdown)")
     p.set_defaults(func=cmd_models_credits)
+    p = models_sub.add_parser(
+        "remove", help="delete downloaded models from this disk and say how much that frees"
+    )
+    p.add_argument("ids", nargs="*", help="model ids, as `models list` shows them")
+    p.add_argument("--all", action="store_true", help="every model that is installed")
+    p.add_argument("-y", "--yes", action="store_true", help="don't ask before removing")
+    p.set_defaults(func=cmd_models_remove)
 
     p = sub.add_parser("listen", help="live transcript (and translation) of one or more stations")
     p.add_argument("stations", nargs="+", metavar="STATION", help="station ids from the config")

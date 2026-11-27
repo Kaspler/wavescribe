@@ -52,24 +52,32 @@ def size_text(n: float) -> str:
     """Bytes as a person reads them: 7.9 GB, 340 MB."""
     if n >= 0.95 * GB:
         return f"{n / GB:.1f} GB"
-    return f"{round(n / 1e6)} MB" if n >= 0.5e6 else "under 1 MB"
+    return f"{max(1, round(n / 1e6))} MB" if n >= 0.5e6 else "under 1 MB"
 
 
 # -- Where a model's bytes land, and how many are there ----------------------------------------
 
 
-def _hf_cache() -> Path:
-    if os.environ.get("HF_HUB_CACHE"):
-        return Path(os.environ["HF_HUB_CACHE"])
-    home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
-    return home / "hub"
+def hub_cache() -> Path:
+    """The Hugging Face cache, where the library puts what it downloads: read from the same
+    variables it reads, in the same order (HF_HUB_CACHE, HUGGINGFACE_HUB_CACHE, HF_HOME,
+    XDG_CACHE_HOME), as they are now."""
+    env = os.environ
+    home = env.get("HF_HOME") or str(Path(env.get("XDG_CACHE_HOME", "~/.cache")) / "huggingface")
+    hub = env.get("HF_HUB_CACHE") or env.get("HUGGINGFACE_HUB_CACHE") or str(Path(home) / "hub")
+    return Path(os.path.expandvars(os.path.expanduser(hub)))
 
 
 def target_dir(registry: ModelRegistry, entry: ModelEntry) -> Path:
     """Where a download's bytes land (to measure progress and free space)."""
     if entry.kind == "hf":
-        return _hf_cache() / ("models--" + entry.location.replace("/", "--"))
+        return hub_cache() / repo_folder(entry)
     return registry.models_dir / entry.id
+
+
+def repo_folder(entry: ModelEntry) -> str:
+    """A Hugging Face model's folder in the cache: models--<owner>--<name>."""
+    return "models--" + entry.location.replace("/", "--")
 
 
 def dir_bytes(path: Path) -> int:

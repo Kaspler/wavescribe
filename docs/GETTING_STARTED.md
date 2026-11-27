@@ -19,6 +19,7 @@ is needed. Allow about half an hour, plus the time to download the models.
 - [10. What Wavescribe keeps, and why](#10-what-wavescribe-keeps-and-why)
 - [11. Keep it running](#11-keep-it-running)
 - [Troubleshooting](#troubleshooting)
+- [Uninstalling](#uninstalling)
 - [Questions](#questions)
 
 Every command used here, with all its options, is in [COMMANDS.md](COMMANDS.md).
@@ -660,8 +661,9 @@ These are cautious defaults. You can change them under Settings → **Storage an
 broadcast limits under *How long it's kept*, the rest under *What's kept of each kind of radio*.
 **Last 24 h as NDJSON**, on the same page, saves the last day's text as a file, one JSON
 object per line.
-To delete everything heard, stop Wavescribe and delete the `data` folder. Models live in the `models` folder and in
-`~/.cache/huggingface`.
+To delete everything heard, stop Wavescribe and delete the `data` folder. Models live in the
+`models` folder and in `~/.cache/huggingface`; [Uninstalling](#uninstalling) says how to remove
+them.
 
 ## 11. Keep it running
 
@@ -745,6 +747,36 @@ safe to run while Wavescribe is running.
 | Too many alerts | Raise the rule's severity threshold, turn on **Let the model confirm**, or use more specific phrases. `uv run wavescribe alerts replay` shows what a draft rule would have announced on everything heard so far. |
 | No notifications | Check System Settings → Notifications for Script Editor or your terminal app, and run `uv run wavescribe alerts test`. |
 | Internet stations keep stopping | They need the internet; Wavescribe reconnects by itself when it comes back. |
+
+## Uninstalling
+
+Almost everything Wavescribe puts on your Mac is inside its folder. Remove things in this order:
+the first two steps use Wavescribe's own commands, so run them in its folder before deleting it.
+To see how much room a folder takes, use `du -sh` with its path, e.g. `du -sh ~/.cache/uv`.
+
+1. **The background service**, if you installed it: `uv run wavescribe service uninstall`
+   stops it and removes its login item from `~/Library/LaunchAgents`.
+2. **The models.** `uv run wavescribe models remove --all` lists every model that is installed,
+   with the room it frees and where it is, asks, then deletes them and says how much it freed.
+   Models from Hugging Face are in its cache, `~/.cache/huggingface/hub`, which other programs
+   use too: only what Wavescribe downloaded goes, and a file another program also uses stays.
+   The others are in the `models` folder. To remove one model, name it, as
+   `uv run wavescribe models list` shows it:
+   `uv run wavescribe models remove whisper-large-v3-turbo`.
+   If no other program on this Mac uses Hugging Face models, the whole `~/.cache/huggingface`
+   folder can go.
+3. **The Wavescribe folder** you unzipped or cloned holds the rest: `data` (what was heard, the
+   audio kept, alerts, logs, the licences you accepted), `config` (your stations, alerts and
+   settings), `models` and the hidden `.venv` (its Python libraries). Keep `data` and `config`
+   somewhere else if you may come back. Then delete the folder in the Finder, or with
+   `rm -rf` and its path.
+4. **uv's caches.** `~/.cache/uv` holds the libraries uv downloaded and `~/.local/share/uv` the
+   Python it installed. Other projects that use uv share both. `uv cache clean` empties the
+   first and `uv python uninstall --all` removes the Pythons in the second; with uv itself
+   going too, delete both folders.
+5. **The Homebrew packages:** `brew uninstall ffmpeg uv librtlsdr`. Other programs may use them,
+   ffmpeg most often: `brew uses --installed ffmpeg` lists the Homebrew packages that need it,
+   and `brew info ffmpeg` shows its size. Leave a package installed when you're not sure.
 
 ## Questions
 

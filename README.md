@@ -286,6 +286,8 @@ what is newer and less tried.
 
 - [Models downloaded once](docs/GETTING_STARTED.md#3-download-the-models) from their publishers,
   with `wavescribe models fetch` or on the page.
+- [Models removed again](docs/GETTING_STARTED.md#uninstalling) to free the disk:
+  `wavescribe models remove` deletes what a model downloaded and says how much that freed.
 - [Each model's licence, size and fit](docs/MODELS.md#will-it-fit-settings--languages-and-models)
   for this Mac, listed on the page, which can search for more online.
 - [Models and their attribution](docs/LICENSING.md#disclosure-to-users) in the Terminal:

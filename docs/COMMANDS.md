@@ -10,7 +10,7 @@ command prints its options (`uv run wavescribe radio scan --help`), and `wavescr
 the version. A test keeps this page complete: it fails when a command or an option is missing
 here.
 
-- [`models`](#wavescribe-models): list and download models
+- [`models`](#wavescribe-models): list, download and remove models
 - [`serve`](#wavescribe-serve): the page
 - [`listen`](#wavescribe-listen): stations in the Terminal
 - [What is kept and which models run](#options-for-what-runs): options `serve`, `listen`,
@@ -29,7 +29,7 @@ Only `models fetch` downloads anything. Every other command runs offline.
 
 ## `wavescribe models`
 
-List and download models ([MODELS.md](MODELS.md), [LICENSING.md](LICENSING.md)).
+List, download and remove models ([MODELS.md](MODELS.md), [LICENSING.md](LICENSING.md)).
 
 ### `wavescribe models list`
 
@@ -78,6 +78,33 @@ whose weights are already on disk.
 ### `wavescribe models credits`
 
 Prints the attribution for the installed models, as Markdown. No options.
+
+### `wavescribe models remove`
+
+`models remove ID [ID …]` deletes what those models put on this disk, and `models remove --all`
+every model that is installed. It lists each model with the space it frees and where it is,
+asks before deleting anything, and ends with how much it freed.
+
+- A model from Hugging Face goes from the library's cache (`~/.cache/huggingface/hub`, or where
+  `HF_HUB_CACHE` or `HF_HOME` puts it), through the library's own cache code: only the
+  repository and revision Wavescribe downloaded, and of that revision only Wavescribe's files
+  when another program added others. The weights sit in a store the whole cache shares, and a
+  file there is deleted only when nothing else in the cache uses it; the listing says how much
+  stays for that reason.
+- A model from a URL goes with its folder in `models/`, and with any download of it that didn't
+  finish.
+- A model of your own at a path you gave (`local:` in `config/models.local.toml`) is never
+  removed.
+- A model with nothing on this disk is refused, and then nothing is removed.
+- Any answer but `y` to the question removes nothing, with exit code 1.
+
+Stations that need a removed model have no text until it is downloaded again (`models fetch`,
+or Settings → Languages and models). Licences you accepted stay accepted.
+
+| Option | What it does |
+|---|---|
+| `--all` | every model that is installed, instead of naming them |
+| `-y`, `--yes` | don't ask before removing |
 
 ## `wavescribe serve`
 
