@@ -1124,10 +1124,13 @@ class App:
     def _digest_schedule(self):  # -> Scheduler | None
         """``[digest]`` in alerts.toml: digests on a schedule, spoken in the alerts' voices."""
         from wavescribe.digest.schedule import scheduler
+        from wavescribe.web.digest import unavailable
 
+        raw, path = self._alert_raw()
+        if self.alerter is None and raw.get("digest") is not None:
+            log.warning("[digest] in %s: no scheduled digests while alerts are off", path)
         if self.alerter is None or self.hub.digester is None or self.hub.speaker is None:
             return None
-        raw, path = self._alert_raw()
         return scheduler(
             raw.get("digest"),
             str(path),
@@ -1137,6 +1140,7 @@ class App:
             language=self.alerter.config.notify_language,
             exports=self.hub.exports,
             closed=self.hub._closed,
+            unavailable=lambda: unavailable(self.hub),
         )
 
     def _llm_rule_list(self) -> list[LlmRule]:

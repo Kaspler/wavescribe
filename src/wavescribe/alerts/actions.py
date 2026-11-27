@@ -26,7 +26,7 @@ class ActionError(RuntimeError):
 
 
 class Actions(Protocol):
-    def notify(self, title: str, body: str) -> None: ...
+    def notify(self, title: str, body: str, *, sound: bool = True) -> None: ...
 
     def speak(self, voice: str, text: str) -> None: ...
 
@@ -36,13 +36,10 @@ class Actions(Protocol):
 
 
 class MacActions:
-    def notify(self, title: str, body: str) -> None:
+    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
         # Text goes in as arguments, never spliced into the script, so quotes can't break it.
-        script = [
-            "on run argv",
-            'display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"',
-            "end run",
-        ]
+        shown = "display notification (item 2 of argv) with title (item 1 of argv)"
+        script = ["on run argv", shown + (' sound name "Glass"' if sound else ""), "end run"]
         cmd = ["osascript"] + [a for line in script for a in ("-e", line)] + [title, body[:1000]]
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if done.returncode != 0:
@@ -68,8 +65,8 @@ class MacActions:
 class LogOnlyActions:
     """Portable fallback: notifications are logged; there is no speech."""
 
-    def notify(self, title: str, body: str) -> None:
-        log.warning("ALERT %s: %s", title, body)
+    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
+        log.warning("%s %s: %s", "ALERT" if sound else "NOTE", title, body)
 
     def speak(self, voice: str, text: str) -> None:
         raise ActionError("no text-to-speech on this platform")

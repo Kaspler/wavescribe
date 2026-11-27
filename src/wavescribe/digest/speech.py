@@ -44,6 +44,10 @@ class Speech:
     def notify(self, title: str, body: str) -> None:
         self.actions.notify(title, body)
 
+    def show(self, title: str, body: str) -> None:
+        """A notification without the alerts' sound: a digest is no alert."""
+        self.actions.notify(title, body, sound=False)
+
     def voices(self) -> set[str] | None:
         return self.actions.voices()
 

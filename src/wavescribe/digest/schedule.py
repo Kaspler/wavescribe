@@ -5,13 +5,15 @@
     every_minutes = 60            # on the hour; 30 is on the hour and half past
     stations = ["tsf", "antena1"] # leave out for every station
     language = "en"               # default: [delivery] notify_language
-    speak = true                  # in the [speak.<language>] voice
-    notify = true                 # a notification with the points
+    speak = true                  # also read the points aloud, in the [speak.<language>] voice
     quiet_hours = ["22:00", "07:00"]
 
-At whole periods on the local clock (every 15 minutes: at :00, :15, :30 and :45), a digest
-of what was said since the last one. When nothing was said, the model isn't asked; when
-nothing of substance was, nothing is said or shown. It covers only radio that may leave this
+At whole periods on the local clock (every 15 minutes: at :00, :15, :30 and :45), a digest of
+what was said since the one before, so that the digests cover the time between them, whatever
+was skipped. Each is shown as a notification, without the alerts' sound and titled as a
+summary, whatever became of it: its points, that nothing stood out in what was read, that
+nothing was said, or why none could be made. A quiet notification centre would otherwise read
+as a quiet radio. Only the points are read aloud. It covers only radio that may leave this
 machine, as if another machine had asked: nobody chose to hear it at that moment, and anyone
 in the room hears it or sees it on the screen. Wavescribe reads the table when it starts.
 """
@@ -22,14 +24,15 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from wavescribe.config import ConfigError
 from wavescribe.digest import (
     LANGUAGE_TAG,
+    MAX_MINUTES,
     Busy,
     Digest,
     Digester,
@@ -48,9 +51,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-KEYS = {"every_minutes", "stations", "language", "speak", "notify", "quiet_hours"}
+KEYS = {"every_minutes", "stations", "language", "speak", "quiet_hours"}
 MIN_EVERY = 5  # a digest every few minutes would be most of what the model does
 DAY_MINUTES = 24 * 60
+MIN_GAP_S = 60.0  # between two digests, whatever the clock says
 CLOCK = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 
 
@@ -60,16 +64,20 @@ class Schedule:
     language: str
     stations: tuple[str, ...] = ()  # empty: every station
     speak: bool = False
-    notify: bool = True
     quiet: tuple[int, int] | None = None  # minutes after midnight: from, until
 
     def next_run(self, now: float) -> float:
-        """The next time on the local clock that is a whole number of periods after
-        midnight, after ``now``."""
-        day = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0)
-        period = self.every_minutes * 60
-        done = int((now - day.timestamp()) // period) + 1
-        return (day + timedelta(seconds=done * period)).timestamp()
+        """The first minute after ``now`` whose time on the local clock is a whole number of
+        periods after midnight. Stepping through real minutes, a change of the clocks can't
+        put it in the past: the hour that doesn't happen when they go forward has no digest,
+        and the one that happens twice when they go back has two."""
+        t = (int(now) // 60 + 1) * 60
+        for _ in range(2 * DAY_MINUTES):
+            local = time.localtime(t)
+            if (local.tm_hour * 60 + local.tm_min) % self.every_minutes == 0:
+                break
+            t += 60
+        return float(t)
 
     def is_quiet(self, t: float) -> bool:
         if self.quiet is None:
@@ -109,11 +117,9 @@ def parse_schedule(
     lang = raw.get("language", language)
     if not isinstance(lang, str) or not LANGUAGE_TAG.fullmatch(lang):
         raise ConfigError(f"{where}: language must be a BCP-47 tag, e.g. en or pt-PT")
-    speak, notify = raw.get("speak", False), raw.get("notify", not raw.get("speak", False))
-    if not isinstance(speak, bool) or not isinstance(notify, bool):
-        raise ConfigError(f"{where}: speak and notify are true or false")
-    if not speak and not notify:
-        raise ConfigError(f"{where}: say how a digest reaches you: speak, notify or both")
+    speak = raw.get("speak", False)
+    if not isinstance(speak, bool):
+        raise ConfigError(f"{where}: speak is true or false")
     if speak and not any(same_language(v, lang) for v in voices):
         raise ConfigError(f"{where}: speak = true needs a [speak.{lang}] voice")
     quiet = raw.get("quiet_hours")
@@ -125,7 +131,9 @@ def parse_schedule(
                 f'{where}: quiet_hours is a start and an end, e.g. ["22:00", "07:00"]'
             )
         quiet = tuple(int(m[1]) * 60 + int(m[2]) for m in times if m)
-    return Schedule(every, lang, tuple(dict.fromkeys(stations)), speak, notify, quiet)
+        if quiet[0] == quiet[1]:
+            raise ConfigError(f"{where}: quiet_hours starts and ends at the same time")
+    return Schedule(every, lang, tuple(dict.fromkeys(stations)), speak, quiet)
 
 
 class Scheduler:
@@ -140,6 +148,8 @@ class Scheduler:
         exports: Callable[[], Exports],
         closed: threading.Event,
         clock: Callable[[], float] = time.time,
+        wait: Callable[[float], bool] | None = None,
+        unavailable: Callable[[], str | None] | None = None,
     ) -> None:
         self.schedule = schedule
         self.digester = digester
@@ -147,6 +157,10 @@ class Scheduler:
         self._exports = exports
         self._closed = closed
         self._clock = clock
+        self._wait = wait or closed.wait  # True once closed
+        self._unavailable = unavailable  # why no digest can be made in this run, if so
+        self._covered: float | None = None  # the end of the last digest delivered
+        self._told: str | None = None  # the reason for none last shown, said once
 
     def start(self) -> threading.Thread:
         thread = threading.Thread(target=self._loop, daemon=True, name="digests")
@@ -154,23 +168,37 @@ class Scheduler:
         return thread
 
     def _loop(self) -> None:
+        last: float | None = None
         while True:
-            at = self.schedule.next_run(self._clock())
-            if self._closed.wait(max(0.0, at - self._clock())):
+            now = self._clock()
+            at = self.schedule.next_run(now)
+            if last is not None:
+                at = max(at, last + MIN_GAP_S)  # whatever the clock or the schedule says
+            if self._wait(max(0.0, at - now)):
                 return
+            last = self._clock()
             try:
                 self.tick()
             except Exception:
                 log.exception("scheduled digest failed")
 
     def tick(self) -> Digest | None:
-        """One scheduled digest, delivered; None when there was nothing to make one of."""
+        """One scheduled digest, delivered; None when there was none to deliver."""
         s = self.schedule
         now = self._clock()
         if s.is_quiet(now):
             return None
+        reason = self._unavailable() if self._unavailable is not None else None
+        if reason:
+            if reason != self._told:
+                self._show(f"No summaries for now: {reason}.")
+            self._told = reason
+            return None
+        self._told = None
+        since = now - s.every_minutes * 60 if self._covered is None else self._covered
+        since = max(since, now - MAX_MINUTES * 60 + 1)
         leaving = self._exports()
-        body: dict[str, object] = {"minutes": s.every_minutes, "language": s.language}
+        body: dict[str, object] = {"since": since, "language": s.language}
         if s.stations:
             stations = [sid for sid in s.stations if sid in leaving.stations]
             if not stations:
@@ -179,32 +207,37 @@ class Scheduler:
             body["stations"] = stations
         try:
             request = self.digester.request(body, leaving)
-        except RequestError as e:
-            log.warning("scheduled digest: %s", e)
-            return None
-        try:
             digest = self.digester.run(request, leaving, stop=self._closed)
-        except (Busy, Unavailable, Failed) as e:
+        except (RequestError, Busy, Unavailable, Failed) as e:
             event(log, "digest_skipped", level=logging.WARNING, reason=str(e)[:200])
+            if not self._closed.is_set():
+                self._show(f"No summary this time: {e}. The next one covers this time too.")
             return None
-        if digest.points:
-            self.deliver(digest)
+        self._covered = request.until
+        self.deliver(digest)
         return digest
 
     def deliver(self, digest: Digest) -> None:
-        r = digest.request
-        if self.schedule.notify:
-            names = ", ".join(digest.names.get(s, s) for s in r.stations)
-            span = f"{local_time(r.since, '%H:%M')}-{local_time(r.until, '%H:%M')}"
-            body = "\n".join(f"{digest.heard_on(p)}{p.text}" for p in digest.points)
-            try:
-                self.speaker.speech.notify(f"Digest · {names} · {span}", body)
-            except Exception as e:  # ActionError, OSError, a timeout
-                event(log, "digest_notify_failed", level=logging.ERROR, error=str(e)[:200])
-        if self.schedule.speak:
+        """Shown whatever became of it, with who wrote it from how much; the points, if any,
+        also read aloud when the schedule says so."""
+        lines = [f"{digest.heard_on(p)}{p.text}" for p in digest.points] or [digest.text()]
+        notice = digest.notice()
+        self._show("\n".join([*lines, *([notice] if notice else [])]), digest)
+        if self.schedule.speak and digest.points:
             why = self.speaker.say(digest)
             if why:
                 event(log, "digest_not_spoken", level=logging.WARNING, reason=why)
+
+    def _show(self, body: str, digest: Digest | None = None) -> None:
+        if digest is not None:
+            r = digest.request
+            span = f", {local_time(r.since, '%H:%M')}-{local_time(r.until, '%H:%M')}"
+        else:
+            span = ""
+        try:
+            self.speaker.speech.show(f"Wavescribe summary{span}", body)
+        except Exception as e:  # ActionError, OSError, a timeout
+            event(log, "digest_notify_failed", level=logging.ERROR, error=str(e)[:200])
 
 
 def scheduler(
@@ -217,10 +250,20 @@ def scheduler(
     language: str | None,
     exports: Callable[[], Exports],
     closed: threading.Event,
+    unavailable: Callable[[], str | None] | None = None,
 ) -> Scheduler | None:
     """The scheduled digests ``[digest]`` asks for, or None. ``voices`` and ``language`` are
     the alerts' (``[speak.<lang>]`` and ``notify_language``)."""
     schedule = parse_schedule(raw, where, voices=voices, language=language or digester.language())
     if schedule is None:
         return None
-    return Scheduler(schedule, digester, speaker, exports=exports, closed=closed)
+    _known(schedule.stations, digester.stations(), f"{where} [digest]")
+    return Scheduler(
+        schedule, digester, speaker, exports=exports, closed=closed, unavailable=unavailable
+    )
+
+
+def _known(asked: Iterable[str], stations: Mapping[str, object], where: str) -> None:
+    unknown = [sid for sid in asked if sid not in stations]
+    if unknown:
+        raise ConfigError(f"{where}: no station {', '.join(map(repr, unknown))} is set up")

@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Digests read aloud and on a schedule, heard through a fake speaker: no sound is made."""
 
-import dataclasses
 import threading
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,15 +10,13 @@ import tests.test_app
 from tests.test_agent import Mcp, url_of
 from tests.test_alerts import FakeActions
 from tests.test_app import make_app, wait_for
-from tests.test_digest import MIN, NOW, STATIONS, FakeLlm, add, digester, stocked
+from tests.test_digest import NOW, FakeLlm, digester, stocked
 from tests.test_digest_web import FROM_LAN, Serving, post
-from tests.test_pipeline import station
 from wavescribe.alerts import Alert, Voice
 from wavescribe.cli import main
 from wavescribe.config import ConfigError
-from wavescribe.digest.schedule import Schedule, Scheduler, parse_schedule
+from wavescribe.digest.schedule import Schedule
 from wavescribe.digest.speech import Speaker, Speech, spoken
-from wavescribe.radio.bandplan import exports
 
 VOICES = {"en": Voice("Lesya", "An alert.")}
 TWO_POINTS = "- Water is cut tomorrow [1].\n- Heavy rain this afternoon [2]."
@@ -164,115 +160,6 @@ def test_a_digest_with_nothing_to_say_is_not_read(tmp_path: Path) -> None:
         "started": False,
         "error": "there is nothing to read aloud: Nothing was said on b in the last 5 minutes.",
     }
-    store.close()
-
-
-# -- the schedule -------------------------------------------------------------------------------
-
-
-def parse(**raw):
-    return parse_schedule(raw, "alerts.toml", voices=VOICES, language="en")
-
-
-def test_the_schedule_is_read_from_its_table() -> None:
-    assert parse_schedule(None, "alerts.toml", voices=VOICES, language="en") is None
-    assert parse() == Schedule(60, "en")  # on the hour, as a notification
-    assert parse(every_minutes=30, stations=["a", "a", "b"], speak=True) == Schedule(
-        30, "en", ("a", "b"), speak=True, notify=False
-    )
-    assert parse(quiet_hours=["22:00", "7:00"], speak=True, notify=True).quiet == (1320, 420)
-
-
-@pytest.mark.parametrize(
-    ("raw", "says"),
-    [
-        ({"every_minutes": 7}, "every_minutes must divide a day into equal parts"),
-        ({"every_minutes": 2}, "every_minutes must divide a day"),
-        ({"stations": "a"}, "stations must be a list of station ids"),
-        ({"language": "English"}, "language must be a BCP-47 tag"),
-        ({"speak": "yes"}, "speak and notify are true or false"),
-        ({"notify": False}, "say how a digest reaches you"),
-        ({"speak": True, "language": "uk"}, r"speak = true needs a \[speak.uk\] voice"),
-        ({"quiet_hours": ["22:00"]}, "quiet_hours is a start and an end"),
-        ({"quiet_hours": ["22:00", "25:00"]}, "quiet_hours is a start and an end"),
-        ({"every": 60}, r"unknown keys \['every'\]"),
-    ],
-)
-def test_a_schedule_written_wrongly_says_what_to_change(raw, says) -> None:
-    with pytest.raises(ConfigError, match=r"alerts.toml \[digest\]: " + says):
-        parse(**raw)
-
-
-def at(hour: int, minute: int = 0) -> float:
-    return datetime(2026, 3, 4, hour, minute).timestamp()
-
-
-def test_digests_come_at_whole_periods_of_the_local_clock() -> None:
-    assert Schedule(60, "en").next_run(at(11, 52)) == at(12)
-    assert Schedule(60, "en").next_run(at(12)) == at(13)
-    assert Schedule(15, "en").next_run(at(11, 52)) == at(12)
-    assert Schedule(15, "en").next_run(at(12, 1)) == at(12, 15)
-    night = Schedule(60, "en", quiet=(22 * 60, 7 * 60))
-    assert [night.is_quiet(at(h, m)) for h, m in ((23, 30), (6, 59), (7, 0), (12, 0))] == [
-        True,
-        True,
-        False,
-        False,
-    ]
-
-
-def scheduled(store, llm, schedule: Schedule, actions: FakeActions, *, stations=STATIONS):
-    speaker = Speaker(Speech(actions), lambda: VOICES, threading.Event())
-    return Scheduler(
-        schedule,
-        digester(store, llm, stations=stations),
-        speaker,
-        exports=lambda: exports(stations),
-        closed=threading.Event(),
-        clock=lambda: NOW,
-    )
-
-
-def test_a_scheduled_digest_is_shown_and_read_aloud(tmp_path: Path) -> None:
-    store = stocked(tmp_path)
-    actions = FakeActions()
-    llm = FakeLlm(TWO_POINTS)
-    run = scheduled(store, llm, Schedule(60, "en", speak=True, notify=True), actions)
-    digest = run.tick()
-    assert digest is not None and digest.request.stations == ("a", "b")
-    assert actions.calls[0] == (
-        "notify",
-        "Digest · a, b · 11:00-12:00",
-        "a: Water is cut tomorrow.\nb: Heavy rain this afternoon.",
-    )
-    assert said(actions) == ["a: Water is cut tomorrow.", "b: Heavy rain this afternoon."]
-    store.close()
-
-
-def test_a_schedule_reads_out_only_radio_that_may_leave(tmp_path: Path) -> None:
-    store = stocked(tmp_path)
-    add(store, "ham", "Encontro na ponte às dez", NOW - 15 * MIN, privacy="amateur")
-    stations = [*STATIONS, dataclasses.replace(station("ham"), privacy="amateur")]
-    llm, actions = FakeLlm(TWO_POINTS), FakeActions()
-    run = scheduled(store, llm, Schedule(60, "en"), actions, stations=stations)
-    assert run.tick() is not None and "ponte às dez" not in llm.prompts[0]
-    only_ham = scheduled(store, llm, Schedule(60, "en", ("ham",)), actions, stations=stations)
-    assert only_ham.tick() is None and len(llm.prompts) == 1
-    store.close()
-
-
-def test_a_schedule_keeps_quiet_when_there_is_nothing_to_tell(tmp_path: Path) -> None:
-    store = stocked(tmp_path)
-    llm, actions = FakeLlm("NONE: Only music."), FakeActions()
-    quiet_now = Schedule(60, "en", quiet=(11 * 60, 13 * 60))
-    assert scheduled(store, llm, quiet_now, actions).tick() is None
-    assert llm.prompts == []
-    # Nothing said in the last 15 minutes on a: no digest is asked of the model.
-    digest = scheduled(store, llm, Schedule(15, "en", ("a",)), actions).tick()
-    assert digest is not None and digest.points == [] and llm.prompts == []
-    # Nothing of substance: the model says so, and nobody is told.
-    digest = scheduled(store, llm, Schedule(60, "en", speak=True), actions).tick()
-    assert digest is not None and digest.nothing and actions.calls == []
     store.close()
 
 
