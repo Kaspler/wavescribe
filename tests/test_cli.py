@@ -91,8 +91,12 @@ def test_listen_explains_stations_it_cannot_transcribe(tmp_path, monkeypatch, ca
         'remote = "http://attic.local:8765"\nremote_station = "antena1"\n'
         '[[station]]\nid = "music"\nlanguage = "pt-PT"\n'
         'stream = "https://example.org/a.mp3"\ntranscribe = false\n'
+        '[[device]]\nid = "a"\nserial = "00000001"\ncenter_mhz = 100.0\ngain_db = 30\n'
+        '[[station]]\nid = "ham"\nlanguage = "en"\ndevice = "a"\nmhz = 145.5\nmode = "nfm"\n'
     )
-    for station, why in (("far", "another Wavescribe"), ("music", "transcribe = false")):
+    cases = (("far", "another Wavescribe"), ("music", "transcribe = false"),
+             ("ham", "doesn't hear"))  # fmt: skip
+    for station, why in cases:
         assert main(["listen", station, "--config", str(stations), "--no-store"]) == 1
         err = capsys.readouterr().err
         assert err.startswith(f"wavescribe: station '{station}'") and why in err

@@ -194,6 +194,8 @@ def cmd_listen(args: argparse.Namespace) -> int:
                 f"station {s.id!r} is only listened to (transcribe = false), so there is no "
                 "text to print; hear it on the page (wavescribe serve) or set transcribe = true"
             )
+        if s.out_of_reach and not args.source:  # before the models load, which takes a while
+            raise ValueError(f"station {s.id!r}: {s.out_of_reach}")
     tuning = None
     if args.source and args.source.startswith("sdr:"):
         from dataclasses import replace
