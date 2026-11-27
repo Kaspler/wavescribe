@@ -1,4 +1,4 @@
-// Find stations, On the internet: the station directory and a stream's own address, with a
+// Find → On the internet: the station directory and a stream's own address, with a
 // playlist and another Wavescribe as the rarer ways in. Each opens the same form for the new station.
 import { useEffect, useRef, useState } from "react";
 import { langNameEn } from "../lib/lang";

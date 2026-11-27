@@ -216,7 +216,7 @@ export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, fr
   );
 }
 
-/** Find, On the air: what watches caught. `keptNothing` says why some of it isn't listed. */
+/** Find → On the air: what watches caught. `keptNothing` says why some of it isn't listed. */
 export function Caught({ bands, watches, keptNothing, onAdd, onChooseBand }: {
   bands: Band[];
   watches: Any[];

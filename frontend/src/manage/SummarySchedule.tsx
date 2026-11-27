@@ -1,4 +1,4 @@
-// Summaries on a schedule, under Settings, Alerts: one switch that works as it is (a summary every
+// Summaries on a schedule, under Settings → Alerts: one switch that works as it is (a summary every
 // hour, of every station), then, folded, how often, which stations, the language, reading aloud
 // and quiet hours. The page's schedule takes the place of alerts.toml's [digest], if the file has
 // one, until the file's is chosen again (GET/POST/DELETE /api/manage/digest/schedule); the view

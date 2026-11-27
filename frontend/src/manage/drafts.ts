@@ -1,5 +1,5 @@
-// What an editor sends back: only what the person changed, and nothing it doesn't understand
-// lost on the way. Plain functions, so they can be tested without a page.
+// What an editor sends back: only what the person changed, and of a rule only what the server
+// takes. Plain functions, so they can be tested without a page.
 
 type Fields = Record<string, unknown>;
 
@@ -31,16 +31,20 @@ const unset = (k: string, v: unknown) =>
   || (typeof v === "object" && v !== null && !Array.isArray(v) && !Object.keys(v).length)
   || (k === "verify" && v === false) || (k === "min_mentions" && v === 1) || (k === "kind" && v === "keyword");
 
-/** The rule to save: the one being edited with the editor's fields over it. Fields the editor
- * doesn't show (a rule's `regex` from an older page, a note in alerts.toml, anything a later
- * version adds) pass through as they are; a field emptied in the editor is left out, so the
- * server's default applies. */
-export function ruleBody(saved: Fields | null, fields: Fields): Fields {
+/** The rule to save, and the keys left out of it: the one being edited with the editor's fields
+ * over it. A field the editor doesn't show passes through when the rule's kind takes it (`takes`,
+ * the rules view's `rule_keys` for that kind); any other (a note in alerts.toml, a key from
+ * another version) would have the rule refused, so it is left out and named in `dropped`, for
+ * the page to say. Without `takes`, everything passes. A field emptied in the editor is left out,
+ * so the server's default applies. */
+export function ruleBody(saved: Fields | null, fields: Fields, takes?: readonly string[] | null): { body: Fields; dropped: string[] } {
   const out: Fields = { ...(saved || {}) };
   for (const k of VIEW_ONLY) delete out[k];
   for (const [k, v] of Object.entries(fields)) out[k] = v;
   for (const [k, v] of Object.entries(out)) if (unset(k, v)) delete out[k];
-  return out;
+  const dropped = takes ? Object.keys(out).filter((k) => !takes.includes(k)).sort() : [];
+  for (const k of dropped) delete out[k];
+  return { body: out, dropped };
 }
 
 /** Regular expressions typed one per line. */

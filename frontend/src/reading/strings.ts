@@ -93,7 +93,7 @@ export const T = {
   alertsCanFail: "Alerts can be missed or wrong. For anything that matters, follow official warnings.",
   byMachine: "Transcripts and translations are made by machine and can be wrong. Wavescribe is not a safety system and comes without warranty.",
   alertRulesHint: "Alerts come from the rules under",
-  alertRules: "Settings, Alerts",
+  alertRules: "Settings → Alerts",
   connecting: "Connecting…",
   connected: "Live",
   behindBy: (min: number | null) => (min ? `Behind by ${min} min` : "Behind"),

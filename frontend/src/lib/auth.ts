@@ -1,5 +1,5 @@
 // Reading a Wavescribe through a reverse proxy can take a read token, which its owner makes under
-// Settings, Connections on the Wavescribe machine. The page keeps it for this browser and sends it
+// Settings → Connections on the Wavescribe machine. The page keeps it for this browser and sends it
 // with every read of the page's data. The events stream can't carry a header, so it gets a
 // one-time ticket for the token instead: the token itself never goes into an address, which logs
 // and proxies keep. Where no token is needed (this machine, the network at home) none is asked

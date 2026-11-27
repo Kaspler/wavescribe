@@ -1,4 +1,5 @@
-// What the rule and station editors send back: their own fields, and everything else untouched.
+// What the rule and station editors send back: their own fields, and of the rest what the server
+// takes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { changedFields, lines, ruleBody } from "../src/manage/drafts.ts";
@@ -15,36 +16,50 @@ const fromFile = {
   origin: "file",
   enabled: true,
 };
+// The keys each kind takes, as the rules view sends them (rules.RULE_KEYS).
+const TAKES = {
+  keyword: ["id", "kind", "min_mentions", "near", "regex", "severity", "stations", "terms", "topics", "verify"],
+  silence: ["after_minutes", "id", "kind", "level_db", "severity", "stations"],
+  traffic: ["id", "kind", "severity", "stations"],
+};
 
-test("a rule saved without changes keeps every field it came with", () => {
-  const body = ruleBody(fromFile, { id: "road-closed", severity: "high", terms: { en: ["ring road"] }, min_mentions: 1 });
+test("a rule saved without changes keeps every field its kind takes", () => {
+  const { body } = ruleBody(fromFile, { id: "road-closed", severity: "high", terms: { en: ["ring road"] }, min_mentions: 1 }, TAKES.keyword);
   assert.deepEqual(body, {
     id: "road-closed",
     terms: { en: ["ring road"] },
     regex: ["\\broad (closed|blocked)\\b"],
     severity: "high",
-    note: "a field this page doesn't know",
-    later: { kept: [1, 2] },
   });
 });
 
+test("a key the rule's kind doesn't take is left out and named, else the rule would be refused", () => {
+  const { body, dropped } = ruleBody(fromFile, { severity: "critical" }, TAKES.keyword);
+  assert.deepEqual(dropped, ["later", "note"]);
+  assert.equal("note" in body || "later" in body, false);
+  assert.deepEqual(ruleBody({ ...fromFile, note: undefined, later: undefined }, {}, TAKES.keyword).dropped, []);
+  // Told nothing about the keys (a server that doesn't say), everything passes.
+  assert.deepEqual(ruleBody(fromFile, {}).body.note, "a field this page doesn't know");
+});
+
 test("what the page is told about a rule isn't saved back, nor the defaults", () => {
-  const body = ruleBody(fromFile, { verify: false, min_mentions: 1, stations: [], near: [] });
+  const { body, dropped } = ruleBody(fromFile, { verify: false, min_mentions: 1, stations: [], near: [] }, TAKES.keyword);
   for (const k of ["origin", "enabled", "kind", "verify", "min_mentions", "stations", "near"]) assert.equal(k in body, false, k);
+  assert.equal(dropped.includes("origin") || dropped.includes("enabled"), false, "what the page was told isn't counted as dropped");
 });
 
 test("an edited field replaces the old one, and an emptied one is left out", () => {
-  const body = ruleBody(fromFile, { severity: "critical", regex: lines("  \\bbridge closed\\b \n\n") });
+  const { body } = ruleBody(fromFile, { severity: "critical", regex: lines("  \\bbridge closed\\b \n\n") }, TAKES.keyword);
   assert.equal(body.severity, "critical");
   assert.deepEqual(body.regex, ["\\bbridge closed\\b"]);
-  assert.equal("regex" in ruleBody(fromFile, { regex: lines("") }), false);
+  assert.equal("regex" in ruleBody(fromFile, { regex: lines("") }, TAKES.keyword).body, false);
 });
 
 test("a station rule keeps its kind and its own fields", () => {
   const silent = { id: "quiet", kind: "silence", after_minutes: 5, level_db: -60, severity: "medium", origin: "page", enabled: false };
-  assert.deepEqual(ruleBody(silent, { severity: "high", after_minutes: 2.5 }),
-    { id: "quiet", kind: "silence", after_minutes: 2.5, level_db: -60, severity: "high" });
-  assert.deepEqual(ruleBody(null, { id: "ta", kind: "traffic", severity: "low", stations: [] }), { id: "ta", kind: "traffic", severity: "low" });
+  assert.deepEqual(ruleBody(silent, { severity: "high", after_minutes: 2.5 }, TAKES.silence),
+    { body: { id: "quiet", kind: "silence", after_minutes: 2.5, level_db: -60, severity: "high" }, dropped: [] });
+  assert.deepEqual(ruleBody(null, { id: "ta", kind: "traffic", severity: "low", stations: [] }, TAKES.traffic).body, { id: "ta", kind: "traffic", severity: "low" });
 });
 
 const station = { name: "Coast FM", language: "es-ES", translate_to: ["en"], priority: 3, disabled: null };

@@ -113,11 +113,12 @@ function Central() {
              description="Either way the central server stores, searches and alerts on the text with its own rules and languages; no audio crosses.">
       <dl className="m-defs">
         <dt>Pull</dt>
-        <dd>On the central Wavescribe, open Stations, Add a station, Another Wavescribe, and give this node's URL and a read token.</dd>
+        <dd>On the central Wavescribe, open Find → On the internet → Other ways to add → From another Wavescribe, and give this node's URL and a read token.</dd>
         <dt>Push, from behind NAT</dt>
         <dd>
-          Make a push token on the central server. Then on each place add an output to <code>http://central:8765/feed/v1/ingest</code> with
-          events Every utterance and Alerts, a 5 s batch and the header <code>Authorization: Bearer &lt;token&gt;</code>.
+          Make a push token on the central server. Then on each place add a connection to <code>http://central:8765/feed/v1/ingest</code> that
+          sends every utterance, every 5 s, with the header <code>Authorization: Bearer &lt;token&gt;</code>. Alerts aren't sent: the central
+          server raises its own and ignores pushed ones.
         </dd>
       </dl>
     </Section>

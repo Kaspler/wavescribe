@@ -257,7 +257,7 @@ function Retention({ s }: { s: Any }) {
         <Field id="ret-audio" label="Keep speech audio (days)" hint={recOff ? "Recording is off for this run (--audio-days 0)." : "0 stops recording. Each utterance's audio replays from its time in the transcript."}>
           <Input id="ret-audio" type="number" min={0} step={0.5} value={audioDays} disabled={recOff} onChange={(e) => setAudioDays(e.target.value)} />
         </Field>
-        <Field id="ret-text" label="Keep text (days)" hint="0 keeps text with no age limit. Four talk stations add roughly 11–14 GB a year.">
+        <Field id="ret-text" label="Keep text (days)" hint="0 keeps text with no age limit. Four talk stations add about 11 GB a year.">
           <Input id="ret-text" type="number" min={0} step={1} value={textDays} onChange={(e) => setTextDays(e.target.value)} />
         </Field>
       </div>

@@ -21,7 +21,7 @@ export const watchOf = (r: { stations: { id: string; running: boolean }[] }) =>
 /** The first free short id for a new receiver: a, b, c… */
 export const nextId = (taken: string[]) => "abcdefghijklmnopqrstuvwxyz".split("").find((c) => !taken.includes(c)) || `rx${taken.length + 1}`;
 
-/** Makes a dongle a receiver as Settings, Receivers would: centred on FM, at the gain that suits
+/** Makes a dongle a receiver as Settings → Receivers would: centred on FM, at the gain that suits
  * most antennas. Both can be changed there afterwards. */
 export async function makeReceiver(serial: string, taken: string[]): Promise<string> {
   const id = nextId(taken);
@@ -44,7 +44,7 @@ export function RxSwitch({ ids, value, onChange, note }: { ids: string[]; value:
 }
 
 /** Where a page that needs a receiver has none: a dongle that's plugged in becomes one and starts
- * on `what` in one press, without a trip to Settings first. Settings, Receivers stays the place
+ * on `what` in one press, without a trip to Settings first. Settings → Receivers stays the place
  * to choose among several dongles by serial. */
 export function UseDongle({ dongles, tools, what, then, look }: { dongles: Any[]; tools: boolean; what: string; then: (id: string) => Promise<void>; look: () => Promise<unknown> }) {
   if (!tools || !dongles.length) {
@@ -61,7 +61,7 @@ export function UseDongle({ dongles, tools, what, then, look }: { dongles: Any[]
     <>
       <p className="m-line">
         {one ? "A dongle is" : `${dongles.length} dongles are`} plugged in, not in use yet. One press makes {one ? "it" : "one"} a
-        receiver; its centre and gain can be changed later under <a className="rd-link" href="#/settings/receivers">Settings, Receivers</a>.
+        receiver; its centre and gain can be changed later under <a className="rd-link" href="#/settings/receivers">Settings → Receivers</a>.
       </p>
       <div className="m-actions">
         <ActButton variant="primary" icon="antenna" run={async () => then(await makeReceiver(dongles[0].serial, []))}>

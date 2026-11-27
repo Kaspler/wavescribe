@@ -16,7 +16,7 @@ import { type Step, defaultStep, hasChannels, keyStep, rasterKhz, snap, stepChoi
 /** The gains an RTL-SDR's tuner offers, in dB. */
 export const GAINS = [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
 /** A few gains named by what they are for, low to high: the rest are under "More". The tuner
- * has no automatic gain (a receiver's own gain is set under Settings, Receivers). */
+ * has no automatic gain (a receiver's own gain is set under Settings → Receivers). */
 const GAIN_WORDS: [number, string][] = [[20.7, "Low"], [29.7, "Medium"], [38.6, "High"], [49.6, "Highest"]];
 /** At most one retune this often: a burst of steps (a key or a button held down) becomes a few
  * retunes, each to the latest frequency asked for, not one per step. */
@@ -102,7 +102,7 @@ export class Player {
 /** A receiver tuned by hand from the page (radio/live.py): the receivers, the one in use, what it
  * is tuned to (`st`, while it is open: the views of an open receiver below, and those drawn from
  * them, are drawn only then), the question the server asked before it would tune (acknowledge,
- * busy), and the sound. Listen's tuner and the dial on Find, On the air share it, so a receiver tuned on one is
+ * busy), and the sound. Listen's tuner and the dial on Find → On the air share it, so a receiver tuned on one is
  * tuned on the other. `from`: which of the two this is. `first`: a frequency to tune and play as
  * soon as a receiver is chosen. */
 export function useTuner(from: "find" | "listen", first: () => Any | null = () => null) {

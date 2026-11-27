@@ -39,7 +39,7 @@ function raster(lo: number, hi: number, stepKhz: number, band: Any | null): numb
 
 // -- the tab ---------------------------------------------------------------------------------
 
-/** A frequency handed over from Find, On the air (`listenTo`), read once. */
+/** A frequency handed over from Find → On the air (`listenTo`), read once. */
 function handedOver(): Any | null {
   try {
     const hand = JSON.parse(sessionStorage.getItem(HANDOFF) || "null");

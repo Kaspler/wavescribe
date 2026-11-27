@@ -54,7 +54,7 @@ function PlayRow({ st }: { st: Station }) {
   const why = st.kind === "remote" ? "Text only: no sound crosses from another Wavescribe."
     : on ? (S.live[st.id]?.connected ? null : stateOf(st.id).detail || "Not connected yet.")
     : !S.canControl ? "Only the Wavescribe machine can start stations."
-    : st.disabled ? "Switched off under Settings, Stations."
+    : st.disabled ? "Switched off under Settings → Stations."
     : !st.available ? st.reason || "Unavailable."
     : !S.status?.ready ? "Wavescribe is still starting." : null;
   const state = on ? (st.listen_only_run ? T.playingOnly : stateOf(st.id).label) : "stopped";

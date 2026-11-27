@@ -1,5 +1,5 @@
 // Radio: find what's on the air with an idle receiver, see what was heard here and turn a frequency
-// into a station (Find stations, On the air); what was found, to play (Listen, On the air here); set
+// into a station (Find → On the air); what was found, to play (Listen → On the air here); set
 // up the receivers and the region, and decide what is kept of radio that isn't broadcast (Settings)
 // (src/wavescribe/radio/service.py).
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -91,7 +91,7 @@ function policyLine(cls: string, policies: Any): string {
     p.export ? "it may leave this machine" : "it stays on this machine",
   ];
   if (!p.quote_in_alerts) parts.push("alerts don't quote it");
-  return `${what}${cls === "digital" ? " like private radio" : ""}: ${parts.join(", ")}. Settings, Storage and privacy changes this.`;
+  return `${what}${cls === "digital" ? " like private radio" : ""}: ${parts.join(", ")}. Settings → Storage and privacy changes this.`;
 }
 
 /** The nearest channel of the band at `mhz` (its channel list or raster), else `mhz` to the kHz. */
@@ -153,7 +153,7 @@ const real = (s: Signal) => !s.spur && s.privacy !== "digital";
 
 const loading = (error: string | null) => <p className="m-loading">{error ? `Couldn't load the radio: ${error}` : "Loading…"}</p>;
 
-/** Find stations, On the air: sweep a band, keep a frequency as a station, and what was heard here. */
+/** Find → On the air: sweep a band, keep a frequency as a station, and what was heard here. */
 export function OnTheAir() {
   const { v, error, reload, job, setJob, running } = useRadio();
   const tuner = useTuner("find");
@@ -189,7 +189,7 @@ export function OnTheAir() {
     <>
       {[...new Set(bare.map((w) => w.privacy))].map((c) => CLASSES[c]?.name || c).join(" and ")} radio is shown as it's caught and not kept,
       so what {and(bare.map((w) => watchWords(w, v.bands)))} {bare.length === 1 ? "catches" : "catch"} shows only in Read while it runs.
-      Change what's kept under <a className="rd-link" href="#/settings/storage">Settings, Storage and privacy</a>.
+      Change what's kept under <a className="rd-link" href="#/settings/storage">Settings → Storage and privacy</a>.
     </>
   );
   return (
@@ -208,7 +208,7 @@ export function OnTheAir() {
   );
 }
 
-/** Settings, Receivers: the dongles, set up and tuned, the region whose band plan names what they
+/** Settings → Receivers: the dongles, set up and tuned, the region whose band plan names what they
  * hear, and the signals each makes itself. */
 export function ReceiversPage() {
   const { v, error, job, setJob, running, reload } = useRadio();
@@ -228,7 +228,7 @@ export function ReceiversPage() {
   );
 }
 
-/** Settings, Storage and privacy: what's kept of each kind of radio. */
+/** Settings → Storage and privacy: what's kept of each kind of radio. */
 export function RadioKept() {
   const { v, error, reload } = useRadio();
   if (!v) return loading(error);
@@ -328,7 +328,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
     const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
     const w = watchOn(r.id);
     // A watch hears its channels, not where the receiver is tuned: its window is those, drawn and
-    // said, and the tuning is left to Settings, Receivers.
+    // said, and the tuning is left to Settings → Receivers.
     const heard = w && s.state === "stations" ? watchListening(w.watch, v.bands) : null;
     const t = w && s.state === "stations"
       ? { ...s, ...(heard ? { lo: heard.lo, hi: heard.hi, on: listeningWords(heard) } : {}), words: `watching ${watchListensWords(w.watch, v.bands)}`, watch: w.id }
@@ -700,7 +700,7 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
 }
 
 /** `held`: radio stations the region change would make less strict, waiting for the operator's
- * word in Settings, Stations, where each station is managed. */
+ * word in Settings → Stations, where each station is managed. */
 function Region({ v, reload, held }: { v: Any; reload: () => Promise<void>; held: number }) {
   useEffect(() => {
     if (!toRegion) return;
@@ -730,7 +730,7 @@ function Region({ v, reload, held }: { v: Any; reload: () => Promise<void>; held
         <div className="m-note" role="status">
           <p>
             {held === 1 ? "One radio station keeps its" : `${held} radio stations keep their`} earlier, stricter kind of radio
-            until you confirm the change under <a className="rd-link" href="#/settings/stations">Settings, Stations</a>.
+            until you confirm the change under <a className="rd-link" href="#/settings/stations">Settings → Stations</a>.
           </p>
         </div>
       )}
@@ -777,7 +777,7 @@ function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (devic
         {result.phase === "error"
           ? <>{who} couldn't scan: {result.error}.</>
           : <>{who} heard nothing {result.what ? `on ${placeWords({ band: result.band, channel: null, label: result.what }, v.bands)}` : "in its last scan"}. Is its antenna connected?</>}
-        {choices ? " Try another receiver:" : " Check the antenna and its cable, or raise the gain under Settings, Receivers."}
+        {choices ? " Try another receiver:" : " Check the antenna and its cable, or raise the gain under Settings → Receivers."}
       </p>
       {choices && (
         <div className="m-actions">
@@ -1131,7 +1131,7 @@ const byInterest = (a: Any, b: Any) =>
 
 const FIRST_ROWS = 12;
 
-/** Listen, On the air here: what scans found from this place, broadcast first, each one press from
+/** Listen → On the air here: what scans found from this place, broadcast first, each one press from
  * playing through a receiver (the tuner below). Before the first scan, that scan in one press; with
  * no receiver yet, a plugged-in dongle put to use for it. */
 export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
@@ -1200,12 +1200,12 @@ export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
             {heard.length > shown.length && (
               <><button type="button" className="rd-link" onClick={() => setAll(true)}>Show all {heard.length}</button>. </>
             )}
-            Other bands, and adding any of these as a station, under <a className="rd-link" href="#/add/air">Find, On the air</a>.
+            Other bands, and adding any of these as a station, under <a className="rd-link" href="#/add/air">Find → On the air</a>.
           </p>
         </>
       ) : v.heard.length ? (
         <p className="m-line">
-          Everything found here so far is under My stations. <a className="rd-link" href="#/add/air">Find, On the air</a> scans
+          Everything found here so far is under My stations. <a className="rd-link" href="#/add/air">Find → On the air</a> scans
           other bands.
         </p>
       ) : (

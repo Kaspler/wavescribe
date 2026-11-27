@@ -6,6 +6,7 @@ import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangPicker, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
 import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } from "./api";
+import { and } from "./bands";
 import { lines, ruleBody } from "./drafts";
 import { SummarySchedule } from "./SummarySchedule";
 
@@ -197,8 +198,11 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
     setSaving(true);
     setRegexErr(null);
     try {
-      onSaved(await post("/rules", ruleBody(r.id ? r : null, fields())));
-      toast("Rule saved");
+      const { body, dropped } = ruleBody(r.id ? r : null, fields(), v.rule_keys?.[kind]);
+      onSaved(await post("/rules", body));
+      toast(dropped.length
+        ? `Rule saved without ${dropped.length === 1 ? "the key" : "the keys"} ${and(dropped)} from alerts.toml, which this version doesn't take`
+        : "Rule saved");
     } catch (e) {
       const msg = (e as Error).message;
       if (words && /: regex /.test(msg)) setRegexErr(msg.replace(/^rule [^:]+: /, ""));
@@ -272,7 +276,7 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
             </Field>
             {topicOpts.length > 0 && (
               <Field label="Ready-made word lists" wide
-                     hint={`Topics with words per language, from config/keywords. Lists exist in ${Object.keys(v.packs || {}).map(langNameEn).join(", ") || "no language yet"}; other stations need words of your own.`}>
+                     hint={`Topics with a word list for each language, from config/keywords. Wavescribe ships one list, for one language, as an example; here there are lists in ${Object.keys(v.packs || {}).map(langNameEn).join(", ") || "no language yet"}. Words of your own and a rule described in plain language work in any language.`}>
                 <ChoiceChips label="Topics" options={topicOpts.map((t) => [t, t.replace(/_/g, " ")] as [string, string])} value={topics} onChange={setTopics} />
               </Field>
             )}

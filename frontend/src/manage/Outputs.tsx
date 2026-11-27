@@ -24,7 +24,7 @@ export function Outputs() {
                description="Send alerts, and optionally every utterance, to other programs: Home Assistant, Node-RED, n8n, a chat bot, ntfy, or a central Wavescribe. Text and metadata only; audio stays here."
                actions={!editing && <>
                  <Button variant="primary" icon="plus" onClick={() => setEditing({})}>New connection</Button>
-                 <Button icon="send" onClick={() => setEditing({ events: ["utterance", "alert"], batch_s: 5, name: "central", url: "http://central:8765/feed/v1/ingest", headers: { Authorization: "" } })}>
+                 <Button icon="send" onClick={() => setEditing({ events: ["utterance"], batch_s: 5, name: "central", url: "http://central:8765/feed/v1/ingest", headers: { Authorization: "" } })}>
                    Push to a central Wavescribe
                  </Button>
                </>}>
@@ -111,6 +111,8 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   const [enabled, setEnabled] = useState(o.enabled ?? true);
   const [headers, setHeaders] = useState<[string, string][]>(Object.entries(o.headers || {}) as [string, string][]);
   const [why, setWhy] = useState<string | null>(null);
+  // A central Wavescribe's ingest takes utterances only: it runs its own rules (docs/FEED.md).
+  const central = /\/feed\/v1\/ingest\/?$/.test(url.trim());
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
   const save = async () => {
@@ -141,7 +143,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
       <div className="m-form">
         <Field id="o-name" label="Name" hint="Yours for it, shown in the delivery log."><Input id="o-name" value={name} placeholder="home-assistant" onChange={(e) => setName(e.target.value)} /></Field>
         <Field id="o-url" label="URL" hint="Where to send: the other program's webhook address."><Input id="o-url" type="url" value={url} placeholder="https://…" className="mono" onChange={(e) => setUrl(e.target.value)} /></Field>
-        <Field label="Send" hint="Every utterance too, if the other program wants all the text."><ChoiceChips label="Events" options={[["alert", "Alerts"], ["utterance", "Every utterance"]]} value={events} onChange={setEvents} /></Field>
+        <Field label="Send" hint={central ? "Every utterance: a central Wavescribe raises its own alerts from the text, with its own rules, and ignores alerts pushed to it." : "Every utterance too, if the other program wants all the text."}><ChoiceChips label="Events" options={[["alert", "Alerts"], ["utterance", "Every utterance"]]} value={events} onChange={setEvents} /></Field>
         <Field id="o-sev" label="Alerts from" hint="This severity and up.">
           <Select id="o-sev" value={sev} onChange={(e) => setSev(e.target.value)} options={[...SEVERITIES].reverse().map((s) => [s, SEV_WORD[s]] as [string, string])} />
         </Field>
