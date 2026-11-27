@@ -848,6 +848,13 @@ class Server:
         tool = self.offered.get(name) if isinstance(name, str) else None
         if tool is None:
             raise BadParams(f"no tool {name!r}")
+        if not tool.control and isinstance(args, dict):  # digest and now's speak, without it
+            for key, _ in next(t for t in TOOLS if t.name == tool.name).control_args:
+                if key in args:
+                    raise BadParams(
+                        f"{key} needs control, which this server was started without "
+                        "(wavescribe mcp --allow-control)"
+                    )
         check(args, tool.schema)
         if not self._slots.acquire(blocking=False):
             return _result(f"{MAX_CALLS} tool calls are already running; try again", error=True)

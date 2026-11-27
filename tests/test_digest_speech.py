@@ -399,7 +399,12 @@ def test_an_agent_may_read_a_digest_aloud_only_with_allow_control(tmp_path: Path
         tools = {t["name"]: t for t in mcp.request("tools/list")["result"]["tools"]}
         assert "speak" not in tools["digest"]["inputSchema"]["properties"]
         speak = {"name": "now", "arguments": {"station": "b", "speak": True}}
-        assert mcp.request("tools/call", speak)["error"]["code"] == -32602
+        error = mcp.request("tools/call", speak)["error"]
+        assert error == {  # what to do about it, rather than that there is no such argument
+            "code": -32602,
+            "message": "Invalid params: speak needs control, which this server was started "
+            "without (wavescribe mcp --allow-control)",
+        }
         mcp.close()
 
         mcp = Mcp(url_of(web.server), "--allow-control", cwd=tmp_path)
