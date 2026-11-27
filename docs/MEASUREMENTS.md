@@ -82,7 +82,7 @@ live VAD settings. All models on MLX on the M1 Max.
 | Translation busy, two stations | 44% | **15%** |
 | ASR time per utterance while translating | 0.30 s | 0.22 s (no contention) |
 | Peak RSS | 5.4 GB | 5.8 GB |
-| pt → uk | **invents content** | correct, once the prompt names the language |
+| Into Ukrainian | **invents content** | correct, once the prompt names the language |
 
 Qwen3.5's English is usually more natural, and it repairs ASR errors ("Estrela Amadoura" →
 "Estrela Amadora"; a garbled "contradions for baralhar" → "contradicts attempts to confuse"). It
@@ -132,7 +132,7 @@ samples; the CSV stays in `data/soak/`).
 **2026-11-09, MADLAD-400 first results.** MADLAD-400 3B int8 (CTranslate2, 4 CPU threads, beam
 2) translates pt-PT → en well on synthetic and live speech: 2–5 s per 12–19 s utterance (RTF ≈
 0.2–0.28 per station). Errors are mostly ASR mishearings carried into the translation. **It must
-not be used for Ukrainian as it stands:** pt-PT → uk directly produced fluent, invented content at
+not be used for Ukrainian as it stands:** translating into it directly produced fluent, invented content at
 beam sizes 1, 2 and 4 (a sentence about restoring a town's water came out as an evacuation ending
 "by the end of 2014"). Pivoting through English mostly worked, but at beam 2 it answered in the
 wrong language. Secondary languages therefore go through the LLM, `models.toml` lists `uk` in

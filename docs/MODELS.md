@@ -99,9 +99,8 @@ radio, every Portuguese sentence of 20+ characters scored p(pt) ≥ 0.14, and ly
 clips mostly ≤ 0.013, so the flag fires below 0.05. Shorter texts get no verdict ("Foi preso."
 reads as Romanian). Languages py3langid doesn't know get no verdict either.
 
-**Alert translations.** On a synthetic civil-protection bulletin, Qwen3.5-9B's English and
-Ukrainian were accurate except for one idiom: *Última hora* ("breaking news") came out as "Last
-hour" / "Остання година".
+**Alert translations.** On a synthetic civil-protection bulletin, Qwen3.5-9B's translation was
+accurate except for one idiom: *Última hora* ("breaking news") came out as "Last hour".
 
 **Remarks instead of translations.** Given recognition gone wrong, Qwen3.5-9B sometimes writes
 about the text instead of translating it ("I cannot translate this word…", "the meaning is
