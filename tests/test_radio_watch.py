@@ -135,15 +135,15 @@ def test_a_watch_that_is_neither_a_band_nor_a_range_is_a_config_error(
             load_stations(path)
 
 
-def test_a_watch_its_device_cant_hear_all_of_is_refused_with_a_centre_that_works() -> None:
+def test_a_watch_its_device_cant_hear_all_of_is_out_of_reach_with_a_centre_that_works() -> None:
     far = SdrDevice("a", "00001234", 445_000_000, 30.0, RATE)
-    with pytest.raises(ConfigError, match=r"center_mhz = 445\.75625"):
-        build_station(
-            {"id": "w", "language": "en", "device": "a", "watch": "pmr446", "acknowledge": True},
-            "test",
-            {"a": far},
-            "cept",
-        )
+    station = build_station(
+        {"id": "w", "language": "en", "device": "a", "watch": "pmr446", "acknowledge": True},
+        "test",
+        {"a": far},
+        "cept",
+    )
+    assert "Centre it on 445.75625 MHz" in station.out_of_reach
 
 
 EDGE = """

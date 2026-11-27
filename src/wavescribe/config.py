@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 from wavescribe.dsp import (
+    DEFAULT_CHANNEL_HZ,
     MAX_CHANNEL_HZ,
     MIN_CHANNEL_HZ,
     MODES,
@@ -131,6 +132,10 @@ class Station:
     # looser (remote.py).
     privacy_set: str | None = None
     languages: tuple[str, ...] = ()  # language "auto": the ones it may be (none: any)
+    # Why its receiver can't hear it where that is tuned (a sentence naming both), or None. Such
+    # a station stays listed, unavailable, and never stops the rest from starting: tuning the
+    # receiver where it hears the station brings it back (``heard_by``).
+    out_of_reach: str | None = None
 
     @property
     def translation_targets(self) -> tuple[str, ...]:
@@ -353,8 +358,55 @@ def _pick_frequency(fm_mhz: tuple[float, ...], device: SdrDevice, mode: str = "w
     return min(heard, key=lambda f: abs(f - device.center_hz)) if heard else None
 
 
-def _reach_mhz(device: SdrDevice, mode: str = "wfm") -> float:
-    return (device.sample_rate / 2 - margin_hz(mode)) / 1e6
+def hears(device: SdrDevice, freq_hz: float, mode: str, channel_hz: float | None = None) -> bool:
+    """Whether a device, where it is tuned, hears a channel: inside its window, and for a
+    narrow channel clear of the spike at its centre (``off_centre``)."""
+    return in_band(freq_hz, device.center_hz, device.sample_rate, mode) and off_centre(
+        freq_hz, device.center_hz, mode, channel_hz
+    )
+
+
+def heard_by(station: Station, device: SdrDevice) -> bool:
+    """Whether ``device``, tuned as it is, hears ``station``: one of its frequencies
+    (``hears``), or every channel of a watch. The rule ``build_station`` applies when it says a
+    station is out of reach, for every kind of station; a retune asks it of each candidate
+    centre (radio/service.py)."""
+    t = station.sdr
+    if t is None:
+        return False
+    if t.watch is not None:
+        from wavescribe.radio.watch import outside
+
+        width = t.channel_hz or DEFAULT_CHANNEL_HZ[t.mode]
+        return not outside(t.watch, device.center_hz, device.sample_rate, width)
+    freqs = [round(f * 1e6) for f in station.mhz or station.fm_mhz] or [t.freq_hz]
+    return any(hears(device, f, t.mode, t.channel_hz) for f in freqs)
+
+
+def _receiver_tip(centre_hz: float, instead: bool = False) -> str:
+    from wavescribe.radio.bandplan import mhz_text
+
+    return (f"Centre it on {mhz_text(round(centre_hz) / 1e6)} MHz{' instead' * instead} "
+            "(Settings → Receivers, or center_mhz in the stations file)")  # fmt: skip
+
+
+def _unheard(name: str, device: SdrDevice, freq_hz: int, mode: str,
+             freqs: list[int]) -> str:  # fmt: skip
+    """Why ``device`` doesn't hear the station ``name`` where it is tuned, and where to tune it."""
+    from wavescribe.radio.bandplan import mhz_text
+    from wavescribe.radio.words import receiver_name
+
+    rx, mhz = receiver_name(device.id), mhz_text(freq_hz / 1e6)
+    centre = freq_hz - OFF_CENTRE_HZ[mode]
+    if any(in_band(f, device.center_hz, device.sample_rate, mode) for f in freqs):
+        return (f"Receiver {rx} is tuned right onto {name} ({mhz} MHz), where every dongle has a "
+                f"spike of its own that would hold the squelch open. "
+                f"{_receiver_tip(centre, instead=True)}.")  # fmt: skip
+    reach = device.sample_rate / 2 - margin_hz(mode)
+    lo, hi = (device.center_hz - reach) / 1e6, (device.center_hz + reach) / 1e6
+    return (f"Receiver {rx} doesn't hear {name} where it is tuned now: {mhz} MHz is outside "
+            f"{lo:.2f} to {hi:.2f} MHz. {_receiver_tip(centre)}, or give {name} another "
+            "receiver.")  # fmt: skip
 
 
 def default_mode(freq_hz: float, region: str | None) -> str:
@@ -530,7 +582,8 @@ def build_station(
     # fm_mhz is broadcast FM; a bare mhz is demodulated as its band plan says.
     mode = d.get("mode") or ("wfm" if not mhz else default_mode(freqs[0] * 1e6, region))
 
-    sdr, privacy, band, privacy_region = None, "broadcast", None, None
+    name = str(d.get("name", station_id))
+    sdr, privacy, band, privacy_region, out_of_reach = None, "broadcast", None, None, None
     if (device_id := d.get("device")) is not None:
         device = (devices or {}).get(device_id)
         if device is None:
@@ -538,16 +591,6 @@ def build_station(
             raise ConfigError(f"{where}: unknown device {device_id!r} (known: {known})")
         if mode not in MODES:
             raise ConfigError(f"{where}: 'mode' must be one of {', '.join(MODES)}")
-        watch, watch_width = None, None
-        if d.get("watch") is not None:
-            watch, mode, watch_width = _plan_watch(d, device, region, where)
-        freq = watch.middle_hz if watch else _pick_frequency(freqs, device, mode)
-        if freq is None:
-            key = "mhz" if mhz else "fm_mhz"
-            raise ConfigError(
-                f"{where}: none of {key} {list(freqs)} is within device {device_id!r}'s band "
-                f"({device.center_hz / 1e6:.2f} MHz ± {_reach_mhz(device, mode):.2f})"
-            )
         deemphasis = d.get("deemphasis_us", 50.0)
         if not isinstance(deemphasis, int | float) or deemphasis <= 0:
             raise ConfigError(f"{where}: 'deemphasis_us' must be a positive number (50 or 75)")
@@ -559,6 +602,21 @@ def build_station(
         if channel and not MIN_CHANNEL_HZ <= channel * 1e3 <= MAX_CHANNEL_HZ:
             raise ConfigError(f"{where}: 'channel_khz' must be {MIN_CHANNEL_HZ / 1e3:g} to "
                               f"{MAX_CHANNEL_HZ / 1e3:g}, e.g. 12.5 or 25")  # fmt: skip
+        watch, watch_width = None, None
+        if d.get("watch") is not None:
+            watch, mode, watch_width, out_of_reach = _plan_watch(d, device, region, where, name)
+            freq = watch.middle_hz
+        elif not freqs:
+            raise ConfigError(f"{where}: give the frequency it is on: mhz, or fm_mhz for "
+                              "broadcast FM")  # fmt: skip
+        else:
+            # The frequency nearest the centre among those the device hears. None heard: the
+            # station is kept, out of reach, until the device is tuned where it hears one.
+            every = [round(f * 1e6) for f in freqs]
+            heard = [f for f in every if hears(device, f, mode, channel and channel * 1e3)]
+            freq = min(heard or every, key=lambda f: abs(f - device.center_hz))
+            if not heard:
+                out_of_reach = _unheard(name, device, freq, mode, every)
         from wavescribe.radio.bandplan import STRICTNESS, stricter
 
         width = WFM_CHANNEL_HZ if mode == "wfm" else channel * 1e3 if channel else watch_width
@@ -580,13 +638,6 @@ def build_station(
             band = watch.spec
         if floor is not None and stricter(floor, privacy):
             privacy_region, privacy = privacy, floor
-        if not watch and not off_centre(freq, device.center_hz, mode, channel and channel * 1e3):
-            raise ConfigError(
-                f"{where}: {freq / 1e6:.5f} MHz is at the centre of device {device_id!r}, where "
-                "every dongle has a spike of its own that would hold this channel's squelch "
-                f"open. Give the device another center_mhz, e.g. "
-                f"{(freq - OFF_CENTRE_HZ[mode]) / 1e6:.5f}"
-            )
         sdr = SdrTuning(device, freq, float(deemphasis), mode,
                         channel * 1e3 if channel else watch_width, squelch, watch)  # fmt: skip
 
@@ -620,7 +671,7 @@ def build_station(
 
     return Station(
         id=station_id,
-        name=str(d.get("name", station_id)),
+        name=name,
         language=language,
         translate_to=translate_to,
         alert_languages=alert_languages,
@@ -641,13 +692,15 @@ def build_station(
         transcribe=d.get("transcribe", True),
         translate=d.get("translate", True),
         languages=languages,
+        out_of_reach=out_of_reach,
     )
 
 
 def _plan_watch(
-    d: Mapping[str, Any], device: SdrDevice, region: str | None, where: str
-) -> tuple[Watch, str, float]:
-    """A watch's window (radio/watch.py), which its device must hear all of."""
+    d: Mapping[str, Any], device: SdrDevice, region: str | None, where: str, name: str
+) -> tuple[Watch, str, float, str | None]:
+    """A watch's window (radio/watch.py), and why its device doesn't hear all of it where it
+    is tuned, if it doesn't (``heard_by``)."""
     from wavescribe.dsp.activity import THRESHOLD_DB
     from wavescribe.radio.bandplan import AUTO
     from wavescribe.radio.watch import WatchError, outside, plan_centre, plan_window
@@ -667,14 +720,17 @@ def _plan_watch(
         )
     except WatchError as e:
         raise ConfigError(f"{where}: {e}") from None
+    unheard = None
     if missing := outside(watch, device.center_hz, device.sample_rate, width):
-        raise ConfigError(
-            f"{where}: device {device.id!r} doesn't hear all of {watch.label} ({len(missing)} "
-            f"of its {len(watch.channels)} channels are outside its band). Give the device "
-            f"center_mhz = {plan_centre(watch, width, device.sample_rate) / 1e6:.5f}, or watch "
-            "the part it hears"
+        from wavescribe.radio.words import receiver_name
+
+        tip = _receiver_tip(plan_centre(watch, width, device.sample_rate))
+        unheard = (
+            f"Receiver {receiver_name(device.id)} doesn't hear all of {watch.label} where it is "
+            f"tuned now: {len(missing)} of the {len(watch.channels)} channels {name} watches are "
+            f"outside what it hears. {tip}, or have {name} watch the part it hears."
         )
-    return watch, mode, width
+    return watch, mode, width, unheard
 
 
 def _check_language(tag: object, where: str) -> None:

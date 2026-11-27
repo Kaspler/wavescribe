@@ -345,6 +345,8 @@ def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
                 "running": s.id in status,
                 "signal_db": status.get(s.id, {}).get("signal_db"),
                 "clipped": status.get(s.id, {}).get("clipped"),
+                # Why the receiver, tuned as it is, doesn't hear it; None when it does.
+                "out_of_reach": s.out_of_reach,
             } for s in stations],
         })  # fmt: skip
     out: dict[str, Any] = {"devices": devices, "rtl_sdr": _which("rtl_sdr")}
@@ -442,10 +444,12 @@ def update_device(app: App, device_id: str, changes: dict[str, Any]) -> dict[str
         app._reload()
     except ConfigError as e:
         raise AdminError(str(e)) from e
-    still = {s.id for s in app.config.stations}
     for sid in running:
-        if sid in still:  # a page station the new tuning can't hear is left off, with its reason
-            app.pipeline.add_station(app._runtime(app.config.get(sid)))
+        s = next((x for x in app.config.stations if x.id == sid), None)
+        if s is not None and sid not in app.unavailable:
+            app.pipeline.add_station(app._runtime(s))
+        else:  # left out by the new tuning: stopped, and not started again by the next serve
+            app.stop_station(sid)
     if watching:
         monitor(app, device_id, True)
     return next(x for x in receivers_view(app)["devices"] if x["id"] == device_id)

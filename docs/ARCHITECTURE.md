@@ -645,6 +645,15 @@ catalogue or the band, and an idle receiver retuned so the frequency fits (250 o
 its centre, away from DC). Retuning a busy one needs `retune: true` and stops its stations;
 page stations it can no longer hear stay, with their reason.
 
+**Stations a receiver doesn't hear.** Whether a receiver hears a station is one rule for every
+kind (`config.heard_by`): one of its frequencies inside the window and, for a narrow channel,
+clear of the centre's spike; every channel of a watch inside the window. A station that fails it
+is built anyway, with `Station.out_of_reach` saying why and where to centre the receiver, and the
+app lists it unavailable with that reason, never starts it (`open_source` refuses it too), and
+stops it if a retune leaves it out. It is not a config error: a stations file with one starts,
+and `doctor` warns `out of reach` instead of counting a page change not applied. A page change that would
+tune a station where its receiver doesn't hear it is refused with the same reason.
+
 **Listening by hand** (`radio/live.py`, `/api/manage/live/<receiver>`, the page's **Tune by
 hand**). A `LiveReceiver` is one more consumer of the dongle's shared `rtl_sdr` pipe, like a
 station's channel, but nothing is segmented, transcribed or stored: its audio goes to the page's

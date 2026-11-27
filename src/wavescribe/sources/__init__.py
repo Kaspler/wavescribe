@@ -46,6 +46,8 @@ class AudioSource(Protocol):
 
 def open_source(station: Station) -> AudioSource:
     """The station's default source: its SDR when one is configured, else its internet stream."""
+    if station.out_of_reach:  # its receiver is tuned where it doesn't hear it
+        raise ValueError(station.out_of_reach)
     if station.sdr is not None and station.sdr.watch is not None:
         from wavescribe.radio.catalog import Catalog
         from wavescribe.sources.watch import WatchSource

@@ -70,11 +70,13 @@ def test_scan_then_tune_a_channel_it_found(radio: Running) -> None:
                             "with another receiver.")  # fmt: skip
     far = {"device": "x", "mhz": 145.5, "language": "en"}
     status, err = radio.call("POST", "/api/manage/radio/tune", far)
-    assert status == 400 and err["code"] == "retune"
+    assert status == 400 and err["code"] == "retune" and err["holders"] == [st["name"]]
     status, ham = radio.call("POST", "/api/manage/radio/tune", {**far, "retune": True})
     assert status == 200 and ham["privacy"] == "amateur"
     assert radio.app.config.devices[0].center_hz == 145_250_000
-    assert st["id"] in radio.app.config_errors  # the walkie-talkie channel is out of reach now
+    # The walkie-talkie channel is out of reach now: listed, unavailable, with the reason.
+    assert radio.app.unavailable[st["id"]].startswith("Receiver X doesn't hear PMR446")
+    assert radio.app.config_errors == {}
 
 
 def test_a_receiver_another_program_holds_says_so(radio: Running, monkeypatch) -> None:

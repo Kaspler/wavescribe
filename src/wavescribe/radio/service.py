@@ -87,7 +87,8 @@ class RadioService:
                 "center_mhz": d.center_hz / 1e6, "span_mhz": d.sample_rate / 1e6,
                 "busy": busy, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
-                              "running": s.id in running} for s in on if s.sdr],
+                              "running": s.id in running, "out_of_reach": s.out_of_reach}
+                             for s in on if s.sdr],
             })  # fmt: skip
         return out
 
@@ -316,7 +317,11 @@ class RadioService:
         here = {s.id for s in self.app.config.stations}
         running = set(self.app.running())
         for sid in paused["stations"]:
-            if sid in here and sid not in running:  # as they ran: listen-only stays so
+            if sid not in here or sid in running:
+                continue
+            if sid in self.app.unavailable:  # switched off, or no longer heard: it stays off
+                self.app.stop_station(sid)
+            else:  # as they ran: listen-only stays so
                 self.app.pipeline.add_station(self.app._runtime(self.app.config.get(sid)))
         if paused["monitor"]:
             with contextlib.suppress(AdminError):

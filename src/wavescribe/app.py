@@ -94,6 +94,7 @@ def _push_node(node: str) -> str:
 # Why a station that is switched off doesn't run (``App._mark_unavailable``).
 SWITCHED_OFF = "switched off on the page"
 UNCONFIRMED = "switched off until you confirm you may receive it under the region chosen"
+NO_SOURCE = "no SDR device or stream URL configured"
 
 
 def _plays_meanwhile(reason: str) -> str:
@@ -432,20 +433,24 @@ class App:
         return replace(s, transcribe=False) if off else s
 
     def _mark_unavailable(self) -> None:
+        """Why each station that can't start can't, worked out afresh from the config."""
         page = {s.get("id"): s for s in self.settings.get("station") or []}
         overrides = self.settings.get("overrides") or {}
         for s in self.config.stations:
-            if s.remote:
-                self.unavailable.pop(s.id, None)
-            elif not (s.sdr or s.stream or s.stream_hls):
-                self.unavailable.setdefault(s.id, "no SDR device or stream URL configured")
+            reason = None
             if s.disabled:
                 # Off on the page, or (settings._build) by a region whose class wants a
                 # confirmation; the error says which, and what to do.
                 by_page = (page.get(s.id) or overrides.get(s.id) or {}).get("disabled")
-                self.unavailable[s.id] = SWITCHED_OFF if by_page else UNCONFIRMED
-            elif self.unavailable.get(s.id) in (SWITCHED_OFF, UNCONFIRMED):
-                del self.unavailable[s.id]
+                reason = SWITCHED_OFF if by_page else UNCONFIRMED
+            elif s.out_of_reach:  # its receiver is tuned where it doesn't hear it
+                reason = s.out_of_reach
+            elif not (s.remote or s.sdr or s.stream or s.stream_hls):
+                reason = NO_SOURCE
+            if reason:
+                self.unavailable[s.id] = reason
+            else:
+                self.unavailable.pop(s.id, None)
         for sid, err in self.config_errors.items():
             if any(s.id == sid for s in self.config.stations):
                 log.warning("page change to %s not applied: %s", sid, err)
@@ -738,6 +743,9 @@ class App:
             self.settings.update(mutate)
 
     def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str) -> Station:
+        """The station as the change would leave it, or why the change can't be made. A change
+        that tunes it where its receiver doesn't hear it is refused with what to do: a station
+        its receiver was moved away from takes other changes (a name, a language) as before."""
         draft = self.settings.snapshot()
         mutate(draft)
         config, errors = effective_config(self.base, draft)
@@ -746,7 +754,12 @@ class App:
         bad = {k: v for k, v in errors.items() if k.startswith("device:")}
         if bad:
             raise ChangeError(next(iter(bad.values())))
-        return config.get(sid)
+        station = config.get(sid)
+        prev = next((s for s in self.config.stations if s.id == sid), None)
+        moved = prev is None or not prev.out_of_reach or prev.sdr != station.sdr
+        if station.out_of_reach and moved and not station.disabled:
+            raise ChangeError(station.out_of_reach)
+        return station
 
     def _acknowledgement(self, sid: str) -> object:
         """What a station's saved confirmation says: its page entry, its override, the file."""
@@ -841,7 +854,7 @@ class App:
                 prev = old.get(sid)
                 planned = self._replan(s, prev)
                 if prev is not None and prev != s:
-                    if s.disabled:
+                    if s.disabled or s.out_of_reach:  # off, or its receiver no longer hears it
                         self.stop_station(sid) if sid in self.running() else None
                     elif not s.remote:  # without a model for it, it goes on without text
                         self.pipeline.update_station(self._runtime(s), planned)

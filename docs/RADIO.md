@@ -215,13 +215,18 @@ stations file, a watch is a station with `watch` in place of `mhz`:
 [[station]]
 id = "walkies"
 name = "PMR446"
-device = "a"             # its center_mhz must let it hear the whole band; the error says where
+device = "a"             # tuned where it hears the whole band, or the watch can't run
 watch = "pmr446"         # a band id from `radio bands`, or a range: [446.0, 446.1]
 language = "auto"
 languages = ["es-ES", "en"]   # optional: the languages it may be
 acknowledge = true
 # threshold_db = 8       # how far above a channel's noise counts as a transmission
 ```
+
+A watch doesn't hold its receiver where it is. If the receiver is tuned where it doesn't hear
+the whole window, from the stations file or because it was moved on the page later, Wavescribe
+starts as usual and lists the watch as unavailable, with where to centre the receiver (as
+`wavescribe serve` prints and `wavescribe doctor` warns).
 
 How it works:
 

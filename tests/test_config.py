@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import re
 from pathlib import Path
 
 import pytest
@@ -152,7 +153,7 @@ def test_station_on_a_device_gets_the_frequency_it_can_hear() -> None:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"station": [{"id": "s", "fm_mhz": 99.0, "device": "a"}]}, "within device 'a'"),
+        ({"station": [{"id": "s", "device": "a"}]}, "give the frequency it is on"),
         ({"station": [{"id": "s", "fm_mhz": 94.4, "device": "b"}]}, "unknown device 'b'"),
         ({"device": [{"id": "a", "serial": "has space", "center_mhz": 94.0, "gain_db": 20}]},
          "no spaces"),
@@ -185,7 +186,13 @@ def test_invalid_sdr_configs(change: dict, message: str) -> None:
         parse_stations({**SDR_RAW, **change}, P)
 
 
-def test_a_narrowband_channel_on_the_devices_centre_is_refused() -> None:
+def test_a_station_its_device_doesnt_hear_is_kept_out_of_reach() -> None:
+    far = parse_stations({**SDR_RAW, "station": [{"id": "s", "fm_mhz": 99.0, "device": "a"}]}, P)
+    assert far.get("s").out_of_reach.startswith("Receiver A doesn't hear s where it is tuned")
+    assert far.get("s").sdr.freq_hz == 99_000_000  # where it would be heard, for the page
+
+
+def test_a_narrowband_channel_on_the_devices_centre_is_out_of_reach() -> None:
     def station(mhz: float, centre: float, **more: object) -> dict:
         return {
             "defaults": {"language": "pt-PT"},
@@ -194,15 +201,18 @@ def test_a_narrowband_channel_on_the_devices_centre_is_refused() -> None:
             "station": [{"id": "s", "mhz": mhz, "device": "a", "acknowledge": True, **more}],
         }
 
+    def unheard(*a: float, **more: object) -> str | None:
+        return parse_stations(station(*a, **more), P).get("s").out_of_reach
+
     # Walkie-talkie channel 1 on a device set to the round number next to it: 6.25 kHz off.
-    with pytest.raises(ConfigError, match=r"at the centre of device 'a'.*e\.g\. 445\.75625"):
-        parse_stations(station(446.00625, 446.0), P)
-    with pytest.raises(ConfigError, match="at the centre"):  # a 25 kHz channel reaches further
-        parse_stations(station(156.8, 156.78, channel_khz=25), P)
-    parse_stations(station(446.00625, 445.99), P)  # 16 kHz off, a 12.5 kHz channel
-    parse_stations(station(118.1, 118.075, mode="am"), P)  # the next 25 kHz airband channel
+    assert re.search(r"tuned right onto s .*Centre it on 445\.75625 MHz", unheard(446.00625, 446.0))
+    # A 25 kHz channel reaches further.
+    assert "right onto" in unheard(156.8, 156.78, channel_khz=25)
+    assert unheard(446.00625, 445.99) is None  # 16 kHz off, a 12.5 kHz channel
+    assert unheard(118.1, 118.075, mode="am") is None  # the next 25 kHz airband channel
     # A broadcast station is far above the spike and may sit on it.
-    parse_stations({**SDR_RAW, "station": [{"id": "s", "fm_mhz": 94.0, "device": "a"}]}, P)
+    fm = parse_stations({**SDR_RAW, "station": [{"id": "s", "fm_mhz": 94.0, "device": "a"}]}, P)
+    assert fm.get("s").out_of_reach is None
 
 
 def test_a_device_carries_its_frequency_correction() -> None:

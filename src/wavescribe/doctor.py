@@ -441,6 +441,14 @@ class Doctor:
             self.add(g, "sources", WARN, f"no receiver or stream URL for: {', '.join(silent)}",
                      "give each a stream URL, or a [[device]] that can hear its frequency "
                      "(docs/RADIO.md)")  # fmt: skip
+        # Not a page change that failed: the station is kept, and serve lists it unavailable.
+        unheard = [s for s in config.stations if s.out_of_reach and not s.disabled]
+        if unheard:
+            more = f" (and {len(unheard) - 1} more)" if len(unheard) > 1 else ""
+            self.add(g, "out of reach", WARN, f"{unheard[0].out_of_reach}{more}",
+                     "retune the receiver under Settings → Receivers, or change its center_mhz; "
+                     "until then serve lists the station as unavailable",
+                     stations={s.id: s.out_of_reach for s in unheard})  # fmt: skip
 
         if self.serve.no_alerts:
             self.add(g, "alerts", SKIP, "off (--no-alerts)")

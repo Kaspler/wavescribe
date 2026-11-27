@@ -307,8 +307,14 @@ def test_config_errors_are_the_ones_serve_stops_with(folder: Path) -> None:
     assert status(found, "page changes") == FAIL and "ui.toml" in found["page changes"][0].summary
 
     (folder / "config" / "ui.toml").write_text("[overrides.dos]\nfm_mhz = [104.0]\n")
+    found = run(folder)
+    # The page moved dos off its receiver: serve lists it unavailable; nothing failed to apply.
+    assert status(found, "page changes") == OK and status(found, "out of reach") == WARN
+    assert found["out of reach"][0].summary.startswith("Receiver A doesn't hear dos")
+
+    (folder / "config" / "ui.toml").write_text('[overrides.dos]\nlanguage = "not a tag"\n')
     found = run(folder, "missing")
-    assert status(found, "page changes") == WARN  # the page moved dos off its receiver
+    assert status(found, "page changes") == WARN  # a change that doesn't check out
     assert (
         status(found, "station") == FAIL
         and "unknown station 'missing'" in found["station"][0].summary
