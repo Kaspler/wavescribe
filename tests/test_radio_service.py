@@ -104,6 +104,20 @@ def test_a_receiver_another_program_holds_says_so(radio: Running, monkeypatch) -
     assert radio.call("GET", "/api/manage/radio")[1]["receivers"][0]["held_elsewhere"] is None
 
 
+def test_the_scan_job_names_the_receiver_and_only_the_end_of_its_serial(radio: Running) -> None:
+    import json
+    import time
+
+    status, out = radio.call("POST", "/api/manage/radio/scan", {"device": "x", "band": "pmr446"})
+    assert status == 200 and out["scan"]["device"] == "x" and out["scan"]["serial"] == "…042"
+    assert abs(out["scan"]["started"] - time.time()) < 60  # seconds since 1970
+    wait_for(lambda: radio.call("GET", "/api/manage/radio/scan")[1]["scan"]["phase"] == "done")
+    view = radio.call("GET", "/api/manage/radio")[1]
+    assert "SN0042" not in json.dumps(view["scan"])
+    assert view["receivers"][0]["serial"] == "SN0042"  # in full: Settings matches a stick
+    assert view["last_scan"]["serial"] == "SN0042"  # the saved scan, as it was
+
+
 def test_a_scan_saved_before_scans_named_their_receiver_is_named_by_its_serial(
     radio: Running, tmp_path: Path
 ) -> None:

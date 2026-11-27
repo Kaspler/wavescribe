@@ -34,7 +34,7 @@ from wavescribe.radio.bandplan import (
     region_bands,
 )
 from wavescribe.radio.catalog import Catalog
-from wavescribe.radio.words import joined, receiver_name, sentence, them
+from wavescribe.radio.words import joined, masked_serial, receiver_name, sentence, them
 from wavescribe.refusal import Refusal
 
 if TYPE_CHECKING:
@@ -296,7 +296,9 @@ class RadioService:
             cancel = threading.Event()
             self._cancel = cancel
             self._job = {
-                "device": d.id, "serial": d.serial, "band": band, "what": what,
+                # The receiver by its id, and its dongle by the serial's last digits only: the
+                # job's words can be pasted anywhere (the full serial is in ``receivers``).
+                "device": d.id, "serial": masked_serial(d.serial), "band": band, "what": what,
                 "start_mhz": start / 1e6, "stop_mhz": stop / 1e6, "gain_db": gain,
                 "phase": "starting", "done": 0, "total": 1, "started": time.time(),
                 "signals": [], "spectrum": None, "error": None, "watch_s": watch_s,

@@ -664,7 +664,11 @@ receiver, and on each of those dongles) says when another program holds it: `{pi
 other_wavescribe, reason}`, else null. `busy_code` says it in one word for the page, the first
 that applies: `scan`, `live` (the hand tuner), `watch` (a running watch, even beside stations),
 `station`, `monitor` (the antenna test's spectrum monitor), `other_program` (`held_elsewhere`),
-else null. `country` is the ISO 3166 code of the chosen region where that region is one country's
+else null. Each receiver keeps its full `serial`, so Settings can match a stick to its letter;
+the scan job (`scan`) names its receiver by `device` and its dongle by the serial's last
+characters only (`masked_serial`: `"…042"`), since a job's words get pasted into reports; the
+saved scans and `last_scan` keep the full serial. The job's `started` is when it began (Unix
+seconds). `country` is the ISO 3166 code of the chosen region where that region is one country's
 band plan (`jp` → `"JP"`), else null: the CEPT countries and ITU Regions 1 to 3 are many
 countries, and a region left to the computer's setting is not one chosen. It comes from macOS's USB registry (`radio/holders.py`:
 `ioreg -r -c IOUSBHostDevice -l`, read at most every 3 s, nothing opened): a `UsbExclusiveOwner`

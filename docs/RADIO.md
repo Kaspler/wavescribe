@@ -20,8 +20,8 @@ gain, and its sample rate under *Advanced*, where *Test the antenna* shows its l
 Listing the dongles opens none of them, so a running station is never disturbed. In a stations file, a
 receiver is a `[[device]]` with an `id` and the dongle's `serial` (docs/HARDWARE.md).
 Messages and the `radio` commands' output name a receiver by its id (`receiver A`), never by
-its serial, so you can paste them anywhere; a dongle no receiver uses shows only the last
-digits of its serial (`…1234`). The full serials are under Settings → **Receivers**, in
+its serial, so you can paste them anywhere; a dongle no receiver uses, and a scan while it
+runs, show only the last digits of its serial (`…1234`). The full serials are under Settings → **Receivers**, in
 `wavescribe doctor` and in the logs.
 
 ## Finding stations
