@@ -198,8 +198,7 @@ Roughly €150–250 in total (2026 prices; they vary a lot by shop and country)
 strong transmitter even with manual gain, lower the gain or add the band-stop filter for the
 other bands. A 12-bit receiver such as the Airspy R2 handles it much better
 ([comparison](https://www.rtl-sdr.com/comparison-several-sdrs-degradation-broadcast-fm-frequencies/)),
-but Wavescribe supports only RTL-SDR dongles. HackRF is 8-bit, with no front-end filtering and
-images around FM, so it's a poor fit.
+but Wavescribe supports only RTL-SDR dongles.
 
 ## Planning frequencies
 
@@ -225,20 +224,19 @@ clusters that wide and give each cluster a receiver:
 
 - Use **manual gain, not AGC**: strong FM overloads 8-bit dongles.
 - An RTL-SDR at **2.4 MS/s** gives about 2.2 MHz usable ([Limits today](#limits-today)), which is 2–5 real stations per dongle.
-- **librtlsdr 2.0.3 or newer** is needed for the V4L/V4Lc's R828S. Osmocom added V4L support in
-  May 2026 and released it in 2.0.3 (August 2026); the Homebrew bottle is 2.0.3, so no source build
-  is needed on macOS (rtl-sdr.com's V4L guide still describes one; it predates the release).
+- **librtlsdr 2.0.3 or newer** is needed for the V4L/V4Lc's R828S. The Homebrew bottle is 2.0.3,
+  so no source build is needed on macOS (rtl-sdr.com's V4L guide describes one; it predates that
+  release).
   radioconda bundles 2.0.2, which doesn't know the V4L. The driver recognises the V4L by its
   EEPROM strings `RTLSDRBlog` / `Blog V4L` (an exact match): never change them.
 - **pyrtlsdr ≥0.4 won't import against Homebrew librtlsdr** (missing `rtlsdr_set_dithering`), and it's GPL-3.0 anyway: never import it.
-- **SDR++** (nightly arm64) is fine for surveying, but multi-VFO with audio sinks hangs on macOS ([#1702](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1702)). Don't use it as the engine. Its macOS app bundles its own librtlsdr, and rtl-sdr.com's V4L guide listed it as not supporting the V4L yet, so the first checks use the command-line tools instead (`rtl_power` plus `scripts/fm_survey.py` for a band survey).
+- **SDR++** (nightly arm64) is fine for surveying, but multi-VFO with audio sinks hangs on macOS ([#1702](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1702)). Its macOS app bundles its own librtlsdr, and rtl-sdr.com's V4L guide listed it as not supporting the V4L yet, so the first checks use the command-line tools instead (`rtl_power` plus `scripts/fm_survey.py` for a band survey).
 - **GQRX** 2.17.7 (Homebrew cask) bundles a librtlsdr that knows the V4 but not the V4L (no
   `Blog V4L` in `Gqrx.app/Contents/Frameworks/librtlsdr.0.dylib`), despite the datasheet saying
   GQRX ships current drivers. Opened directly, a V4L is driven as a plain R820T: the V4L guide says
   that gets no signal. Let Homebrew's driver own the dongle and feed GQRX over loopback instead:
   `rtl_tcp -d 00001234 -a 127.0.0.1 -p 1234`, then the GQRX device string
   `rtl_tcp=127.0.0.1:1234,psize=16384`. Only one program can hold a dongle at a time.
-- **SDRplay on macOS:** closed-source API service, started by hand, with ARM library-discovery problems ([#1431](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1431)). That's one reason we didn't pick it.
 - **De-emphasis is 50 µs in Europe** (75 µs in the Americas).
 
 ## First steps with the dongles
@@ -264,10 +262,9 @@ check that an approved dongle reconnects with no prompt after a replug or a rebo
    identifies itself as an R820T) and `RTL-SDR Blog V4 Lite Detected`. `-t` is a benchmark for an
    older tuner, so it ends with `No E4000 tuner found, aborting.`: that's expected.
 
-   SoapySDR (`brew install soapysdr soapyrtlsdr`) isn't needed. Homebrew builds its Python bindings
-   for Homebrew's own Python, not for Wavescribe's 3.12 environment, so using it means building
-   the bindings yourself. Wavescribe uses an `rtl_sdr` pipe instead: it needs nothing but
-   librtlsdr, and a subprocess is the cleanest licence boundary (librtlsdr is GPL).
+   SoapySDR (`brew install soapysdr soapyrtlsdr`) isn't needed. Wavescribe uses an `rtl_sdr`
+   pipe: it needs nothing but librtlsdr, and a subprocess is the cleanest licence boundary
+   (librtlsdr is GPL).
 
 2. **A unique serial per dongle.** They usually ship with the same serial (`00000001`), and with
    three plugged in there's no telling A from B. Plug in **one at a time**:
