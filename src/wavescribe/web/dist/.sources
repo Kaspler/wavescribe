@@ -35,7 +35,7 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 5cf365c275d29b68bcecfcc67d184d5a98b9eba9 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
-e5b60da0dfe4cbaab415608017231c7c251fefa8 frontend/src/manage/AlertRules.tsx
+880e6e6edcfc4bf0d4429f96c92e65a6f7a1370d frontend/src/manage/AlertRules.tsx
 bc4745619c3c4c68660dde6f41a1967b23ddb91d frontend/src/manage/Caught.tsx
 e15f3bc903c9c4bdd5aa784612bb289a6e41880a frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
@@ -54,6 +54,7 @@ cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
 6b91179049171a2432ae1de4e117cf92766a5c4d frontend/src/manage/Stations.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
+a97e225d9dc60961a53cc6f62c404a50a220094e frontend/src/manage/SummarySchedule.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 47c4ad535418aee64a382ea6ef57f54fed29c04d frontend/src/manage/bands.ts
@@ -63,6 +64,7 @@ cd991cc8d9ac21eb246ad56b656c52953ce32c18 frontend/src/manage/dial.ts
 ce63599971e621a20fb0bcd3ad41a3004884b99a frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
+9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts
 e6ed73dd60af45d78a3329145f07162df9edcd94 frontend/src/manage/spokenLang.ts
 f5e793910f621fcdfdf41b1adc9042d947e1d536 frontend/src/manage/tuner.tsx
 fb0a5294c93a167651049804cde69afa4390cb38 frontend/src/reading/Alerts.tsx
@@ -106,6 +108,7 @@ f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 b50fefc9f4b54ab13ceda864de461221783e9a01 frontend/tests/overload.test.mjs
 44dfbe97e4979802238794a4caff62c2f06dab7b frontend/tests/refusals.test.mjs
 e20c7d7fafaf0a1f629a6ee14b43e16fdf2015ce frontend/tests/router.test.mjs
+22d02e9a624ee8121e0831585df67a837b746e5f frontend/tests/schedule.test.mjs
 d984f6c5104858f54615228ae2fd61382b96950c frontend/tests/spokenLang.test.mjs
 352b4cb6a777fb575995ce51ae0ce8cbd9344f83 frontend/tests/startRefusal.test.mjs
 80b3c255b77e0c157f6e8ceb2aef9cc1f30d54d9 frontend/tests/tabs.test.mjs

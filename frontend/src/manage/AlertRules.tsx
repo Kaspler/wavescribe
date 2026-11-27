@@ -7,6 +7,7 @@ import {
 } from "../components/ui";
 import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } from "./api";
 import { lines, ruleBody } from "./drafts";
+import { SummarySchedule } from "./SummarySchedule";
 
 /** Said under the page's heading, whatever follows: what an alert can and can't be relied on for. */
 const NOT_A_WARNING_SYSTEM = (
@@ -30,9 +31,12 @@ function RulesPage() {
   if (!v) return <p className="m-loading">{error ? `Couldn't load the rules: ${error}` : "Loading…"}</p>;
   if (!v.enabled) {
     return (
-      <Section id="al-off" title="Alerts are off">
-        <p className="m-line">This run was started with --no-alerts. Without config/alerts.toml the example rules in config/alerts.example.toml apply; copy it to make your own.</p>
-      </Section>
+      <>
+        <Section id="al-off" title="Alerts are off">
+          <p className="m-line">This run was started with --no-alerts. Without config/alerts.toml the example rules in config/alerts.example.toml apply; copy it to make your own.</p>
+        </Section>
+        <SummarySchedule stations={v.stations} />
+      </>
     );
   }
   const redraw = (fresh: Any) => setData({ ...fresh, stations: v.stations });
@@ -56,15 +60,7 @@ function RulesPage() {
       </Section>
       <TryRules stations={v.stations} />
       <Delivery v={v} reload={reload} />
-      <Section id="al-sum" title="Summaries on a schedule">
-        {/* No route reads or writes [digest]: the page names where it is set, and no more. */}
-        <p className="m-line">
-          A summary of what was said every hour, or every few minutes, shown as a notification without the alerts' sound
-          and read aloud if asked: it is set in <code>[digest]</code> in {v.file ? v.file.split(/[\\/]/).pop() : "alerts.toml"}, which
-          Wavescribe reads when it starts. This page doesn't show or change it. A summary at any time is under Summary on the
-          reading page.
-        </p>
-      </Section>
+      <SummarySchedule stations={v.stations} />
     </>
   );
 }
