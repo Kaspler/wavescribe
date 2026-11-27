@@ -40,7 +40,7 @@ from wavescribe.pipeline import (
 )
 from wavescribe.refusal import Refusal, said
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
-from wavescribe.rules import VIEW_KEYS, LlmRule, parse_rule
+from wavescribe.rules import RULE_KEYS, VIEW_KEYS, LlmRule, parse_rule
 from wavescribe.settings import (
     OVERRIDE_KEYS,
     Settings,
@@ -1417,6 +1417,9 @@ class App:
             "enabled": self.alerter is not None,
             "file": str(path) if path else None,
             "rules": rules,
+            # The keys each kind of rule takes, so that the page saves an edited rule without
+            # one alerts.toml has that this version doesn't (save_rule refuses those).
+            "rule_keys": {kind: sorted(keys) for kind, keys in RULE_KEYS.items()},
             "packs": packs,
             "delivery": {
                 "notify_language": config.notify_language if config else None,

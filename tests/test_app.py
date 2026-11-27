@@ -261,6 +261,10 @@ def test_the_page_keeps_no_key_a_rule_or_a_setting_does_not_take(node: Running) 
     status, view = node.call("POST", "/api/manage/rules", rule)
     shown = next(r for r in view["rules"] if r["id"] == "bridge")
     assert (shown["origin"], shown["enabled"], shown["kind"]) == ("page", True, "keyword")
+    # The page is told which keys each kind takes, so it can leave out any other before saving.
+    takes = view["rule_keys"]
+    assert "min_mentions" in takes["keyword"] and "min_mention" not in takes["keyword"]
+    assert takes["silence"] == ["after_minutes", "id", "kind", "level_db", "severity", "stations"]
     status, view = node.call("POST", "/api/manage/rules", {**shown, "severity": "high"})
     assert status == 200
     assert kept()["rule"] == [
