@@ -31,6 +31,7 @@ export const S = {
   ask: null as string | null,
   askCode: null as string | null,
   digest: null as string | null,
+  digestCode: null as string | null,
   mtModel: null as string | null,
   noncommercial: [] as string[],
   node: { name: "", url: "" },
@@ -106,6 +107,7 @@ export async function loadState() {
   S.ask = state.ask;
   S.askCode = state.ask_code ?? null;
   S.digest = state.digest ?? null;
+  S.digestCode = state.digest_code ?? null;
   S.mtModel = state.mt_model;
   S.noncommercial = state.noncommercial || [];
   S.node = state.node;

@@ -97,16 +97,36 @@ test("who said a point is named in a summary of several stations, not of one", (
   assert.equal(saidBy(a.points[0], answer({ kind: "now" })), null);
 });
 
-test("a failure keeps the server's sentence and says whether trying again can help", () => {
-  assert.deepEqual(failureOf(503, "2 digests are already being made; try again in a minute", { retryAfter: "60" }),
-    { kind: "busy", text: "2 digests are already being made; try again in a minute.", retry: true, retryAfter: 60 });
-  assert.equal(failureOf(403, "asking from another machine is off").kind, "off_here");
-  assert.equal(failureOf(409, "a digest needs an LLM translator").kind, "unavailable");
-  assert.equal(failureOf(409, "x").retry, false);
-  assert.equal(failureOf(500, "the digest couldn't be made: boom").retry, true);
-  assert.equal(failureOf(400, "minutes must be a number from 1 to 1440").kind, "refused");
-  assert.equal(failureOf(401, undefined).kind, "token");
+test("a refusal is read from its code, and keeps the server's sentence", () => {
+  const busy = failureOf(503, { error: "2 digests are already being made; try again in a minute", code: "busy", id: "x" },
+    { retryAfter: "60", now: 1000 });
+  assert.deepEqual(busy, { kind: "busy", code: "busy", text: "2 digests are already being made; try again in a minute.",
+    retry: true, retryAt: 1060, maxMinutes: null });
+  // Busy says when to try again even without Retry-After: the server's minute.
+  assert.equal(failureOf(503, { error: "the model's queue is full", code: "busy" }, { now: 1000 }).retryAt, 1060);
+  for (const code of ["no_store", "no_llm", "not_set_up"]) {
+    const f = failureOf(409, { error: "why", code });
+    assert.deepEqual([f.kind, f.code, f.retry], ["unavailable", code, false], code);
+  }
+  const far = failureOf(400, { error: "from another machine, minutes must be a number from 1 to 360", code: "bad_window", max_minutes: 360 });
+  assert.deepEqual([far.kind, far.maxMinutes, far.retry], ["refused", 360, false]);
+  assert.equal(failureOf(400, { error: "until must be a time that has passed", code: "bad_until" }).maxMinutes, null);
+  // An id another request took: asked again, the summary has a new one.
+  assert.equal(failureOf(400, { error: "a digest with this id is already being made", code: "id_in_use" }).retry, true);
+  const failed = failureOf(500, { error: "the digest couldn't be made: boom", code: "failed", id: "x" });
+  assert.deepEqual([failed.kind, failed.retry, failed.retryAt], ["failed", true, null]);
+  // A code the page doesn't know: the server's words, by its status.
+  const odd = failureOf(409, { error: "something new", code: "new_reason" });
+  assert.deepEqual([odd.kind, odd.code, odd.text, odd.retry], ["refused", "new_reason", "Something new.", false]);
+  assert.equal(failureOf(500, { error: "x", code: "new_reason" }).kind, "failed");
+});
+
+test("a refusal without a code is the gate's: a token, or this device not allowed", () => {
+  assert.equal(failureOf(401, { error: "a feed token is needed", token_required: true }).kind, "token");
+  assert.equal(failureOf(403, { error: "asking from another machine is off" }).kind, "off_here");
   assert.equal(failureOf(502, null).text, "The server answered 502.");
+  assert.equal(failureOf(502, null).kind, "failed");
+  assert.equal(failureOf(400, "not an object").kind, "refused");
 });
 
 test("the server's words stand as a sentence, otherwise unchanged", () => {

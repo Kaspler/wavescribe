@@ -168,6 +168,8 @@ export const T = {
   summaryOffWhat: {
     no_llm_here: "Summaries are written by the translation model: download it in Settings.",
     no_llm: "Whoever runs this Wavescribe can download the translation model it needs.",
+    no_store_here: "Summaries are made from what Wavescribe keeps: start it without --no-store.",
+    no_store: "Whoever runs this Wavescribe can start it so that it keeps what it hears.",
     remote_off: "Whoever runs this Wavescribe can allow it.",
   },
   languagesAndModels: "Languages and models",
@@ -178,6 +180,7 @@ export const T = {
   alertsInWindow: "Alerts announced in this time",
   took: (s: number) => `Took ${s} s`,
   tryAgain: "Try again",
+  tryAgainAt: (t: string) => `Try again at ${t}`,
   cantReach: "Couldn't reach Wavescribe: is it still running?",
   answerUnreadable: "The answer couldn't be read.",
   summaryReady: (n: number) => `Summary ready: ${n} point${n === 1 ? "" : "s"}.`,

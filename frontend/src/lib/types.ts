@@ -161,8 +161,10 @@ export interface PageState {
   ask: string | null;
   /** Why Ask is off, as a code: no_store, no_llm, not_set_up, remote_off, or unavailable. */
   ask_code?: string | null;
-  /** Why summaries (POST /api/digest) can't be had here, or null when they can. */
+  /** Why summaries (POST /api/digest) can't be had here, or null when they can, and why as a
+   * code: no_store, no_llm, not_set_up, remote_off, or unavailable. */
   digest?: string | null;
+  digest_code?: string | null;
   noncommercial: string[];
   audio_rate: number;
   recent: Utterance[];

@@ -12,7 +12,7 @@ import { P, visible } from "../lib/prefs";
 import { MAX_COLS, setCols } from "../lib/router";
 import { emit } from "../lib/store";
 import { V, showLine } from "../lib/view";
-import { type Answer, type Choice, type Failure, answerOf, digestBody, failureOf, nowBody, spokenSeconds } from "./digest";
+import { type Answer, type Choice, type Failure, answerOf, digestBody, failure, failureOf, nowBody, spokenSeconds } from "./digest";
 import { T } from "./strings";
 
 export interface Job {
@@ -86,17 +86,17 @@ async function fetchAnswer(job: Job | NowJob, body: Record<string, unknown>, sig
     });
     const data = await r.json().catch(() => null);
     if (!r.ok) {
-      job.failure = failureOf(r.status, data?.error, { retryAfter: r.headers.get("Retry-After") });
+      job.failure = failureOf(r.status, data, { retryAfter: r.headers.get("Retry-After") });
       job.state = "failed";
     } else {
       job.answer = answerOf(data);
       job.state = job.answer ? "done" : "failed";
-      if (!job.answer) job.failure = { kind: "failed", text: T.answerUnreadable, retry: true, retryAfter: null };
+      if (!job.answer) job.failure = failure("failed", T.answerUnreadable);
     }
   } catch {
     if (signal.aborted) job.state = "cancelled";
     else {
-      job.failure = { kind: "unreachable", text: T.cantReach, retry: true, retryAfter: null };
+      job.failure = failure("unreachable", T.cantReach);
       job.state = "failed";
     }
   }

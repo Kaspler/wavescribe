@@ -70,18 +70,18 @@ export function SummaryButton() {
   );
 }
 
-/** What can be done about summaries being off, by Ask's code for the same gate. */
-// What to do about summaries being off, from the Ask code (the same model answers both), or
-// `assumed` where the server refused one before the page heard why.
-function offWhat(assumed?: "no_llm"): { text: string; settings: boolean } | null {
-  const code = (S.ask ? S.askCode : null) ?? assumed;
+/** What can be done about summaries being off, by the server's code for why (/api/state's
+ * digest_code, or a refusal's): nothing beyond its sentence for a reason the page has no
+ * remedy for. */
+function offWhat(code: string | null): { text: string; settings: boolean } | null {
   if (code === "remote_off") return { text: T.summaryOffWhat.remote_off, settings: false };
   if (code === "no_llm") return S.manage ? { text: T.summaryOffWhat.no_llm_here, settings: true } : { text: T.summaryOffWhat.no_llm, settings: false };
+  if (code === "no_store") return { text: S.manage ? T.summaryOffWhat.no_store_here : T.summaryOffWhat.no_store, settings: false };
   return null;
 }
 
-function OffWhat({ assumed }: { assumed?: "no_llm" }) {
-  const what = offWhat(assumed);
+function OffWhat({ code }: { code: string | null }) {
+  const what = offWhat(code);
   if (!what) return null;
   return (
     <>
@@ -135,7 +135,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
       {S.digest ? (
         <div className="sum-off">
           <p className="sum-said">{T.summaryOff(S.digest)}</p>
-          <OffWhat />
+          <OffWhat code={S.digestCode} />
         </div>
       ) : !stations.length ? (
         <p className="sum-pick-for">{T.summaryNoStation}</p>
@@ -260,15 +260,32 @@ function Speech({ job }: { job: Job }) {
   return <p className="sum-speech" role="status">{text}</p>;
 }
 
-/** The server's sentence as it is, then what can be done about it. */
+/** The server's sentence as it is (a window too long in the page's words, with how long one may
+ * be), then what can be done about it. */
 function Failed({ f, again }: { f: Failure; again: () => void }) {
   return (
     <div className="sum-failed">
-      <p className="sum-said" dir="auto">{f.text}</p>
+      <p className="sum-said" dir="auto">{f.maxMinutes ? T.windowFar(f.maxMinutes / 60, S.canControl) : f.text}</p>
       {f.kind === "off_here" && <p className="sum-cost">{T.summaryOffWhat.remote_off}</p>}
-      {f.kind === "unavailable" && <OffWhat assumed="no_llm" />}
-      {f.retry && <Button size="sm" variant="secondary" icon="refresh" onClick={again}>{T.tryAgain}</Button>}
+      {f.kind === "unavailable" && <OffWhat code={f.code} />}
+      {f.retry && <Again f={f} again={again} variant="secondary" />}
     </div>
+  );
+}
+
+/** Try again; while the server is busy, not before the time it gave, which the button names. */
+function Again({ f, again, variant }: { f: Failure; again: () => void; variant: "secondary" | "ghost" }) {
+  const [, tick] = useState(0);
+  const wait = f.retryAt != null ? f.retryAt * 1000 - Date.now() : 0;
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => tick((n) => n + 1), wait + 100);
+    return () => clearTimeout(t);
+  }, [wait > 0]);
+  return (
+    <Button size="sm" variant={variant} icon="refresh" disabled={wait > 0} onClick={again}>
+      {wait > 0 ? T.tryAgainAt(hm(f.retryAt)) : T.tryAgain}
+    </Button>
   );
 }
 
@@ -353,7 +370,7 @@ export function NowLine({ id }: { id: string }) {
       ) : job.state === "failed" && job.failure ? (
         <div className="col-now-row">
           <p className="col-now-said" dir="auto">{job.failure.text}</p>
-          {job.failure.retry && <Button size="sm" variant="ghost" icon="refresh" onClick={() => askNow(id)}>{T.tryAgain}</Button>}
+          {job.failure.retry && <Again f={job.failure} again={() => askNow(id)} variant="ghost" />}
           {close}
         </div>
       ) : a && v ? (

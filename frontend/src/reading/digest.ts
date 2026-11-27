@@ -1,7 +1,8 @@
 // What the page asks POST /api/digest for and how it reads the answer (src/wavescribe/digest/,
 // web/digest.py): the windows a summary can cover, the request, which of the server's sentences
-// stand for the outcome and the lines each point opens. Plain functions over the server's JSON,
-// so they can be tested without a page; the words around them are in strings.ts.
+// stand for the outcome, the lines each point opens, and what its refusals' codes mean. Plain
+// functions over the server's JSON, so they can be tested without a page; the words around them
+// are in strings.ts.
 
 export const OUTCOMES = ["points", "nothing_said", "not_read", "nothing_stood_out", "unsourced"] as const;
 export type Outcome = (typeof OUTCOMES)[number];
@@ -179,14 +180,22 @@ export function saidBy(point: Point, a: Answer): string | null {
 /** Why an answer didn't come, for the page: "off_here" (this device may not use the model),
  * "unavailable" (no model or store in this run), "busy" (the queue was needed, or two are being
  * made), "failed" (the model failed), "refused" (the request can't be served as asked), "token"
- * (a read token is needed), "unreachable" (no answer at all). `text` is the server's sentence,
- * shown as it is; `retry` whether trying again later can help. */
+ * (a read token is needed), "unreachable" (no answer at all). `code` is the server's for it, and
+ * `text` its sentence, shown as it is; `retry` whether trying again can help, and `retryAt` when
+ * (busy: seconds since 1970, from Retry-After); `maxMinutes` the longest window, for a window
+ * refused as too long. */
 export interface Failure {
   kind: "off_here" | "unavailable" | "busy" | "failed" | "refused" | "token" | "unreachable";
+  code: string | null;
   text: string;
   retry: boolean;
-  retryAfter: number | null;
+  retryAt: number | null;
+  maxMinutes: number | null;
 }
+
+/** A failure without an answer from the server, or with one the page can't read. */
+export const failure = (kind: "failed" | "unreachable", text: string): Failure =>
+  ({ kind, code: null, text, retry: true, retryAt: null, maxMinutes: null });
 
 /** The server's words, set as a sentence of their own: it writes them to follow a colon. */
 export function asSentence(s: string): string {
@@ -195,17 +204,36 @@ export function asSentence(s: string): string {
   return t[0].toUpperCase() + t.slice(1) + (/[.!?…]$/.test(t) ? "" : ".");
 }
 
-export function failureOf(status: number, error: unknown, o: { retryAfter?: string | null } = {}): Failure {
-  const text = asSentence(typeof error === "string" && error ? error : `the server answered ${status}`);
-  const after = Number.parseInt(o.retryAfter ?? "", 10);
-  const retryAfter = Number.isFinite(after) && after > 0 ? after : null;
-  const kind: Failure["kind"] = status === 401 ? "token"
+/** The codes that mean no summary can be made in this run, as /api/state's digest_code says them
+ * too. */
+const OFF = ["no_store", "no_llm", "not_set_up"];
+
+/** A refusal from its `code` (web/digest.py): `busy` with when to try again, the run's reasons
+ * for having none, a window too long with how long one may be, the model failing, and an id
+ * another request took (asked again, it gets a new one). A refusal with no code is the gate's,
+ * before any digest is looked at: a read token wanted (401), or this device not allowed to use
+ * the model (403). Any other code is shown in the server's words. `now`: seconds since 1970. */
+export function failureOf(status: number, data: unknown, o: { retryAfter?: string | null; now?: number } = {}): Failure {
+  const d = (data && typeof data === "object" ? data : {}) as { error?: unknown; code?: unknown; max_minutes?: unknown };
+  const code = typeof d.code === "string" && d.code ? d.code : null;
+  const text = asSentence(typeof d.error === "string" && d.error ? d.error : `the server answered ${status}`);
+  const kind: Failure["kind"] = code === "busy" ? "busy"
+    : code === "failed" ? "failed"
+    : code && OFF.includes(code) ? "unavailable"
+    : code ? (status >= 500 ? "failed" : "refused")
+    : status === 401 ? "token"
     : status === 403 ? "off_here"
-    : status === 409 ? "unavailable"
-    : status === 503 ? "busy"
     : status >= 500 ? "failed"
     : "refused";
-  return { kind, text, retry: kind === "busy" || kind === "failed", retryAfter };
+  const after = Number.parseInt(o.retryAfter ?? "", 10);
+  const retryAt = kind === "busy" ? (o.now ?? Date.now() / 1000) + (Number.isFinite(after) && after > 0 ? after : 60) : null;
+  const max = Number(d.max_minutes);
+  return {
+    kind, code, text,
+    retry: kind === "busy" || kind === "failed" || code === "id_in_use",
+    retryAt,
+    maxMinutes: code === "bad_window" && Number.isFinite(max) && max > 0 ? max : null,
+  };
 }
 
 // -- reading aloud ---------------------------------------------------------------------------
