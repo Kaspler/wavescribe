@@ -593,6 +593,7 @@ def event_context(store: Store, stations_file: Path | None) -> tuple[dict[str, A
     file asked for by name that can't be read is an error. There is no URL, so no audio links:
     nothing here knows the address a server would be reached at."""
     from wavescribe.config import ConfigError, load_stations, resolve_stations_path
+    from wavescribe.events import NODE_ID
     from wavescribe.settings import Settings, effective_config
 
     try:
@@ -607,7 +608,11 @@ def event_context(store: Store, stations_file: Path | None) -> tuple[dict[str, A
             raise
     else:
         stations.update({s.id: s for s in config.stations})
-    return stations, {"name": (page.get("node") or {}).get("name") or "wavescribe", "url": None}
+    node = page.get("node") or {}
+    sender = {"name": node.get("name") or "wavescribe", "url": None}
+    if isinstance(node.get("id"), str) and NODE_ID.fullmatch(node["id"]):
+        sender["id"] = node["id"]  # as the running Wavescribe sends it; none before its first start
+    return stations, sender
 
 
 def print_events(rows: Iterable[dict[str, Any]], event: Callable[..., dict[str, Any]],
@@ -623,6 +628,9 @@ def print_events(rows: Iterable[dict[str, Any]], event: Callable[..., dict[str, 
 def cmd_search(args: argparse.Namespace) -> int:
     from wavescribe.store import HIT_END, HIT_START, Store
 
+    if not " ".join(args.query).strip(' "\u201c\u201d\u201e\u00ab\u00bb*'):
+        print("wavescribe: give words to search for, e.g. wavescribe search flood", file=sys.stderr)
+        return 2
     path = DATA_DIR / "wavescribe.db"
     if not path.exists():
         print(f"wavescribe: nothing stored yet ({path} doesn't exist)", file=sys.stderr)

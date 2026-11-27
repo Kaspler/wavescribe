@@ -170,6 +170,9 @@ def utterance_event(
     return out
 
 
+NODE_ID = re.compile(r"[0-9a-f]{12}")  # a machine's id in events (``App.node_id``)
+
+
 def _sender(node: Mapping[str, Any]) -> dict[str, Any]:
     """The machine an event comes from: its name, URL and, when it has one, its id."""
     out = {"name": node.get("name"), "url": node.get("url")}

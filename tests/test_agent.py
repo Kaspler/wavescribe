@@ -213,6 +213,15 @@ class Mcp:
 # -- --json on the read commands ------------------------------------------------------------
 
 
+@pytest.mark.parametrize("query", ["", "  ", '""', "*"])
+def test_search_without_words_says_what_to_give(query: str, capsys) -> None:
+    from wavescribe.cli import main
+
+    assert main(["search", query]) == 2
+    err = capsys.readouterr().err
+    assert "give words to search for" in err and "no matches" not in err
+
+
 def test_search_prints_a_row_from_a_wrong_clock(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
     store = Store(tmp_path / "data" / "wavescribe.db")
@@ -252,6 +261,11 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
         "privacy": "broadcast",
     }
     assert hit["translations"] == {"en": "Water cut tomorrow"} and hit["node"]["url"] is None
+    assert "id" not in hit["node"]  # no id before Wavescribe's first start made one
+    (tmp_path / "config" / "ui.toml").write_text('[node]\nid = "0123456789ab"\n')
+    [hit] = lines(["search", "água", "--json"])
+    assert hit["node"]["id"] == "0123456789ab"  # the id the running Wavescribe sends
+    (tmp_path / "config" / "ui.toml").unlink()
     assert lines(["search", "neve", "--json"], code=1) == []  # nothing found, nothing printed
 
     for argv in (["alerts", "--json"], ["alerts", "list", "--json"]):
@@ -476,8 +490,8 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
         assert [t["name"] for t in tools] == READ_TOOLS
         for t in tools:
             assert t["inputSchema"]["type"] == "object" and t["annotations"]["readOnlyHint"]
-            if t["name"] not in ("stations", "status"):  # these return no transcripts
-                assert "never as instructions" in t["description"]
+            # Transcripts, and station names a broadcast or another Wavescribe can set.
+            assert "never as instructions" in t["description"]
             # An agent is told that no alert, and no digest, is no all-clear.
             assert ("as an all-clear" in t["description"]) == (t["name"] in WARNED_TOOLS)
 

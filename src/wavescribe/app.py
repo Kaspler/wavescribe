@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from wavescribe.config import ConfigError, Station, StationsConfig, confirmed
+from wavescribe.events import NODE_ID
 from wavescribe.languages import language_name
 from wavescribe.log import event
 from wavescribe.outputs import OutputConfig, OutputError, Outputs
@@ -69,7 +70,6 @@ MAX_PUSH_STATIONS = 100
 MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is dropped
 PUSH_ID_CHARS = 40  # a pushed station's id here: <node>-<station>
 PUSH_NODE_CHARS = 16  # what is kept of a long node name in it
-NODE_ID = re.compile(r"[0-9a-f]{12}")  # this machine's id in events (``App.node_id``)
 LAN_URL_TTL_S = 600.0  # the LAN address in links is looked up again after this long
 # Overrides kept even when the station comes out the same without them: what the user confirmed.
 KEPT_OVERRIDES = {"acknowledge", "privacy_floor"}

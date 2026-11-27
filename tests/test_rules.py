@@ -271,6 +271,7 @@ def test_topics_in_no_pack_are_said_once_with_where_the_packs_were_looked_for(
 ) -> None:
     shutil.copy("config/alerts.example.toml", tmp_path / "alerts.toml")
     monkeypatch.chdir(tmp_path)  # no config/keywords here either
+    monkeypatch.setattr("wavescribe.alerts._SAID_MISSING", set())
     with caplog.at_level("WARNING", logger="wavescribe.alerts"):
         alerts = load_alerts(tmp_path / "alerts.toml")
     assert alerts.rules.packs == {}
@@ -279,6 +280,10 @@ def test_topics_in_no_pack_are_said_once_with_where_the_packs_were_looked_for(
         f"no keyword pack in {tmp_path / 'keywords'} or config/keywords has the topics of 10 "
         "alert rules, so they match nothing: civil_protection, "
     )
+    caplog.clear()  # the page reloads the file on every rule saved: said once a run, not each
+    with caplog.at_level("WARNING", logger="wavescribe.alerts"):
+        load_alerts(tmp_path / "alerts.toml")
+    assert caplog.records == []
 
 
 def test_the_example_regexes_cost_next_to_nothing(tmp_path: Path) -> None:

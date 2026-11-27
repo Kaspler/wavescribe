@@ -126,6 +126,9 @@ def read_alerts(path: Path) -> dict[str, Any]:
         raise ConfigError(f"{path}: {e}") from e
 
 
+_SAID_MISSING: set[tuple[str, str, str]] = set()  # missing-pack warnings already logged
+
+
 def _packs_dirs(path: Path | None, keywords_dir: Path) -> list[Path]:
     """Where keyword packs are looked for, in order: keywords/ beside the alerts file, so a
     config folder kept elsewhere (``--alerts``) brings its own, then config/keywords. A folder
@@ -217,8 +220,10 @@ def parse_alerts(
         topics = list(dict.fromkeys(t for ts in missing.values() for t in ts))
         rules_n = f"{len(missing)} alert rule" + ("s, so they match" if len(missing) > 1 else
                                                   ", so it matches")  # fmt: skip
-        log.warning("no keyword pack in %s has the topics of %s nothing: %s",
-                    " or ".join(str(d) for d in looked), rules_n, ", ".join(topics))  # fmt: skip
+        said = (" or ".join(str(d) for d in looked), rules_n, ", ".join(topics))
+        if said not in _SAID_MISSING:  # once a run: the page reloads this file on every save
+            _SAID_MISSING.add(said)
+            log.warning("no keyword pack in %s has the topics of %s nothing: %s", *said)
     return AlertConfig(
         rules=rules,
         actions=actions,
