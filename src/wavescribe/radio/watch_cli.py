@@ -187,6 +187,13 @@ def _arg(check: Any) -> Any:
     return parse
 
 
+def tunable_mhz(text: str) -> float:
+    """A frequency in MHz that the receiver tunes, in the words the page uses (dsp/)."""
+    from wavescribe.dsp import tunable_hz
+
+    return tunable_hz(text) / 1e6
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
     from wavescribe.cli import cmd_listen
@@ -428,7 +435,7 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
     p.set_defaults(func=cmd_watch)
 
     p = rsub.add_parser("catches", help="what watches caught and kept, with what was said")
-    p.add_argument("--mhz", type=float, help="one channel only")
+    p.add_argument("--mhz", type=_arg(tunable_mhz), help="one channel only")
     p.add_argument("--width", type=_arg(catch_width), default=0.0,
                    help="with --mhz: kHz either side")  # fmt: skip
     p.add_argument("--hours", type=_arg(catch_hours), default=24.0, help="this far back (0: all)")
@@ -438,7 +445,7 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
     p.set_defaults(func=cmd_catches)
 
     p = rsub.add_parser("note", help="name a frequency, note something about it, tag it")
-    p.add_argument("mhz", type=float, help="the frequency in MHz, e.g. 446.00625")
+    p.add_argument("mhz", type=_arg(tunable_mhz), help="the frequency in MHz, e.g. 446.00625")
     p.add_argument("--name", help="what to call it (also its name in `radio heard`)")
     p.add_argument("--note", help="anything worth remembering about it")
     p.add_argument("--tag", nargs="*", help="tags, e.g. family hiking")

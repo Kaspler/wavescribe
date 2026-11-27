@@ -163,6 +163,25 @@ def test_out_of_range_frequencies_say_which_way() -> None:
     assert "medium wave" not in str(above.value)
 
 
+@pytest.mark.parametrize(
+    ("given", "said"),
+    [
+        ("1e303", "the receiver tunes 24 to 1766 MHz, no higher"),  # was an OverflowError
+        ("9999", "the receiver tunes 24 to 1766 MHz, no higher"),
+        ("5", "the receiver tunes 24 to 1766 MHz; medium wave and shortwave aren't supported yet"),
+        ("99999", "99999 looks like kHz; frequencies are in MHz: 99.999"),
+        ("x", "'x' isn't one: give a frequency in MHz, e.g. 99.5 or 446.00625"),
+    ],
+)
+def test_a_frequency_no_receiver_tunes_is_refused_in_words(given: str, said: str) -> None:
+    from wavescribe.dsp import tunable_hz
+
+    with pytest.raises(ValueError) as e:
+        tunable_hz(given)
+    assert str(e.value) == said
+    assert tunable_hz("446.00625") == 446_006_250
+
+
 def test_radio_bands_marks_what_the_receiver_cannot_reach(capsys) -> None:
     from wavescribe.cli import main
 

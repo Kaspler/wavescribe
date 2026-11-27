@@ -134,6 +134,9 @@ class Catalog:
     ) -> dict[str, Any]:
         """Note something about a frequency (a watch's catches show it). None leaves a field
         as it is; "" or [] clears it. The name is the heard catalogue's name for it too."""
+        from wavescribe.dsp import check_tunable
+
+        check_tunable(freq_hz)  # a note is about something a receiver can hear
         if name is not None and len(name) > MAX_NAME:
             raise ValueError(f"a name is at most {MAX_NAME} characters")
         if note is not None and len(note) > MAX_NOTE:

@@ -50,6 +50,8 @@ def frequency_hz(mhz: object) -> int:
         if value * 1e6 > hi and lo <= value / per_mhz * 1e6 <= hi:
             meant = f"{value / per_mhz:.6f}".rstrip("0").rstrip(".")
             raise ValueError(f"{mhz} looks like {unit}; frequencies are in MHz: {meant}")
+    if not math.isfinite(value * 1e6):  # 1e303 MHz is a number, but no whole number of Hz
+        check_tunable(math.inf)
     return round(value * 1e6)
 
 
@@ -59,6 +61,14 @@ def check_tunable(hz: float) -> None:
     if not lo <= hz <= hi:
         below = "; medium wave and shortwave aren't supported yet" if hz < lo else ", no higher"
         raise ValueError(f"the receiver tunes {lo / 1e6:g} to {hi / 1e6:g} MHz{below}")
+
+
+def tunable_hz(mhz: object) -> int:
+    """A frequency someone gave in MHz that the receiver tunes, as whole Hz (``frequency_hz``
+    and ``check_tunable``): the same words wherever one is given."""
+    hz = frequency_hz(mhz)
+    check_tunable(hz)
+    return hz
 
 
 def supported_rate(rate: int) -> bool:

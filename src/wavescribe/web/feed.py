@@ -470,16 +470,13 @@ def alerts(h: Handler, query: dict[str, str]) -> None:
 def catch_filter(query: dict[str, str]) -> dict[str, Any]:
     """The arguments of ``Store.catches`` from a request's query, for the page's /api/catches
     and for /feed/v1/catches alike. ValueError says what a valid query is."""
-    from wavescribe.radio.bandplan import TUNER_RANGE_HZ
+    from wavescribe.dsp import tunable_hz
     from wavescribe.radio.watch import CATCHES, catch_hours, catch_limit, catch_width
 
-    lo, hi = (f / 1e6 for f in TUNER_RANGE_HZ)
-    try:
-        mhz = float(query["mhz"]) if query.get("mhz") else None
-        if mhz is not None and not lo <= mhz <= hi:
-            raise ValueError
-    except ValueError:
-        raise ValueError(f"mhz is {lo:g} to {hi:g}") from None
+    try:  # in the words `radio catches --mhz` uses
+        freq = tunable_hz(query["mhz"]) if query.get("mhz") else None
+    except ValueError as e:
+        raise ValueError(f"mhz: {e}") from None
     got: dict[str, Any] = {"hours": 24.0, "width_khz": 0.0, "limit": CATCHES}
     for key, check in (("hours", catch_hours), ("width_khz", catch_width), ("limit", catch_limit)):
         if query.get(key):  # the same rule as `radio catches` (radio/watch.py)
@@ -488,7 +485,7 @@ def catch_filter(query: dict[str, str]) -> dict[str, Any]:
             except ValueError as e:
                 raise ValueError(f"{key} {e}") from None
     return {
-        "freq_hz": round(mhz * 1e6) if mhz else None,
+        "freq_hz": freq,
         "width_hz": got["width_khz"] * 1e3,
         "station_ids": _list(query.get("stations")) or None,
         "since": time.time() - got["hours"] * 3600 if got["hours"] else None,

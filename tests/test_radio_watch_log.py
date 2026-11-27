@@ -407,7 +407,10 @@ def test_catch_routes_give_other_machines_only_what_may_leave(
         # "auto" is no language tag: a machine following the watch would refuse the list.
         assert {s["id"]: s["language"] for s in listed}["walkies"] is None
         assert request(server, "GET", "/api/catches?mhz=1e303")[0] == 400  # past any tuner
-        assert request(server, "GET", "/api/catches?mhz=5")[0] == 400
+        status, body = request(server, "GET", "/api/catches?mhz=9999")
+        assert (status, json.loads(body)) == (
+            400, {"error": "mhz: the receiver tunes 24 to 1766 MHz, no higher"}
+        )  # fmt: skip
         # The feed is what leaves this machine, also for a program on it, and has no notes.
         status, body = request(server, "GET", "/feed/v1/catches")
         [fed] = json.loads(body)
@@ -448,3 +451,34 @@ def test_notes_are_set_through_the_control_centre(tmp_path: Path) -> None:
         app, "POST", "/api/manage/radio/notes/446031000", {}, {"name": "ch 3"}
     )
     assert status == 200 and noted["freq_hz"] == PMR[2]
+    # A frequency no receiver tunes, in the words `radio note` uses.
+    for hz in (99_999_999_999, 5_000_000):
+        status, said = api.dispatch(app, "POST", f"/api/manage/radio/notes/{hz}", {}, {"name": "x"})
+        assert status == 400 and said["error"].startswith("the receiver tunes 24 to 1766 MHz")
+    with pytest.raises(ValueError, match="the receiver tunes 24 to 1766 MHz, no higher"):
+        Catalog(tmp_path).note(99_999_999_999, name="x")  # whoever asks
+    assert len(Catalog(tmp_path).notes()) == 2
+
+
+@pytest.mark.parametrize(
+    ("argv", "said"),
+    [
+        (["note", "99999", "--name", "x"],
+         "argument mhz: 99999 looks like kHz; frequencies are in MHz: 99.999"),
+        (["note", "5000"], "argument mhz: the receiver tunes 24 to 1766 MHz, no higher"),
+        (["catches", "--mhz", "9999"],
+         "argument --mhz: the receiver tunes 24 to 1766 MHz, no higher"),
+    ],
+)  # fmt: skip
+def test_the_command_line_refuses_a_frequency_no_receiver_tunes(
+    argv: list[str], said: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:  # fmt: skip
+    from wavescribe import cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "DATA_DIR", tmp_path / "data")
+    with pytest.raises(SystemExit) as e:
+        cli.main(["radio", *argv])
+    assert e.value.code == 2 and said in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()  # nothing noted
