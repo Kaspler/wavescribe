@@ -21,6 +21,7 @@ import pytest
 
 from tests.test_app import Running, alert_on, make_app, wait_for
 from tests.test_ask import FakeLlm, llm_server
+from tests.test_feed import feed_server, finish, transcribed
 from tests.test_pipeline import station
 from tests.test_store import result
 from tests.test_web import idle_server
@@ -47,6 +48,7 @@ UTTERANCE_KEYS = {
     "flags",
     "rules",
 }
+FOLLOW_KEYS = {"resume"}  # what `wavescribe follow` adds to each utterance
 # The other shapes the --json commands and the MCP tools give, pinned so that they can't drift
 # from docs/FEED.md (feed events) and docs/AGENT_TOOLS.md (the rest) without a test saying so.
 ALERT_KEYS = {
@@ -96,9 +98,10 @@ def test_every_json_shape_is_documented_field_by_field() -> None:
     feed = (DOCS / "FEED.md").read_text(encoding="utf-8")
     tools = (DOCS / "AGENT_TOOLS.md").read_text(encoding="utf-8")
     assert [k for k in sorted(UTTERANCE_KEYS | ALERT_KEYS) if f'"{k}"' not in feed] == []
-    shapes = [MODEL_KEYS, HEARD_KEYS, CATCH_KEYS, CHECK_KEYS, SUMMARY_KEYS, SERVICE_KEYS,
-              TOOL_STATION_KEYS, LAG_KEYS, ADDED_STATION_KEYS, *TOOL_RESULT_KEYS.values(),
-              DIGEST_POINT_KEYS, DIGEST_WINDOW_KEYS, DIGEST_COUNT_KEYS]  # fmt: skip
+    shapes = [FOLLOW_KEYS, MODEL_KEYS, HEARD_KEYS, CATCH_KEYS, CHECK_KEYS, SUMMARY_KEYS,
+              SERVICE_KEYS, TOOL_STATION_KEYS, LAG_KEYS, ADDED_STATION_KEYS,
+              *TOOL_RESULT_KEYS.values(), DIGEST_POINT_KEYS, DIGEST_WINDOW_KEYS,
+              DIGEST_COUNT_KEYS]  # fmt: skip
     named = set()  # each field in code: `name`, or in a result written `{a, b: null}`
     prose = re.sub(r"```.*?```", "", tools, flags=re.S)  # not the examples
     for span in re.findall(r"`([^`\n]+)`", prose):
@@ -352,7 +355,7 @@ def test_follow_prints_json_lines_and_stops_when_its_reader_goes(tmp_path: Path)
         alert = alert_on(store, "a", "Bom dia", seg, ["broadcast"])
         hub.on_alert({**alert.payload(), "status": "delivered"})
         utterance, announced = json.loads(out.read()), json.loads(out.read())
-        assert set(utterance) == UTTERANCE_KEYS and utterance["text"] == "Bom dia"
+        assert set(utterance) == UTTERANCE_KEYS | FOLLOW_KEYS and utterance["text"] == "Bom dia"
         assert utterance["id"] == seg and utterance["translations"] == {"en": "Good morning"}
         assert announced["type"] == "alert" and announced["rule"] == "water"
 
@@ -376,36 +379,75 @@ def test_follow_says_to_start_wavescribe_when_none_answers(capsys) -> None:
     assert "no Wavescribe answers" in captured.err and "wavescribe serve" in captured.err
 
 
+def sse(seg: int, text: str, event_id: str) -> bytes:
+    """An utterance event as the feed writes it, with its id (a resume point)."""
+    ev = {"type": "utterance", "id": seg, "text": text, "station": {"id": "a"}}
+    return f"id: {event_id}\nevent: utterance\ndata: {json.dumps(ev)}\n\n".encode()
+
+
+class Scripted(Client):
+    """A server that answers each request with the next of ``bodies``, noting its headers."""
+
+    def __init__(self, bodies: list[bytes]) -> None:
+        super().__init__()
+        self.bodies, self.asked = bodies, []
+
+    def open(self, method, path, query=None, body=None, *, control=False, headers=None,
+             timeout=0.0):  # fmt: skip
+        self.asked.append(headers)
+        return io.BytesIO(self.bodies.pop(0))
+
+
 def test_follow_sends_back_the_feeds_id_and_writes_a_repeated_line_once() -> None:
     """The feed's id is a resume point ("low,sent,sent"); a resume may send a line again."""
-
-    def sse(seg: int, text: str, event_id: str) -> bytes:
-        ev = {"type": "utterance", "id": seg, "text": text, "station": {"id": "a"}}
-        return f"id: {event_id}\nevent: utterance\ndata: {json.dumps(ev)}\n\n".encode()
-
-    bodies = [sse(5, "cinco", "3,5"), sse(4, "quatro", "3,5") + sse(5, "cinco", "5")]
-    asked: list = []
-
-    class Scripted(Client):
-        def open(self, method, path, query=None, body=None, *, control=False, headers=None,
-                 timeout=0.0):  # fmt: skip
-            asked.append(headers)
-            return io.BytesIO(bodies.pop(0))
+    server = Scripted([sse(5, "cinco", "3,5"), sse(4, "quatro", "3,5") + sse(5, "cinco", "5")])
 
     class Done(Exception):
         pass
 
     def sleep(_seconds: float) -> None:
-        if not bodies:
+        if not server.bodies:
             raise Done
 
     out = io.StringIO()
     with pytest.raises(Done):
-        follow(Scripted(), {}, out, sleep=sleep, err=io.StringIO())
+        follow(server, {}, out, sleep=sleep, err=io.StringIO())
     assert [json.loads(line)["text"] for line in out.getvalue().splitlines()] == [
         "cinco", "quatro",
     ]  # fmt: skip
-    assert asked == [None, {"Last-Event-ID": "3,5"}]
+    assert server.asked == [None, {"Last-Event-ID": "3,5"}]
+
+
+def test_follow_starts_from_a_resume_point_keeps_each_one_and_says_it_when_stopped() -> None:
+    server = Scripted([sse(5, "cinco", "3,5") + sse(4, "quatro", "5")])
+    out, err, kept = io.StringIO(), io.StringIO(), []
+
+    def keep(point: str) -> None:  # called once the line is out, never before
+        assert json.loads(out.getvalue().splitlines()[-1])["resume"] == point
+        kept.append(point)
+
+    def stop(_seconds: float) -> None:
+        raise KeyboardInterrupt  # Ctrl-C while it waits to reconnect
+
+    with pytest.raises(KeyboardInterrupt):
+        follow(server, {}, out, since_id="2", keep=keep, sleep=stop, err=err)
+    assert server.asked == [{"Last-Event-ID": "2"}]
+    assert [json.loads(line)["resume"] for line in out.getvalue().splitlines()] == ["3,5", "5"]
+    assert kept == ["3,5", "5"]
+    assert err.getvalue().endswith(
+        "wavescribe: run follow again with --since-id 5 to go on after the last line printed\n"
+    )
+
+    def full(_point: str) -> None:
+        raise OSError(28, "No space left on device")
+
+    err = io.StringIO()
+    server = Scripted([sse(5, "cinco", "3,5")])
+    assert follow(server, {}, io.StringIO(), keep=full, sleep=stop, err=err) == 1
+    assert "can't keep the resume point: [Errno 28] No space left on device; stopped" in (
+        err.getvalue()
+    )
+    assert "--since-id 3,5" in err.getvalue()  # the line went out: go on after it
 
 
 def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) -> None:
@@ -445,6 +487,68 @@ def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) 
         store.close()
 
 
+def test_follow_goes_on_after_a_restart_with_the_line_that_finished_late(tmp_path: Path) -> None:
+    """Stopped while an older line is still being translated, ``follow`` goes on from its
+    resume point: the late line comes, and the one already printed doesn't come again. The
+    plain id of the last line printed would skip the late one."""
+    server, hub, store = feed_server(tmp_path)  # station b has no translation to wait for
+    url, kept = url_of(server), tmp_path / "follow.state"
+
+    def follower(*flags: str) -> tuple[subprocess.Popen, Lines]:
+        proc = wavescribe("follow", "--url", url, *flags, cwd=tmp_path)
+        return proc, Lines(proc.stdout)
+
+    def keeps(text: str) -> bool:  # the file is written just after the line is printed
+        return kept.exists() and kept.read_text() == text
+
+    try:
+        first, out = follower("--resume", str(kept))
+        wait_for(lambda: len(hub._clients) == 1)
+        um = transcribed(hub, "a", "um")  # waits for its translation
+        dois = transcribed(hub, "b", "dois")
+        finish(hub, store, dois)
+        line = json.loads(out.read())
+        point = f"{um.segment_id - 1},{dois.segment_id}"
+        assert line["text"] == "dois" and line["resume"] == point
+        wait_for(lambda: keeps(point + "\n"))
+        first.terminate()  # SIGTERM, as `kill` sends
+        assert first.wait(10) == 143
+        err = first.stderr.read().decode()
+        assert f"--since-id {point} to go on" in err and "Traceback" not in err
+
+        # While it is away: the older line finishes, a newer one comes and goes, and another
+        # is still being translated when it is back.
+        finish(hub, store, um, en="one")
+        tres = transcribed(hub, "b", "três")
+        finish(hub, store, tres)
+        quatro = transcribed(hub, "a", "quatro")
+        # The file wins over --since-id, which counts only while it holds no point.
+        again, out = follower("--resume", str(kept), "--since-id", "0")
+        got = [json.loads(out.read()), json.loads(out.read())]
+        finish(hub, store, quatro, en="four")
+        got.append(json.loads(out.read()))
+        assert [g["text"] for g in got] == ["um", "três", "quatro"]  # no "dois" again
+        assert got[0]["translations"] == {"en": "one"} and got[2]["translations"] == {"en": "four"}
+        wait_for(lambda: keeps(f"{quatro.segment_id}\n"))
+        again.kill()  # even killed, it leaves the point after the last line it printed
+        again.wait(10)
+
+        # By hand, the point it said on stopping does the same.
+        by_hand, out = follower("--since-id", point)
+        assert [json.loads(out.read())["text"] for _ in range(3)] == ["um", "três", "quatro"]
+        by_hand.kill()
+        by_hand.wait(10)
+        # The last line's plain id says everything up to it was printed: "um" never comes.
+        plain, out = follower("--since-id", str(dois.segment_id))
+        assert [json.loads(out.read())["text"] for _ in range(2)] == ["três", "quatro"]
+        plain.kill()
+        plain.wait(10)
+    finally:
+        hub.close()
+        server.shutdown()
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("command", "url"),
     [("follow", "ftp://localhost:8765"), ("mcp", "notaurl"), ("digest", "http://"),
@@ -459,6 +563,19 @@ def test_agent_commands_refuse_an_address_that_isnt_a_wavescribes(command, url, 
     err = capsys.readouterr().err
     assert err.splitlines()[-1].startswith(f"wavescribe {command}: error: argument --url: ")
     assert "Traceback" not in err
+
+
+def test_follow_refuses_a_start_that_isnt_a_resume_point(tmp_path: Path, capsys) -> None:
+    with pytest.raises(SystemExit) as stop:
+        main(["follow", "--since-id", "yesterday"])
+    assert stop.value.code == 2
+    assert "argument --since-id: 'yesterday' isn't a resume point" in capsys.readouterr().err
+    kept = tmp_path / "follow.state"
+    kept.write_text("not a point\n")
+    assert main(["follow", "--resume", str(kept)]) == 2
+    assert "doesn't hold a resume point" in capsys.readouterr().err
+    assert main(["follow", "--resume", str(tmp_path / "gone" / "follow.state")]) == 2
+    assert "can't write" in capsys.readouterr().err
 
 
 # -- the MCP adapter --------------------------------------------------------------------------

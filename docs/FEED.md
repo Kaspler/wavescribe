@@ -140,6 +140,10 @@ station, or that Whisper re-checked, finishes after later ones. So each `utteran
 field): `<low>` or `<low>,<id>,<id>…`. Every utterance up to segment id `low` that the stream
 may send has been sent, and so have the ids after it; `low` stays just below the oldest line
 still in flight on the stations you follow. Treat it as text and send it back as it came.
+To go on after a restart, keep the last event id, not the last `id` field: `since_id=197`
+takes everything up to 197 as sent, so a line 196 that finished after 197 would never come.
+`wavescribe follow` gives the event id on each line as `resume` and keeps it with `--resume FILE`
+([AGENT_TOOLS.md](AGENT_TOOLS.md), *Stopping and going on*).
 
 EventSource sends the last one back as `Last-Event-ID` when it reconnects (a client that opens a
 new stream passes it as `?since_id=`). The feed then replays the lines that finished since (up

@@ -148,7 +148,7 @@ non-zero:
 | `wavescribe radio catches --json` | a transmission a watch caught and kept, newest first: `id`, `station`, `freq_hz`, `mhz`, `t_start`, `t_end`, `duration`, `mode`, `band`, `label`, `snr_db`, `peak_db`, `voice` (null when not checked), `reason`, `privacy`, `utterances` (`id`, `t`, `language`, `text`), and the `name`, `note` and `tags` noted for its frequency |
 | `wavescribe doctor --json` | a check (`type` `check`: `group`, `check`, `status` `ok`, `warn`, `fail` or `skip`, `summary`, `fix` (null when there is nothing to do), `details`), then one with `type` `summary`: `status`, `problems`, `warnings`, `version`, `folder`, `options` and `from_service` (whether those are the background service's options); exits 1 when something is broken |
 | `wavescribe service status --json` | one line: `label`, `plist`, `installed`, `loaded`, `running`, `pid`, `state`, `runs`, `last_exit`, `last_signal`, `workdir`, `serve_args`, `keep_awake`, `log`, `log_bytes`, `full_log`; exits 3 when it isn't running |
-| `wavescribe follow` | a live utterance or alert, until you stop it |
+| `wavescribe follow` | a live utterance, with `resume` (where to go on after it; see *Stopping and going on*), or alert, until you stop it |
 | `wavescribe digest --json` | one line: what the `digest` tool returns (with `--now`, the `now` tool); it asks the running Wavescribe, like `follow` |
 
 `search` and `alerts` print utterances and alerts in the shapes of [FEED.md](FEED.md), without
@@ -164,7 +164,8 @@ one the store has no name for, by its id, with `language` null and no `privacy`.
 file that can't be read fails, saying why. `digest --json` asks the running Wavescribe, so its
 utterances and alerts carry those links when that Wavescribe knows its own address. Its
 `--now`, `--minutes`, `--since`, `--stations`, `--language` and `--speak` are as in
-`wavescribe digest --help`. `follow` prints the feed's events as they come.
+`wavescribe digest --help`. `follow` prints the feed's events as they come, each utterance with
+one field more, `resume`.
 
 ```sh
 $ uv run wavescribe search água --json | jq -r '.time + "  " + .station.name + "  " + .translations.en'
@@ -182,9 +183,43 @@ printed once.
 | `--stations IDS` | only these stations, comma-separated |
 | `--langs LANGS` | only these translations, comma-separated |
 | `--alerts-only` | alerts, no utterances |
-| `--since-id ID`, `--since EPOCH` | first, what was stored after that utterance, or heard since that time (up to 1,000), then live |
+| `--since-id ID`, `--since EPOCH` | first, what finished after that resume point, or was heard since that time (up to 1,000), then live. `ID` is a `resume` as `follow` gives it (`195,197`), or an utterance's `id`, which skips a line that was still being translated then |
+| `--resume FILE` | keep the resume point in `FILE`, and start from it: see *Stopping and going on* |
 | `--url URL` | another Wavescribe (default `http://localhost:8765`): an `http://` or `https://` address with a host; anything else is refused at once, and `follow` exits 2 |
 | `--token TOKEN` | a feed token, which a Wavescribe on another machine asks for once it has one ([FEED.md](FEED.md), *Who can read what*); `WAVESCRIBE_TOKEN` in the environment does the same and doesn't show in the list of running processes |
+
+**Stopping and going on.** Lines don't always finish in order: one still being translated
+can come after later ones. So the `id` of the last line printed is no place to go on from:
+`--since-id 197` takes everything up to 197 as printed, and a line 196 that finished after it
+never comes. The feed's resume point is the place ([FEED.md](FEED.md), *Resuming*), and `follow`
+gives it three ways:
+
+- **On each utterance**, as `resume`: the point to go on from after that line, as text
+  (`"195,197"`; null when the feed gives none, as a Wavescribe that keeps no history doesn't).
+  A program that reads the lines keeps the `resume` of the last one it has handled, and starts
+  `follow` again with `--since-id` and that value.
+- **In a file**, with `--resume FILE`: written after each line printed, and replaced whole, so
+  it never holds part of one, even when `follow` is killed. `follow` starts from it the next
+  time; `--since-id` and `--since` count only while the file holds none, so the same command
+  line serves the first start and every restart. A file that holds something else is refused,
+  as is one that can't be written, before anything is printed.
+- **When you stop it** (Ctrl-C, `kill`, or a refusal such as a revoked token), on stderr:
+
+  ```
+  wavescribe: run follow again with --since-id 195,197 to go on after the last line printed
+  ```
+
+Going on from a resume point prints every line that finished meanwhile, and those still being
+translated when they finish. A line can come twice, such as the last one before `follow` was
+killed: skip an utterance whose `id` you already have. Give the same `--stations`: the point
+counts only the stations followed. The file says what `follow` printed, not what the program
+reading it handled: one that can stop with lines it hadn't read yet should keep `resume`
+itself. Alerts have no resume point and aren't printed again; `wavescribe alerts --json` lists
+those raised meanwhile.
+
+```sh
+uv run wavescribe follow --resume follow.state --since "$(date -v-1H +%s)" >> radio.jsonl
+```
 
 `follow` prints every alert event the feed sends, not only announcements: an alert comes when
 it opens, again at each further mention (with `mentions` grown), translation or delivery

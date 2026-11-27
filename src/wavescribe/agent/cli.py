@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 from wavescribe.agent import DEFAULT_URL, TOKEN_ENV
@@ -46,15 +47,35 @@ def server_url(text: str) -> str:
     return text
 
 
+def since_id(text: str) -> str:
+    """``--since-id``: a resume point as ``follow`` gives it (``195,197``) or a segment id."""
+    from wavescribe.events import resume_point
+
+    if resume_point(text) is None:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} isn't a resume point (like 195,197) nor an utterance id"
+        )
+    return text
+
+
 def cmd_follow(args: argparse.Namespace) -> int:
-    from wavescribe.agent.client import follow
+    from wavescribe.agent.client import ResumeFile, follow
 
     query = {"events": "alert"} if args.alerts_only else {}
-    for key in ("stations", "langs", "since", "since_id"):
+    for key in ("stations", "langs", "since"):
         if getattr(args, key) is not None:
             query[key] = str(getattr(args, key))
+    start, keep = args.since_id, None
+    if args.resume is not None:
+        kept = ResumeFile(args.resume)
+        try:
+            start = kept.start(start)
+        except (OSError, ValueError) as e:
+            print(f"wavescribe: {e}", file=sys.stderr)
+            return 2
+        keep = kept.write
     try:
-        return follow(_client(args), query, sys.stdout)
+        return follow(_client(args), query, sys.stdout, since_id=start, keep=keep)
     except BrokenPipeError:
         # The program reading the lines has gone (`| head -1`): stop quietly. Python would try
         # to flush stdout once more on the way out and complain, so it goes to /dev/null.
@@ -117,7 +138,8 @@ def add_parser(sub: Any) -> None:
         "(experimental)",
         description="Print the live feed of a running Wavescribe (/feed/v1/events), one JSON "
         "object per line, until interrupted; experimental. A lost connection is tried again and "
-        "resumes after the last utterance printed. See docs/AGENT_TOOLS.md.",
+        "resumes after the last utterance printed; each utterance's `resume`, or --resume FILE, "
+        "goes on from there after a restart. See docs/AGENT_TOOLS.md.",
     )
     server(p)
     p.add_argument("--stations", metavar="IDS", help="only these stations, comma-separated")
@@ -125,15 +147,25 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--alerts-only", action="store_true", help="alerts, no utterances")
     p.add_argument(
         "--since-id",
-        type=int,
+        type=since_id,
         metavar="ID",
-        help="first, the utterances stored after this id (up to 1,000)",
+        help="first, the utterances after this point (up to 1,000): the `resume` of the last "
+        "line handled, or what follow says when stopped, like 195,197. An utterance's plain id "
+        "can miss a line that was still being translated then",
     )
     p.add_argument(
         "--since",
         type=float,
         metavar="EPOCH",
         help="first, the utterances heard since this time, in seconds since 1970 (up to 1,000)",
+    )
+    p.add_argument(
+        "--resume",
+        type=Path,
+        metavar="FILE",
+        help="keep the resume point in FILE after each line printed, and start from it: a "
+        "restart, even after a kill, loses no line (one may come twice). --since-id and --since "
+        "count only while FILE holds none",
     )
     p.set_defaults(func=cmd_follow)
 
