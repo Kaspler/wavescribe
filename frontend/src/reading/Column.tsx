@@ -11,6 +11,7 @@ import { useTopics } from "../lib/store";
 import { ago, hm, hms, whenLabel } from "../lib/time";
 import type { Station, Utterance } from "../lib/types";
 import { Icon } from "../components/Icon";
+import { WatchNotes } from "../components/Overload";
 import { Button, Lamp, cx } from "../components/ui";
 import { V } from "../lib/view";
 import { bandWords } from "../manage/bands";
@@ -162,12 +163,13 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
           </span>
         )}
         {last && !speech && <span className="num">{T.lastText(last)}</span>}
-        {overloaded(st.id) && <span className="is-trouble">RF overload: lower the gain</span>}
+        {overloaded(st.id) && !S.live[st.id]?.overload && <span className="is-trouble">RF overload: lower the gain</span>}
         {S.live[st.id]?.rds?.rt && (
           <span className="col-rds" title="What the station sends about itself (RDS radiotext)">{S.live[st.id]!.rds!.rt}</span>
         )}
         {span && <span className="col-span num" title="The time span in view">{span}</span>}
       </p>
+      {st.watch && <WatchNotes id={st.id} />}
       <NowLine id={st.id} />
       {away && (
         <div className="col-reach">

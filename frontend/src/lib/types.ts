@@ -97,6 +97,14 @@ export interface Alert {
   lately?: "reminder" | "ended";
 }
 
+/** A receiver overloaded by a transmitter close by, as the server reports it: when it was last
+ * seen (epoch seconds), the channel on top where known, and what to do, in its own words. */
+export interface Overload {
+  t: number;
+  freq_hz: number | null;
+  message: string;
+}
+
 /** One running station as the pipeline reports it. */
 export interface Live {
   connected: boolean;
@@ -113,6 +121,12 @@ export interface Live {
   rds?: { pi: string | null; ps: string | null; rt: string | null; pty_name: string | null; ta: boolean } | null;
   /** Walkie-talkie, aircraft and amateur channels: whether anyone is transmitting. */
   squelch_open?: boolean | null;
+  /** A watch deaf across its whole window for 3 s or more: what keeps it from catching, in the
+   * server's words, and why, a transmitter close by overloading the receiver or noise. */
+  warning?: string | null;
+  deaf?: "overload" | "interference" | null;
+  /** A watch's last overload, while it lasts and for 10 minutes after (lib/overload.ts). */
+  overload?: Overload | null;
   /** Why its capture failed, while it is down, and how soon it is tried again. */
   error?: string;
   retry_in_s?: number;

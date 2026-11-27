@@ -319,7 +319,11 @@ function SpotRow({ s, label, band, onAdd, onNoted }: { s: Spot; label: string; b
   );
 }
 
-const REASONS: Record<string, string> = { carrier: "on for minutes, then taken as the channel's noise" };
+const REASONS: Record<string, string> = {
+  carrier: "on for minutes, then taken as the channel's noise",
+  stopped: "cut short where the watch or its receiver stopped",
+  overload: "very strong: the receiver was overloaded, so the words may be wrong",
+};
 
 function CatchRow({ c }: { c: Catch }) {
   return (

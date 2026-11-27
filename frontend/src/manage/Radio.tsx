@@ -300,7 +300,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const rxs: RxStatus[] = v.receivers.map((r: Any) => {
     const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
     const w = watchOn(r.id);
-    const t = w && s.state === "stations" ? { ...s, words: `watching ${watchWords(w, v.bands)}` } : s;
+    const t = w && s.state === "stations" ? { ...s, words: `watching ${watchWords(w, v.bands)}`, watch: w.id } : s;
     // Its stations it doesn't hear where it is tuned now are counted here, and named with what
     // fixes it on their band's card.
     const lost = unheard.filter((x) => x.rx.id === r.id);

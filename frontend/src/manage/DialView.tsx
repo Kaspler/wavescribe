@@ -4,6 +4,7 @@
 // on it (ReceiverMarks), and one tuned by hand shows what it sees live (LiveView). The geometry
 // lives in dial.ts.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { WatchNotes } from "../components/Overload";
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import { agoWords } from "../lib/time";
 import type { Any } from "./api";
@@ -214,9 +215,12 @@ export function DialLegend() {
  * and the letter, and this is also where the lamps' meanings are learnt. */
 export function ReceiverWords({ rxs }: { rxs: RxStatus[] }) {
   return (
-    <p className="dl-legend dl-rx-words">
-      {rxs.map((r) => <span key={r.id}><Lamp state={r.lamp} />Receiver {rxName(r.id)}: {r.words}</span>)}
-    </p>
+    <>
+      <p className="dl-legend dl-rx-words">
+        {rxs.map((r) => <span key={r.id}><Lamp state={r.lamp} />Receiver {rxName(r.id)}: {r.words}</span>)}
+      </p>
+      {rxs.map((r) => r.watch && <WatchNotes key={r.id} id={r.watch} />)}
+    </>
   );
 }
 
@@ -258,6 +262,8 @@ export interface RxStatus {
   words: string;
   /** Running stations a move would pause. */
   holders: string[];
+  /** The watch running on it, whose notes (an overload, deafness) its line carries. */
+  watch?: string | null;
 }
 
 
