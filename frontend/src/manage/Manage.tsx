@@ -4,10 +4,10 @@
 import { useEffect, useRef } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Advanced, cx } from "../components/ui";
-import { langName } from "../lib/lang";
 import type { Area } from "../lib/router";
 import { T } from "../reading/strings";
-import { knownLangs } from "./api";
+import { loadModelLangs } from "./api";
+import { useTopics } from "../lib/store";
 import { AlertRules } from "./AlertRules";
 import { FeedApi } from "./FeedApi";
 import { OnTheInternet } from "./Internet";
@@ -53,6 +53,8 @@ const AREAS: Record<Area, { label: string; pages: Page[] }> = {
 const RADIO_PAGES = new Set(["add/air"]);
 
 export default function Manage({ area, page }: { area: Area; page: string }) {
+  useTopics("langs");
+  useEffect(loadModelLangs, []);
   const a = AREAS[area];
   const current = a.pages.find(([id]) => id === page) || a.pages[0];
   const single = a.pages.length === 1;
@@ -97,7 +99,6 @@ export default function Manage({ area, page }: { area: Area; page: string }) {
           {current[3]()}
           {area === "settings" && <p className="m-page-foot">{T.byMachine}</p>}
         </div>
-        <datalist id="m-langs">{knownLangs().map((t) => <option key={t} value={t}>{langName(t)}</option>)}</datalist>
       </main>
     </div>
   );

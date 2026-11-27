@@ -2,9 +2,8 @@
 // hand, like a radio or an SDR program. Nothing heard here is written down, stored or checked for
 // alerts; "Keep as a station" makes it one (radio/live.py).
 import { useEffect, useState } from "react";
-import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
-import { langName } from "../lib/lang";
-import { ApiError, type Any, HANDOFF, del, post, refreshPage } from "./api";
+import { ActButton, Button, Field, Input, Lamp, LangPicker, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
+import { ApiError, type Any, HANDOFF, del, knownLangs, localLang, post, refreshPage } from "./api";
 import { fmtMhz } from "./bands";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
@@ -260,7 +259,7 @@ function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: Any; radio: 
 
 function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; onKept: () => Promise<void> }) {
   const [does, setDoes] = useState<string>("translate");
-  const [lang, setLang] = useState<string>(radio?.defaults?.language || "");
+  const [lang, setLang] = useState<string>(() => localLang(radio));
   const [name, setName] = useState("");
   const [retune, setRetune] = useState<string | null>(null);
   const save = async (force = false) => {
@@ -289,8 +288,8 @@ function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; on
           <Input id="lv-name" value={name} placeholder={st.rds?.ps?.trim() || `${fmtMhz(st.mhz, st.mode)} MHz`} onChange={(e) => setName(e.target.value)} />
         </Field>
         {does !== "listen" && (
-          <Field id="lv-lang" label="Spoken language" hint={lang ? langName(lang) : "A BCP-47 tag, e.g. es-ES"}>
-            <Input id="lv-lang" list="m-langs" value={lang} placeholder="e.g. es-ES" onChange={(e) => setLang(e.target.value)} />
+          <Field id="lv-lang" label="Language spoken" hint="Its name in English or in the language itself, or a tag.">
+            <LangPicker id="lv-lang" value={lang} onChange={setLang} options={knownLangs()} />
           </Field>
         )}
       </div>

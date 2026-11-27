@@ -1,7 +1,10 @@
 // Radio's and Settings' calls. /api/manage answers only the Wavescribe machine itself, and every
 // change carries the X-Wavescribe header.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LANGS, countryLang, langNameEn } from "../lib/lang";
 import { S, stationsChanged } from "../lib/live";
+import { P } from "../lib/prefs";
+import { emit } from "../lib/store";
 
 export type Any = any;
 
@@ -87,16 +90,38 @@ export const bytes = (b: number | null | undefined) => (b == null ? "–" : mb(b
 export const gbSize = (g: number | null | undefined) => (g == null ? "size unknown" : mb(g * 1024));
 export const secs = (s: number | null | undefined) => (s == null ? "–" : s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`);
 
-const COMMON_LANGS = ["en", "es", "fr", "de", "it", "pt-PT", "pt-BR", "nl", "pl", "ro", "cs", "el", "tr", "uk",
-  "he", "ar", "fa", "hi", "zh", "ja", "ko", "vi", "id", "sw"];
-/** Language tags to suggest: common ones plus every one a station uses. */
+// What the speech models on this machine can write down, asked for once (Settings re-renders on
+// "langs" when it arrives).
+const modelLangs = new Set<string>();
+let askedModels = false;
+export function loadModelLangs() {
+  if (askedModels) return;
+  askedModels = true;
+  get("/models").then((v) => {
+    for (const m of v.models || []) for (const l of m.languages || []) if (l !== "*") modelLangs.add(l);
+    emit("langs");
+  }).catch(() => { askedModels = false; });
+}
+
+/** Languages to offer, the likeliest first: this reader's, then the stations' own and their
+ * translations, then every other one by its English name. */
 export function knownLangs(stations: { language: string; translate_to?: string[] }[] = S.stations): string[] {
-  const all = new Set(COMMON_LANGS);
-  for (const s of stations) {
-    all.add(s.language);
-    (s.translate_to || []).forEach((t) => all.add(t));
-  }
-  return [...all].filter(Boolean).sort();
+  const used = stations.flatMap((s) => [s.language, ...(s.translate_to || [])]).filter((t) => t && t !== "auto");
+  const rest = [...new Set([...LANGS, ...modelLangs])].sort((a, b) => langNameEn(a).localeCompare(langNameEn(b)));
+  return [...new Set([...(P.lang ? [P.lang] : []), ...used, ...rest])];
+}
+
+/** The reader's own language, offered as a translation unless the station already speaks it. */
+export const readerLang = (spoken: string): string[] => (P.lang && primaryOf(P.lang) !== primaryOf(spoken) ? [P.lang] : []);
+const primaryOf = (t: string) => (t || "").split("-")[0].toLowerCase();
+
+/** The language a new station on the air most likely speaks: the default set for new stations,
+ * else the language of the machine's country (where the server says it), else the one most of
+ * this machine's radio stations speak. Empty when nothing says. */
+export function localLang(radio: Any): string {
+  const said = S.stations.filter((s) => s.kind === "sdr" && s.language && s.language !== "auto").map((s) => s.language);
+  const most = [...new Set(said)].sort((a, b) => said.filter((x) => x === b).length - said.filter((x) => x === a).length)[0];
+  return radio?.defaults?.language || countryLang(radio?.country) || most || "";
 }
 
 export const SEVERITIES = ["critical", "high", "medium", "low"] as const;

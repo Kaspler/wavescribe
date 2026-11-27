@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import { langName, langNameEn } from "../lib/lang";
 import { Icon } from "../components/Icon";
 import {
-  ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LinkButton, Section, Segmented, Select, Tag, act, cx,
+  ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LangPicker, LinkButton, Section, Segmented, Select, Tag, act, cx,
 } from "../components/ui";
-import { type Any, del, get, knownLangs, post, refreshPage, useLoad } from "./api";
+import { type Any, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { changedFields } from "./drafts";
 
 export function Stations() {
@@ -188,17 +188,17 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
       )}
       <div className="m-form">
         <Field id={id("name")} label="Name" hint="How it's shown on the reading page."><Input id={id("name")} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id={id("lang")} label="Language spoken" hint="A BCP-47 tag such as pt-PT, es or uk. The wrong language gives gibberish.">
-          <Input id={id("lang")} value={lang} list="m-langs" onChange={(e) => setLang(e.target.value)} />
+        <Field id={id("lang")} label="Language spoken" hint="Its name in English or in the language itself, or a tag such as pt-PT. The wrong language gives gibberish.">
+          <LangPicker id={id("lang")} value={lang} onChange={setLang} options={knownLangs()} />
         </Field>
         {mode === "translate" && (
           <Field label="Translate into" hint="Continuously, as the station speaks.">
-            <LangChips value={targets} onChange={setTargets} known={knownLangs()} label="Add a translation language" />
+            <LangChips value={targets} onChange={setTargets} known={knownLangs()} offer={readerLang(lang)} label="Add a translation language" />
           </Field>
         )}
         {transcribing && s.kind !== "remote" && (
           <Field label="Translate alerts into" hint="Alerts above Low from this station are also translated into these, for everyone reading the page or receiving webhooks.">
-            <LangChips value={alerts} onChange={setAlerts} known={knownLangs()} label="Add a language for alerts" />
+            <LangChips value={alerts} onChange={setAlerts} known={knownLangs()} offer={readerLang(lang)} label="Add a language for alerts" />
           </Field>
         )}
         {s.kind === "stream" && (
@@ -301,7 +301,7 @@ function Languages({ stations, reload }: { stations: Any[]; reload: () => Promis
         ))}
       </ul>
       <div className="m-row">
-        <Input value={add} list="m-langs" placeholder="Add a language, e.g. fr" aria-label="Language to add" size={18} onChange={(e) => setAdd(e.target.value)} />
+        <LangPicker value={add} onChange={setAdd} options={knownLangs(stations).filter((t) => !targets.includes(t))} label="Language to add" placeholder="Add a language" />
         <ActButton disabled={!add.trim()} done="Done"
                    run={async () => {
                      const t = add.trim();

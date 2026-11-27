@@ -265,6 +265,18 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 .chips-edit:focus-within { border-color: var(--accent); outline: 1px solid var(--accent); }
 .chips-edit .chip { height: 22px; background: var(--sunken); border-color: var(--rule); }
 .chip-input { flex: 1; min-width: 64px; height: 24px; border: 0; background: transparent; padding: 0 4px; }
+.chip-offer { height: 22px; padding: 0 8px 0 6px; border-style: dashed; }
+
+/* The language picker: an input with its list of matches under it. */
+.lang-pick { position: relative; display: block; min-width: 0; }
+/* In a chips box the list hangs from the whole box, so it stays on screen beside the last chip. */
+.chips-edit { position: relative; }
+.lang-pick.chip-input { display: flex; position: static; padding: 0; min-width: 12ch; }
+.chip-input .input { height: 24px; border: 0; outline: 0; background: transparent; padding: 0 4px; }
+.lang-list { top: calc(100% + 4px); left: 0; min-width: max(100%, 260px); max-height: 280px; overflow-y: auto; padding: 4px; margin: 0; list-style: none; transform-origin: top left; }
+.lang-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: var(--r-control); color: var(--ink); cursor: default; }
+.lang-list li.is-active { background: var(--sunken); }
+.lang-tag { font-family: var(--mono); font-size: var(--t-xs); color: var(--ink-3); }
 
 /* -- sections and tables -------------------------------------------------------------------- */
 .section { padding: var(--s8) 0 var(--s9); border-top: 1px solid var(--rule); }

@@ -4,9 +4,8 @@
 // (src/wavescribe/radio/service.py).
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
-import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { langName } from "../lib/lang";
-import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
+import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
+import { type Any, ApiError, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
@@ -837,7 +836,7 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
   const [device, setDevice] = useState<string>(() => pre.device || pickRx());
   const [name, setName] = useState(pre.name || "");
   const [does, setDoes] = useState("translate");
-  const [lang, setLang] = useState<string>(v.defaults.language || "");
+  const [lang, setLang] = useState<string>(() => localLang(v));
   const [to, setTo] = useState<string[]>(v.defaults.translate_to || []);
   const [ack, setAck] = useState(false);
   const [retune, setRetune] = useState<Any | null>(null);
@@ -881,12 +880,12 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
       <div className="m-form rd-form">
         <Field id="rd-name" label="Name" hint={effMode === "wfm" ? "Optional: an FM station names itself from RDS." : "Optional: a channel label."}><Input id="rd-name" value={name} placeholder={band ? band.name : ""} onChange={(e) => setName(e.target.value)} /></Field>
         {does !== "listen" && (
-          <Field id="rd-lang" label="Spoken language" hint={lang ? langName(lang) : "As a BCP-47 tag, e.g. es-ES"}>
-            <Input id="rd-lang" list="m-langs" value={lang} placeholder="e.g. es-ES" onChange={(e) => setLang(e.target.value)} />
+          <Field id="rd-lang" label="Language spoken" hint="Its name in English or in the language itself, or a tag.">
+            <LangPicker id="rd-lang" value={lang} onChange={setLang} options={knownLangs()} />
           </Field>
         )}
         {does === "translate" && (
-          <Field id="rd-to" label="Translate into" wide hint="Continuously, as it speaks."><LangChips value={to} onChange={setTo} known={knownLangs()} label="Translate into" /></Field>
+          <Field id="rd-to" label="Translate into" wide hint="Continuously, as it speaks."><LangChips value={to} onChange={setTo} known={knownLangs()} offer={readerLang(lang)} label="Translate into" /></Field>
         )}
       </div>
       <Advanced id="rd-add">

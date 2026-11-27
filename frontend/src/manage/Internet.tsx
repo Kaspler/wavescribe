@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { langName } from "../lib/lang";
 import { day } from "../lib/time";
-import { ActButton, Advanced, Button, Check, Field, Input, LangChips, Section, Segmented, Table, Tag, Textarea, act, toast } from "../components/ui";
-import { type Any, get, knownLangs, post, refreshPage, useLoad } from "./api";
+import { ActButton, Advanced, Button, Check, Field, Input, LangChips, LangPicker, Section, Segmented, Table, Tag, Textarea, act, toast } from "../components/ui";
+import { type Any, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { MODE_HINT, primaryTargets } from "./Stations";
 
 export function OnTheInternet() {
@@ -80,10 +80,10 @@ function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: 
       </div>
       <div className="m-form">
         <Field id="new-name" label="Name" hint="How it's shown on the reading page."><Input ref={first} id="new-name" value={name} placeholder="Station name" onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id="new-lang" label="Language spoken" hint={pre.detected ? `Detected: ${pre.detected}` : "A BCP-47 tag such as pt-PT, es or uk. The wrong language gives gibberish."}>
-          <Input id="new-lang" value={lang} list="m-langs" placeholder="e.g. es" onChange={(e) => setLang(e.target.value)} />
+        <Field id="new-lang" label="Language spoken" hint={pre.detected ? `Detected: ${pre.detected}` : "Its name in English or in the language itself, or a tag such as pt-PT. The wrong language gives gibberish."}>
+          <LangPicker id="new-lang" value={lang} onChange={setLang} options={knownLangs(stations)} />
         </Field>
-        {does === "translate" && <Field label="Translate into" hint="Continuously, as the station speaks."><LangChips value={targets} onChange={setTargets} known={knownLangs(stations)} label="Add a translation language" /></Field>}
+        {does === "translate" && <Field label="Translate into" hint="Continuously, as the station speaks."><LangChips value={targets} onChange={setTargets} known={knownLangs(stations)} offer={readerLang(lang)} label="Add a translation language" /></Field>}
         {does !== "listen" && (
           <Field id="new-prio" label="Priority" hint="1 is transcribed first when the machine falls behind.">
             <Input id="new-prio" type="number" min={1} max={99} value={prio} onChange={(e) => setPrio(e.target.value)} className="input-short" />
@@ -194,7 +194,7 @@ function DirectoryMode({ use }: { use: (url: string, extra?: Any) => void }) {
       <div className="m-row">
         <Input type="search" value={q} placeholder="Name, city or tag" aria-label="Search the directory" className="m-grow"
                onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") act(search); }} />
-        <Input value={lang} list="m-langs" placeholder="Language" aria-label="Language" size={12} onChange={(e) => setLang(e.target.value)} />
+        <LangPicker value={lang} onChange={setLang} options={knownLangs()} label="Language" placeholder="Any language" className="m-lang-filter" />
         <Input value={country} placeholder="Country" aria-label="Country code, two letters" size={9} maxLength={2} onChange={(e) => setCountry(e.target.value)} />
         <ActButton variant="primary" icon="search" run={search}>Search</ActButton>
       </div>

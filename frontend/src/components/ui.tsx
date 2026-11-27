@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { emit, useTopics } from "../lib/store";
-import { langName } from "../lib/lang";
+import { findLangs, langName, langNameEn, resolveLang } from "../lib/lang";
 import type { Lamp as LampState } from "../lib/station";
 import { Icon, type IconName } from "./Icon";
 
@@ -171,36 +171,91 @@ export function ChoiceChips({ options, value, onChange, label }: { options: (str
   );
 }
 
-const BCP47 = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
-/** A list of BCP-47 tags as removable chips plus an input (Enter or comma adds). */
-export function LangChips({ value, onChange, known, label, placeholder = "add…" }: { value: string[]; onChange: (v: string[]) => void; known: string[]; label: string; placeholder?: string }) {
-  const [draft, setDraft] = useState("");
+/** A language, chosen from a list by its name in English or in the language itself, or by its
+ * tag; what was typed is kept only when it names one. `options`: the tags offered, most likely
+ * first. */
+export function LangPicker({ id, value, onChange, options, label, placeholder = "Type a language", className }: {
+  id?: string; value: string; onChange: (tag: string) => void; options: string[]; label?: string; placeholder?: string; className?: string;
+}) {
+  const [text, setText] = useState<string | null>(null); // null: not typing, the value's name shows
+  const [active, setActive] = useState(0);
   const listId = useId();
-  const add = () => {
-    const v = draft.trim().replace("_", "-");
-    setDraft("");
-    if (!v || value.includes(v)) return;
-    if (!BCP47.test(v)) {
-      toast(`${v} isn't a language tag (BCP-47, e.g. en, pt-PT)`, true);
-      return;
-    }
-    onChange([...value, v]);
+  const open = text !== null;
+  const hits = open ? findLangs(text, value ? options.filter((t) => t !== value) : options) : [];
+  const choose = (tag: string) => {
+    setText(null);
+    if (tag !== value) onChange(tag);
   };
+  const settle = () => {
+    if (text === null) return;
+    const tag = resolveLang(text, options);
+    setText(null);
+    if (tag) choose(tag);
+    else if (text.trim()) toast(`No language called "${text.trim()}": choose one from the list`, true);
+  };
+  return (
+    <span className={cx("lang-pick", className)}>
+      <input id={id} className="input" role="combobox" aria-autocomplete="list" aria-label={label} autoComplete="off" spellCheck={false}
+             aria-expanded={hits.length > 0} aria-controls={listId}
+             aria-activedescendant={hits[active] ? `${listId}-${active}` : undefined}
+             value={text ?? (value ? langName(value) : "")} placeholder={placeholder}
+             onFocus={(e) => e.currentTarget.select()}
+             onClick={() => { if (text === null) { setText(""); setActive(0); } }}
+             onChange={(e) => { setText(e.target.value); setActive(0); }}
+             onBlur={settle}
+             onKeyDown={(e) => {
+               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                 e.preventDefault();
+                 if (text === null) setText("");
+                 else setActive((a) => Math.max(0, Math.min(hits.length - 1, a + (e.key === "ArrowDown" ? 1 : -1))));
+               } else if (e.key === "Enter" && open) {
+                 e.preventDefault();
+                 if (hits[active] && text) choose(hits[active]);
+                 else settle();
+               } else if (e.key === "Escape" && open) {
+                 e.preventDefault();
+                 e.stopPropagation(); // closes the list, not the page
+                 setText(null);
+               }
+             }} />
+      {hits.length > 0 && (
+        <ul id={listId} role="listbox" className="pop lang-list" aria-label={label}>
+          {hits.map((t, i) => (
+            <li key={t} id={`${listId}-${i}`} role="option" aria-selected={i === active} className={cx(i === active && "is-active")}
+                onPointerDown={(e) => { e.preventDefault(); choose(t); }} onPointerEnter={() => setActive(i)}>
+              <span dir="auto">{langName(t)}</span>
+              <span className="lang-tag">{t}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </span>
+  );
+}
+
+/** Several languages: each a removable chip, and a picker that adds one. `offer`: languages to
+ * add with one click, such as the reader's own. */
+export function LangChips({ value, onChange, known, label, offer = [] }: { value: string[]; onChange: (v: string[]) => void; known: string[]; label: string; offer?: string[] }) {
+  const add = (t: string) => { if (t && !value.includes(t)) onChange([...value, t]); };
+  const quick = [...new Set(offer)].filter((t) => t && !value.includes(t));
   return (
     <div className="chips chips-edit">
       {value.map((t) => (
-        <span key={t} className="chip" title={langName(t)}>
-          {t}
-          <button type="button" className="chip-x" aria-label={`Remove ${langName(t)}`}
+        <span key={t} className="chip" title={t}>
+          {langNameEn(t)}
+          <button type="button" className="chip-x" aria-label={`Remove ${langNameEn(t)}`}
                   onClick={() => onChange(value.filter((x) => x !== t))}>
             <Icon name="close" size={12} />
           </button>
         </span>
       ))}
-      <input className="chip-input" value={draft} list={listId} size={8} placeholder={placeholder}
-             aria-label={label} onChange={(e) => setDraft(e.target.value)} onBlur={add}
-             onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} />
-      <datalist id={listId}>{known.map((t) => <option key={t} value={t}>{langName(t)}</option>)}</datalist>
+      {quick.map((t) => (
+        <button key={t} type="button" className="chip chip-toggle chip-offer" onClick={() => add(t)} aria-label={`Add ${langNameEn(t)}`}>
+          <Icon name="plus" size={12} />
+          {langNameEn(t)}
+        </button>
+      ))}
+      <LangPicker value="" onChange={add} options={[...quick, ...known].filter((t) => !value.includes(t))} label={label} placeholder="Add a language" className="chip-input" />
     </div>
   );
 }

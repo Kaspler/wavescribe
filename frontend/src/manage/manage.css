@@ -484,3 +484,4 @@ tr.is-off td { color: var(--ink-3); }
 .cg-tr { margin-top: 2px; color: var(--ink-2); }
 .cg-more { margin-top: 8px; font-size: var(--t-sm); }
 .cg-note { margin: var(--s4) 0 0; }
+.m-lang-filter { width: 16ch; flex: none; }

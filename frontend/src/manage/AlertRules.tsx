@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
 import { langName, langNameEn } from "../lib/lang";
 import {
-  ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
+  ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangPicker, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
-import { type Any, SEVERITIES, SEV_WORD, del, get, post, useLoad } from "./api";
+import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } from "./api";
 import { lines, ruleBody } from "./drafts";
 
 /** Said under the page's heading, whatever follows: what an alert can and can't be relied on for. */
@@ -142,7 +142,9 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
   const [mentions, setMentions] = useState(String(r.min_mentions || 1));
   const [only, setOnly] = useState<string[]>(r.stations || []);
   const [prompt, setPrompt] = useState(r.prompt || "");
-  const langs = [...new Set([...v.stations.map((s: Any) => s.language.split("-")[0]), ...Object.keys(r.terms || {})])] as string[];
+  const [more, setMore] = useState<string[]>([]);
+  const langs = [...new Set([...v.stations.map((s: Any) => s.language.split("-")[0]), ...Object.keys(r.terms || {}), ...more])]
+    .filter((l) => l && l !== "auto") as string[];
   const [terms, setTerms] = useState<Record<string, string>>(Object.fromEntries(langs.map((l) => [l, (r.terms?.[l] || []).join("\n")])));
   const [topics, setTopics] = useState<string[]>(r.topics || []);
   const [near, setNear] = useState<string[]>(r.near || []);
@@ -251,6 +253,10 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
                           onChange={(e) => setTerms({ ...terms, [l]: e.target.value })} />
               </Field>
             ))}
+            <Field id="ru-more" label="Words in another language" hint="For a station added later, or one that switches language.">
+              <LangPicker id="ru-more" value="" onChange={(t) => { const l = t.split("-")[0].toLowerCase(); if (!langs.includes(l)) setMore([...more, l]); }}
+                          options={knownLangs().filter((t) => !langs.includes(t.split("-")[0].toLowerCase()))} placeholder="Add a language" />
+            </Field>
             {topicOpts.length > 0 && (
               <Field label="Ready-made word lists" wide
                      hint={`Topics with words per language, from config/keywords. Lists exist in ${Object.keys(v.packs || {}).map(langNameEn).join(", ") || "no language yet"}; other stations need words of your own.`}>
@@ -313,7 +319,7 @@ function TryRules({ stations }: { stations: Any[] }) {
     <Section id="al-try" title="Try a sentence" description="Nothing is raised: this only shows which word rules would match. Rules described in your words can't be tried here, because they need what was said around it.">
       <Textarea rows={2} value={text} lang={lang} placeholder="A sentence as the radio would say it" aria-label="Sentence to try" onChange={(e) => setText(e.target.value)} />
       <div className="m-row">
-        <Input value={lang} list="m-langs" aria-label="Its language" title="Its language, as a tag such as pt-PT" size={9} onChange={(e) => setLang(e.target.value)} />
+        <LangPicker value={lang} onChange={setLang} options={knownLangs(stations)} label="Its language" className="m-lang-filter" />
         <ActButton variant="primary" disabled={!text.trim()} run={async () => setHits((await post("/rules/try", { text, language: lang })).hits)}>Try</ActButton>
         {hits && !hits.length && <span className="m-hint">No keyword rule matches.</span>}
       </div>
@@ -373,7 +379,7 @@ function Delivery({ v, reload }: { v: Any; reload: () => Promise<void> }) {
       </div>
       <div className="m-form m-form-3">
         <Field id="al-nl" label="Notifications in" hint="The language notifications use, when its translation arrives in time.">
-          <Input id="al-nl" value={notifyLang} list="m-langs" onChange={(e) => setNotifyLang(e.target.value)} />
+          <LangPicker id="al-nl" value={notifyLang} onChange={setNotifyLang} options={knownLangs()} />
         </Field>
       </div>
       <Advanced id="alert-delivery">
@@ -396,7 +402,7 @@ function Delivery({ v, reload }: { v: Any; reload: () => Promise<void> }) {
             </tr>
           ))}
           <tr className="m-add-row">
-            <td><Input value={nl.lang} list="m-langs" placeholder="Add a language" aria-label="New voice language" size={12} onChange={(e) => setNl({ ...nl, lang: e.target.value })} /></td>
+            <td><LangPicker value={nl.lang} onChange={(lang) => setNl({ ...nl, lang })} options={knownLangs().filter((t) => !voices.includes(t))} label="New voice language" placeholder="Add a language" /></td>
             <td>{voiceInput(nl.voice, (x) => setNl({ ...nl, voice: x }), "New voice")}</td>
             <td className="m-muted">–</td>
             <td><Input value={nl.fallback} placeholder="A fixed phrase in that language, read when no checked translation exists" aria-label="New fallback phrase" className="m-grow" onChange={(e) => setNl({ ...nl, fallback: e.target.value })} /></td>
