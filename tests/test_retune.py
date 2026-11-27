@@ -132,7 +132,7 @@ def test_a_stopped_watch_asks_before_a_retune_leaves_it_out(tmp_path: Path) -> N
         assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
         assert ask["holders"] == [] and ask["center_mhz"] == 99.2
         assert ask["error"] == (
-            "To hear 99.5 MHz, Receiver A moves to 99.2 MHz, where it no longer hears Two "
+            "Receiver A moves to 99.2 MHz to hear 99.5 MHz, where it no longer hears Two "
             "metres. It stays in your stations, unavailable until the receiver hears it again."
         )
         assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
@@ -180,9 +180,9 @@ def test_the_receivers_page_asks_the_same_question(tmp_path: Path) -> None:
                                 {"id": "rpt", "name": "Repeater", "running": True}]  # fmt: skip
         assert ask["holders"] == ["Repeater"] and ask["center_mhz"] == 98.0
         assert ask["error"] == (
-            "Tuned to 98 MHz, Receiver A no longer hears Two metres or Repeater. Retuning it "
-            "stops Repeater. They stay in your stations, unavailable until the receiver hears "
-            "them again."
+            "Receiver A moves to 98 MHz, where it no longer hears Two metres or Repeater. "
+            "Retuning it stops Repeater. They stay in your stations, unavailable until the "
+            "receiver hears them again."
         )
         # On a narrow channel's very centre: that one is left out too, for its spike.
         status, ask = r.call("POST", "/api/manage/receivers/a", {"center_mhz": 145.1})

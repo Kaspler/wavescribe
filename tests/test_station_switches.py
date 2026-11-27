@@ -319,6 +319,9 @@ def test_without_models_stations_play_and_get_text_once_downloaded(tmp_path: Pat
         view = next(v for v in app.stations_view() if v["id"] == "a")
         assert view["available"] and view["transcribe"] and view["listen_only"]
         assert "models fetch" in view["reason"]
+        # The page's state says the same, so Read can say why there is no text.
+        [shown] = [v for v in app.hub.state()["stations"] if v["id"] == "a"]
+        assert shown["available"] and shown["listen_only"] and shown["reason"] == view["reason"]
         app.start_station("a")
         assert app.pipeline._live["a"].station.transcribe is False
 

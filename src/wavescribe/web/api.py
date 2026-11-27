@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from wavescribe import admin, refusal
 from wavescribe.admin import AdminError
-from wavescribe.app import ChangeError
+from wavescribe.app import ChangeError, NotFound
 from wavescribe.config import ConfigError
 from wavescribe.radio import stills
 from wavescribe.radio.service import RadioError
@@ -51,6 +51,8 @@ def dispatch(app: App, method: str, path: str, query: dict[str, str], body: Any)
             continue
         try:
             return 200, fn(app, found, query, body)
+        except NotFound as e:
+            return 404, {"error": str(e), **refusal.fields(e)}
         except RadioError as e:  # carries what the page needs to ask (acknowledge, retune)
             return 400, {"error": str(e), "code": e.code, **e.extra}
         except (ChangeError, AdminError, ConfigError, ModelError) as e:

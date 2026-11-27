@@ -47,6 +47,24 @@ def test_the_state_says_where_each_station_listens(tmp_path: Path) -> None:
         r.close()
 
 
+def test_both_views_agree_and_a_station_switched_off_is_in_nobodys_way(tmp_path: Path) -> None:
+    any_language = {**SLICE, "id": "anything", "name": "Anything", "languages": []}
+    off = {**FAR, "id": "off", "name": "Off"}
+    r = running(tmp_path, stations(two_metres_centre(), any_language, FAR, off))
+    try:
+        r.app.update_station("off", {"disabled": True})  # switched off on the page
+        state = {s["id"]: s for s in r.call("GET", "/api/state")[1]["stations"]}
+        view = {s["id"]: s for s in r.call("GET", "/api/manage/stations")[1]["stations"]}
+        for sid in ("anything", "ham2m", "far", "stream"):
+            assert view[sid]["languages"] == state[sid]["languages"], sid
+        assert state["anything"]["languages"] == []  # auto, narrowed to nothing: any language
+        assert state["far"]["out_of_reach"] and state["off"]["out_of_reach"] is None
+        assert r.call("DELETE", "/api/manage/stations/nowhere") == (
+            404, {"error": "no station 'nowhere'", "code": "not_found"})  # fmt: skip
+    finally:
+        r.close()
+
+
 def heard_on(r, sid: str, text: str, freq_hz: int | None = None, **translations: str):
     """An utterance of station ``sid`` as the running app hears it: stored, then final."""
     res = result(sid, text, time.time() - 30, "de-DE", **translations)
@@ -147,7 +165,7 @@ def test_adding_a_station_its_receiver_doesnt_hear_asks_as_a_tune_does(tmp_path:
         assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
         assert ask["holders"] == [] and ask["center_mhz"] == 432.25
         assert ask["error"] == (
-            "To hear Far, Receiver A moves to 432.25 MHz, where it no longer hears Two metres. "
+            "Receiver A moves to 432.25 MHz to hear Far, where it no longer hears Two metres. "
             "It stays in your stations, unavailable until the receiver hears it again."
         )
         assert r.app.settings.snapshot() == before  # nothing changed while it asks
@@ -182,7 +200,7 @@ def test_a_watch_its_receiver_doesnt_hear_moves_it_and_asks_for_what_that_stops(
         assert ask["holders"] == ["Morning FM"]
         assert ask["unfit"] == [{"id": "fm", "name": "Morning FM", "running": True}]
         assert ask["center_mhz"] == two_metres_centre()
-        assert ask["error"].startswith("To hear Two metres, Receiver A moves to ")
+        assert ask["error"].startswith("Receiver A moves to about 145.006 MHz to hear Two metres")
         assert "Retuning it stops Morning FM." in ask["error"]
         assert all(s.name != "Two metres" for s in r.app.config.stations)
 

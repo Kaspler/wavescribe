@@ -659,14 +659,13 @@ def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: s
     ``holders`` names the running ones, ``unfit`` all of them, ``center_mhz`` where it goes.
     ``freq_hz`` (a frequency) or ``heard`` (a station's name) is what the receiver moves for."""
     rx, at = receiver_name(device_id), mhz_text(centre_hz / 1e6)
+    if centre_hz % 1000:  # between two channels of a watch: said to the kHz, kept exact
+        at = f"about {mhz_text(round(centre_hz, -3) / 1e6)}"
     names = [s.name for s in unfit]
     stops = [s.name for s in unfit if s.id in running]
     target = heard or (f"{mhz_text(freq_hz / 1e6)} MHz" if freq_hz is not None else None)
-    if target is None:
-        said = f"Tuned to {at} MHz, Receiver {rx} no longer hears {joined(names, 'or')}."
-    else:
-        said = (f"To hear {target}, Receiver {rx} moves to {at} MHz, "
-                f"where it no longer hears {joined(names, 'or')}.")  # fmt: skip
+    why = f" to hear {target}" if target else ""  # one sentence, whatever moves it
+    said = f"Receiver {rx} moves to {at} MHz{why}, where it no longer hears {joined(names, 'or')}."
     if stops:
         said += f" Retuning it stops {joined(stops)}."
     one = len(names) == 1

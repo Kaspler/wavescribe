@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from wavescribe.config import ConfigError, Station, StationsConfig, confirmed
+from wavescribe.config import ConfigError, Station, StationsConfig, confirmed, transcribed_languages
 from wavescribe.events import NODE_ID
 from wavescribe.languages import language_name
 from wavescribe.log import event
@@ -128,6 +128,10 @@ def _differing(over: dict[str, Any], s: Station, file: Station | None) -> list[s
 class ChangeError(Refusal):
     """A change from the page that can't be applied; the message is shown to the user, and a
     technical refusal has a ``code`` beside it for the page (wavescribe/refusal.py)."""
+
+
+class NotFound(ChangeError):
+    """What the change is about doesn't exist (a 404 on the page's routes)."""
 
 
 def slug(text: str) -> str:
@@ -492,6 +496,7 @@ class App:
             planned = self.plan.asr.get(s.id)
             out.append({
                 **station_dict(s),
+                "languages": transcribed_languages(s),  # as /api/state says them
                 "remote_token": bool(s.remote_token),
                 "origin": "page" if s.id in page_ids else "file",
                 # Changed here: what the page set that differs from stations.toml.
@@ -657,6 +662,8 @@ class App:
 
     def delete_station(self, sid: str) -> None:
         if not any(s.get("id") == sid for s in self.settings.get("station") or []):
+            if not any(s.id == sid for s in self.config.stations):
+                raise NotFound(f"no station {sid!r}", "not_found")
             raise ChangeError(f"{sid} is in stations.toml: switch it off here, or edit that file")
         self.stop_station(sid)
 

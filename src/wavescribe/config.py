@@ -374,6 +374,18 @@ def hears(device: SdrDevice, freq_hz: float, mode: str, channel_hz: float | None
     )
 
 
+def transcribed_languages(station: Station) -> list[str] | None:
+    """The languages a station in language ``auto`` or a watch transcribes, as the page is told
+    them: those ``auto`` is narrowed to (empty: any Whisper tells), a watch's one language;
+    None for any other station, which speaks its ``language``."""
+    from wavescribe.asr.language import AUTO
+
+    if station.language == AUTO:
+        return list(station.languages)
+    watching = station.sdr is not None and station.sdr.watch is not None
+    return [station.language] if watching else None
+
+
 def heard_by(station: Station, device: SdrDevice) -> bool:
     """Whether ``device``, tuned as it is, hears ``station``: one of its frequencies
     (``hears``), or every channel of a watch. The rule ``build_station`` applies when it says a

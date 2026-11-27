@@ -35,9 +35,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 from wavescribe import jsonsafe
-from wavescribe.asr.language import AUTO as AUTO_LANGUAGE
 from wavescribe.audio import SAMPLE_RATE, AudioChunk
-from wavescribe.config import Station, StationsConfig
+from wavescribe.config import Station, StationsConfig, transcribed_languages
 from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
 from wavescribe.pipeline import Pipeline, Plan, Result
@@ -420,6 +419,7 @@ class WebHub:
             if exports is not None and s.id not in exports.stations:
                 continue
             entry = self.plan.asr.get(s.id)
+            listen_only = getattr(self.app, "listen_only", None) or {}
             stations.append(
                 {
                     "id": s.id,
@@ -433,7 +433,9 @@ class WebHub:
                     "listen_only_run": s.id in getattr(self.app, "listen_only_run", ()),
                     "priority": s.priority,
                     "available": s.id not in self.unavailable,
-                    "reason": self.unavailable.get(s.id),
+                    # Why not, or why it plays without text until its model is there.
+                    "reason": self.unavailable.get(s.id) or listen_only.get(s.id),
+                    "listen_only": s.id in listen_only,
                     "running": s.id in running,
                     "asr_model": entry[0].id if entry else ("remote" if s.remote else None),
                     "kind": "remote" if s.remote else "sdr" if s.sdr else "stream",
@@ -550,18 +552,16 @@ def _radio_fields(s: Station) -> dict[str, Any]:
     apply (a stream, a fixed frequency, a station in one language)."""
     t = s.sdr
     watch = t.watch if t is not None else None
-    spec, languages = None, None
+    spec = None
     if watch is not None:
         spec = watch.spec if isinstance(watch.spec, str) else list(watch.spec)
-        languages = [s.language]
-    if s.language == AUTO_LANGUAGE:
-        languages = list(s.languages)
     return {
         "device": t.device.id if t is not None else None,
         "watch": spec,
-        "languages": languages,
+        "languages": transcribed_languages(s),
         "privacy": s.privacy,
-        "out_of_reach": s.out_of_reach,
+        # A station switched off is in nobody's way, and its reach says nothing until it is on.
+        "out_of_reach": None if s.disabled else s.out_of_reach,
     }
 
 
