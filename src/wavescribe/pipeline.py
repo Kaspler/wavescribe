@@ -468,6 +468,7 @@ class Pipeline:
         self._vad_factory = vad_factory
         self._gate_factory = gate_factory
         self._music_s = 0.0  # seconds of music the gate kept away from ASR
+        self._music_at: dict[str, float] = {}  # station -> when the gate last dropped a song
         self._transcriber_factory = transcriber_factory
         self._translator_factory = translator_factory or (
             lambda entry, path: load_translator(entry, path, threads=mt_threads)
@@ -1018,6 +1019,11 @@ class Pipeline:
             return False
         return True
 
+    def music_heard(self) -> dict[str, float]:
+        """When the gate last dropped an utterance of each station as music in this run (epoch
+        seconds): a digest of a window with nothing written down says it was music."""
+        return dict(self._music_at)
+
     def llm_waiting(self, below: float) -> bool:
         """Whether a job of priority under ``below`` waits for the translation thread: what a
         long job of lower priority gives way to (a digest's call)."""
@@ -1181,7 +1187,7 @@ class Pipeline:
             else:
                 self._worked(gate.model_id, f"station {live.station.id}")
             if verdict.kind == "music":
-                live.last_music_at = time.time()
+                live.last_music_at = self._music_at[live.station.id] = time.time()
                 self._music_s += utt.duration
                 event(log, "gated", station=live.station.id, kind="music",
                       s=round(utt.duration, 1), speech=verdict.speech, music=verdict.music,

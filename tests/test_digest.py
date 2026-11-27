@@ -534,6 +534,32 @@ def test_nothing_said_needs_no_model(tmp_path: Path) -> None:
     store.close()
 
 
+def test_a_window_of_only_music_says_so(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    played = {"a": NOW - 60}  # a song dropped by the music filter a minute ago
+
+    def music() -> dict[str, float]:
+        return played
+
+    d = Digester(store, lambda: STATIONS, lambda run, given_up: True, clock=lambda: NOW,
+                 music=music)  # fmt: skip
+    out = d.run(d.request({"kind": "now", "stations": ["a"], "minutes": 2})).payload()
+    assert out["outcome"] == "nothing_said"
+    assert out["text"] == (
+        "Nothing said was written down from a in the last 2 minutes: it played music, which "
+        "isn't transcribed."
+    )
+    out = d.run(d.request({"minutes": 30, "stations": ["a", "b"]})).payload()
+    assert out["text"] == (
+        "Nothing said was written down from a and b in the last 30 minutes: a played music, "
+        "which isn't transcribed."
+    )
+    played["a"] = NOW - 10 * MIN  # before the window: it says nothing of it
+    out = d.run(d.request({"kind": "now", "stations": ["a"], "minutes": 2})).payload()
+    assert out["text"] == "Nothing was said on a in the last 2 minutes."
+    store.close()
+
+
 def test_a_window_from_before_wavescribe_started_says_so(tmp_path: Path) -> None:
     store = stocked(tmp_path)
     llm = FakeLlm("- Water is cut tomorrow [1].")

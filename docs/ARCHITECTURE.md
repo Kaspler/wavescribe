@@ -306,7 +306,9 @@ Steps (`digest/__init__.py`):
    is refused at once (503 with `Retry-After`).
 
 The answer says what became of the digest (`outcome`: `points`, `nothing_said`, `not_read` with
-the stations and why in `unread`, `nothing_stood_out` or `unsourced`) and who wrote it from how
+the stations and why in `unread`, `nothing_stood_out` or `unsourced`; with nothing kept from a
+station whose songs the gate dropped in the window, `nothing_said` says it played music, from
+`Pipeline.music_heard`) and who wrote it from how
 much (`notice`: the local model, lines read of those said, the window, and when Wavescribe
 started if that was within it: before then only an earlier run heard anything). The alerts
 announced in the window come with it in the words they were announced in: each incident once,

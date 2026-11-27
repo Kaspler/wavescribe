@@ -219,9 +219,12 @@ def test_gate_keeps_songs_away_from_asr() -> None:
         transcriber_factory=lambda _e, _p: FakeTranscriber(),
         translator_factory=lambda _e, _p: FakeTranslator(),
     )
+    t0 = time.time()
     pipeline.run(duration=30)
     assert [r.transcript.text for r in results] == ["2s"]
     assert pipeline.status()["music_skipped_s"] == 3
+    # When, for a digest of a window with nothing written down (digest/).
+    assert t0 <= pipeline.music_heard()["a"] <= time.time()
 
 
 class ScriptedTranscriber:

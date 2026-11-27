@@ -236,6 +236,7 @@ class Digest:
     model: str | None = None
     timings: dict[str, int] = field(default_factory=dict)
     started: float | None = None  # when this run of Wavescribe started, when known
+    music: list[str] = field(default_factory=list)  # stations whose music was dropped in it
 
     def stations_of(self, point: Point) -> list[str]:
         """The stations a point's sources were heard on."""
@@ -321,7 +322,15 @@ class Digest:
         if outcome == "nothing_said":
             heard = [s for s in self.request.stations if s not in self.unread]
             where = f"{_names(heard, self.names)} in the last {self.request.minutes:.0f} minutes"
-            return f"Nothing was said on {where}. {unread}".strip()
+            if not self.music:
+                return f"Nothing was said on {where}. {unread}".strip()
+            # Not "nothing was said": a voice over a song goes with the song.
+            who = ("it" if len(heard) == 1 else "they") if self.music == heard else None
+            who = who or _names(self.music, self.names)
+            return (
+                f"Nothing said was written down from {where}: {who} played music, which isn't "
+                f"transcribed. {unread}"
+            ).strip()
         if outcome == "not_read":
             return unread
         if outcome == "nothing_stood_out" and not self.calls:
@@ -384,9 +393,11 @@ class Digester:
         running: Callable[[], Collection[str]] | None = None,
         ahead: Callable[[], bool] | None = None,
         started: float | None = None,
+        music: Callable[[], Mapping[str, float]] | None = None,
     ) -> None:
         self.store = store
         self.started = started  # when this run of Wavescribe started: a digest says so
+        self._music = music  # when each running station last had a song dropped, when known
         self._ahead = ahead  # a job that goes first waits for the model (GIVE_WAY_BELOW)
         self._stations = stations  # read each time: the page adds and removes stations
         self._running_now = running  # the stations running, when known
@@ -617,6 +628,13 @@ class Digester:
         )
         digest.unread = self.unread(request, selection.said)
         digest.started = self.started
+        if self._music is not None and not sum(selection.said.values()):
+            played = self._music()
+            digest.music = [
+                sid
+                for sid in request.stations
+                if request.since <= played.get(sid, -1.0) <= request.until
+            ]
         prompts = plan_prompts(selection.lines)
         if not prompts:
             return digest
