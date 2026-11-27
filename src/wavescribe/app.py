@@ -544,7 +544,21 @@ class App:
         self.untranslated = found
 
     def add_station(self, raw: dict[str, Any], *, start: bool = False) -> dict[str, Any]:
-        """A station from the page: a stream URL, a feed of another Wavescribe, or a device."""
+        """A station from the page: a stream URL, a feed of another Wavescribe, or a device.
+        One its receiver doesn't hear where that is tuned is refused (``_check_draft``): the
+        page's route moves the receiver first (``RadioService.add_station``)."""
+        raw = self.station_entry(raw)
+        sid = str(raw["id"])
+        self._check_draft(lambda d: d.setdefault("station", []).append(raw), sid)
+        self.settings.update(lambda d: d.setdefault("station", []).append(raw))
+        self._reload()
+        if start:
+            self.start_station(sid)
+        return next(v for v in self.stations_view() if v["id"] == sid)
+
+    def station_entry(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """A station from the page as it is saved: without its empty fields, with an id from its
+        name and a name from its id where it lacks one; refused when either is taken."""
         raw = {k: v for k, v in raw.items() if v not in (None, "", [])}
         raw.setdefault("id", self._free_id(slug(str(raw.get("name") or raw.get("id") or ""))))
         sid = str(raw["id"])
@@ -552,12 +566,7 @@ class App:
             raise ChangeError(f"there is already a station called {sid!r}")
         raw.setdefault("name", sid)
         self._check_name_free(str(raw["name"]))
-        self._check_draft(lambda d: d.setdefault("station", []).append(raw), sid)
-        self.settings.update(lambda d: d.setdefault("station", []).append(raw))
-        self._reload()
-        if start:
-            self.start_station(sid)
-        return next(v for v in self.stations_view() if v["id"] == sid)
+        return raw
 
     def update_station(self, sid: str, changes: dict[str, Any]) -> dict[str, Any]:
         """Change a station: page stations are edited in place, stations.toml ones get an
@@ -746,10 +755,12 @@ class App:
 
             self.settings.update(mutate)
 
-    def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str) -> Station:
+    def _check_draft(self, mutate: Callable[[dict[str, Any]], None], sid: str, *,
+                     reach: bool = True) -> Station:  # fmt: skip
         """The station as the change would leave it, or why the change can't be made. A change
-        that tunes it where its receiver doesn't hear it is refused with what to do: a station
-        its receiver was moved away from takes other changes (a name, a language) as before."""
+        that tunes it where its receiver doesn't hear it is refused with what to do (unless
+        ``reach`` is false: the caller moves the receiver): a station its receiver was moved
+        away from takes other changes (a name, a language) as before."""
         draft = self.settings.snapshot()
         mutate(draft)
         config, errors = effective_config(self.base, draft)
@@ -761,7 +772,7 @@ class App:
         station = config.get(sid)
         prev = next((s for s in self.config.stations if s.id == sid), None)
         moved = prev is None or not prev.out_of_reach or prev.sdr != station.sdr
-        if station.out_of_reach and moved and not station.disabled:
+        if reach and station.out_of_reach and moved and not station.disabled:
             raise ChangeError(station.out_of_reach, "out_of_reach")
         return station
 

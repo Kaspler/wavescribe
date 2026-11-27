@@ -676,7 +676,13 @@ every station the receiver has (where the hand tuner has it, else 250 or 300 kHz
 frequency, away from DC, else the nearest kHz that keeps them all). With no such centre nothing
 changes and the answer is a 400 with code `retune` (`retune_question`: `unfit`, `holders`,
 `center_mhz`); `retune: true` goes ahead, and `/api/manage/receivers/<id>` asks the same before a
-hand-set centre leaves stations out. A receiver tuned by hand is let go first, and what it paused
+hand-set centre leaves stations out. `POST /api/manage/stations` moves the receiver the same way
+for a radio station or watch it doesn't hear where it is tuned (`add_station`, with the same
+planner: `_centre_for_station` tries, for a watch, where a watch is tuned (`plan_centre`) and
+then every kHz from which it hears the whole window): without asking when that leaves nothing
+out, else the same question with nothing changed, until the same body comes with `retune: true`.
+After such a move its answer adds `receiver`, `unfit`, `live_closed` and `start_error`, as
+`tune`'s does. A receiver tuned by hand is let go first, and what it paused
 starts again where it is still heard.
 
 **Codes beside refusals** (`refusal.py`). A refusal the page may act on carries a `code` beside
@@ -702,7 +708,8 @@ app lists it unavailable with that reason, never starts it (`open_source` refuse
 stops it if a retune leaves it out. It is not a config error: a stations file with one starts,
 and `doctor` warns `out of reach` instead of counting a page change not applied. Switched-off
 stations, and those already out of reach, never hold a retune back. A page change that would
-tune a station where its receiver doesn't hear it is refused with the same reason.
+tune a station where its receiver doesn't hear it is refused with the same reason (code
+`out_of_reach`); a station added from the page moves the receiver instead, as above.
 
 **Listening by hand** (`radio/live.py`, `/api/manage/live/<receiver>`, the page's **Tune by
 hand**). A `LiveReceiver` is one more consumer of the dongle's shared `rtl_sdr` pipe, like a

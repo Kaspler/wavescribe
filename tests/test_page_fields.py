@@ -135,6 +135,65 @@ def test_what_a_watch_caught_comes_with_its_translations_where_its_words_may_go(
         r.close()
 
 
+def test_adding_a_station_its_receiver_doesnt_hear_asks_as_a_tune_does(tmp_path: Path) -> None:
+    r = running(tmp_path, stations(two_metres_centre()))
+    before = r.app.settings.snapshot()
+    try:
+        far = {"name": "Far", "device": "a", "mhz": 432.5, "start": True}
+        status, ask = r.call("POST", "/api/manage/stations", far)
+        assert status == 400 and ask["code"] == "retune", ask
+        assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
+        assert ask["holders"] == [] and ask["center_mhz"] == 432.25
+        assert ask["error"] == (
+            "To hear Far, Receiver A moves to 432.25 MHz, where it no longer hears Two metres. "
+            "It stays in your stations, unavailable until the receiver hears it again."
+        )
+        assert r.app.settings.snapshot() == before  # nothing changed while it asks
+        assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
+
+        status, added = r.call("POST", "/api/manage/stations", {**far, "retune": True})
+        assert status == 200, added
+        assert added["name"] == "Far" and added["available"] is True
+        assert added["start_error"] is None and added["live_closed"] is False
+        assert added["id"] in r.app.settings.get("run")["stations"]  # started, as asked
+        assert added["receiver"] == {"id": "a", "center_mhz": 432.25, "moved": True}
+        assert added["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
+        assert r.app.config.devices[0].center_hz == 432_250_000
+        assert r.app.unavailable["ham2m"].startswith("Receiver A doesn't hear all of Amateur 2 m")
+    finally:
+        r.close()
+
+
+def test_a_watch_its_receiver_doesnt_hear_moves_it_and_asks_for_what_that_stops(
+    tmp_path: Path,
+) -> None:
+    fm = {"id": "fm", "name": "Morning FM", "device": "a", "fm_mhz": 98.5}
+    raw = stations(98.0, fm)
+    raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]
+    r = running(tmp_path, raw)
+    real = r.app.running
+    r.app.running = lambda: real() | {"fm"}  # type: ignore[method-assign]
+    try:
+        watch = {"name": "Two metres", "device": "a", "watch": "2m", "language": "auto"}
+        status, ask = r.call("POST", "/api/manage/stations", watch)
+        assert status == 400 and ask["code"] == "retune", ask
+        assert ask["holders"] == ["Morning FM"]
+        assert ask["unfit"] == [{"id": "fm", "name": "Morning FM", "running": True}]
+        assert ask["center_mhz"] == two_metres_centre()
+        assert ask["error"].startswith("To hear Two metres, Receiver A moves to ")
+        assert "Retuning it stops Morning FM." in ask["error"]
+        assert all(s.name != "Two metres" for s in r.app.config.stations)
+
+        status, err = r.call("POST", "/api/manage/stations", {**watch, "retune": "yes"})
+        assert status == 400 and err["error"] == "retune must be true or false"
+        status, added = r.call("POST", "/api/manage/stations", {**watch, "retune": True})
+        assert status == 200 and added["available"] is True, added
+        assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
+        assert "Receiver A doesn't hear Morning FM" in r.app.unavailable["fm"]
+    finally:
+        r.close()
+
+
 def test_a_watch_too_wide_says_so_with_the_slice_that_fits(tmp_path: Path) -> None:
     with pytest.raises(WatchError) as said:
         plan_window("marine", "cept", rate=2_400_000)

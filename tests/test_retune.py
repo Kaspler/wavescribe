@@ -100,10 +100,16 @@ def test_a_page_change_cant_tune_a_station_where_its_receiver_doesnt_hear_it(
 ) -> None:
     r = running(tmp_path, stations(98.0))
     try:
+        # Added, a station its receiver doesn't hear moves the receiver, as a tune does: here
+        # without asking, since the receiver hears nothing else.
         far = {"name": "Far", "device": "a", "mhz": 145.6}
-        status, err = r.call("POST", "/api/manage/stations", far)
+        status, added = r.call("POST", "/api/manage/stations", far)
+        assert status == 200 and added["available"] is True, added
+        assert added["receiver"] == {"id": "a", "center_mhz": 145.35, "moved": True}
+        # Changed, it can't be tuned where its receiver doesn't hear it.
+        status, err = r.call("POST", f"/api/manage/stations/{added['id']}", {"mhz": 98.0})
         assert status == 400 and err["error"].startswith("Receiver A doesn't hear Far where")
-        assert all(s.name != "Far" for s in r.app.config.stations)
+        assert r.app.config.get(added["id"]).sdr.freq_hz == 145_600_000
         # A station its receiver was moved away from still takes other changes.
         status, ham = r.call("POST", "/api/manage/stations/ham2m", {"name": "Two metres FM"})
         assert status == 200 and ham["available"] is False

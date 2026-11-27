@@ -103,9 +103,15 @@ def _stations(app: App, m, q, b) -> Any:
 
 @route("POST", "/stations")
 def _add_station(app: App, m, q, b) -> Any:
+    """A radio station or watch its receiver doesn't hear moves the receiver, and asks first
+    when that leaves stations out (code ``retune``, as ``/radio/tune`` asks it); ``retune:
+    true`` is the yes."""
     b = dict(_body(b))
     start = bool(b.pop("start", False))
-    return app.add_station(b, start=start)
+    retune = b.pop("retune", False)
+    if not isinstance(retune, bool):
+        raise ChangeError("retune must be true or false")
+    return app.radio.add_station(b, start=start, retune=retune)
 
 
 @route("POST", "/stations/(?P<id>[a-z0-9_-]+)")
