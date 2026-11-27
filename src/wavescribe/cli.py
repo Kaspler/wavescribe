@@ -315,9 +315,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"# page change to {sid} not applied: {reason}", file=sys.stderr)
     warn_noncommercial(app.plan)
     if app.alerter is not None:
-        rules = app.alerter.config.rules
-        print(f"# alerts: {len(rules.rules)} keyword, {len(rules.llm_rules)} LLM and "
-              f"{len(rules.station_rules)} station rules", file=sys.stderr)  # fmt: skip
+        print(f"# alerts: {rule_counts(app.alerter.config.rules)}", file=sys.stderr)
 
     def ready(url: str) -> None:
         print(f"Wavescribe is running at {url}  (Ctrl-C to stop)", file=sys.stderr)
@@ -354,9 +352,17 @@ def open_alerter(
               file=sys.stderr)  # fmt: skip
         return None
     lists = ", ".join(sorted(config.rules.packs)) or "none"
-    print(f"# alerts: {len(config.rules.rules)} rules ({path or 'the page'}, with the page's "
-          f"changes); topic word lists: {lists}", file=sys.stderr)  # fmt: skip
+    # Only serve runs the LLM that reads the text for LLM rules.
+    unchecked = "; LLM rules are checked under serve only" if config.rules.llm_rules else ""
+    print(f"# alerts: {rule_counts(config.rules)} ({path or 'the page'}, with the page's "
+          f"changes){unchecked}; topic word lists: {lists}", file=sys.stderr)  # fmt: skip
     return Alerter(config, store=store, station_names=station_names, on_alert=on_alert)
+
+
+def rule_counts(rules: Any) -> str:
+    """How many rules there are of each kind, as serve and listen say when they start."""
+    return (f"{len(rules.rules)} keyword, {len(rules.llm_rules)} LLM and "
+            f"{len(rules.station_rules)} station rules")  # fmt: skip
 
 
 def _alerts_replay(args: argparse.Namespace, db: Path) -> int:

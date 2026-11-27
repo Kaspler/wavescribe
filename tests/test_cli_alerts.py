@@ -43,3 +43,22 @@ def test_alerts_check_says_plainly_when_a_language_has_no_topic_words(
     assert main(["alerts", "check", "--language", "es", "Corte", "de", "agua"]) == 1
     err = capsys.readouterr().err
     assert "no rule matches" in err and "Spanish" in err and "config/keywords/es.toml" in err
+
+
+def test_listen_counts_every_kind_of_rule_as_serve_does(project: Path, capsys) -> None:
+    import argparse
+
+    from wavescribe.cli import open_alerter
+
+    with (project / "config" / "alerts.toml").open("a", encoding="utf-8") as f:
+        f.write('[[rule]]\nid = "leave"\nkind = "llm"\nprompt = "people are told to leave"\n'
+                '[[rule]]\nid = "quiet"\nkind = "silence"\nafter_minutes = 5\n')  # fmt: skip
+    args = argparse.Namespace(no_alerts=False, alerts=None)
+    alerter = open_alerter(args, {}, None)
+    assert alerter is not None
+    try:
+        err = capsys.readouterr().err
+        assert "# alerts: 1 keyword, 1 LLM and 1 station rules (" in err
+        assert "LLM rules are checked under serve only" in err  # listen runs no LLM for them
+    finally:
+        alerter.close()
