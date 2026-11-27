@@ -13,7 +13,9 @@ import { Icon } from "../components/Icon";
 import { Button, Check, LinkButton, cx, useDismiss } from "../components/ui";
 import { SEV_WORD, human } from "./Alerts";
 import { SourceRow } from "./Ask";
-import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, cutAt, linksOf, saidBy, shown, sinceClock, windowProblem } from "./digest";
+import { langNameEn } from "../lib/lang";
+import { Aloud, readAloud, stopReading } from "./aloud";
+import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, linksOf, readingAt, saidBy, shown, sinceClock, windowProblem } from "./digest";
 import { T } from "./strings";
 import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary, speakNext } from "./summaries";
 
@@ -173,7 +175,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
             </form>
           </div>
           {problem && <p className="sum-pick-why" id={`${uid}-p`} role="alert">{problem}</p>}
-          {S.canControl && <Check checked={Sm.speak} disabled={busy} onChange={speakNext}>{T.readAloud}</Check>}
+          {S.canControl && <Check checked={Sm.speak} disabled={busy} onChange={speakNext}>{T.readAloudWhenReady}</Check>}
           {busy && <p className="sum-pick-why">{T.oneAtATime}</p>}
         </>
       )}
@@ -257,31 +259,69 @@ function Body({ job }: { job: Job }) {
   if (!job.answer) return null;
   return (
     <>
-      {job.cancel === "late" && <p className="sum-speech">{T.cancelledLate}</p>}
-      <AnswerView a={job.answer} took={job.took} speech={job.speak ? <Speech job={job} /> : null} />
+      {job.cancel === "late" && <p className="sum-late">{T.cancelledLate}</p>}
+      <AnswerView a={job.answer} took={job.took} />
     </>
   );
 }
 
-/** Whether the summary is being read aloud on this machine, was, or was cut short by an alert's
- * voice; or the server's reason it isn't read. */
-function Speech({ job }: { job: Job }) {
-  useTopics("alerts");
+/** Reading the answer aloud on this machine, for an answer with points: the button, and where
+ * it stands (being read, read, cut short by an alert's voice, stopped, or why not). Elsewhere
+ * nothing: only the Wavescribe machine reads aloud, in its own room. */
+function ReadAloud({ a, compact }: { a: Answer; compact?: boolean }) {
+  useTopics("aloud", "alerts");
   const [, tick] = useState(0);
-  const sp = job.spoken;
-  const ends = sp ? sp.at + sp.seconds : 0;
+  const rec = a.id ? Aloud[a.id] : undefined;
+  const ends = rec?.state === "reading" ? rec.at + rec.seconds : 0;
   useEffect(() => {
     const left = ends * 1000 - Date.now();
     if (left <= 0) return;
     const t = setTimeout(() => tick((n) => n + 1), left + 500);
     return () => clearTimeout(t);
   }, [ends]);
-  const why = job.answer?.speech?.error;
-  if (!sp) return why ? <p className="sum-speech" dir="auto">{T.notReadAloud(why)}</p> : null;
-  const cut = cutAt(sp, S.alerts.values());
-  const text = cut != null ? T.readAloudCut(hms(cut))
-    : Date.now() / 1000 < ends ? T.readingAloud(sp.seconds) : T.readAloudAt(hm(sp.at));
-  return <p className="sum-speech" role="status">{text}</p>;
+  if (!S.canControl || !a.id || !shown(a).points.length) return null;
+  const id = a.id;
+  const read = (label: string) => (
+    <Button size="sm" variant={compact ? "ghost" : "secondary"} icon="speaker" title={T.readAloudTitle}
+            disabled={rec?.state === "starting"} onClick={() => readAloud(a)}>{label}</Button>
+  );
+  const stop = (
+    <Button size="sm" variant={compact ? "ghost" : "secondary"} icon="stop" title={T.stopReadingTitle}
+            disabled={rec?.state === "stopping"} onClick={() => stopReading(id)}>{T.stopReading}</Button>
+  );
+  let text: React.ReactNode = null;
+  let act: React.ReactNode = read(T.readAloud);
+  if (rec?.state === "starting") text = T.aloudStarting;
+  else if (rec?.state === "reading") {
+    const now = readingAt(rec, Date.now() / 1000, S.alerts.values());
+    text = now.state === "cut" ? T.readAloudCut(hms(now.cut)) : now.state === "read" ? T.readAloudAt(hm(rec.at)) : T.readingAloud(rec.seconds);
+    act = now.state === "reading" ? stop : read(T.readAloudAgain);
+  } else if (rec?.state === "stopping") {
+    text = T.aloudStopping;
+    act = stop;
+  } else if (rec?.state === "stopped") {
+    text = rec.other ? T.aloudOtherStopped : T.aloudStopped(hm(rec.at));
+    act = read(rec.other ? T.readAloud : T.readAloudAgain);
+  } else if (rec?.state === "ended") {
+    text = T.aloudEnded;
+    act = read(T.readAloudAgain);
+  } else if (rec?.state === "gone") {
+    text = T.aloudGone;
+    act = null;
+  } else if (rec?.state === "refused" && rec.code === "speaking") {
+    text = T.aloudSpeaking;
+    act = stop;
+  } else if (rec?.state === "refused" && rec.code === "no_voice" && S.manage) {
+    text = <>{T.aloudNoVoice(langNameEn(a.language))} <a href="#/settings/alerts">{T.alertRules}</a>.</>;
+  } else if (rec?.state === "refused" || rec?.state === "failed") {
+    text = <span dir="auto">{T.notReadAloud(rec.text)}</span>;
+  }
+  return (
+    <div className={cx("sum-aloud", compact && "is-compact")}>
+      {text && <p role="status">{text}</p>}
+      {act}
+    </div>
+  );
 }
 
 /** The server's sentence as it is (a window too long in the page's words, with how long one may
@@ -313,14 +353,14 @@ function Again({ f, again, variant }: { f: Failure; again: () => void; variant: 
   );
 }
 
-function AnswerView({ a, took, speech }: { a: Answer; took: number | null; speech: React.ReactNode }) {
+function AnswerView({ a, took }: { a: Answer; took: number | null }) {
   const v = shown(a);
   const uid = useId();
   const foot = [took != null ? T.took(Math.max(1, Math.round(took / 1000))) : null, a.model].filter(Boolean).join(" · ");
   return (
     <>
       {v.notice && <p className="sum-notice">{v.notice}</p>}
-      {speech}
+      <ReadAloud a={a} />
       {a.alerts.length > 0 && <WindowAlerts a={a} />}
       {v.points.length ? (
         <ol className="sum-points">{v.points.map((p, i) => <PointView key={i} p={p} a={a} />)}</ol>
@@ -411,6 +451,7 @@ export function NowLine({ id }: { id: string }) {
             {close}
           </div>
           {v.notice && <p className="col-now-notice">{v.notice}</p>}
+          <ReadAloud a={a} compact />
         </>
       ) : null}
       <p className="sr-only" role="status">

@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, newId, nowBody, saidBy, shown, sinceClock,
-  spokenSeconds, windowProblem,
+  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, newId, nowBody, readingAt, saidBy, shown,
+  sinceClock, speakResult, speechOf, spokenSeconds, windowProblem,
 } from "../src/reading/digest.ts";
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
@@ -185,4 +185,33 @@ test("an alert read aloud during the reading, or just after it, cut it short", (
   assert.equal(cutAt(speech, [{ delivered_at: 1010, actions: { notify: "ok" } }]), null); // not spoken
   assert.equal(cutAt(speech, [{ delivered_at: 1010, actions: { "speak:en": "failed" } }]), null);
   assert.equal(cutAt(speech, [spoke(1030), spoke(1015)]), 1015);
+});
+
+test("asking to read a summary aloud: begun, refused by its code, no longer kept, or failed", () => {
+  assert.deepEqual(speakResult(200, { id: "x", speech: { started: true } }), { kind: "started", code: null, text: "" });
+  for (const code of ["no_voice", "no_speech", "voice_missing", "nothing_to_read", "no_phrases", "speaking"]) {
+    const r = speakResult(409, { error: "why not", code, id: "x" });
+    assert.deepEqual(r, { kind: "refused", code, text: "Why not." }, code);
+  }
+  // A code the page has no words for keeps the server's sentence.
+  assert.deepEqual(speakResult(409, { error: "a new reason", code: "brand_new" }), { kind: "refused", code: "brand_new", text: "A new reason." });
+  assert.equal(speakResult(404, { error: "no digest with this id is kept here: make it again", code: "not_found" }).kind, "gone");
+  assert.equal(speakResult(403, { error: "this machine only" }).kind, "failed");
+  assert.equal(speakResult(400, { error: "send an id", code: "bad_id" }).kind, "failed");
+  assert.equal(speakResult(200, { stopped: true }).kind, "failed");
+});
+
+test("a summary asked with speak says whether its reading began, and why not", () => {
+  assert.equal(speechOf(answer()), null);
+  assert.deepEqual(speechOf(answer({ speech: { started: true } })), { kind: "started", code: null, text: "" });
+  assert.deepEqual(speechOf(answer({ speech: { started: false, error: "another digest is being read aloud; try again when it ends", code: "speaking" } })),
+    { kind: "refused", code: "speaking", text: "Another digest is being read aloud; try again when it ends." });
+});
+
+test("a reading is being read until its estimate runs out, unless an alert's voice cut it", () => {
+  const r = { at: 1000, seconds: 30 };
+  assert.deepEqual(readingAt(r, 1010, []), { state: "reading", cut: null });
+  assert.deepEqual(readingAt(r, 1031, []), { state: "read", cut: null });
+  const spoke = { delivered_at: 1012, actions: { "speak:en": "ok" } };
+  assert.deepEqual(readingAt(r, 1015, [spoke]), { state: "cut", cut: 1012 });
 });

@@ -41,6 +41,8 @@ export interface WindowAlert {
 }
 
 export interface Answer {
+  /** The request's id: what reads it aloud again (POST /api/digest/speak). */
+  id?: string;
   kind: "digest" | "now";
   language: string;
   stations: string[];
@@ -56,8 +58,9 @@ export interface Answer {
   text: string;
   model?: string | null;
   timings?: { model_ms?: number; total_ms?: number };
-  /** Asked with `speak`: whether reading it aloud began, and the server's reason when not. */
-  speech?: { started: boolean; error?: string };
+  /** Asked with `speak`: whether reading it aloud began, and the server's reason and its code
+   * (digest/speech.py, SPEECH_CODES) when not. */
+  speech?: { started: boolean; error?: string; code?: string };
 }
 
 /** An id for a request, by which it can be cancelled: a random UUID where the browser makes one
@@ -297,4 +300,43 @@ export function cutAt(speech: { at: number; seconds: number }, alerts: Iterable<
     if (first == null || at < first) first = at;
   }
   return first;
+}
+
+/** What asking to read a summary aloud came to (POST /api/digest/speak, or `speech` in the
+ * answer of one asked with `speak`): begun; refused, with the server's code (digest/speech.py,
+ * SPEECH_CODES: no_voice, no_speech, voice_missing, nothing_to_read, no_phrases, speaking) and
+ * sentence; "gone", no longer kept on the Wavescribe machine (404); or "failed", any other
+ * answer, the server's sentence when it gave one. */
+export interface SpeakResult {
+  kind: "started" | "refused" | "gone" | "failed";
+  code: string | null;
+  text: string;
+}
+
+export function speakResult(status: number, data: unknown): SpeakResult {
+  const d = (data && typeof data === "object" ? data : {}) as { error?: unknown; code?: unknown; speech?: unknown };
+  const speech = (d.speech && typeof d.speech === "object" ? d.speech : null) as { started?: unknown } | null;
+  const code = typeof d.code === "string" && d.code ? d.code : null;
+  const text = asSentence(typeof d.error === "string" && d.error ? d.error : `the server answered ${status}`);
+  if (status >= 200 && status < 300 && speech?.started === true) return { kind: "started", code: null, text: "" };
+  if (status === 404 || code === "not_found") return { kind: "gone", code, text };
+  if (status === 409 && code) return { kind: "refused", code, text };
+  return { kind: "failed", code, text };
+}
+
+/** The same, from the answer to a summary asked with `speak`; null when it wasn't. */
+export function speechOf(a: Answer): SpeakResult | null {
+  const sp = a.speech;
+  if (!sp) return null;
+  if (sp.started) return { kind: "started", code: null, text: "" };
+  return { kind: "refused", code: sp.code ?? null, text: asSentence(sp.error || "") };
+}
+
+/** Where a reading that began at `at` and takes about `seconds` stands at `now`: still being
+ * read, read to the end, or cut short by an alert's voice (when: `cut`). */
+export function readingAt(r: { at: number; seconds: number }, now: number, alerts: Iterable<Delivered>):
+  { state: "reading" | "read" | "cut"; cut: number | null } {
+  const cut = cutAt(r, alerts);
+  if (cut != null) return { state: "cut", cut };
+  return { state: now < r.at + r.seconds ? "reading" : "read", cut: null };
 }

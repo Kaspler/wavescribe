@@ -13,7 +13,8 @@ import { P, visible } from "../lib/prefs";
 import { MAX_COLS, setCols } from "../lib/router";
 import { emit } from "../lib/store";
 import { V, showLine } from "../lib/view";
-import { type Answer, type Choice, type Failure, answerOf, digestBody, failure, failureOf, newId, nowBody, spokenSeconds } from "./digest";
+import { heard } from "./aloud";
+import { type Answer, type Choice, type Failure, answerOf, digestBody, failure, failureOf, newId, nowBody, speechOf } from "./digest";
 import { T } from "./strings";
 
 export interface Job {
@@ -31,17 +32,16 @@ export interface Job {
   cancel: "stopped" | "late" | "unreached" | null;
   answer: Answer | null;
   failure: Failure | null;
-  /** Asked to be read aloud on this machine; once it began, when (s) and for about how long. */
+  /** Asked to be read aloud on this machine as soon as it is made. */
   speak: boolean;
-  spoken: { at: number; seconds: number } | null;
 }
 
 export const Sm = {
   job: null as Job | null,
   /** The answer shows beside the columns (on a phone, on its own page: #/summary). */
   open: false,
-  /** Read the next one aloud on this machine: the server reads a summary aloud only as it is
-   * made, never one already shown. */
+  /** Read the next one aloud on this machine as soon as it is made: whoever wants to hear it may
+   * be away from the screen by then. Any answer with points can be read aloud later too. */
   speak: false,
 };
 
@@ -152,7 +152,7 @@ export async function askSummary(choice: Choice, stations: string[]) {
   const id = newId();
   const job: Job = {
     id, stations, choice, asked: Date.now(), took: null, state: "working", cancel: null, answer: null, failure: null,
-    speak, spoken: null,
+    speak,
   };
   const mine = new AbortController();
   ctl = mine;
@@ -160,7 +160,8 @@ export async function askSummary(choice: Choice, stations: string[]) {
   Sm.open = true;
   emit("summary");
   await fetchAnswer(job, digestBody(choice, { id, stations, language: readerLanguage(stations), speak }), mine.signal);
-  if (job.answer?.speech?.started) job.spoken = { at: Date.now() / 1000, seconds: spokenSeconds(job.answer) };
+  const speech = job.answer && speechOf(job.answer);
+  if (job.answer && speech) heard(job.answer, speech);
   if (ctl === mine) ctl = null;
   keep();
   emit("summary");
