@@ -384,9 +384,11 @@ language, in `config/keywords/`. Wavescribe ships one pack, as an example, for o
 - stations in any other language get only the example's *station silent* alert, until you
   give them rules that work in their language.
 
-Nothing warns you of this while Wavescribe runs: a topic rule simply never matches a station
-whose language has no pack. (A warning is logged, once, only for a rule whose topic is in no
-pack at all.) To see where you stand:
+A topic rule simply never matches a station whose language has no pack. When none of the
+stations being written down is in a language with a word list for the topic rules that are
+on, the page says so, in the same words, in the empty alerts list (the bell) and above the
+rules under Settings → **Alerts**. (A warning is also logged, once, for a rule whose topic is
+in no pack at all.) To see where you stand:
 
 ```sh
 uv run wavescribe alerts check --language es "Hiervan el agua antes de beberla"

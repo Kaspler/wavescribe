@@ -1,7 +1,11 @@
 // Alerts: the rules that listen for what matters, and what happens when one fires.
 import { useEffect, useRef, useState } from "react";
-import { S } from "../lib/live";
+import { S, running } from "../lib/live";
 import { langNameEn } from "../lib/lang";
+import { noText } from "../lib/station";
+import { useTopics } from "../lib/store";
+import { withoutWordLists } from "../reading/rulesNote";
+import { T } from "../reading/strings";
 import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangPicker, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
@@ -9,6 +13,7 @@ import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } f
 import { and } from "./bands";
 import { lines, ruleBody } from "./drafts";
 import { SummarySchedule } from "./SummarySchedule";
+import { topicLanguages } from "./wordLists";
 
 /** Said under the page's heading, whatever follows: what an alert can and can't be relied on for. */
 const NOT_A_WARNING_SYSTEM = (
@@ -49,6 +54,7 @@ function RulesPage() {
                  <Button icon="plus" onClick={() => setEditing({ kind: "keyword" })}>Words to listen for</Button>
                  <Button icon="plus" onClick={() => setEditing({ kind: "llm" })}>Describe it in your words</Button>
                </>}>
+        <WordListNote rules={v.rules} packs={v.packs} />
         {editing && <RuleEditor key={editing.id || editing.kind} r={editing} v={v} onSaved={(fresh) => { redraw(fresh); setEditing(null); }} onCancel={() => setEditing(null)} />}
         <ul className="m-list">
           {v.rules.map((r: Any) => <RuleRow key={r.id} r={r} packs={v.packs} redraw={redraw} onEdit={() => setEditing(r)} />)}
@@ -63,6 +69,23 @@ function RulesPage() {
       <Delivery v={v} reload={reload} />
       <SummarySchedule stations={v.stations} />
     </>
+  );
+}
+
+/** Above the rules, in the words of the reading page's bell: none of the stations being written
+ * down now is in a language with a word list for the topics of the rules that are on, so those
+ * rules can't match there; words of your own and a rule in plain language can. */
+function WordListNote({ rules, packs }: { rules: Any[]; packs: Any }) {
+  useTopics("state", "status");
+  const lists = topicLanguages(rules, packs);
+  // The stations being written down here now, as the bell counts them.
+  const heard = S.stations.filter((s) => running(s.id) && s.transcribe && !noText(s) && !s.listen_only_run && s.kind !== "remote");
+  const without = withoutWordLists(lists, heard);
+  if (!without) return null;
+  return (
+    <div className="m-note">
+      <p>{T.alertsNoWordList(without.map(langNameEn), (lists || []).map(langNameEn))} {T.alertsAnyLanguage}</p>
+    </div>
   );
 }
 
