@@ -23,8 +23,7 @@ This page explains the defaults.
 Also registered, used only when chosen for a station or put in the chain under Settings → Languages and models:
 Whisper large-v3 (Apache-2.0), Nemotron 3.5 ASR streaming 0.6B (OpenMDW-1.1), Qwen3-ASR 1.7B
 (Apache-2.0, strong on Asian languages and Arabic) and Voxtral Mini 4B Realtime (Apache-2.0), all
-through mlx-audio. Omnilingual ASR (Apache-2.0, 1,600+ languages) would cover the long tail; it
-isn't registered (PyTorch, untested on macOS).
+through mlx-audio.
 
 The pt-PT bake-off measured speed and failure modes ([MEASUREMENTS.md](MEASUREMENTS.md)), not
 word error rate: there are no reference transcripts. Whisper large-v3-turbo is the chain's
@@ -57,9 +56,6 @@ time and GPU wasn't measured ([MEASUREMENTS.md](MEASUREMENTS.md)).
 | **Continuous, alerts, secondary languages, LLM rules and questions** | **Qwen3.5 9B** 4-bit | Apache-2.0 | 201 | mlx-lm (GPU). Beat MADLAD on speed and quality ([MEASUREMENTS.md](MEASUREMENTS.md)) |
 | **CPU fallback** | **MADLAD-400 3B** int8 | Apache-2.0 | 419 | CTranslate2 (CPU). Unsafe for Ukrainian: it invented content |
 
-Not registered and not tried here: TranslateGemma 4B/12B/27B (opt-in: Gemma Terms of Use), Opus-MT / Tatoeba (CC-BY-4.0 or Apache-2.0, small per-pair
-models for CTranslate2) and EuroLLM-9B-Instruct (Apache-2.0, 35 languages, mlx-lm).
-
 NLLB-200 and SeamlessM4T are **restricted** (non-commercial; see below). Hunyuan-MT is not listed (its licence excludes the EU).
 
 ## Embeddings
@@ -70,14 +66,10 @@ Not used: search is FTS5 trigram matching, and rules are keywords or LLM checks.
 
 **Silero VAD finds speech, then YAMNet checks each utterance** (`gate/yamnet.py`). Silero treats
 singing as speech, so without the gate every song reaches ASR and comes back as lyrics or
-invented text (one funk track came back partly as made-up Cyrillic).
+invented text.
 
-| Option | Result (2026-11-22) |
-|---|---|
-| **YAMNet** (Google, Apache-2.0), MediaPipe's LiteRT build | **Chosen.** 4 MB model, ~60 MB install with LiteRT, 0.16 s of one CPU core for 3 minutes of audio, 80 MB RAM |
-| inaSpeechSegmenter (MIT) | Dropped: 0.7.6 breaks on NumPy 2 (twice) and its Keras 2 model won't load in Keras 3; TensorFlow is a 1.6 GB install |
-| Apple SoundAnalysis | Not used: YAMNet does the job at a small cost. Not tried |
-| PANNs (CC-BY-4.0 weights) | Heavier (torch); not tried |
+**YAMNet** (Google, Apache-2.0) runs as MediaPipe's LiteRT build: a 4 MB model, ~60 MB install
+with LiteRT, 0.16 s of one CPU core for 3 minutes of audio, 80 MB RAM (2026-11-22).
 
 **Measurements** on 14 minutes from four Portuguese stations (news, a documentary over a music
 bed, fado, funk and pop), YAMNet's scores per 0.975 s window, checked against ASR text per
@@ -102,17 +94,14 @@ retune the thresholds.
 ## Text language identification (ASR checks)
 
 **py3langid** (BSD-3-Clause, 97 languages, a 4.4 MB model, numpy only) flags transcripts that
-are clearly not in the station's language. lingua (Apache-2.0) was compared: similar on long
-text, better on some short Spanish lines, but 305 MB. On 101 real transcripts from Portuguese
+are clearly not in the station's language. On 101 real transcripts from Portuguese
 radio, every Portuguese sentence of 20+ characters scored p(pt) ≥ 0.14, and lyrics and English
 clips mostly ≤ 0.013, so the flag fires below 0.05. Shorter texts get no verdict ("Foi preso."
 reads as Romanian). Languages py3langid doesn't know get no verdict either.
 
 **Alert translations.** On a synthetic civil-protection bulletin, Qwen3.5-9B's English and
 Ukrainian were accurate except for one idiom: *Última hora* ("breaking news") came out as "Last
-hour" / "Остання година". A prompt line asking to translate idioms by meaning made it worse
-("Final bulletin", and the Ukrainian changed a present-tense water cut into a future one), so the
-prompt stays as it is.
+hour" / "Остання година".
 
 **Remarks instead of translations.** Given recognition gone wrong, Qwen3.5-9B sometimes writes
 about the text instead of translating it ("I cannot translate this word…", "the meaning is
@@ -143,7 +132,7 @@ None is registered: the tiers and the licence gate exist, and no model uses them
 | Gemma 3 / 3n | opt-in | Gemma Terms of Use | 140+ languages, small sizes |
 | NLLB-200 (600M–3.3B) | **restricted ⚠ NC** | CC-BY-NC-4.0 | Direct translation between 200 languages, no pivot |
 | SeamlessM4T v2 | **restricted ⚠ NC** | CC-BY-NC-4.0 | Speech → text translation for ~100 languages |
-| Meta MMS (ASR + LID) | **restricted ⚠ NC** | CC-BY-NC-4.0 | 1,100+ languages, though Omnilingual ASR (Apache-2.0) covers this now |
+| Meta MMS (ASR + LID) | **restricted ⚠ NC** | CC-BY-NC-4.0 | 1,100+ languages |
 
 ## Will it fit? (Settings → Languages and models)
 
