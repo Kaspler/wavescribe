@@ -377,7 +377,10 @@ left alone.
    translated and watched by your alerts, like any other station.
 
 Choose another band on the dial to read what it is and find what's on it there
-([RADIO.md](RADIO.md#finding-stations)).
+([RADIO.md](RADIO.md#finding-stations)). On a band whose channels talk now and then, such as
+walkie-talkies or the 2 m amateur band, **Watch this band** writes down whatever is said on any
+of its channels and lists it under **Caught here**
+([RADIO.md](RADIO.md#catching-radio-that-only-talks-now-and-then)).
 
 One dongle hears a window about 2 MHz wide, so it can carry two to five FM stations that sit
 close together. For stations spread across the band, use more dongles

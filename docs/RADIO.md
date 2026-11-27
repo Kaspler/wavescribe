@@ -38,17 +38,21 @@ Choose a band to read what it is, when it is busy and the antenna it wants. Then
 - **Find stations here** sweeps the band with the receiver chosen under *Receiver*: once for
   broadcast, again and again for a few minutes where channels talk now and then. What it finds
   is listed under the dial, strongest first, and kept under *Heard here*.
-- **Look here with Receiver A** tunes the receiver by hand to a slice of the band about 2.4 MHz
-  wide (what one receiver hears at once; a wider band takes several looks) and shows that slice's
-  spectrum and waterfall live, with what was heard marked by name. Click a signal, or **Listen**
-  in the list, to hear it there. You can also drag a receiver's letter along the dial. A receiver
-  that is following stations asks first, says which would pause, and offers a free receiver
-  instead.
+- **Look here with Receiver A** tunes the receiver by hand to the strongest station heard in the
+  band (with nothing heard yet, a channel at its middle) and shows the slice of the band around
+  it, about 2.4 MHz wide (what one receiver hears at once; a wider band takes several looks),
+  as spectrum and waterfall live, with what was heard marked by name. Click a signal, or
+  **Listen** in the list, to hear it there. You can also drag a receiver's letter along the dial.
+  A receiver that is following stations and has to move for it asks first, says which would
+  pause, and offers a free receiver instead.
 - **Add as a station** makes what you are hearing a station that runs all the time, in one step:
   the receiver is let go from tuning by hand and stays where it hears the new station and the
   stations it already has, moving if it must; then the station starts. If no place hears them
   all, nothing changes until you answer: the page names the stations that would be left out
   (see [Keeping a frequency as a station](#keeping-a-frequency-as-a-station)).
+- **Watch this band with Receiver A**, on a band whose channels talk now and then
+  (walkie-talkies, 2 m, aircraft), turns whatever is said on any of its channels into text; see
+  [Catching radio that only talks now and then](#catching-radio-that-only-talks-now-and-then).
 
 One receiver is live at a time. For a band without it, the page shows the band from the newest
 scan that covered it, with how long ago that was. With nothing found yet, the page offers one
@@ -161,21 +165,24 @@ installed model that fits its language, and the shared translator. In a stations
 
 ## Keeping a frequency as a station
 
-On the page: **Add as a station** beside a scan result or a heard station, or click anywhere on
-the scan's spectrum (the nearest channel of the band there). For a frequency you type, tune it
-under **Listen** → **Tune by hand** and press **Keep it as a station**. An FM station tuned by
-its frequency alone takes its RDS name once RDS has it.
+On the page: **Add as a station** beside a scan result or a heard station, under a receiver
+tuned by hand on the dial, or click anywhere on the scan's spectrum (the nearest channel of the
+band there). For a frequency you type, tune it under **Listen** → **Tune by hand** and press
+**Keep it as a station**. An FM station tuned by its frequency alone takes its RDS name once RDS
+has it.
 
 **When the receiver has to move.** A receiver stays where it is if it hears the new frequency
 there. If not, it moves to where it hears the new station and every station it already has
 (running ones restart within seconds). If no place hears them all, nothing changes until you
-answer: the page names the stations that would be left out, running or not, and says which
-would stop. A station left out isn't deleted: it stays in your stations, unavailable, with a
-reason that says where to tune the receiver to hear it again. The same question comes from
-Settings → **Receivers** when you change a receiver's centre by hand. A station that is switched
-off is never in the way. A receiver can't hear a station when the frequency is outside the
-2.4 MHz or so it hears, or (narrowband) on its very centre, where every dongle has a spike of its
-own; for a watch, when any channel of its window is outside.
+answer: the page names the stations that would be left out, running or not, and says which would
+stop. A station left out isn't deleted: it stays in your stations, unavailable, with a reason
+that says where to tune the receiver to hear it again. Settings → **Receivers** asks the same
+question when you change a receiver's centre by hand. On the dial, the receiver's line counts
+such stations, and the card of each one's band names it with **Move Receiver A there**, which
+moves the receiver back and starts it, asking first if that leaves others out. A station that is
+switched off is never in the way. A receiver can't hear a station when the frequency is outside
+the 2.4 MHz or so it hears, or (narrowband) on its very centre, where every dongle has a spike
+of its own; for a watch, when any channel of its window is outside.
 
 From a terminal:
 
@@ -220,7 +227,20 @@ When a channel's squelch is closed the page shows "channel quiet" instead of sil
 someone speaks you rarely know on which channel. A **watch** listens to every channel of a band
 at once and transcribes whatever is said on any of them, though weak, very short or overlapping
 transmissions can be missed (see Limits, below). Each transmission is caught on its own, from its
-first syllable, with the channel it was on:
+first syllable, with the channel it was on.
+
+On the page: choose the band on the dial and press **Watch this band with Receiver A**. It asks
+for the confirmation the band's kind of radio needs and names the stations the receiver would
+stop. A receiver that doesn't hear the band is moved where it does, and if that leaves stations
+out the page asks first, as when adding a station. A band wider than one receiver hears is
+refused with a slice that fits, offered as a button. The receiver's line under the dial then
+says what it watches, and **Stop watching** frees it. What is caught and kept is listed under
+**Caught here**, by frequency, newest first: when, how long, how far above the noise, and
+whether anyone spoke, with the words underneath. Give a frequency a name, tags and a note there,
+**Listen there**, or **Add as a station**; the list can be narrowed to the last hour, day or
+week, to one band, or to catches with speech. A kind of radio that keeps nothing
+(walkie-talkies, by default) shows only in Read while the watch runs, and Caught here says so.
+From a terminal:
 
 ```sh
 uv run wavescribe radio watch a pmr446 --acknowledge     # all 16 PMR446 channels
@@ -309,11 +329,10 @@ Limits:
 - **Busy bands queue up.** Catches go through speech recognition one after another, so on a band
   with many transmissions their words come later. Beyond 16 waiting, more are counted in the log
   (`watch_behind`) and not kept.
-- **Started from a terminal or the stations file.** The page lists a watch like any station, and
-  doesn't show its catches.
-- **Tested on synthetic signals, with no antenna** (no false catches in 10 minutes on PMR446
-  and on 2 m), **and briefly on the air** on 2 m with an indoor antenna, where it caught short
-  carrier bursts. Speech on the air is untested.
+- **Tried on the air only briefly**, with an indoor whip on 2 m, where short transmissions on an
+  amateur channel were caught and logged; before that on synthetic signals and with no antenna
+  (no false catches in 10 minutes on PMR446 and on 2 m). Speech from a walkie-talkie nearby
+  hasn't been tried yet.
 
 ## What Wavescribe does with each kind of radio
 
