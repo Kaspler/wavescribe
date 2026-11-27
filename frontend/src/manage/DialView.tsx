@@ -5,6 +5,7 @@
 // lives in dial.ts.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
+import { agoWords } from "../lib/time";
 import type { Any } from "./api";
 import { type Band, and, bandWords } from "./bands";
 import { type Segment, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks } from "./dial";
@@ -255,7 +256,7 @@ export interface RxStatus {
   /** Its window: what it hears now, or, while it scans, the range it sweeps. */
   lo: number;
   hi: number;
-  state: "idle" | "hand" | "stations" | "scanning" | "trouble";
+  state: "idle" | "hand" | "stations" | "testing" | "scanning" | "trouble";
   lamp: "off" | "dim" | "on" | "wait" | "trouble";
   /** "following Valley and City News", "idle", … */
   words: string;
@@ -264,17 +265,19 @@ export interface RxStatus {
 }
 
 
-/** A receiver's state from what the radio view (`r`: stations, scan) and the tuner (`live`: where
- * the dongle is tuned now, whether it is tuned by hand and answering) say about it. */
+/** A receiver's state from what the radio view (`r`: what holds it, as `busy_code`, its stations,
+ * the scan) and the tuner (`live`: where the dongle is tuned now, whether it is tuned by hand and
+ * answering) say about it. The tuner's word on listening by hand is the newer one. */
 export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStatus {
   const centre = live?.center_mhz ?? r.center_mhz;
   const span = live?.span_mhz ?? r.span_mhz;
   const running = (r.stations || []).filter((s: Any) => s.running).map((s: Any) => s.name);
   const base = { id: r.id, lo: centre - span / 2, hi: centre + span / 2, holders: running };
-  const scanning = r.scanning || (job && job.device === r.id && !["done", "error"].includes(job.phase));
-  if (scanning) {
-    return { ...base, lo: job?.start_mhz ?? base.lo, hi: job?.stop_mhz ?? base.hi, state: "scanning", lamp: "wait",
-      words: `scanning ${job?.what || "a band"}` };
+  const scan = job && job.device === r.id && !["done", "error"].includes(job.phase) ? job : null;
+  if (scan || r.busy_code === "scan") {
+    const since = agoWords(scan?.started);
+    return { ...base, lo: scan?.start_mhz ?? base.lo, hi: scan?.stop_mhz ?? base.hi, state: "scanning", lamp: "wait",
+      words: `scanning ${scan?.what || "a band"}${since ? `, started ${since}` : ""}` };
   }
   if (live?.open) {
     if (live.error || (live.connected === false && live.reconnects > 0)) {
@@ -285,12 +288,14 @@ export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStat
     return { ...base, state: "hand", lamp: "dim",
       words: `tuned by hand to ${mhzText(live.mhz, live.mode)}${waiting.length ? `; ${and(waiting)} ${waiting.length === 1 ? "waits" : "wait"} until it's let go` : running.length ? `, beside ${and(running)}` : ""}` };
   }
+  if (r.busy_code === "live") return { ...base, state: "hand", lamp: "dim", words: "tuned by hand" };
   if (running.length) {
     return { ...base, state: "stations", lamp: "on", words: `following ${and(running)}` };
   }
+  if (r.busy_code === "monitor") return { ...base, state: "testing", lamp: "on", words: "testing the antenna" };
   // Another program holding the dongle (another Wavescribe, say) is why it can't be used now.
-  if (r.held_elsewhere) {
-    return { ...base, state: "trouble", lamp: "trouble", words: `in use elsewhere: ${r.held_elsewhere.reason || "another program holds it"}` };
+  if (r.busy_code === "other_program" || r.held_elsewhere) {
+    return { ...base, state: "trouble", lamp: "trouble", words: `in use elsewhere: ${r.held_elsewhere?.reason || "another program holds it"}` };
   }
   return { ...base, state: "idle", lamp: "off", words: "idle" };
 }

@@ -95,10 +95,8 @@ const NEXT_BANDS = ["airband", "airband-25", "marine", "weather-us", "pmr446", "
 
 const fmBand = (v: Any): Any | undefined => v.bands.find((b: Any) => b.mode === "wfm" && b.privacy === "broadcast" && b.tunable);
 
-/** The receiver that made a scan: by the receiver it names, else by its dongle's serial (a scan
- * saved before scans named their receiver). */
-const scanRx = (v: Any, scan: Any): Any | undefined =>
-  scan && (v.receivers.find((r: Any) => scan.device && r.id === scan.device) || v.receivers.find((r: Any) => r.serial === scan.serial));
+/** The receiver that made a scan, by the receiver it names; none for a scan that names none. */
+const scanRx = (v: Any, scan: Any): Any | undefined => (scan?.device ? v.receivers.find((r: Any) => r.id === scan.device) : undefined);
 
 /** When a scan was made: a saved scan carries its time (`t`); the scan this page started is the
  * scan job, which has when it started and, once done, how long it took. Null when neither says. */
@@ -109,7 +107,7 @@ const scanTime = (scan: Any): number | null =>
  * if it's busy, the button says what the scan pauses), else a free one. Switching stays one press. */
 function pickReceiver(v: Any): string {
   const last = scanRx(v, v.last_scan);
-  return (last || v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0])?.id || "";
+  return (last || v.receivers.find((r: Any) => !r.busy_code) || v.receivers[0])?.id || "";
 }
 
 /** Anything worth listening to: not the receivers' own lines, not a digital service's noise. */
@@ -364,7 +362,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const following: string[] = ((rx?.stations || []) as Any[]).filter((x) => x.running).map((x) => x.name);
   // With nothing found yet, one way in: FM, the easiest to hear, on a free receiver.
   const fresh = v.receivers.length > 0 && !!fm && !v.heard.length && !scanJob;
-  const firstRx = v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0];
+  const firstRx = v.receivers.find((r: Any) => !r.busy_code) || v.receivers[0];
   // Once a band has finds, the next one worth a try in this region, quietly.
   const next = chosen && heardIn(v.heard, chosen).length > 0
     ? NEXT_BANDS.map((id) => v.bands.find((b: Any) => b.id === id) as Band | undefined).find((b) => b && b.tunable && b.id !== chosen.id && !heardIn(v.heard, b).length)
@@ -899,7 +897,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
   const band = bandAt(v.bands, f);
   const [mode, setMode] = useState<string>(pre.mode && band && pre.mode !== band.mode ? pre.mode : "");
   const pickRx = () =>
-    (v.receivers.find((r: Any) => fits(r, f) && !r.scanning) || v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0])?.id || "";
+    (v.receivers.find((r: Any) => fits(r, f) && r.busy_code !== "scan") || v.receivers.find((r: Any) => !r.busy_code) || v.receivers[0])?.id || "";
   const [device, setDevice] = useState<string>(() => pre.device || pickRx());
   const [name, setName] = useState(pre.name || "");
   const [does, setDoes] = useState("translate");
@@ -1023,7 +1021,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
         </Refusal>
       )}
       <div className="m-actions">
-        <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || !!rx?.scanning || !!already} run={() => submit(!!asked)}>
+        <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || rx?.busy_code === "scan" || !!already} run={() => submit(!!asked)}>
           {asked ? (asked.stops.length ? `Stop ${and(asked.stops)} and add` : "Move it and add") : "Add as a station"}
         </ActButton>
         <Button variant="ghost" onClick={() => (asked ? setAsked(null) : onDone())}>{asked ? "Keep it as it is" : "Cancel"}</Button>

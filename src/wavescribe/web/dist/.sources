@@ -33,7 +33,7 @@ d6b01ff04f8c9bb84b422c6bad933ef75e5cb061 frontend/src/lib/lang.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
 cba60455ce17d46207b692388a02c95bc759495c frontend/src/manage/Caught.tsx
-5ba0484f8d3cdfd54707ba73a079b8d81ab0f378 frontend/src/manage/DialView.tsx
+7f2671dbbca3f95bd458ad913c77e923bd43c4ef frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 709b343b531273c53b5e6f6af8ae6e0e3e21f4e8 frontend/src/manage/Internet.tsx
 c56a60c2666be43a85d0763591eda48792cda265 frontend/src/manage/Listen.tsx
@@ -43,7 +43,7 @@ ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 1d3ee611eda8ed9def14cd6c1fe8af631987704f frontend/src/manage/MoveStation.tsx
 157bdbf49a829e680d3a4e9a67b6add81f2be726 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-10711a2e6eec6771218ea1aedc87b3f06932d6b5 frontend/src/manage/Radio.tsx
+ef7f7aecdd0c820bc6a3282aa83d2ad327d6a03c frontend/src/manage/Radio.tsx
 b79c48adeb4c1af720ede7fdbfd952b9f567f39b frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
