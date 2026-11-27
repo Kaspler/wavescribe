@@ -130,6 +130,7 @@ def run_day(schedule: Schedule, start: float, end: float) -> list[float]:
     clock, ticks = [start], []
 
     def wait(seconds: float) -> bool:
+        assert len(ticks) < 1000, "digests without end: the loop doesn't wait"
         clock[0] += seconds
         return clock[0] > end
 

@@ -117,6 +117,6 @@ def test_a_digest_gives_up_when_alerts_keep_coming(tmp_path: Path) -> None:
     # Something that goes first is always waiting once the model has started a reply.
     d = Digester(store, lambda: STATIONS, submit, clock=lambda: NOW, ahead=lambda: llm.mid)
     with pytest.raises(Busy, match="alerts and questions kept the model busy"):
-        d.run(d.request({"minutes": 60}))
+        d.run(d.request({"minutes": 60}), timeout=10)
     assert llm.stopped == GIVE_WAY_TIMES + 1
     store.close()
