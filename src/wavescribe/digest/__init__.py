@@ -1403,13 +1403,15 @@ def choice_messages(
     count = POINTS["digest"]
     content = (
         f"Notes on what each station said {_span(request)} (local time), written from their "
-        "transcripts:\n\n" + "\n".join(blocks) + f"\n\nWhich {count} of them matter most to "
-        "someone who missed it, with at least one from each station? Warnings and dangers "
-        "first, then decisions and events that touch many people, then the rest; of two that "
-        "matter as much, the later. Advertising, sponsorship and the station's promotion of "
-        "itself (its programmes, trailers, events) never matter. Notes that tell the same "
-        'story count as one: join their numbers with "+".\nReply with one line: the numbers, '
-        'the most important first, like "3+9, 7, 1, 12, 5".'
+        "transcripts:\n\n" + "\n".join(blocks) + "\n\nWhich of them matter to someone who "
+        f"missed it? {count} at most, and fewer when fewer matter: a curiosity or a filler item "
+        "is left out rather than added to reach the number. Where several stations have notes "
+        "that matter, at least one from each. Warnings and dangers first, then decisions and "
+        "events that touch many people, then the rest; of two that matter as much, the later. "
+        "Advertising, sponsorship and the station's promotion of itself (its programmes, "
+        "trailers, events) never matter. Notes that tell the same story count as one: join "
+        'their numbers with "+".\nReply with one line: the numbers, the most important first, '
+        'like "3+9, 7, 1".'
     )
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
 

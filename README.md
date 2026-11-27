@@ -64,7 +64,7 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 
 ## What it does
 
-- **Transcribes live** in about 100 languages, and skips the music.
+- **Transcribes live** in about 100 languages, and skips most music.
 - **Translates** into your language as it is said, and into other languages for alerts or on
   demand.
 - **Alerts** from keywords, regular expressions or a plain-language description ("residents are

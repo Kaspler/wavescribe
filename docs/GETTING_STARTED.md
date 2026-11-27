@@ -87,7 +87,7 @@ That's about 8 GB:
 | Model | What it does | Size |
 |---|---|---|
 | Silero VAD | finds where someone is speaking | tiny |
-| YAMNet | skips music, so songs aren't transcribed | tiny |
+| YAMNet | skips music, so most songs aren't transcribed | tiny |
 | Parakeet TDT 0.6B v3 | speech to text, 25 European languages | 2.3 GB |
 | Qwen3.5 9B | translation, alert checks, answers to your questions | 5.5 GB |
 

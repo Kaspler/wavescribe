@@ -391,7 +391,9 @@ watch:
   keeps nothing).
 
 If the receiver is overloaded anyway, the watch still catches the transmission on its channel
-and marks it as overloaded (`overload`). The watch's status says "A very strong signal nearby
+and marks it as overloaded (`overload`). From another room its words come out close to what was
+said; in the same room it is caught, but its words may be missing: an overloaded receiver
+distorts what it hears. The watch's status says "A very strong signal nearby
 overloaded Receiver A. Move the radio further away, or lower the gain in Settings → Receivers.",
 and the log has `watch_deaf` with `reason=overload` for an overload of 3 s or more (noise is
 `reason=interference`). `radio watch` prints the same sentence in the terminal, with `--gain` for

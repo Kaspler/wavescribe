@@ -410,7 +410,8 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         "[1] a: Latest note on a.\n[2] b: A note on b.\n[3] c: A note on c.\n"
         "[4] a: First note on a.\n[5] a: Second note on a." in shown
     )
-    assert "Which 5 of them matter most" in choice and "of two that matter as much" in choice
+    assert "5 at most, and fewer when fewer matter" in choice
+    assert "of two that matter as much" in choice
     assert "Advertising, sponsorship and the station's promotion of itself" in choice
     # The note joined to the first is left out, sources and all: a join isn't trusted. Two
     # chosen of five asked for are two points: the notes it left out, it left out on purpose.
