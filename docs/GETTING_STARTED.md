@@ -432,7 +432,8 @@ each station's language. Read them, fix any that are wrong, and save.
   word in an Arabic one) is left out; a wrong word in the right script is not caught.
 - **It asks for one language at a time**, between the station work, and takes up to two
   minutes in all. A language can come back empty: the model's reply was cut short or couldn't
-  be read, the model was busy, or the time ran out before it got there. When nothing at all
+  be read, the model was busy, or the time ran out before it got there. The page says how many
+  came back, and under a language that got none, why. When nothing at all
   comes back, the page says so and why, instead of adding anything; press it again later, or
   type the words yourself. With a translator that isn't a language model (MADLAD), there are
   no suggestions.

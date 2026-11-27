@@ -36,7 +36,7 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 f67ef5594f772ab41e3208fd6517327244285f83 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
-abfed1d426ad182339826627d4b8fca093ffd0e8 frontend/src/manage/AlertRules.tsx
+e5942fb47a739fd7e8706dc0f5c46f2a6ba4609c frontend/src/manage/AlertRules.tsx
 b7c38bd7694b8dc05265269ff48ad2cc80825320 frontend/src/manage/Caught.tsx
 3b4e0473f651c0262d8f8a68059690a9bfaf3274 frontend/src/manage/DialView.tsx
 7774ce4c96b048e5f3e8c24636aef3b6234cd4c3 frontend/src/manage/FeedApi.tsx
@@ -68,6 +68,7 @@ b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts
 e6ed73dd60af45d78a3329145f07162df9edcd94 frontend/src/manage/spokenLang.ts
+622e1a26d4c8455827b8dc42cfaea291c3f717f2 frontend/src/manage/suggest.ts
 0c26a75c597d4ccc8fe6bffa2302ecc43e4c2fcd frontend/src/manage/tuner.tsx
 170792a2429d8508c2cd2980ae13ae792f829530 frontend/src/manage/tuning.ts
 8fa01b779d53d5aae36fb95e0cf6319158d77e34 frontend/src/manage/wordLists.ts
@@ -121,6 +122,7 @@ c51427ce91c2bc1a7951909d3b6ee13cf1464072 frontend/tests/rulesNote.test.mjs
 22d02e9a624ee8121e0831585df67a837b746e5f frontend/tests/schedule.test.mjs
 d984f6c5104858f54615228ae2fd61382b96950c frontend/tests/spokenLang.test.mjs
 352b4cb6a777fb575995ce51ae0ce8cbd9344f83 frontend/tests/startRefusal.test.mjs
+7c62ff7487d32bb37a7c0e42cd8119e8c7dc7b7b frontend/tests/suggest.test.mjs
 80b3c255b77e0c157f6e8ceb2aef9cc1f30d54d9 frontend/tests/tabs.test.mjs
 ef8340b9978505f33fddf27c20ae4482786bd7fd frontend/tests/time.test.mjs
 0c37192abb19b8a5b94b3d9ff52fb1779a488c83 frontend/tests/tuning.test.mjs

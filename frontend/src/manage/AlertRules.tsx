@@ -9,9 +9,10 @@ import { T } from "../reading/strings";
 import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangPicker, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
-import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } from "./api";
+import { type Any, ApiError, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useLoad } from "./api";
 import { and } from "./bands";
 import { lines, ruleBody } from "./drafts";
+import { takeSuggestions } from "./suggest";
 import { SummarySchedule } from "./SummarySchedule";
 import { topicLanguages } from "./wordLists";
 
@@ -200,6 +201,8 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
   const [after, setAfter] = useState(String(r.after_minutes ?? 5));
   const [level, setLevel] = useState(String(r.level_db ?? -50));
   const [mine, setMine] = useState("");
+  // What the last suggestions said beside the lists: per language, and once for all.
+  const [said, setSaid] = useState<{ notes: Record<string, string>; note: string | null }>({ notes: {}, note: null });
   const [saving, setSaving] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
@@ -244,15 +247,21 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
       setSaving(false);
     }
   };
+  // The answer says per language the words or why none came; when none came at all it is a
+  // refusal with the same fields beside it (code no_suggestions), so nothing reads as added.
   const suggest = async () => {
-    const s = await post("/rules/suggest", { terms: mine.split(","), languages: langs });
-    const next = { ...terms };
-    for (const [l, ws] of Object.entries(s.terms || {}) as [string, string[]][]) {
-      const have = new Set((next[l] || "").split("\n").filter(Boolean));
-      ws.forEach((w) => have.add(w));
-      next[l] = [...have].join("\n");
+    const asked = langs;
+    let answer: Any;
+    try {
+      answer = await post("/rules/suggest", { terms: mine.split(","), languages: asked });
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.code !== "no_suggestions") throw e;
+      answer = { ...e.data, error: e.message };
     }
-    setTerms(next);
+    const s = takeSuggestions(terms, asked, answer, langNameEn);
+    setTerms((cur) => takeSuggestions(cur, asked, answer).terms); // over what was typed meanwhile
+    setSaid({ notes: s.notes, note: s.note });
+    toast(s.toast, s.bad);
   };
   return (
     <div ref={box} className="m-panel">
@@ -293,12 +302,13 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
               <span className="field-label">Words and phrases</span>
               <div className="m-row">
                 <Input value={mine} placeholder="Words in your language, comma-separated" aria-label="Words to suggest from" className="m-grow" onChange={(e) => setMine(e.target.value)} />
-                <ActButton icon="ask" disabled={!mine.trim()} run={suggest} done="Suggestions added: check them before saving">Suggest in each language</ActButton>
+                <ActButton icon="ask" disabled={!mine.trim()} run={suggest}>Suggest in each language</ActButton>
               </div>
-              <p className="field-hint">The model proposes how broadcasters say it in each station's language. Check them before saving; matching itself never translates.</p>
+              <p className="field-hint">{said.note || "The model proposes how broadcasters say it in each station's language, one language at a time, in up to two minutes. Its words can be wrong: check each one before saving. Matching itself never translates."}</p>
             </div>
             {langs.map((l) => (
-              <Field key={l} id={`ru-t-${l}`} label={`In ${langNameEn(l)}`} hint="As the radio says it, one per line.">
+              <Field key={l} id={`ru-t-${l}`} label={`In ${langNameEn(l)}`}
+                     hint={said.notes[l] ? <>{said.notes[l]} As the radio says it, one per line.</> : "As the radio says it, one per line."}>
                 <Textarea id={`ru-t-${l}`} rows={3} lang={l} value={terms[l] || ""} placeholder="One word or phrase per line"
                           onChange={(e) => setTerms({ ...terms, [l]: e.target.value })} />
               </Field>
