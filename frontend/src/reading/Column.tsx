@@ -30,13 +30,15 @@ interface Para {
   utts: Utterance[];
 }
 
-/** A line without a known time joins nothing and nothing joins it: it stands alone, timed "?". */
+/** A line without a known time joins nothing and nothing joins it: it stands alone, timed "?".
+ * A watch's lines join only lines from the same channel. */
 function group(list: Utterance[]): Para[] {
   const paras: Para[] = [];
   for (const u of list) {
     const last = paras[paras.length - 1];
     const t = u.t_start;
-    if (last && t != null && last.start != null && last.end != null && t - last.end < PARA_GAP_S && t - last.start < PARA_MAX_S) {
+    if (last && t != null && last.start != null && last.end != null && t - last.end < PARA_GAP_S && t - last.start < PARA_MAX_S
+        && (last.utts[0].freq_hz ?? null) === (u.freq_hz ?? null)) {
       last.utts.push(u);
       last.end = Math.max(last.end, t + u.duration);
     } else paras.push({ start: t, end: t == null ? null : t + u.duration, utts: [u] });
@@ -44,8 +46,16 @@ function group(list: Utterance[]): Para[] {
   return paras;
 }
 
+/** "446.00625 MHz · PMR446 ch 3": the channel a watch's line was caught on. */
+const channelOf = (u: Utterance) =>
+  u.freq_hz == null ? null : `${(u.freq_hz / 1e6).toFixed(5).replace(/(\.\d{3}\d*?)0+$/, "$1")} MHz${u.label ? ` · ${u.label}` : ""}`;
+
+/** "every channel of the band", "446.000–446.100 MHz": what a watch listens to. */
+const watching = (w: string | [number, number]) => (typeof w === "string" ? T.watchingBand : T.watchingRange(w[0], w[1]));
+
 /** "Hebrew → English", or just "Hebrew" when the station is shown in its own language. */
 export function langPair(st: Station): string {
+  if (st.language === "auto") return T.anyLanguage; // a watch: each line says its own
   const shown = shownLang(st, P.lang);
   const from = langNameEn(st.language);
   return sameLang(shown, st.language) ? from : `${from} → ${langNameEn(shown)}`;
@@ -117,6 +127,7 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
       </div>
       <p className="col-meta">
         <span>{langPair(st)}</span>
+        {st.watch && <span>{watching(st.watch)}</span>}
         {lag?.text && <span className="is-trouble num">{T.colBehind(lag.text)}</span>}
         {lag?.translation && translated && <span className="num">{T.colTranslationBehind(lag.translation)}</span>}
         {(stale || !speech) && (
@@ -325,6 +336,7 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
         <time className="ts num" title={hms(para.start)}>{whenLabel(para.start)}</time>
       )}
       <div className="para-body">
+        {channelOf(para.utts[0]) && <p className="para-ch num">{channelOf(para.utts[0])}</p>}
         <p className="para-text" dir={dirOf(shown)} onClick={onClick}
            onMouseOver={src ? (e) => setLinked(keyOf(e)) : undefined} onMouseLeave={src ? () => setLinked(null) : undefined}>
           {para.utts.map((u, i) => (

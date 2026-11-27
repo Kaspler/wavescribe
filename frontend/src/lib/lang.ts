@@ -16,6 +16,7 @@ export const dirOf = (tag: string | null | undefined): "rtl" | "ltr" => (RTL.has
 const names = new Map<string, string>();
 /** "Ukrainian · українська": the name in English and in the language itself, when they differ. */
 export function langName(tag: string): string {
+  if (tag === "auto") return "Any language"; // a watch's: each line is told its own
   const hit = names.get(tag);
   if (hit) return hit;
   let out = tag;

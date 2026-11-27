@@ -23,6 +23,8 @@ export interface Station {
   /** Set after a change of region would make the station's kind of radio less strict: it keeps
    * `privacy` until the operator confirms, and this is what the region says. */
   privacy_region?: string;
+  /** A watch: every channel of a band (its id) or of a range in MHz, each line with its own. */
+  watch?: string | [number, number] | null;
 }
 
 export interface Hit {
@@ -48,6 +50,9 @@ export interface Utterance {
   audio: boolean;
   flags?: string[];
   hits?: Hit[];
+  /** A watch's line: the channel it was caught on, and the band plan's name for it. */
+  freq_hz?: number | null;
+  label?: string | null;
 }
 
 export interface Alert {

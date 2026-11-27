@@ -8,6 +8,8 @@ import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, 
 import { langName } from "../lib/lang";
 import { type Any, ApiError, del, get, knownLangs, listenTo, post, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
+import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
+import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
@@ -33,7 +35,7 @@ const CLASS_WORD: Record<string, string> = {
   private: "private",
   digital: "digital",
 };
-const WATCH: [string, string][] = [["0", "One sweep"], ["1", "Watch 1 min"], ["5", "Watch 5 min"], ["15", "Watch 15 min"]];
+const WATCH: [string, string][] = [["0", "One sweep"], ["1", "Sweeps for 1 min"], ["5", "Sweeps for 5 min"], ["15", "Sweeps for 15 min"]];
 
 /** The kinds of radio a band plan knows (radio/bands.toml), in the order the page lists them. */
 const CLASSES: Record<string, { name: string; what: string; examples: string }> = {
@@ -114,15 +116,36 @@ export function OnTheAir() {
   const tuner = useTuner();
   useEvery(3000, tuner.reload); // where each receiver is tuned now, and whether it answers
   const [add, setAdd] = useState<Any | null>(null);
+  const [want, setWant] = useState<{ id: string; t: number } | null>(null);
+  const canWatch = useWatchesHere();
+  const { data: st, reload: reloadStations } = useLoad(() => (canWatch ? get("/stations") : Promise.resolve(null)), [canWatch]);
+  useEvery(10000, reloadStations, canWatch);
   if (!v) return loading(error);
+  const watches: Any[] = ((st?.stations || []) as Any[]).filter((s) => s.watch != null);
   const openAdd = (t: Any) => {
     setAdd(t);
     requestAnimationFrame(() => document.getElementById("rd-tune")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
   };
+  // A first watch: the narrowest band that can be watched, which one receiver hears whole.
+  const firstWatch = () => {
+    const b = onDial(v.bands as Band[]).filter((x) => talksNowAndThen(x)).sort((x, y) => (x.stop_mhz - x.start_mhz) - (y.stop_mhz - y.start_mhz))[0];
+    if (b) setWant({ id: b.id, t: Date.now() });
+  };
+  // A watch whose kind of radio keeps nothing lists nothing here; say so, and where that is set.
+  const bare = watches.filter((w) => w.running && v.policies?.[w.privacy]?.text_days === 0);
+  const keptNothing = bare.length > 0 && (
+    <>
+      {[...new Set(bare.map((w) => w.privacy))].map((c) => CLASSES[c]?.name || c).join(" and ")} radio is shown as it's caught and not kept,
+      so what {and(bare.map((w) => watchWords(w, v.bands)))} {bare.length === 1 ? "catches" : "catch"} shows only in Read while it runs.
+      Change what's kept under <a className="rd-link" href="#/settings/storage">Settings, Storage and privacy</a>.
+    </>
+  );
   return (
     <>
-      <Finder v={v} job={job} running={running} onJob={setJob} onAdd={openAdd} reload={reload} tuner={tuner} />
+      <Finder v={v} job={job} running={running} onJob={setJob} onAdd={openAdd} reload={reload} tuner={tuner}
+              watches={canWatch ? watches : null} want={want} onWatched={async () => { await reloadStations(); await reload(); await refreshPage(); }} />
       {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} onDone={async () => { setAdd(null); await reload(); }} />}
+      {canWatch && <Caught bands={v.bands} watches={watches} keptNothing={keptNothing} onAdd={openAdd} onChooseBand={firstWatch} />}
       <Heard v={v} onAdd={openAdd} reload={reload} />
     </>
   );
@@ -172,7 +195,14 @@ export function Responsibility() {
 
 // -- finding: sweep a band, list what's there ---------------------------------------------------
 
-function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job: Any; running: boolean; onJob: (j: Any) => void; onAdd: (t: Any) => void; reload: () => Promise<void>; tuner: Tuner }) {
+function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, onWatched }: {
+  v: Any; job: Any; running: boolean; onJob: (j: Any) => void; onAdd: (t: Any) => void; reload: () => Promise<void>; tuner: Tuner;
+  /** The watch stations, or null where this Wavescribe can't watch a band. */
+  watches: Any[] | null;
+  /** A band asked for from elsewhere on the page. */
+  want: { id: string; t: number } | null;
+  onWatched: () => Promise<void>;
+}) {
   const [device, setDevice] = useState<string>(() => tuner.receivers.find((r) => r.open)?.id || pickReceiver(v));
   const fm = fmBand(v);
   const [band, setBand] = useState<string>(fm?.id || v.bands[0]?.id || "all");
@@ -221,7 +251,12 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
   // The same scan on another receiver, or on a dongle just made one.
   const tryOn = async (id: string) => { await reload(); setDevice(id); await start(id); };
   const minutes = +watch;
-  const rxs: RxStatus[] = v.receivers.map((r: Any) => rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob));
+  const watchOn = (id: string) => (watches || []).find((w) => w.device === id && w.running);
+  const rxs: RxStatus[] = v.receivers.map((r: Any) => {
+    const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
+    const w = watchOn(r.id);
+    return w && s.state === "stations" ? { ...s, words: `watching ${watchWords(w, v.bands)}` } : s;
+  });
   const me = rxs.find((r) => r.id === device);
   const [moving, setMoving] = useState<{ id: string; mhz: number; mode: string | null; play: boolean } | null>(null);
   const question = useRef<HTMLDivElement>(null);
@@ -272,6 +307,19 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
     const onIt = (r: RxStatus) => bandOfWindow(v.bands, r.lo, r.hi)?.id === id;
     if (me && !onIt(me)) { const there = rxs.find(onIt); if (there) setDevice(there.id); }
   };
+  useEffect(() => {
+    if (!want) return;
+    pick(want.id);
+    requestAnimationFrame(() => document.getElementById("rd-find")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  }, [want?.t]);
+  // Watching: every channel of a band whose channels talk now and then, written down as it comes.
+  const [watchAsk, setWatchAsk] = useState(false);
+  useEffect(() => setWatchAsk(false), [band, device]);
+  const watchable = !!watches && !!chosen && onTheDial && talksNowAndThen(chosen) && !!rx;
+  // A watch of the band, or of a slice of it.
+  const ofBand = (w: Any) => w.watch === chosen?.id || (Array.isArray(w.watch) && !!chosen && w.watch[0] >= chosen.start_mhz && w.watch[1] <= chosen.stop_mhz);
+  const watched = watchable ? watches.find((w) => w.running && ofBand(w)) : undefined;
+  const following = ((rx?.stations || []) as Any[]).filter((x) => x.running).map((x) => ({ id: x.id as string, name: x.name as string }));
   // With nothing found yet, one way in: FM, the easiest to hear, on a free receiver.
   const fresh = v.receivers.length > 0 && !!fm && !v.heard.length && !scanJob;
   const firstRx = v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0];
@@ -304,9 +352,18 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
             Look here with Receiver {rxName(device)}
           </Button>
         )}
+        {watched ? (
+          <ActButton icon="stop" run={async () => { await post(`/stations/${watched.id}/stop`); await onWatched(); }}>
+            Stop watching{Array.isArray(watched.watch) ? ` ${watchWords(watched, v.bands)}` : ""}{watched.device !== device ? ` with Receiver ${rxName(watched.device)}` : ""}
+          </ActButton>
+        ) : watchable && !watchAsk && (
+          <Button variant="secondary" icon="antenna" disabled={me?.state === "scanning"} onClick={() => setWatchAsk(true)}>
+            Watch this band with Receiver {rxName(device)}
+          </Button>
+        )}
         {!running && !pause && chosen && kindOf(chosen) === "text" && (
           <span className="m-hint rd-inline">
-            {minutes ? `Watches the band for ${minutes} minutes: these channels talk now and then.` : "One sweep, a minute or two."}
+            {minutes ? `Sweeps the band for ${minutes} minutes: these channels talk now and then.` : "One sweep, a minute or two."}
             {onTheDial && me && me.state !== "scanning" && !liveHere && " Look here shows the band live, without sound."}
           </span>
         )}
@@ -343,6 +400,12 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
         </div>
       )}
       {tuner.ask && <Ask ask={tuner.ask} onYes={tuner.resend} onNo={() => tuner.setAsk(null)} />}
+      {watchAsk && watchable && !watched && (
+        <WatchBand band={chosen} device={device} holders={following} needsAck={!!v.policies?.[chosen.privacy]?.needs_ack}
+                   free={rxs.find((r) => r.id !== device && r.state === "idle")?.id || null}
+                   existing={watches.find((w) => w.device === device && w.watch === chosen.id) || null}
+                   onDone={async () => { setWatchAsk(false); await onWatched(); }} onCancel={() => setWatchAsk(false)} />
+      )}
     </>
   );
   return (
@@ -417,7 +480,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner }: { v: Any; job:
                 </>
               )}
               <Field id="rd-watch" label="How long"
-                     hint={chosen && chosen.privacy !== "broadcast" ? "These channels talk now and then: watch a few minutes." : "One sweep finds broadcast stations; watching also catches channels that talk now and then."}>
+                     hint={chosen && chosen.privacy !== "broadcast" ? "These channels talk now and then: sweep for a few minutes." : "One sweep finds broadcast stations; sweeping for longer also catches channels that talk now and then."}>
                 <Select id="rd-watch" value={watch} onChange={(e) => setWatch(e.target.value)} options={WATCH} />
               </Field>
             </div>
