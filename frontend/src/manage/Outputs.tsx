@@ -16,14 +16,14 @@ export function Outputs() {
   useEvery(5000, reload);
   const [editing, setEditing] = useState<Any | null>(null);
   const [log, setLog] = useState<"failed" | "all">("failed");
-  if (!v) return <p className="m-loading">{error ? `Couldn't load the outputs: ${error}` : "Loading…"}</p>;
+  if (!v) return <p className="m-loading">{error ? `Couldn't load the connections: ${error}` : "Loading…"}</p>;
   const rows: Any[] = log === "all" ? v.deliveries : v.deliveries.filter((d: Any) => !d.ok);
   return (
     <>
       <Section id="out-h" title="Webhooks and live pushes"
                description="Send alerts, and optionally every utterance, to other programs: Home Assistant, Node-RED, n8n, a chat bot, ntfy, or a central Wavescribe. Text and metadata only; audio stays here."
                actions={!editing && <>
-                 <Button variant="primary" icon="plus" onClick={() => setEditing({})}>New output</Button>
+                 <Button variant="primary" icon="plus" onClick={() => setEditing({})}>New connection</Button>
                  <Button icon="send" onClick={() => setEditing({ events: ["utterance", "alert"], batch_s: 5, name: "central", url: "http://central:8765/feed/v1/ingest", headers: { Authorization: "" } })}>
                    Push to a central Wavescribe
                  </Button>
@@ -34,14 +34,14 @@ export function Outputs() {
             {v.outputs.map((o: Any) => <OutputRow key={o.id} o={o} onEdit={() => setEditing(o)} reload={reload} />)}
           </ul>
         ) : !editing && (
-          <p className="m-empty">No outputs yet. Alerts still show on the page and as notifications on this machine; an output also sends them somewhere else.</p>
+          <p className="m-empty">No connections yet. Alerts still show on the page and as notifications on this machine; a connection also sends them somewhere else.</p>
         )}
       </Section>
       <Section id="out-log" title="Delivery log"
                actions={<Segmented label="Which deliveries" value={log} onChange={setLog}
                                    options={[{ value: "failed", label: "Failures" }, { value: "all", label: "All" }]} />}>
         <Table caption="Deliveries" empty={log === "failed" ? "No failed deliveries." : "Nothing delivered yet."}
-               cols={[{ label: "Time" }, { label: "Output" }, { label: "Event" }, { label: "Result" }, { label: "Tries", num: true }, { label: "ms", num: true }, { label: "Error" }]}>
+               cols={[{ label: "Time" }, { label: "Connection" }, { label: "Event" }, { label: "Result" }, { label: "Tries", num: true }, { label: "ms", num: true }, { label: "Error" }]}>
           {rows.map((d) => (
             <tr key={d.id}>
               <td className="num">{hms(d.t)}</td>
@@ -121,7 +121,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   return (
     <div ref={box} className="m-panel">
       <div className="m-panel-head">
-        <h4>{o.id ? `Output ${o.name || o.id}` : "New output"}</h4>
+        <h4>{o.id ? `Connection ${o.name || o.id}` : "New connection"}</h4>
         <ButtonClose onClick={onCancel} />
       </div>
       <div className="m-form">
@@ -174,7 +174,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
         </div>
       </Advanced>
       <div className="m-actions">
-        <ActButton variant="primary" disabled={!url.trim()} run={save} done="Output saved">Save output</ActButton>
+        <ActButton variant="primary" disabled={!url.trim()} run={save} done="Connection saved">Save connection</ActButton>
         <Check checked={enabled} onChange={setEnabled}>On</Check>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>

@@ -47,10 +47,10 @@ function Node({ node }: { node: Any }) {
 function Tokens({ tokens, reload }: { tokens: Any[]; reload: () => Promise<void> }) {
   const [label, setLabel] = useState("");
   const [scopes, setScopes] = useState<string[]>(["read"]);
-  const [made, setMade] = useState<string | null>(null);
+  const [made, setMade] = useState<{ token: string; note?: string } | null>(null);
   return (
     <Section id="api-tokens" title="Feed tokens"
-             description="Once the first token exists, other machines need one: Authorization: Bearer <token>, or ?token= for EventSource. Only a hash is kept, so a token is shown once.">
+             description="Once the first token exists, other machines need one, sent as Authorization: Bearer <token>. A browser's EventSource, which can't send it, gets a one-time ticket from POST /feed/v1/ticket and uses ?ticket=. Only a hash is kept, so a token is shown once.">
       <Table caption="Feed tokens" empty="No tokens."
              cols={[{ label: "Label" }, { label: "Scopes" }, { label: "Made" }, { label: "", width: "1%" }]}>
         {tokens.map((t) => (
@@ -68,16 +68,17 @@ function Tokens({ tokens, reload }: { tokens: Any[]; reload: () => Promise<void>
         <Input value={label} placeholder="Who uses it" aria-label="Token label" size={20} onChange={(e) => setLabel(e.target.value)} />
         <ChoiceChips label="Scopes" options={[["read", "Read the feed"], ["push", "Push to ingest"]]} value={scopes} onChange={setScopes} />
         <ActButton variant="primary" icon="plus" disabled={!scopes.length}
-                   run={async () => { setMade((await post("/tokens", { label, scopes })).token); setLabel(""); await reload(); }}>
+                   run={async () => { const t = await post("/tokens", { label, scopes }); setMade({ token: t.token, note: t.note }); setLabel(""); await reload(); }}>
           Make a token
         </ActButton>
       </div>
       {made && (
         <div className="m-panel m-secret" role="status">
           <h4>Copy it now: it won't be shown again</h4>
-          <pre className="m-code">{made}</pre>
+          <pre className="m-code">{made.token}</pre>
+          {made.note && <p className="m-hint">{made.note}</p>}
           <div className="m-actions">
-            <Button icon="copy" onClick={() => navigator.clipboard?.writeText(made).then(() => toast("Copied"), () => toast("Couldn't copy: select it and copy by hand"))}>Copy</Button>
+            <Button icon="copy" onClick={() => navigator.clipboard?.writeText(made.token).then(() => toast("Copied"), () => toast("Couldn't copy: select it and copy by hand"))}>Copy</Button>
             <Button variant="ghost" onClick={() => setMade(null)}>Done</Button>
           </div>
         </div>

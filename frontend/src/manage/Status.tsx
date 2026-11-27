@@ -221,8 +221,8 @@ function Pipeline({ s }: { s: Any }) {
 
 function OutputHealth({ outs }: { outs: Record<string, Any> }) {
   return (
-    <Section id="st-outs" title="Outputs">
-      <Table caption="Outputs" cols={[{ label: "Output" }, { label: "Sent", num: true }, { label: "Failed", num: true }, { label: "Dropped", num: true }, { label: "Queued", num: true }, { label: "Last error" }]}>
+    <Section id="st-outs" title="Connections">
+      <Table caption="Connections" cols={[{ label: "Connection" }, { label: "Sent", num: true }, { label: "Failed", num: true }, { label: "Dropped", num: true }, { label: "Queued", num: true }, { label: "Last error" }]}>
         {Object.entries(outs).map(([id, o]) => (
           <tr key={id}>
             <td>{id}</td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
