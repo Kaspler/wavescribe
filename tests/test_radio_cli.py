@@ -11,6 +11,7 @@ import pytest
 from tests.test_agent import HEARD_KEYS
 from wavescribe.cli import main
 from wavescribe.radio import cli as radio_cli
+from wavescribe.radio import holders
 
 RX = radio_cli.Receiver("00001234", 30.0, 0, "receiver A")
 STATIONS = (
@@ -144,29 +145,46 @@ def test_no_output_names_a_dongle_by_its_serial(
     assert radio_cli.resolve_receiver("00004321", None).name == "the dongle …4321"
 
 
+SERVE_HOLDS = {"pid": 4001, "program": "rtl_sdr", "other_wavescribe": True,
+               "wavescribe_pid": 4000, "serve": True}  # fmt: skip
+
+
 @pytest.mark.parametrize(
-    ("serve", "said"),
+    ("held", "said"),
     [
-        (4242, "receiver A is busy: Wavescribe itself has it open (`wavescribe serve`, process "
-               "4242). Do it from the page instead: Find → On the air, which pauses the "
-               "receiver's stations for the scan. Or stop serve, or use another receiver"),
-        (None, "receiver A is busy: another program has it open (an SDR program, or another "
-               "rtl_ tool). Close it, or use another receiver"),
+        (SERVE_HOLDS,
+         "receiver A is busy: Wavescribe itself has it open (`wavescribe serve`, process 4000). "
+         "Do it from the page instead: Find → On the air, which pauses the receiver's stations "
+         "for the scan. Or stop serve, or use another receiver"),
+        ({**SERVE_HOLDS, "serve": False},
+         "receiver A is busy: another Wavescribe command has it open (process 4000). Wait for "
+         "it to end or stop it, or use another receiver"),
+        ({"pid": 3001, "program": "sdrpp", "other_wavescribe": False, "wavescribe_pid": None,
+          "serve": False},
+         "receiver A is busy: sdrpp (process 3001) has it open. Close it, or use another "
+         "receiver"),
+        # Not known for sure (not macOS, or the registry didn't say): nothing is named.
+        (None, "receiver A is busy: another program has it open (`wavescribe serve`, an SDR "
+               "program, or another rtl_ tool). Close it, or use another receiver; if it is "
+               "serve, do it from the page instead: Find → On the air, which pauses the "
+               "receiver's stations for the scan"),
     ],
 )  # fmt: skip
-def test_a_busy_receiver_says_when_wavescribe_itself_holds_it(
-    serve, said, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+def test_a_busy_receiver_names_what_holds_it_and_only_that(
+    held, said, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     from wavescribe.radio.scan import Busy
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(radio_cli, "resolve_receiver", lambda *_a: RX)
-    monkeypatch.setattr(radio_cli, "serve_pid", lambda: serve)
+    # Another serve runs on this machine, but it isn't what holds this receiver.
+    others = {"00009999": SERVE_HOLDS}
+    monkeypatch.setattr(holders, "held_elsewhere", lambda: {"00001234": held} if held else others)
 
-    def held(*_a, **_k):
+    def holds(*_a, **_k):
         raise Busy()
 
-    monkeypatch.setattr("wavescribe.radio.scan.scan", held)
+    monkeypatch.setattr("wavescribe.radio.scan.scan", holds)
     assert main(["radio", "scan", "a", "fm", "--region", "cept"]) == 1
     assert capsys.readouterr().err.splitlines()[-1] == f"wavescribe: {said}"
 
@@ -182,7 +200,7 @@ def test_a_busy_receiver_says_when_wavescribe_itself_holds_it(
     ],
 )
 def test_a_running_serve_is_found_however_it_was_started(command, found) -> None:
-    assert bool(radio_cli.SERVE.search(command)) is found
+    assert bool(holders.SERVE.search(command)) is found
 
 
 def test_messages_name_and_list_things_as_the_page_does() -> None:

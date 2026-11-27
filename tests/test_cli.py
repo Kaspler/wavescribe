@@ -154,7 +154,7 @@ def test_radio_rds_says_why_it_heard_nothing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:  # fmt: skip
     monkeypatch.setenv(trouble, str(tmp_path))  # as PATH: a folder with no rtl_sdr in it
-    monkeypatch.setattr("wavescribe.radio.cli.serve_pid", lambda: None)  # no serve holds it
+    monkeypatch.setattr("wavescribe.radio.holders.held_elsewhere", dict)  # nothing it can tell
     assert main(["radio", "rds", *receiver[0]]) == 1
     err = capsys.readouterr().err
     assert message in err and "groups" not in err

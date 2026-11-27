@@ -14,7 +14,8 @@ and opening a dongle only to read its name doesn't stop anyone else from using i
 help here: libusb on macOS goes through IOKit, not through a file.
 
 A holder whose parent is this process is one of Wavescribe's own rtl tools; one whose parent's
-command line names wavescribe is another Wavescribe. Each is told apart with ``ps``.
+command line names wavescribe is another Wavescribe, and that parent is the process to name: a
+`wavescribe serve`, or another command. Each is told apart with ``ps``.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ IOREG = ["ioreg", "-r", "-c", "IOUSBHostDevice", "-l", "-w", "0", "-d", "4"]
 _NODE = re.compile(r"^(?P<indent>[\s|]*)\+-o (?P<name>.+?)\s+<class (?P<cls>\w+)")
 _PROP = re.compile(r'^[\s|]*"([^"]+)" = (.*)$')
 _OWNER = re.compile(r'^"pid (\d+), (.+)"$')
+# A `wavescribe serve`, however it was started: uv run, its script, python -m.
+SERVE = re.compile(r"(?:^|[\s/])wavescribe(?:\.__main__)?\s+serve(?:\s|$)")
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,9 @@ def held_elsewhere(run: Run | None = None, *, own_pid: int | None = None) -> dic
             who = "another Wavescribe" if other else h.program
             out[serial] = {
                 "pid": h.pid, "program": h.program, "other_wavescribe": other,
+                # The Wavescribe that started the rtl tool holding it, and whether it is serve.
+                "wavescribe_pid": ppid if other else None,
+                "serve": bool(other and SERVE.search(parent)),
                 "reason": (f"another Wavescribe is using it ({h.program}, pid {h.pid})" if other
                            else f"{who} (pid {h.pid}) is using it; stop it to use this "
                            "receiver here"),

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
 from pathlib import Path
@@ -69,41 +68,42 @@ def resolve_receiver(name: str, config: Any) -> Receiver:
                      f"{where})")  # fmt: skip
 
 
-# A `wavescribe serve` on this machine, however it was started: uv run, its script, python -m.
-SERVE = re.compile(r"(?:^|[\s/])wavescribe(?:\.__main__)?\s+serve(?:\s|$)")
+def holder(rx: Receiver) -> dict[str, Any] | None:
+    """What holds ``rx``'s dongle, from macOS's USB registry without opening it
+    (radio/holders.py); None when nothing does, and wherever that can't be told."""
+    from wavescribe.radio import holders
+
+    return holders.held_elsewhere().get(rx.serial)
 
 
-def serve_pid() -> int | None:
-    """The process id of a `wavescribe serve` running here (not this process), from ps."""
-    import os
-    import subprocess
-
-    try:
-        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True,
-                             timeout=5).stdout  # fmt: skip
-    except (OSError, subprocess.SubprocessError):
-        return None
-    for line in out.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if pid.isdigit() and int(pid) != os.getpid() and SERVE.search(command):
-            return int(pid)
-    return None
-
-
-def busy(rx: Receiver, on_the_page: str) -> Exception:
-    """Why ``rx`` can't be opened, in words to act on. The program holding it is most often
-    Wavescribe's own server, which a scan from the page pauses for as long as it takes."""
+def busy(rx: Receiver, on_the_page: str | None, held: dict[str, Any] | None = None) -> Exception:
+    """Why ``rx`` can't be opened, in words to act on. It names what holds the dongle when the
+    USB registry says (``held``, else read now), and nothing when that can't be known for sure:
+    another serve on this machine may hold another dongle. The holder is most often
+    Wavescribe's own server, which a scan from the page pauses for as long as it takes
+    (``on_the_page`` says where; None where the page can't do it)."""
     from wavescribe.radio.scan import ScanError
 
-    pid = serve_pid()
-    if pid is not None:
-        return ScanError(
-            f"{rx.name} is busy: Wavescribe itself has it open (`wavescribe serve`, process "
-            f"{pid}). Do it from the page instead: {on_the_page}. Or stop serve, or use another "
-            "receiver"
+    held = held or holder(rx)
+    if held is None:
+        serve = "; if it is serve, " + (
+            f"do it from the page instead: {on_the_page}" if on_the_page else "stop it"
         )
-    return ScanError(f"{rx.name} is busy: another program has it open (an SDR program, or "
-                     "another rtl_ tool). Close it, or use another receiver")  # fmt: skip
+        return ScanError(f"{rx.name} is busy: another program has it open (`wavescribe serve`, "
+                         "an SDR program, or another rtl_ tool). Close it, or use another "
+                         f"receiver{serve}")  # fmt: skip
+    if held.get("serve"):
+        instead = f"Do it from the page instead: {on_the_page}. Or stop serve" if on_the_page else (
+            "Stop serve")  # fmt: skip
+        return ScanError(f"{rx.name} is busy: Wavescribe itself has it open (`wavescribe serve`, "
+                         f"process {held['wavescribe_pid']}). {instead}, or use another "
+                         "receiver")  # fmt: skip
+    if held.get("other_wavescribe"):
+        return ScanError(f"{rx.name} is busy: another Wavescribe command has it open (process "
+                         f"{held['wavescribe_pid']}). Wait for it to end or stop it, or use "
+                         "another receiver")  # fmt: skip
+    return ScanError(f"{rx.name} is busy: {held['program']} (process {held['pid']}) has it open. "
+                     "Close it, or use another receiver")  # fmt: skip
 
 
 def cmd_bands(args: argparse.Namespace) -> int:

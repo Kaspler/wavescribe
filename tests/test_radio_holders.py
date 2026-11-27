@@ -90,11 +90,26 @@ def test_another_program_or_wavescribe_is_named_and_our_own_tools_are_not() -> N
     held = held_elsewhere(fake_run(calls), own_pid=OWN_PID)
     assert held == {
         "00002345": {"pid": 3001, "program": "sdrpp", "other_wavescribe": False,
+                     "wavescribe_pid": None, "serve": False,
                      "reason": "sdrpp (pid 3001) is using it; stop it to use this receiver here"},
+        # The Wavescribe that started the rtl tool is the process to name: here, a serve.
         "00003456": {"pid": 4001, "program": "rtl_power", "other_wavescribe": True,
+                     "wavescribe_pid": 4000, "serve": True,
                      "reason": "another Wavescribe is using it (rtl_power, pid 4001)"},
     }  # fmt: skip
     assert calls[0] == IOREG and {c[0] for c in calls} == {"ioreg", "ps"}
+
+
+def test_another_wavescribe_command_is_told_from_serve() -> None:
+    def run(args):
+        if list(args) == IOREG:
+            return "\n".join([*device("Blog V4L", "00003456", location="00130000"),
+                              *interface(0, owner="pid 4001, rtl_sdr")])  # fmt: skip
+        return {"4001": "4000", "4000": "/x/.venv/bin/python /x/.venv/bin/wavescribe radio "
+                "watch a 2m"}[args[-1]] + "\n"  # fmt: skip
+
+    held = held_elsewhere(run, own_pid=OWN_PID)["00003456"]
+    assert held["wavescribe_pid"] == 4000 and held["serve"] is False
 
 
 def test_nothing_is_said_when_the_registry_cant_be_read() -> None:
