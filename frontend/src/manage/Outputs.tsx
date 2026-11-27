@@ -4,7 +4,7 @@ import { hms } from "../lib/time";
 import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangChips, Section, Segmented, Select, Table, Tag, act, toast,
 } from "../components/ui";
-import { type Any, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useEvery, useLoad } from "./api";
+import { type Any, ApiError, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useEvery, useLoad } from "./api";
 
 const SECRET_HEADER = /auth|token|key|secret|cookie|password/i; // values shown as dots
 
@@ -66,6 +66,7 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
       <div className="m-item-head">
         <strong>{o.name || o.id}</strong>
         {o.enabled ? <Tag tone="good">on</Tag> : <Tag tone="muted">off</Tag>}
+        {o.enabled && st.waiting && <Tag tone="warn">waiting</Tag>}
         <Tag>{o.events.join(" + ")}</Tag>
         <Tag>{o.format}</Tag>
         {o.secret && <Tag>signed</Tag>}
@@ -87,6 +88,9 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
         {st.sent ?? 0} sent · {st.failed ?? 0} failed · {st.dropped ?? 0} dropped · {st.queued ?? 0} queued
         {st.last_error && <span className="is-trouble"> · last error: {st.last_error}</span>}
       </p>
+      {o.enabled && st.waiting && (
+        <p className="m-item-sub">The other end doesn't answer: events wait for it and go once it is back, the oldest lines dropped first if too many pile up.</p>
+      )}
     </li>
   );
 }
@@ -106,6 +110,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   const [dropSecret, setDropSecret] = useState(false);
   const [enabled, setEnabled] = useState(o.enabled ?? true);
   const [headers, setHeaders] = useState<[string, string][]>(Object.entries(o.headers || {}) as [string, string][]);
+  const [why, setWhy] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
   const save = async () => {
@@ -115,7 +120,16 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
       secret: dropSecret ? "" : secret || (o.secret ? true : ""),
     };
     if (!raw.id) delete raw.id;
-    await post("/outputs", raw);
+    try {
+      await post("/outputs", raw);
+    } catch (e) {
+      // The server's reason (a name already in use, a URL it can't send to) stays beside the form.
+      if (!(e instanceof ApiError)) throw e;
+      setWhy(e.message.replace(/^./, (c) => c.toUpperCase()));
+      return;
+    }
+    setWhy(null);
+    toast("Connection saved");
     await onDone();
   };
   return (
@@ -148,7 +162,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
             <Field id="o-fmt" label="Format" hint="Plain text suits chat bots and ntfy.">
               <Select id="o-fmt" value={fmt} onChange={(e) => setFmt(e.target.value)} options={[["json", "JSON events"], ["text", "Plain text"], ["cap", "CAP 1.2 XML (alerts)"]]} />
             </Field>
-            <Field id="o-batch" label="Send utterances every (s)" hint="0 sends each one as it comes; alerts always go at once.">
+            <Field id="o-batch" label="Send utterances every (s)" hint="0 sends each one as it comes. Alerts don't wait for this: one goes once its translations are ready, about 12 s, and later mentions of the same incident fold into it.">
               <Input id="o-batch" type="number" min={0} max={3600} value={batch} onChange={(e) => setBatch(e.target.value)} className="input-short" />
             </Field>
             <Field id="o-ctx" label="Context before an alert" hint="Utterances before the alert's, from the same station.">
@@ -174,10 +188,11 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
         </div>
       </Advanced>
       <div className="m-actions">
-        <ActButton variant="primary" disabled={!url.trim()} run={save} done="Connection saved">Save connection</ActButton>
+        <ActButton variant="primary" disabled={!url.trim()} run={save}>Save connection</ActButton>
         <Check checked={enabled} onChange={setEnabled}>On</Check>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
+      {why && <p className="m-trouble" role="alert">{why}</p>}
     </div>
   );
 }

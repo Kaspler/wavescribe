@@ -213,7 +213,7 @@ function Pipeline({ s }: { s: Any }) {
       <p className="m-hint">
         {dropped.length ? `Dropped since start: ${dropped.map(([k, v]) => `${k} ${v}`).join(", ")}. ` : "Nothing dropped since start. "}
         {llm && `Described rules: ${llm.checks} checks, ${llm.matches} matches${llm.last_ms ? `, the last took ${(llm.last_ms / 1000).toFixed(1)} s` : ""}${llm.error ? `, error: ${llm.error}` : ""}. `}
-        This node: {s.node?.name} ({s.node?.url}).
+        This node: {s.node?.name} ({s.node?.url || location.origin}).
       </p>
     </Section>
   );
@@ -225,7 +225,7 @@ function OutputHealth({ outs }: { outs: Record<string, Any> }) {
       <Table caption="Connections" cols={[{ label: "Connection" }, { label: "Sent", num: true }, { label: "Failed", num: true }, { label: "Dropped", num: true }, { label: "Queued", num: true }, { label: "Last error" }]}>
         {Object.entries(outs).map(([id, o]) => (
           <tr key={id}>
-            <td>{id}</td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
+            <td>{id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}</td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
             <td className={o.last_error ? "is-trouble" : "m-muted"}>{o.last_error || "–"}</td>
           </tr>
         ))}

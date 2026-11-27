@@ -15,7 +15,7 @@ export function FeedApi() {
     <>
       <Node node={v.node} />
       <Tokens tokens={v.tokens} reload={reload} />
-      <Feed base={v.node.url} />
+      <Feed base={v.node.url || location.origin} />
       <Central />
     </>
   );
@@ -33,8 +33,8 @@ function Node({ node }: { node: Any }) {
         <Field id="n-name" label="Name" hint="Shown on a central server and in every event. “wavescribe” until you name it.">
           <Input id="n-name" value={name} placeholder={node.name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field id="n-url" label="Public URL" hint="How other machines reach this one; audio and CAP links in events point here. Under --lan it defaults to this machine's .local name, which then goes out in events too.">
-          <Input id="n-url" type="url" value={pub} placeholder={node.url} className="mono" onChange={(e) => setPub(e.target.value)} />
+        <Field id="n-url" label="Public URL" hint="The address other machines use for this one, such as a proxy's public name; audio and CAP links in events point here. Empty: this machine's address on the network.">
+          <Input id="n-url" type="url" value={pub} placeholder={node.url || location.origin} className="mono" onChange={(e) => setPub(e.target.value)} />
         </Field>
       </div>
       <div className="m-actions">
