@@ -1000,6 +1000,12 @@ class Pipeline:
             return False
         return True
 
+    def llm_waiting(self, below: float) -> bool:
+        """Whether a job of priority under ``below`` waits for the translation thread: what a
+        long job of lower priority gives way to (a digest's call)."""
+        with self._mt_q.mutex:
+            return bool(self._mt_q.queue) and self._mt_q.queue[0][0] < below
+
     def _busy_fraction(self, stage: str, now: float, window: float = 60.0) -> float:
         return min(1.0, sum(d for t, d in list(self._busy[stage]) if t > now - window) / window)
 

@@ -84,6 +84,11 @@ MAX_LANGUAGE = 35  # a BCP-47 tag's length in practice
 # Behind the translations of every station, whatever priority a station has (a positive
 # integer), and ahead only of the pipeline's stop once drained.
 DIGEST_PRIORITY = sys.float_info.max
+# A digest's call stops between tokens for a job of higher priority than this waiting for the
+# model: an alert's translation, a rule check, a question. Not for a station's translation
+# (priority 1 and up), or a busy radio would never let a digest finish.
+GIVE_WAY_BELOW = 1.0
+GIVE_WAY_TIMES = 3  # then it gives up, rather than start the same call again and again
 # One prompt's excerpts, as for Ask: about 3k tokens, which a recent Mac reads in about 10 s.
 STAGE_CHARS = 12_000
 DIGEST_CHARS = 36_000  # every station's excerpts together: at most three prompts of notes
@@ -144,6 +149,10 @@ class Busy(RuntimeError):
 
 class Failed(RuntimeError):
     """The model failed while making the digest; ``__cause__`` is why."""
+
+
+class _GiveWay(Exception):
+    """A job that goes first waits for the model: the call stops, to start again after it."""
 
 
 @dataclass(frozen=True)
@@ -338,8 +347,10 @@ class Digester:
         *,
         clock: Callable[[], float] = time.time,
         running: Callable[[], Collection[str]] | None = None,
+        ahead: Callable[[], bool] | None = None,
     ) -> None:
         self.store = store
+        self._ahead = ahead  # a job that goes first waits for the model (GIVE_WAY_BELOW)
         self._stations = stations  # read each time: the page adds and removes stations
         self._running_now = running  # the stations running, when known
         self._submit = submit
@@ -552,7 +563,7 @@ class Digester:
         prompts = plan_prompts(selection.lines)
         if not prompts:
             return digest
-        job = self._wait(_Job(self._submit, request, prompts, names), timeout, stop)
+        job = self._wait(_Job(self._submit, request, prompts, names, self._ahead), timeout, stop)
         if job.error is not None:
             if isinstance(job.error, Unavailable | Busy):
                 raise job.error
@@ -605,8 +616,11 @@ class _Job:
         request: Request,
         prompts: list[list[Line]],
         names: Mapping[str, str],
+        ahead: Callable[[], bool] | None = None,
     ) -> None:
         self._submit = submit
+        self._ahead = ahead or (lambda: False)
+        self.gave_way = 0
         self.request = request
         self.prompts = prompts
         self.names = names
@@ -640,7 +654,20 @@ class _Job:
             )
             return
         try:
+            if self._ahead():
+                raise _GiveWay
             finished = self._call(llm)
+        except _GiveWay:
+            # From the start again, behind the job that goes first: the model's partial reply
+            # can't be resumed.
+            self.gave_way += 1
+            if self.gave_way > GIVE_WAY_TIMES:
+                self._fail(
+                    Busy("alerts and questions kept the model busy; try again in a few minutes")
+                )
+            else:
+                self.next()
+            return
         except Exception as e:
             log.exception("digest failed")
             self._fail(e)
@@ -653,48 +680,55 @@ class _Job:
     def _call(self, llm: Llm) -> bool:
         """One call to the model; True when it was the last. Notes beyond those asked for are
         kept for the choice (the answer's length bounds them); points are not."""
-        r = self.request
         self.model = llm.model_id
         t0 = time.perf_counter()
         try:
-            if len(self.prompts) == 1:
-                lines = self.prompts[0]
-                messages = excerpt_messages(r, lines, self.names, points=POINTS[r.kind])
-                points = [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
-                self.points = pick(points, POINTS[r.kind], self._station)
-                return True
-            if self.calls < len(self.prompts):  # the first stage: notes from one prompt
-                lines = self.prompts[self.calls]
-                messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
-                self.notes += [
-                    Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)
-                ]
-                if self.calls + 1 < len(self.prompts) or len(self.notes) > 1:
-                    return False
-                self.points = list(self.notes)  # nothing to choose from
-                return True
-            # A small model favours the first notes it reads: a station at a time, the first
-            # station would have the digest to itself.
-            notes = in_turn(self.notes, self._station)
-            messages = choice_messages(r, notes, self.names, self._stations_of)
-            reply = llm.complete(messages, max_tokens=CHOICE_TOKENS)
-            groups = parse_choice(reply, len(notes), POINTS["digest"])
-            chosen = [g[0] for g in groups]
-            told = {n for g in groups if len(g) <= MAX_JOIN for n in g}
-            rest = [n for n in range(1, len(notes) + 1) if n not in told and n not in chosen]
-            self.points = [notes[n - 1] for n in chosen + rest][: POINTS["digest"]]
-            return True
+            finished = self._stage(llm)
         finally:
-            self.calls += 1
             self.model_s += time.perf_counter() - t0
+        self.calls += 1  # not for a call that gave way: it is made again
+        return finished
+
+    def _stage(self, llm: Llm) -> bool:
+        r = self.request
+        if len(self.prompts) == 1:
+            lines = self.prompts[0]
+            messages = excerpt_messages(r, lines, self.names, points=POINTS[r.kind])
+            points = [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
+            self.points = pick(points, POINTS[r.kind], self._station)
+            return True
+        if self.calls < len(self.prompts):  # the first stage: notes from one prompt
+            lines = self.prompts[self.calls]
+            messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
+            self.notes += [Point(t, _ids(lines, ns)) for t, ns in self._reply(llm, messages, lines)]
+            if self.calls + 1 < len(self.prompts) or len(self.notes) > 1:
+                return False
+            self.points = list(self.notes)  # nothing to choose from
+            return True
+        # A small model favours the first notes it reads: a station at a time, the first
+        # station would have the digest to itself.
+        notes = in_turn(self.notes, self._station)
+        messages = choice_messages(r, notes, self.names, self._stations_of)
+        reply = llm.complete(messages, max_tokens=CHOICE_TOKENS, on_text=self._give_way)
+        groups = parse_choice(reply, len(notes), POINTS["digest"])
+        chosen = [g[0] for g in groups]
+        told = {n for g in groups if len(g) <= MAX_JOIN for n in g}
+        rest = [n for n in range(1, len(notes) + 1) if n not in told and n not in chosen]
+        self.points = [notes[n - 1] for n in chosen + rest][: POINTS["digest"]]
+        return True
 
     def _reply(
         self, llm: Llm, messages: list[dict[str, str]], lines: Sequence[Line]
     ) -> list[tuple[str, list[int]]]:
-        parsed = parse_points(llm.complete(messages, max_tokens=ANSWER_TOKENS), len(lines))
+        reply = llm.complete(messages, max_tokens=ANSWER_TOKENS, on_text=self._give_way)
+        parsed = parse_points(reply, len(lines))
         self.nones += parsed.none
         self.uncited += parsed.uncited
         return parsed.points
+
+    def _give_way(self, _text: str) -> None:
+        if self._ahead():
+            raise _GiveWay
 
     def _stations_of(self, ids: Iterable[int]) -> list[str]:
         return list(dict.fromkeys(self._lines[i].station for i in ids))

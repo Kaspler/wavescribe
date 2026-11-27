@@ -285,7 +285,7 @@ class App:
         self.asker: Asker | None = None
         if store is not None:
             from wavescribe.ask import Asker
-            from wavescribe.digest import DIGEST_PRIORITY, Digester
+            from wavescribe.digest import DIGEST_PRIORITY, GIVE_WAY_BELOW, Digester
             from wavescribe.digest.speech import Speaker
 
             self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
@@ -294,7 +294,11 @@ class App:
                 self.pipeline.request_llm, name="digest", priority=DIGEST_PRIORITY
             )
             self.hub.digester = Digester(
-                store, lambda: self.config.stations, llm, running=self.running
+                store,
+                lambda: self.config.stations,
+                llm,
+                running=self.running,
+                ahead=lambda: self.pipeline.llm_waiting(GIVE_WAY_BELOW),
             )
             self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
         self.digests = self._digest_schedule()
