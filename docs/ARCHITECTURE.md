@@ -901,7 +901,7 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 - `alerts.kind` (`keyword` or `llm`) and `alerts.reason` (the LLM's one-line reason), schema 4. A station alert has kind `silence` or `traffic`, Wavescribe's own words as its quote (language `en`), no mentions rows, and "audio is back …" as its reason once it ended
 - `deliveries(id, output_id, event, ref, t, ok, status, error, attempts, ms)`: one row per output request, capped at 10,000 rows (schema 4)
 - `segments.privacy` (the class the row was heard under), `alerts.privacy` (the classes of the alert's stations when heard, comma-separated), index `segments_class`, schema 6; at start, older rows take their station's current class if it isn't broadcast
-- `catches(id, station_id, freq_hz, t_start, t_end, mode, band, label, snr_db, peak_db, voice, reason, privacy)`: one row per transmission a watch caught, kept and pruned like text of its class (not written at all where the class keeps no text); its words are the segments of the same station and frequency over the same moments. `segments.freq_hz` (where radio was heard), schema 7
+- `catches(id, station_id, freq_hz, t_start, t_end, mode, band, label, snr_db, peak_db, voice, reason, privacy)`: one row per transmission a watch caught, kept and pruned like text of its class (not written at all where the class keeps no text); its words are the segments of the same station and frequency over the same moments, read with their translations under the same rules (`Store.catches`). `segments.freq_hz` (where radio was heard), schema 7
 
 The schema version lives in `PRAGMA user_version`. The database runs in WAL mode, so `wavescribe
 search` can read while `listen` or `serve` writes. Searches read through a second, read-only

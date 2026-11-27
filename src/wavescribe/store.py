@@ -1369,11 +1369,28 @@ class Store:
                                 "t": u["t_start"],
                                 "language": u["lang"],
                                 "text": u["text"],
+                                "translations": {},
                             }
                             for u in said
                         ],
                     }
                 )
+            # Their translations: of the rows just read, so under the same rules as the words
+            # (a class that keeps no text has none; with ``exports``, only what may leave).
+            said_by_id: dict[int, list[dict[str, Any]]] = {}
+            for c in out:  # one utterance may fall in two catches close together
+                for u in c["utterances"]:
+                    said_by_id.setdefault(u["id"], []).append(u)
+            ids = list(said_by_id)
+            for start in range(0, len(ids), 500):  # under SQLite's limit of bound values
+                chunk = ids[start : start + 500]
+                for tr in self._reader.execute(
+                    "SELECT segment_id, lang, text FROM translations "
+                    f"WHERE segment_id IN ({','.join('?' * len(chunk))})",
+                    chunk,
+                ):
+                    for u in said_by_id[tr["segment_id"]]:
+                        u["translations"][tr["lang"]] = tr["text"]
         return out
 
     def prune_catches(self) -> int:
