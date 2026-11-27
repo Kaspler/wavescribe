@@ -9,7 +9,12 @@ from tests.test_rules import RULES, pack
 from tests.test_store import result
 from wavescribe.alerts import Alerter, merge_page, parse_alerts
 from wavescribe.rules import LlmRule, RuleSet, parse_rule
-from wavescribe.rules.llm import LlmRuleChecker, parse_matches
+from wavescribe.rules.llm import (
+    RULES_DUE_PRIORITY,
+    RULES_PRIORITY,
+    LlmRuleChecker,
+    parse_matches,
+)
 
 
 def test_page_keyword_rules_carry_their_own_terms_per_language(tmp_path: Path) -> None:
@@ -56,11 +61,16 @@ class FakeLlm:
         return self.reply
 
 
+asked: list[dict] = []  # how the last checker's jobs were queued, beside ``jobs``
+
+
 def checker(llm: FakeLlm, rules: list[LlmRule], seen: list, clock=None):
     jobs: list = []
+    asked.clear()
 
-    def submit(run, name, priority, station=None):
+    def submit(run, name, priority, station=None, **how):
         jobs.append((name, priority, station))
+        asked.append(how)
         run(llm)
         return True
 
@@ -88,7 +98,11 @@ def test_llm_rules_read_a_stations_text_in_batches(tmp_path: Path) -> None:
     assert jobs == []  # not enough text yet, and not due
     now[0] = 31.0
     c.tick()
-    assert jobs == [("llm-rules", 0.3, "a")]  # counted against its station if it can't run
+    assert jobs == [("llm-rules", RULES_PRIORITY, "a")]  # counted against it if not run
+    # Behind everything else the model does, for a minute at most; by the rules' names.
+    [how] = asked
+    assert how["put_off_s"] == 60.0 and how["urgent"] == RULES_DUE_PRIORITY
+    assert "evacuation" in how["about"]
     prompt = llm.prompts[0][1]["content"]
     assert "- evacuation: they tell people to leave an area" in prompt
     assert "elsewhere" not in prompt  # that rule is for another station

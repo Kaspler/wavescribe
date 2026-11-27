@@ -15,7 +15,6 @@ from tests.test_store import result
 from wavescribe.alerts import Alert
 from wavescribe.digest import (
     DIGEST_CHARS,
-    MAX_RUNNING,
     POINT_CHARS,
     QUIET_S,
     QUIET_UNKNOWN_S,
@@ -1266,20 +1265,6 @@ def test_another_machine_learns_no_name_of_radio_that_stays_here(tmp_path: Path)
     store.close()
 
 
-def test_a_digest_takes_its_turn_before_reading_the_store(tmp_path: Path) -> None:
-    store = stocked(tmp_path)
-    d = digester(store, FakeLlm("- x [1]."))
-    reads: list[str] = []
-    store_window = store.window
-    store.window = lambda **kw: reads.append("window") or store_window(**kw)
-    for _ in range(MAX_RUNNING):
-        assert d._running.acquire(blocking=False)
-    with pytest.raises(Busy, match="already being made"):
-        d.run(d.request({"minutes": 60}))
-    assert reads == []
-    store.close()
-
-
 def test_another_machine_asks_for_a_few_hours_at_most(tmp_path: Path) -> None:
     store = stocked(tmp_path)
     d = digester(store)
@@ -1384,14 +1369,28 @@ def test_a_translator_that_isnt_an_llm_cant_make_digests(tmp_path: Path) -> None
 
 def test_a_full_queue_and_a_model_that_never_gets_to_it_are_busy(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    full = digester(store, submit=lambda run, given_up: False)
-    with pytest.raises(Busy, match="queue is full"):
-        full.run(full.request({}))
+    # No room in the model's queue: the call is queued again until there is, and for as
+    # long as the digest is waited for. The time here is counted in looks at the clock.
+    tries: list = []
+    looks = itertools.count()
+    full = Digester(
+        store,
+        lambda: STATIONS,
+        lambda run, given_up: tries.append(run) or False,
+        clock=lambda: NOW,
+        timer=lambda: next(looks) / 100,
+        poll_s=0.001,
+    )
+    with pytest.raises(Busy, match="the model was busy for a second, so no digest was made") as e:
+        full.run(full.request({}), timeout=1.0)
+    assert len(tries) > 5 and e.value.retry_after_s == 60 and e.value.busy_with == []
+    assert str(e.value).endswith("in time; try again in a minute")
 
     queued: list = []
     late = digester(store, submit=lambda run, given_up: queued.append(run) or True)
-    with pytest.raises(Busy, match="no digest in time"):
+    with pytest.raises(Busy, match="no digest was made in time"):
         late.run(late.request({}), timeout=0.3)
+    assert len(queued) == 1
     llm = FakeLlm("- too late [1].")
     queued[0](llm)  # the model gets to it after the request gave up: it isn't asked
     assert llm.prompts == []

@@ -26,9 +26,10 @@ import sys
 import threading
 import time
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -167,6 +168,13 @@ class LlmJob:
     # A job that may make way for any other work when the queue is full (a digest): told here,
     # instead of being counted as dropped work.
     given_up: Callable[[], None] | None = None
+    # What it is about, for whoever is told what the model was busy with: the ids of the alert
+    # rules a check reads for, a digest's id.
+    about: tuple[str, ...] = ()
+    # A job that can be put off, but not for ever (an LLM rule's pass, a digest's call): it
+    # waits at its own priority until ``urgent_at``, and sorts at ``urgent`` from then on.
+    urgent_at: float | None = None
+    urgent: float | None = None
 
 
 class _WorkQueue:
@@ -178,19 +186,25 @@ class _WorkQueue:
     being turned away, and ``on_evict`` is told, outside the lock. Otherwise it is refused
     (``queue.Full``), as is an entry no more urgent than everything there: among equals the
     newest goes. An LLM rule check or an alert's translation must not be refused because the
-    station backlog filled the queue."""
+    station backlog filled the queue.
+
+    An item with ``urgent_at`` and ``urgent`` (an ``LlmJob`` that can be put off) sorts at its
+    ``urgent`` priority once ``clock`` passes ``urgent_at``, among the entries of that priority
+    in the order they came: what is put off still gets its turn."""
 
     def __init__(
         self,
         maxsize: int,
         evictable: Callable[[object], bool],
         on_evict: Callable[[tuple], None],
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.maxsize = maxsize
         self._heap: list[tuple] = []
         self._cond = threading.Condition()
         self._evictable = evictable
         self._on_evict = on_evict
+        self._clock = clock
 
     def qsize(self) -> int:
         with self._cond:
@@ -200,6 +214,7 @@ class _WorkQueue:
         evicted = None
         with self._cond:
             if len(self._heap) >= self.maxsize:
+                self._age()  # what is due makes way as what it now is
                 least = max((e for e in self._heap if self._evictable(e[2])),
                             key=lambda e: e[:2], default=None)  # fmt: skip
                 if least is None or entry[:2] >= least[:2]:
@@ -231,12 +246,31 @@ class _WorkQueue:
                 if left is not None and left <= 0:
                     raise queue.Empty
                 self._cond.wait(left)
+            self._age()
             entry = heapq.heappop(self._heap)
             self._cond.notify_all()  # room for a waiting put
             return entry
 
+    def _age(self) -> None:
+        """Entries put off until now sort at their ``urgent`` priority from here on (the caller
+        holds the lock)."""
+        now: float | None = None
+        aged = False
+        for i, (priority, tiebreak, item) in enumerate(self._heap):
+            at = getattr(item, "urgent_at", None)
+            if at is None or item.urgent is None or item.urgent >= priority:
+                continue
+            now = self._clock() if now is None else now
+            if at <= now:
+                self._heap[i] = (item.urgent, tiebreak, item)
+                aged = True
+        if aged:
+            heapq.heapify(self._heap)
+
     def snapshot(self) -> list[tuple]:
+        """The entries as they sort now, in no order."""
         with self._cond:
+            self._age()
             return list(self._heap)
 
     def take(self, which: Callable[[tuple], bool]) -> list[tuple]:
@@ -281,7 +315,39 @@ class _Recent:
         return out
 
 
-LLM_JOB_PRIORITY = 0.5  # alert translations are 0, stations start at 1
+# The one LLM's work, in the order it is taken (lowest first; equals in the order they came):
+#   -1    model loads and swaps
+#   0     an alert's translation (``request_translation``)
+#   0.3   the check of a keyword match (rules/llm.py, VERIFY_PRIORITY): an alert on its way
+#   0.4   word suggestions for a rule being written on the page
+#   0.5   a question (``LLM_JOB_PRIORITY``)
+#   0.7   an LLM rule's pass that has been put off a minute (rules/llm.py, RULES_DUE_PRIORITY)
+#   0.8   a call of a digest that has waited its two minutes (digest, DIGEST_DUE_PRIORITY)
+#   1...  station lines to translate, by the station's priority
+#   big   a digest's call (digest, DIGEST_PRIORITY)
+#   max   an LLM rule's pass (rules/llm.py, RULES_PRIORITY)
+# So live translation goes before a digest and a digest before the rule passes, and neither a
+# digest nor a rule pass waits for ever: the queue moves them up when their time is up
+# (``LlmJob.urgent_at``). A digest's call stops between tokens only for what sorts under 0.6
+# (digest, GIVE_WAY_BELOW).
+LLM_JOB_PRIORITY = 0.5
+SPENT_KEPT = 2000  # units of the LLM's work remembered, for saying what kept it busy
+# What a job of the translation queue is, in the words the status and a refusal use.
+JOB_KINDS = {"llm": "question", "ask": "question", "llm-rules": "rules", "verify": "check",
+             "digest": "digest"}  # fmt: skip
+
+
+def work_kind(item: object) -> str:
+    """What a unit of the LLM's work is: "translation" (a station's line), "alert" (an alert's
+    translation), "check" (of a keyword match), "rules" (an LLM rule's pass), "question",
+    "digest", "model" (a load or a swap) or "other"."""
+    if isinstance(item, Result):
+        return "translation"
+    if isinstance(item, TranslationJob):
+        return "alert"
+    if isinstance(item, LlmJob):
+        return JOB_KINDS.get(item.name, "other")
+    return "model"
 
 
 @dataclass
@@ -454,6 +520,7 @@ class Pipeline:
         transcriber_factory: Callable[[ModelEntry, Path], Transcriber] = load_transcriber,
         translator_factory: Callable[[ModelEntry, Path], Translator] | None = None,
         mt_threads: int = 4,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         """
         Args:
@@ -467,7 +534,10 @@ class Pipeline:
                 set, once Whisper has listened again (asr/recheck.py): its text may be new.
                 Then it goes on to translation and ``on_result``.
             on_audio: called with every audio chunk, from the station's source thread.
+            clock: seconds since 1970, for the LLM's queue: when a job was queued, when one
+                that was put off is due, and how long each unit of its work took.
         """
+        self._clock = clock or (lambda: time.time())
         self._stations = stations
         self._plan = plan
         self._on_result = on_result
@@ -497,7 +567,12 @@ class Pipeline:
             MT_QUEUE_MAX,
             lambda item: isinstance(item, Result) or getattr(item, "given_up", None) is not None,
             self._made_way,
+            self._clock,
         )
+        # What the LLM is on, and what it did lately as (when it ended, seconds, kind, about):
+        # for a digest that waits, and for one that wasn't made in time (``llm_spent``).
+        self._llm_doing: tuple[str, tuple[str, ...]] | None = None
+        self._spent: deque[tuple[float, float, str, tuple[str, ...]]] = deque(maxlen=SPENT_KEPT)
         self._tiebreak = itertools.count()
         self._lock = threading.Lock()
         self._live: dict[str, _Live] = {}
@@ -845,7 +920,7 @@ class Pipeline:
 
         text_s, text_where = worst(text_since)
         mt_s, _ = worst(mt_since)
-        rules_s = now - rules_since if rules_since is not None else 0.0
+        rules_s = self._clock() - rules_since if rules_since is not None else 0.0
         machine = "this Mac" if sys.platform == "darwin" else "this computer"
         many = f"Too many stations for {machine}: "
         if n := lost("rules"):
@@ -1011,28 +1086,49 @@ class Pipeline:
         priority: float = LLM_JOB_PRIORITY,
         station: str | None = None,
         given_up: Callable[[], None] | None = None,
+        *,
+        about: Iterable[str] = (),
+        put_off_s: float | None = None,
+        urgent: float | None = None,
     ) -> bool:
         """Queue ``run(translator)`` on the translation thread. False if there is no translator
         or its queue is full of other jobs (station lines make way for it). An LLM rule check
         (``name`` "llm-rules") that can't be queued is counted against its ``station``: it is
         a possibly missed alert. A job with ``given_up`` makes way for any other work when the
-        queue is full, and is told so."""
+        queue is full, and is told so.
+
+        With ``put_off_s`` and ``urgent``, the job waits at ``priority`` for at most that long
+        and sorts at ``urgent`` from then on; with nothing left to wait, it is queued at
+        ``urgent``, where it takes the place of a station line when the queue is full. A rule
+        check that finds the queue full at its own priority is queued at ``urgent`` at once:
+        it is never refused for a backlog of station lines. ``about`` names what the job is
+        for (rule ids, a digest's id), for ``llm_spent``."""
         rules = name == "llm-rules"
         if self._plan.mt is None:
             if rules:
                 self._drop("rules", station, "no_llm")
             return False
         self._start_mt()
-        try:
-            job = LlmJob(run, name, station, given_up=given_up)
-            self._mt_q.put_nowait((priority, next(self._tiebreak), job))
-        except queue.Full:
-            if rules:
-                self._drop("rules", station, "full")
-            else:
-                event(log, "drop", level=logging.WARNING, stage="mt", station=name)
-            return False
-        return True
+        now = self._clock()
+        due = None if put_off_s is None or urgent is None else now + max(0.0, put_off_s)
+        job = LlmJob(run, name, station, now, given_up, tuple(about), due, urgent)
+        if due is not None and due <= now:
+            tries = [urgent]
+        elif rules and due is not None:
+            tries = [priority, urgent]
+        else:
+            tries = [priority]
+        for at in tries:
+            try:
+                self._mt_q.put_nowait((at, next(self._tiebreak), job))
+                return True
+            except queue.Full:
+                continue
+        if rules:
+            self._drop("rules", station, "full")
+        elif given_up is None:  # a job that makes way says so itself to whoever waits for it
+            event(log, "drop", level=logging.WARNING, stage="mt", station=name)
+        return False
 
     def music_heard(self) -> dict[str, float]:
         """When the gate last dropped an utterance of each station as music in this run (epoch
@@ -1043,6 +1139,38 @@ class Pipeline:
         """Whether a job of priority under ``below`` waits for the translation thread: what a
         long job of lower priority gives way to (a digest's call)."""
         return any(entry[0] < below for entry in self._mt_q.snapshot())
+
+    def llm_line(self, run: Callable[[Translator], None]) -> dict[str, Any] | None:
+        """Where the queued job whose ``run`` this is stands: ``behind``, how many units of
+        work go before it as things are (the one the LLM is on included), and ``kinds``, what
+        they are (``work_kind``), the most frequent first. None when it isn't queued: it is
+        being run, or was never queued. Lines said meanwhile still go before a digest."""
+        entries = self._mt_q.snapshot()
+        mine = next((e for e in entries if isinstance(e[2], LlmJob) and e[2].run is run), None)
+        if mine is None:
+            return None
+        kinds = Counter(work_kind(e[2]) for e in entries if e[:2] < mine[:2] and e[2] is not None)
+        doing = self._llm_doing
+        if doing is not None:
+            kinds[doing[0]] += 1
+        return {"behind": sum(kinds.values()), "kinds": [k for k, _ in kinds.most_common()]}
+
+    def llm_spent(self, last_s: float) -> dict[tuple[str, tuple[str, ...]], float]:
+        """What the LLM spent the last ``last_s`` seconds on, in seconds per kind of work
+        (``work_kind``) and what it was about: a station's name for its lines, the ids of the
+        alert rules for a pass or a check, a digest's id."""
+        now = self._clock()
+        out: dict[tuple[str, tuple[str, ...]], float] = {}
+        for ended, seconds, kind, about in list(self._spent):
+            if ended > now - last_s:
+                out[kind, about] = out.get((kind, about), 0.0) + seconds
+        return out
+
+    def _did(self, kind: str, about: tuple[str, ...], since: float) -> None:
+        """A unit of the LLM's work is done (translation thread)."""
+        now = self._clock()
+        self._spent.append((now, max(0.0, now - since), kind, about))
+        self._llm_doing = None
 
     def _busy_fraction(self, stage: str, now: float, window: float = 60.0) -> float:
         return min(1.0, sum(d for t, d in list(self._busy[stage]) if t > now - window) / window)
@@ -1505,8 +1633,12 @@ class Pipeline:
                 elif isinstance(result, Result):
                     self._finish(result)
                 continue
+            began = self._clock()
+            about = (current.name,) if current is not None else getattr(result, "about", ())
+            self._llm_doing = (work_kind(result), about)
             if isinstance(result, TranslationJob):
                 self._run_job(translator, result)
+                self._did("alert", about, began)
                 continue
             if isinstance(result, LlmJob):
                 t0 = time.perf_counter()
@@ -1515,6 +1647,7 @@ class Pipeline:
                 except Exception:
                     log.exception("%s job failed", result.name)
                 self._busy["mt"].append((time.time(), _ms(t0) / 1000))
+                self._did(work_kind(result), about, began)
                 continue
             queued_ms = (time.time() - result.asr_done_at) * 1000
             t0 = time.perf_counter()
@@ -1538,6 +1671,7 @@ class Pipeline:
                         result.flags = (*result.flags, left_out_flag(target, why))
             finally:
                 self._mt_doing = None
+                self._did("translation", about, began)
             mt_ms = _ms(t0)
             result.translations_model = translator.model_id
             result.timings.update(mt_queue_ms=queued_ms, mt_ms=mt_ms)

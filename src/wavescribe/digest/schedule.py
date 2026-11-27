@@ -269,7 +269,9 @@ class Scheduler:
         except (RequestError, Busy, Unavailable, Failed) as e:
             event(log, "digest_skipped", level=logging.WARNING, reason=str(e)[:200])
             if not self._closed.is_set():
-                self._show(f"No summary this time: {e}. The next one covers this time too.")
+                # Why, without when to ask again: nobody asked, and the next one comes.
+                why = e.reason if isinstance(e, Busy) else e
+                self._show(f"No summary this time: {why}. The next one covers this time too.")
             return None
         self._covered = request.until
         self.deliver(digest)

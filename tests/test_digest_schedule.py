@@ -209,7 +209,9 @@ def test_a_schedule_that_goes_wrong_still_waits_between_digests(lisbon) -> None:
 # -- what is delivered --------------------------------------------------------------------------
 
 
-def scheduled(store, llm, schedule: Schedule, actions, *, clock=None, submit=None, **kw):
+def scheduled(
+    store, llm, schedule: Schedule, actions, *, clock=None, submit=None, digester=None, **kw
+):
     clock = clock or (lambda: NOW)
 
     def at_once(run, given_up) -> bool:
@@ -219,7 +221,7 @@ def scheduled(store, llm, schedule: Schedule, actions, *, clock=None, submit=Non
     speaker = Speaker(Speech(actions), lambda: VOICES, threading.Event())
     return Scheduler(
         schedule,
-        Digester(store, lambda: STATIONS, submit or at_once, clock=clock),
+        Digester(store, lambda: STATIONS, submit or at_once, clock=clock, **(digester or {})),
         speaker,
         exports=lambda: exports(STATIONS),
         closed=threading.Event(),
@@ -282,14 +284,20 @@ def test_scheduled_digests_cover_the_time_between_them_whatever_was_skipped(tmp_
         return True
 
     actions = FakeActions()
-    run = scheduled(store, llm, Schedule(60, "en"), actions, clock=lambda: clock[0], submit=submit)
+    # The digester's wait is counted in looks at the time: a second of them, at most.
+    looks = itertools.count()
+    waits = {"timer": lambda: next(looks) / 100, "timeout_s": 1.0, "poll_s": 0.001}
+    run = scheduled(
+        store, llm, Schedule(60, "en"), actions,
+        clock=lambda: clock[0], submit=submit, digester=waits,
+    )  # fmt: skip
     assert run.tick().request.since == NOW - 60 * MIN
     clock[0] += 60 * MIN
     queue_full[0] = True
     assert run.tick() is None
     assert shown(actions)[-1][1] == (
-        "No summary this time: the model's queue is full; try again in a moment. The next one "
-        "covers this time too."
+        "No summary this time: the model was busy for a second, so no digest was made in time. "
+        "The next one covers this time too."
     )
     clock[0] += 60 * MIN
     queue_full[0] = False

@@ -46,7 +46,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an alert that hasn't got there is also a row in the store's `outbox`, written before the first try and deleted after the delivery, so the next run sends what a restart or crash left (at least once: each alert delivery carries the same random id on every try, `X-Wavescribe-Delivery` and the JSON's `delivery_id`), and it is given up when older than the output's `alert_max_age_hours` (24, at most 168); utterances, and everything under `--no-store`, wait in memory only; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
 | `Asker` | Answers a question about what was said (`ask.py`) | The translation LLM plans a search (stations, time range, words in the translation and station languages), FTS5 finds excerpts, and the LLM answers in the question's language citing them as [n]. Runs on the translation thread through `Pipeline.request_llm` |
-| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`, giving way between tokens to alerts and questions; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`, or the page's in its place); a digest is cancelled by its request id through the same give-way path |
+| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], one call at a time through `Pipeline.request_llm`, behind live translation (for two minutes at most, then in turns with it) and ahead of the LLM rules' passes, giving way between tokens to alerts and questions; digests asked for meanwhile wait in line; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`, or the page's in its place); a digest is cancelled by its request id through the same give-way path |
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md`. Around each download (`modelfetch.py`): the total and a free-disk check first; the download in a thread of its own, so Ctrl-C and SIGTERM stop the command at once (the library's worker threads can't be interrupted, so the process leaves without them and removes the part-files they were writing); a failure as one sentence. The downloads Wavescribe makes itself check certificates against the system trust store (`httpclient.trust_store`, the truststore package), as the Hugging Face library's client does | `ModelRegistry` (`registry.py`) |
 | Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes | — |
 
@@ -55,8 +55,9 @@ Each interface is a Python protocol with one or more implementations:
 One process with threads. Each station has a source thread (an ffmpeg subprocess, or a channel
 of a dongle's shared `rtl_sdr` pipe, plus the VAD), one ASR thread owns the MLX speech model and
 works through a priority queue (station priority, then arrival; Whisper's re-checks of lines heard in another language after all of them), and one translation thread
-owns the translator and the LLM jobs (alert translations first, then LLM rules, then questions,
-then the continuous backlog). Each thread loads its model itself, because MLX arrays are bound
+owns the translator and the LLM jobs (alert translations first, then the checks of keyword
+matches, then questions, then the continuous backlog, then a digest's calls, then the LLM
+rules' passes; the last two wait a bounded time, see Overload). Each thread loads its model itself, because MLX arrays are bound
 to the thread that created them. The translation thread waits until the ASR models are loaded:
 loading two backends at once raced on shared imports (mlx-audio and mlx-lm both import
 transformers). Utterances from a station that is already in every target language skip the
@@ -115,9 +116,29 @@ queues capped at 200 entries, so memory stays bounded and a slow stage never blo
 readers.
 
 **Overload.** Keyword rules run on the ASR thread as soon as a line is written down, so they are
-never behind translation. On the shared LLM thread the order is: model changes, alert translations
-(0), LLM rule checks and verifications (0.3), questions (0.5), then station lines by station
-priority. When a queue is full, more urgent work takes the place of the least urgent station
+never behind translation. The one LLM does one thing at a time, in this order (the priority
+each sorts at; equals in the order they came):
+
+| | Work | Waits at most |
+|---|---|---|
+| -1 | model loads and swaps | |
+| 0 | an alert's translation | |
+| 0.3 | the check of a keyword match (`verify`): an alert on its way | |
+| 0.4 | word suggestions for a rule being written on the page | |
+| 0.5 | a question (Ask) | |
+| 1 and up | station lines to translate, by station priority | 5 minutes, then shown untranslated |
+| after every line | a digest's call | 2 minutes for all its calls together, then 10 s a call; from then on it sorts at 0.8 |
+| last | an LLM rule's pass over a station's recent speech | 60 s; from then on it sorts at 0.7 |
+
+So live translation goes before a digest, and a digest someone waits for before the rules'
+passes, which read the same lines a little later. Neither is put off for ever: the queue
+moves an entry up when its time is up (`LlmJob.urgent_at`, `_WorkQueue._age`), so a rule's
+pass takes its turn between two calls of a digest, a minute late at most plus the call under
+way, and with a translation backlog that never ends a digest's calls and the station lines
+take turns. A pass carries its lines from the moment it is queued, and the next lines collect
+for the next pass, so none are dropped because a digest ran. Only a digest's call is ever
+stopped once begun (see Digests): for what sorts under 0.6, never for a rule's pass. When a
+queue is full, more urgent work takes the place of the least urgent station
 entry (on the ASR queue: the least important station's newest utterance; on the translation
 queue: the least important station's newest line, which is stored untranslated) instead of being
 turned away; jobs are never displaced, and a station entry that is no more urgent than everything
@@ -307,8 +328,12 @@ words), `sources` (the numbered excerpts), `text` (the answer as the model write
    model answers in the question's language and cites `[n]`; follow-ups carry the previous two
    turns.
 
-The job waits behind alert translations and runs ahead of the continuous backlog, which pauses
-for the few seconds an answer takes. Alerts never wait for it: they don't use translation.
+The job waits behind alert translations and the checks of keyword matches, and runs ahead of
+the continuous backlog, which pauses for the few seconds an answer takes; a digest's call
+under way stops for it, and an LLM rule's pass waits for it. The plan and the answer are one
+job that nothing stops once it has begun, so a question is never crowded out by work that
+keeps coming, as a digest's longer calls were. Alerts never wait for it: they don't use
+translation.
 
 **Digests.** `POST /api/digest` (`wavescribe digest`, the agent tools `digest` and `now`) takes
 stations, a time and a language, and answers once the digest is written; it isn't stored. The
@@ -378,18 +403,67 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    `over`: beyond the bound), the span of time the kept ones cite (`cited_since`,
    `cited_until`) and the `seconds` it took; never a word of what was said. It is how a digest
    whose points all come from one end of its window is traced to the model or to the checks.
-3. **Queue.** Each call is a job of its own at the lowest priority, behind every station's
-   translation, so live translation runs between them; an hour of two busy stations takes
-   a minute or two while they are translated. While a call generates, it checks between tokens
-   whether a job of priority under 1 waits (an alert's translation, a rule check, a question,
-   a model load) and stops, to start again from scratch behind it; after three times the
-   digest gives up and says so. Reading a prompt can't be stopped, so an alert's translation
-   can still wait that long: about 10 s for a full prompt on a recent Mac. When the queue is
-   full, a digest's call is the first thing any other work takes the place of, and it takes
-   nobody's; the digest then says that live translation needed the room. A digest waiting,
-   however long, is neither a station behind nor dropped work in the status. At most two
-   digests are made at once; a digest takes its turn before reading the store, and a third
-   is refused at once (503 with `Retry-After`).
+3. **Queue.** Each call is a job of its own, queued once the one before is done, behind
+   every station's translation and ahead of the LLM rules' passes (the order is under
+   Overload), so live translation runs between the calls. A digest of busy stations is ten
+   calls at most (nine parts and the choice), each a prompt of about 1,000 tokens and a reply
+   of up to 500; how long that takes depends on the Mac and on how much is being translated
+   meanwhile.
+   Live translation doesn't hold a digest up for ever: its calls wait 2 minutes behind the
+   station lines in all (`PUT_OFF_S`, less the time it stood in line), and from then on each
+   call waits 10 s at most (`BETWEEN_S`) and goes ahead of them, so with a backlog that never
+   ends the two take turns. While a call generates, it checks between tokens whether a job
+   that sorts under 0.6 waits (an alert's translation, the check of a keyword match, a
+   question, a model load) and stops, to start again from scratch behind it; a call that has
+   stopped three times isn't started a fourth, and the digest is refused. It never stops for
+   an LLM rule's pass: one is queued for each station every 45 s, about as often as a call
+   ends, and stopping for them, a digest of three stations with one LLM rule on was never
+   made. A pass waits for the call under way and goes before the next. Reading a prompt
+   can't be stopped, so an alert's translation can still wait that long: about 10 s for a full
+   prompt on a recent Mac. When the queue is full, a digest's call that still waits behind
+   the station lines takes nobody's place, is the first thing other work takes the place of,
+   and is queued again by whoever waits for the digest (every 0.25 s) until there is room;
+   one that has waited its time takes the place of the least urgent station line, as a rule
+   check does. A digest waiting, however long, is neither a station behind nor dropped work
+   in the status.
+4. **Line.** Two digests are made at once; four more wait in line in the order they came,
+   each taking its turn before it reads the store, and a seventh is refused at once (503,
+   with about when a place comes free). A digest is refused as not made in time 10 minutes
+   after it was asked for (`TIMEOUT_S`), wherever it stands. Scheduled digests stand in the
+   same line and wait the same way.
+
+While a digest isn't made yet, the `status` this machine's page gets (in `/api/state` and in
+each `status` event) lists it under `digests` (`Digester.status`), in the order asked:
+`{"id", "kind", "here", "state", "waited_s", "behind", "behind_what", "turn_in_s", "call",
+"calls", "gives_up_in_s"}`. `state` is `in_line` (`behind` digests must be made before its
+turn), `waiting` (its call is queued: `behind` units of the model's work sort before it as
+things are, of the kinds in `behind_what`, most frequent first: `translation`, `alert`,
+`check`, `rules`, `question`, `digest`, `model`, `other`; `turn_in_s` is how long at most
+until it goes ahead of the station lines) or `writing` (the model is on its call); `call` of
+`calls` is the one it waits for or is on, null until it has read the store. Another machine
+sees only the digests other machines asked for, without their ids.
+
+A refusal for lack of the model's time is 503 with `code: "busy"`, `retry_after_s` (also the
+`Retry-After` header) and, when the digest waited, `waited_s` and `busy_with`: what the model
+spent that wait on, from the last 2,000 units of its work (`Pipeline.llm_spent`), as
+`[{"kind", "names", "seconds"}]`, the most first, at most three kinds, each a tenth of the
+time or more; `names` are the stations translated or the alert rules read for, and empty for
+another machine. The sentence says the same: "live translation of A and B and the alert rule
+'x' kept the model busy for 10 minutes, so no digest was made in time; try again in a
+minute", or, for a call that stopped too often, "checks of what the alert rule 'x' matched
+kept the model busy; try again in a minute". The time is a true one: for 15 minutes after
+such a refusal (`OWED_S`), or until a digest is made, the next digest is owed its turn. Its
+calls wait 10 s at most behind the station lines from the first, and stop only for an alert's
+translation, a model load or the stop (what sorts under 0.3); a check or a question then
+waits for the call under way, as a rule's pass does. The log has `digest_crowded` with the
+seconds per kind, and each `digest_call` says how long the call `waited` for the model and
+how often it `gave_way`.
+
+In simulated time (`tests/test_llm_turns.py`: a fake model that reads 380 tokens a second and
+writes 40, three stations saying a line every 8 s, a digest of the last 20 minutes in ten
+calls), the digest takes 126 s with no LLM rule and 139 s with one, whose passes are then
+read up to 68 s after they were queued; with translation falling ever further behind (4 s a
+line) it takes 306 s, of which the first 124 s waiting.
 
 **Cancelling and reading again.** Each request has an `id`, the asker's (8 to 64 letters,
 digits, `-` and `_`: the page sends a random UUID) or one made for it, which the answer
@@ -646,8 +720,12 @@ force, a hit is raised at its rule's severity, and `checked` stays null.
 
 An LLM rule (`kind = "llm"`, `rules/llm.py`) is a sentence ("people are told to
 leave their homes"). Each station's source text is collected and checked against every LLM
-rule about every 45 s (or at 1,500 characters), as one prompt at priority 0.3, behind alert
-translations and ahead of Ask; a backlog of station lines makes way for it (see Overload). A
+rule about every 45 s (or at 1,500 characters), as one prompt. The pass is queued behind
+everything else the model does, so it runs when nothing else wants the model; after 60 s
+(`RULES_PUT_OFF_S`) it goes ahead of the station lines and of a digest's next call (see
+Overload). Its lines are in the job from the start, so a pass that waits reads the same lines
+later and skips none. A backlog of station lines makes way for it: when the queue is full it
+is queued ahead of them at once. A
 check that still can't be queued is counted against its station (`dropped.rules`) and makes the
 load `overloaded`: alerts may be missed. A match comes back with a one-line reason and the utterance it
 rests on, and goes through the same Alerter as keyword hits (cooldown, `min_mentions`,

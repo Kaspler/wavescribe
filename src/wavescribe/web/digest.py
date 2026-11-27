@@ -11,8 +11,16 @@ It spends the model as a question does, so it passes the gate a question does (s
 from another machine only with ``serve --allow-remote-ask``; through a proxy, a read token
 unless ``--public-read``. Another machine gets a digest of only what may leave this one, over
 a few hours at most. The answer comes once the model is done, which can take a few minutes
-while live translation goes first; when two digests are being made, it is refused at once
-with ``Retry-After``.
+while live translation goes first. While two digests are being made, the next ones wait in
+line for their turn. A digest that isn't made in time, or finds the line full, is refused 503
+with code ``busy``: the sentence says what kept the model busy, and ``retry_after_s`` (also the
+``Retry-After`` header) when asking again is worth it; with it come ``waited_s`` and
+``busy_with``, when the digest waited (``digest.kept_busy``: ``[{"kind", "names",
+"seconds"}]``, the most first; no names for another machine). While a digest waits, the
+``status`` this machine's page gets (``/api/state`` and the ``status`` events) lists it under
+``digests`` (``Digester.status``): by its id, how long it has waited, whether it is in line
+behind other digests, waiting for the model behind how many other jobs of which kinds, or
+being written, and which of its calls it is on.
 
 Every answer carries the request's ``id``: the asker's (``"id"`` in the request, 8 to 64 of
 ``A-Z a-z 0-9 - _``, such as a random UUID), or one made for it. With its own id, the asker can
@@ -139,7 +147,11 @@ def handle(h: Handler) -> None:
     except Cancelled as e:
         h._json({"error": str(e), "code": "cancelled", **rid}, HTTPStatus.CONFLICT)
     except Busy as e:
-        _busy(h, {"error": str(e), "code": "busy", **rid})
+        answer: dict[str, Any] = {"error": str(e), "code": "busy", **rid}
+        answer["retry_after_s"] = max(1, round(e.retry_after_s))
+        if e.waited_s is not None:
+            answer.update(waited_s=round(e.waited_s, 1), busy_with=e.busy_with)
+        _busy(h, answer)
     except Failed as e:
         h._json({"error": str(e), "code": "failed", **rid}, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
@@ -214,7 +226,7 @@ def stop_speech(h: Handler) -> None:
 def _busy(h: Handler, answer: dict[str, Any]) -> None:
     body = to_json(answer).encode()
     h.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
-    h.send_header("Retry-After", str(RETRY_AFTER_S))
+    h.send_header("Retry-After", str(answer.get("retry_after_s", RETRY_AFTER_S)))
     h.send_header("Content-Type", "application/json; charset=utf-8")
     h.send_header("Content-Length", str(len(body)))
     h.send_header("Cache-Control", "no-store")

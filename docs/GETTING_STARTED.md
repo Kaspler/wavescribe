@@ -335,9 +335,20 @@ A station that plays music while another talks leaves no such gap, and a stretch
 longer than your stations are known to go quiet: ten minutes at least, half an hour for a
 station it has heard little of. A restart of a few minutes isn't mentioned.
 
-It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
-takes a minute or two, `--now` from a few seconds to a minute. When two digests are already being
-made, it is refused at once; try again in a minute. `--speak` also reads its points aloud, in
+It needs the Qwen3.5 model, which does one thing at a time and is shared: alerts on their
+way and questions come first, then live translation, then a digest, then the rules you
+described in your own words ([section 7](#7-get-alerts)). A digest of busy stations is up to
+ten calls to the model, one after another (a short or quiet stretch is fewer, `--now` is
+usually one), and lines are translated between them. So how long it takes depends on how
+much was said, how fast the Mac is and how much the stations are talking right now: a few
+minutes for a full one, from a few seconds to a minute for `--now`. A rule in your own words
+doesn't stop it: the model reads the stations' recent speech for the rule between a digest's
+calls, up to a minute later than usual, and skips none of it. When translation is running
+behind, a digest waits up to two minutes for it and then takes turns with it. While two
+digests are being made, the next ones wait in line (four at most). One that isn't made
+within ten minutes says what kept the model busy, by name (the stations being translated,
+the alert rule), and when to try again; asked for again then, it no longer waits behind
+them. `--speak` also reads its points aloud, in
 the voice your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by
 saying that this is a Wavescribe summary written by the local model, and an alert stops it at
 once. One that comes while an alert is being spoken waits for it to end (a minute at most;
@@ -440,7 +451,8 @@ each station's language. Read them, fix any that are wrong, and save.
     refused, with the rule's name; a rule takes 20 patterns at most, of 200 characters each.
 - **Describe it in your words:** say what you want to hear about in one sentence (*"residents
   are told to leave their homes"*), with no keywords at all. The model reads each station's recent speech
-  about every 45 seconds.
+  about every 45 seconds, when it has a free moment: up to a minute later while it is busy
+  translating or writing a summary, never skipping a line.
 - **Try a sentence**, as the radio would say it, to see which word rules would fire. Nothing is
   raised. In the Terminal: `uv run wavescribe alerts check "la carretera está cortada"
   --language es-ES`; `uv run wavescribe alerts replay` runs everything heard so far through the

@@ -12,7 +12,12 @@ water cut from a football team called "Água"; the LLM, reading the sentence, us
 whose check didn't answer is raised all the same, marked as not checked: one severity lower, as
 it is, or after being held while the check is tried again, as its rule's ``unverified`` says.
 
-Both run as jobs on the translation thread, ahead of station translations and questions.
+Both run as jobs on the translation thread. The check of a keyword hit is an alert on its way:
+it goes ahead of station translations and questions. A pass over recent speech waits for a
+moment when nothing else wants the model, behind live translation, a question and a digest
+someone asked for, since it reads the same lines a little later; after ``RULES_PUT_OFF_S`` it
+goes ahead of the station lines and of a digest's next call, so no rule is silent for long. Its
+lines are in the job from the moment it is queued, so none are lost while it waits.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -33,7 +39,14 @@ from wavescribe.rules import Hit, KeywordRule, LlmRule, raise_severity
 
 log = logging.getLogger(__name__)
 
-RULES_PRIORITY = 0.3  # alert translations are 0, questions 0.5, stations from 1
+# The order of the LLM's work is listed in pipeline.py, above LLM_JOB_PRIORITY.
+VERIFY_PRIORITY = 0.3  # a keyword hit's check: behind an alert's translation (0) only
+# A pass over recent speech: behind everything else, a digest's calls included, for at most
+# RULES_PUT_OFF_S; then ahead of station lines (1 and up) and of a digest's next call, behind
+# questions (0.5). A digest's call under way is never stopped for it.
+RULES_PRIORITY = sys.float_info.max
+RULES_DUE_PRIORITY = 0.7
+RULES_PUT_OFF_S = 60.0
 CHECK_TOKENS = 300
 VERIFY_TOKENS = 120
 # A keyword hit the LLM hasn't judged by then wasn't checked: its rule's `unverified` says what
@@ -80,8 +93,10 @@ class _Verify:
     timer: threading.Timer | None = None  # the try's timeout
 
 
-# (run, name, priority, station=...) -> queued. A rule check that isn't queued is counted and
-# logged by the pipeline (Pipeline.request_llm), against its station.
+# (run, name, priority, station=..., about=..., put_off_s=..., urgent=...) -> queued. A rule
+# check that isn't queued is counted and logged by the pipeline (Pipeline.request_llm), against
+# its station. ``about`` is the ids of the rules it reads for; ``put_off_s`` and ``urgent`` say
+# for how long it may wait at ``priority`` and where it sorts after that.
 Submit = Callable[..., bool]
 
 
@@ -188,7 +203,15 @@ class LlmRuleChecker:
         def run(llm: Any) -> None:
             self._check(llm, results, rules)
 
-        self._submit(run, "llm-rules", RULES_PRIORITY, station=station_id)
+        self._submit(
+            run,
+            "llm-rules",
+            RULES_PRIORITY,
+            station=station_id,
+            about=tuple(r.id for r in rules),
+            put_off_s=RULES_PUT_OFF_S,
+            urgent=RULES_DUE_PRIORITY,
+        )
 
     # -- checking (translation thread) ------------------------------------------------------
 
@@ -286,7 +309,7 @@ class LlmRuleChecker:
                 self._unanswered(v, n, "failed", f"the check failed ({type(e).__name__})")
 
         timer.start()
-        if not self._submit(run, "verify", RULES_PRIORITY):
+        if not self._submit(run, "verify", VERIFY_PRIORITY, about=(v.rule.id,)):
             if self._has_llm():
                 self._unanswered(v, n, "queue_full", "its queue is full")
             else:

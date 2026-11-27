@@ -299,23 +299,18 @@ class App:
         self.asker: Asker | None = None
         if store is not None:
             from wavescribe.ask import Asker
-            from wavescribe.digest import DIGEST_PRIORITY, GIVE_WAY_BELOW, Digester
+            from wavescribe.digest import Digester, model_of
             from wavescribe.digest.speech import Speaker
 
             self.asker = Asker(store, list(self.config.stations), self.pipeline.request_llm)
             self.hub.asker = self.asker
-
-            def llm(run: Callable[[Any], None], given_up: Callable[[], None]) -> bool:
-                return self.pipeline.request_llm(run, "digest", DIGEST_PRIORITY, given_up=given_up)
-
             self.hub.digester = Digester(
                 store,
                 lambda: self.config.stations,
-                llm,
                 running=self.running,
-                ahead=lambda: self.pipeline.llm_waiting(GIVE_WAY_BELOW),
                 started=self.started_at,
                 music=self.pipeline.music_heard,
+                **model_of(self.pipeline),
             )
             self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
         self._digests_lock = threading.Lock()  # the page replaces the scheduler

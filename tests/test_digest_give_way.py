@@ -16,13 +16,13 @@ from tests.test_digest import NOW, STATIONS, FakeLlm, stocked
 from tests.test_pipeline import PLAN, EnergyVad, FakeTranscriber, ListSource
 from wavescribe.digest import (
     DIGEST_PRIORITY,
-    GIVE_WAY_BELOW,
     GIVE_WAY_TIMES,
     KEPT,
     Busy,
     Cancelled,
     Digester,
     RequestError,
+    model_of,
 )
 from wavescribe.pipeline import Pipeline
 
@@ -76,16 +76,7 @@ def pipeline_with(llm: SlowLlm) -> Pipeline:
 
 
 def digester_on(store, pipeline: Pipeline) -> Digester:
-    def submit(run, given_up) -> bool:
-        return pipeline.request_llm(run, "digest", DIGEST_PRIORITY, given_up=given_up)
-
-    return Digester(
-        store,
-        lambda: STATIONS,
-        submit,
-        clock=lambda: NOW,
-        ahead=lambda: pipeline.llm_waiting(GIVE_WAY_BELOW),
-    )
+    return Digester(store, lambda: STATIONS, clock=lambda: NOW, **model_of(pipeline))
 
 
 def test_an_alerts_translation_waits_for_a_token_not_for_a_digest(tmp_path: Path) -> None:
@@ -191,19 +182,25 @@ def test_a_digest_waiting_long_is_no_station_behind(monkeypatch) -> None:
         pipeline.stop()
 
 
-def test_a_digest_given_up_for_live_work_says_so(tmp_path: Path) -> None:
+def test_a_call_that_made_way_in_a_full_queue_is_queued_again(tmp_path: Path) -> None:
     store = stocked(tmp_path)
+    llm = FakeLlm("- Water is cut tomorrow [1].")
     taken: list = []
 
     def submit(run, given_up) -> bool:
-        taken.append(given_up)
-        threading.Timer(0.1, given_up).start()  # station lines filled the queue meanwhile
+        taken.append(run)
+        if len(taken) == 1:
+            given_up()  # station lines filled the queue meanwhile: its call made way for them
+        else:
+            run(llm)
         return True
 
-    d = Digester(store, lambda: STATIONS, submit, clock=lambda: NOW)
-    with pytest.raises(Busy, match="live translation needed the model's queue"):
-        d.run(d.request({"minutes": 60}), timeout=10)
-    assert len(taken) == 1
+    d = Digester(store, lambda: STATIONS, submit, clock=lambda: NOW, poll_s=0.001)
+    digest = d.run(d.request({"minutes": 60}), timeout=60)
+    assert [p.text for p in digest.points] == ["Water is cut tomorrow."]
+    assert len(taken) == 2 and len(llm.prompts) == 1
+    taken[0](llm)  # the call that made way, should it turn up after all: it isn't made twice
+    assert len(llm.prompts) == 1
     store.close()
 
 

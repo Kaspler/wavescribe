@@ -68,7 +68,15 @@ listening, so a stretch ends there at the latest.
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
 once the previous call is done: live translation runs between the calls, and a digest waits
-while there is a backlog rather than holding it up.
+while there is a backlog rather than holding it up. It doesn't wait for ever: once its calls
+have waited ``PUT_OFF_S`` in all, each call it has left waits ``BETWEEN_S`` at most and then
+goes ahead of the station lines, so the digest and live translation take turns. A call under
+way stops for an alert on its way or a question, never for an LLM rule's pass over recent
+speech, which comes after it. A digest asked for while others are being made waits in line for
+its turn, and one that isn't made within ``TIMEOUT_S`` says what the model was busy with
+(``kept_busy``) and when to ask again; the one asked for next doesn't wait behind live
+translation, and its calls stop only for an alert's translation (``OWED_S``).
+``Digester.status`` says where each one waiting stands.
 
 Each request has an ``id`` (the asker's, or one made for it), which its answer carries.
 ``Digester.cancel`` drops a digest by it: one still queued for the model never reaches it, and
@@ -132,13 +140,28 @@ MAX_NOW_MINUTES = 60.0
 REMOTE_MINUTES = 6 * 60.0
 MAX_LANGUAGE = 35  # a BCP-47 tag's length in practice
 # Behind the translations of every station, whatever priority a station has (a positive
-# integer), and ahead only of the pipeline's stop once drained.
-DIGEST_PRIORITY = sys.float_info.max
-# A digest's call stops between tokens for a job of higher priority than this waiting for the
-# model: an alert's translation, a rule check, a question. Not for a station's translation
-# (priority 1 and up), or a busy radio would never let a digest finish.
-GIVE_WAY_BELOW = 1.0
-GIVE_WAY_TIMES = 3  # then it gives up, rather than start the same call again and again
+# integer), and ahead of the LLM rules' passes over recent speech (the order of the model's
+# work is listed in pipeline.py, above LLM_JOB_PRIORITY).
+DIGEST_PRIORITY = sys.float_info.max / 2
+# Live translation goes first, but not for ever: once a digest's calls have waited PUT_OFF_S
+# for their turns in all, each call it has left waits BETWEEN_S at most behind the station
+# lines and then goes ahead of them. So with a backlog that never ends, the digest and live
+# translation take turns, a call and then about as long of translating.
+DIGEST_DUE_PRIORITY = 0.8
+PUT_OFF_S = 120.0
+BETWEEN_S = 10.0
+# A digest's call stops between tokens for a job that sorts under this waiting for the model:
+# an alert's translation, the check of a keyword match, a question. Not for a station's
+# translation (priority 1 and up), or a busy radio would never let a digest finish; and not
+# for an LLM rule's pass, which is queued every 45 s for each station and takes its turn
+# between a digest's calls: stopping for those, a digest of three stations was never made.
+GIVE_WAY_BELOW = 0.6
+# The calls of a digest asked for soon after one that wasn't made (OWED_S) stop only for what
+# sorts under this: an alert's translation, a model being loaded, Wavescribe stopping. A check
+# or a question then waits for the call under way, some ten seconds, as a rule's pass does.
+GIVE_WAY_OWED_BELOW = 0.3
+# For one call; then the digest gives up, rather than start the same call again and again.
+GIVE_WAY_TIMES = 3
 # One prompt's excerpts, as for Ask: about 3k tokens, which a recent Mac reads in about 10 s.
 STAGE_CHARS = 12_000
 DIGEST_CHARS = 36_000  # every station's excerpts together: at most three prompts
@@ -171,8 +194,19 @@ SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a recei
 # Never announced: still being checked or translated, announced by another alert, or only
 # logged, as its severity's actions said (no notification, no voice).
 UNANNOUNCED = ("pending", "covered", "logged")
-TIMEOUT_S = 240.0  # nine parts of notes and the choice, behind whatever backlog there is
-MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
+# From asked to made, at most: its turn among digests, PUT_OFF_S behind live translation, then
+# nine parts of notes and the choice with the rule passes and alerts that come between them.
+TIMEOUT_S = 600.0
+MAX_RUNNING = 2  # digests whose calls take turns at the model at once
+MAX_WAITING = 4  # more wait in line for a turn, each holding a connection; another is refused
+POLL_S = 0.25  # how often a digest that waits looks whether it was cancelled or is late
+RETRY_S = 60.0  # after a digest that wasn't made: when asking again is worth it
+# A digest asked for within this long of one that wasn't made, for lack of time or for making
+# way too often, is owed its turn: its calls wait BETWEEN_S at most behind live translation
+# from the first, and stop only for an alert's translation (GIVE_WAY_OWED_BELOW). So the time
+# a refusal names for trying again is one at which the digest is made. Until one is made.
+OWED_S = 15 * 60.0
+CALL_S = 15.0  # about what a call takes, live translation between calls included: an estimate
 KEPT = 8  # answers kept in memory by id, to be read aloud again without being made again
 # A request's id, when the asker gives one: long enough that nobody else guesses it (a UUID).
 REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
@@ -252,7 +286,26 @@ class Unavailable(RuntimeError):
 
 
 class Busy(RuntimeError):
-    """The model's queue is full, or the model didn't get to the digest in time."""
+    """No digest for now: the line of digests is full, the model didn't get to it in time, its
+    call kept making way for alerts, or Wavescribe is closing. ``reason`` says which, and the
+    message adds when to ask again ("…; try again in a minute"), which ``retry_after_s`` is
+    in seconds. ``waited_s`` is how long this one waited, and ``busy_with`` what the model did
+    meanwhile (``kept_busy``), when it waited."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        retry_after_s: float = RETRY_S,
+        again: bool = False,
+        waited_s: float | None = None,
+        busy_with: Sequence[Mapping[str, Any]] = (),
+    ) -> None:
+        super().__init__(f"{reason}; try again in {_about(retry_after_s)}" if again else reason)
+        self.reason = reason
+        self.retry_after_s = retry_after_s
+        self.waited_s = waited_s
+        self.busy_with = [dict(b) for b in busy_with]
 
 
 class Failed(RuntimeError):
@@ -264,6 +317,107 @@ class Cancelled(RuntimeError):
 
 
 CANCELLED = "the digest was cancelled"
+
+
+# Of the kinds of the model's work (pipeline.py, ``work_kind``): those whose names are worth
+# saying (a station's, an alert rule's), and those a digest's call under way stops for.
+NAMED = ("translation", "rules", "check")
+STOPPED_FOR = ("alert", "check", "question", "other", "model")
+
+
+def kept_busy(
+    spent: Mapping[tuple[str, tuple[str, ...]], float], *, own: str = "", named: bool = True
+) -> list[dict[str, Any]]:
+    """What the model spent a digest's wait on, the most first: ``{"kind", "names",
+    "seconds"}`` per kind of work, from the seconds ``Pipeline.llm_spent`` gives. ``names`` are
+    the stations translated or the alert rules read for, those that took longest first, when
+    ``named``: another machine learns no name. The calls of the digest ``own`` aren't counted,
+    and of the rest only what took a tenth of the time or more, three kinds at most."""
+    seconds: dict[str, float] = {}
+    names: dict[str, dict[str, float]] = {}
+    for (kind, about), s in spent.items():
+        if kind == "digest" and about == (own,):
+            continue
+        seconds[kind] = seconds.get(kind, 0.0) + s
+        for name in about if kind in NAMED else ():
+            of = names.setdefault(kind, {})
+            of[name] = of.get(name, 0.0) + s
+    total = sum(seconds.values())
+    rows = [
+        {
+            "kind": kind,
+            "names": sorted(names.get(kind, {}), key=lambda n: -names[kind][n]) if named else [],
+            "seconds": round(s, 1),
+        }
+        for kind, s in sorted(seconds.items(), key=lambda kv: -kv[1])
+        if s > 0 and s >= total / 10
+    ]
+    return rows[:3]
+
+
+def busy_words(row: Mapping[str, Any]) -> str:
+    """One row of ``kept_busy`` in words: "live translation of A and B", "the alert rule
+    'x'"."""
+    kind, names = row["kind"], list(row["names"])
+    shown = names[:3] + (["others"] if len(names) > 3 else [])
+    rules = _listed([f"'{n}'" for n in names[:3]] + (["others"] if len(names) > 3 else []))
+    plural = "s" if len(names) > 1 else ""
+    if kind == "translation":
+        return "live translation" + (f" of {_listed(shown)}" if shown else "")
+    if kind == "rules":
+        return f"the alert rule{plural} {rules}" if names else "alert rules"
+    if kind == "check":
+        if names:
+            return f"checks of what the alert rule{plural} {rules} matched"
+        return "checks of keyword matches"
+    return {
+        "alert": "alerts being translated",
+        "question": "questions",
+        "digest": "other digests",
+    }.get(kind, "other requests")
+
+
+def _listed(items: Sequence[str]) -> str:
+    """One, "a and b" or "a, b and c"; nothing for none."""
+    items = list(items)
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _about(seconds: float) -> str:
+    """A wait in round words: "20 seconds", "a minute", "4 minutes"."""
+    if seconds < 50:
+        return "a second" if seconds < 1.5 else f"{round(seconds)} seconds"
+    minutes = round(seconds / 60)
+    return "a minute" if minutes <= 1 else f"{minutes} minutes"
+
+
+def model_of(pipeline: Any) -> dict[str, Any]:
+    """What a ``Digester`` takes from the pipeline whose LLM it shares, as keyword arguments:
+    ``submit`` queues a ``Call`` behind live translation for as long as it says and ahead of
+    it after that, ``ahead`` says whether a job a call stops for is waiting (``ahead_owed``:
+    for a digest that is owed its turn), ``line`` where a queued call stands and ``spent`` what
+    the model did lately."""
+
+    def submit(call: Any, given_up: Callable[[], None]) -> bool:
+        return pipeline.request_llm(
+            call,
+            "digest",
+            DIGEST_PRIORITY,
+            given_up=given_up,
+            about=getattr(call, "about", ()),
+            put_off_s=getattr(call, "put_off_s", None),
+            urgent=DIGEST_DUE_PRIORITY,
+        )
+
+    return {
+        "submit": submit,
+        "ahead": lambda: pipeline.llm_waiting(GIVE_WAY_BELOW),
+        "ahead_owed": lambda: pipeline.llm_waiting(GIVE_WAY_OWED_BELOW),
+        "line": pipeline.llm_line,
+        "spent": pipeline.llm_spent,
+    }
 
 
 class _GiveWay(Exception):
@@ -319,12 +473,32 @@ class Parsed:
     none: bool  # it said nothing of substance was said, and gave no point
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
+class Call:
+    """One call of a digest as the model's queue takes it: ``call(llm)`` makes it. ``put_off_s``
+    is how much longer it may wait behind live translation before it goes ahead of it, and
+    ``about`` the digest's id."""
+
+    run: Callable[[Any], None]
+    put_off_s: float
+    about: tuple[str, ...] = ()
+
+    def __call__(self, llm: Any) -> None:
+        self.run(llm)
+
+
+@dataclass(eq=False)
 class _Live:
-    """A digest being made: what cancels it, and whether this machine asked for it."""
+    """A digest asked for and not made yet: what cancels it, whether this machine asked for
+    it, when and until when it is waited for (on the digester's timer), and its calls once it
+    has read the store."""
 
     cancel: threading.Event
     here: bool
+    request: Request
+    asked: float
+    deadline: float
+    job: _Job | None = None
 
 
 @dataclass
@@ -531,7 +705,17 @@ class Digest:
 
 
 class Digester:
-    """Makes digests from the store with the pipeline's LLM."""
+    """Makes digests from the store with the pipeline's LLM.
+
+    ``submit(call, given_up)`` queues one call for the model (a ``Call``: its ``put_off_s`` and
+    ``about`` are for the queue) and says whether it was queued; ``given_up`` is called if it
+    later makes way for other work. ``ahead`` says whether a job a call stops for is waiting
+    (``ahead_owed``: for the calls of a digest that is owed its turn; ``ahead`` when not
+    given), ``line(call)`` where a queued call stands (``Pipeline.llm_line``) and
+    ``spent(seconds)`` what the model did in the last seconds (``Pipeline.llm_spent``).
+    ``timer`` measures the waits (seconds, from any start); ``clock`` is the time of day the
+    windows are cut by. A digest that waits looks every ``poll_s`` whether it was cancelled or
+    is late (``polls`` counts the looks)."""
 
     def __init__(
         self,
@@ -544,8 +728,25 @@ class Digester:
         ahead: Callable[[], bool] | None = None,
         started: float | None = None,
         music: Callable[[], Mapping[str, float]] | None = None,
+        line: Callable[[Any], Mapping[str, Any] | None] | None = None,
+        spent: Callable[[float], Mapping[tuple[str, tuple[str, ...]], float]] | None = None,
+        timer: Callable[[], float] = time.monotonic,
+        timeout_s: float = TIMEOUT_S,
+        ahead_owed: Callable[[], bool] | None = None,
+        poll_s: float = POLL_S,
     ) -> None:
         self.store = store
+        self.timeout_s = timeout_s  # from asked to made, at most
+        self.poll_s = poll_s
+        self.polls = 0
+        self._ahead_owed = ahead_owed or ahead
+        self._line_of = line
+        self._spent = spent
+        self._timer = timer
+        # The digests asked for and not made yet, in the order they came: the first
+        # MAX_RUNNING are being made, the others wait for a turn.
+        self._line: list[_Live] = []
+        self._owed_until: float | None = None  # until then, a digest is owed its turn (OWED_S)
         # When this run of Wavescribe started: it has listened since, which is all a digest
         # takes from it. What was heard before, the lines of earlier runs say (``gaps``).
         self.started = started
@@ -555,8 +756,8 @@ class Digester:
         self._running_now = running  # the stations running, when known
         self._submit = submit
         self._clock = clock
-        self._running = threading.BoundedSemaphore(MAX_RUNNING)
         self._lock = threading.Lock()
+        self._turn = threading.Condition(self._lock)  # a place among those being made is free
         self._live: dict[str, _Live] = {}  # id -> a digest being made
         self._kept: OrderedDict[str, tuple[Digest, bool]] = OrderedDict()  # id -> (it, here)
 
@@ -703,25 +904,134 @@ class Digester:
             kept = self._kept.get(request_id)
         return kept[0] if kept is not None else None
 
-    @staticmethod
-    def _wait(job: _Job, timeout: float, stop: threading.Event | None) -> _Job:
-        job.next()
-        deadline = time.monotonic() + timeout
-        while not job.done.wait(0.25):
-            if job.cancel.is_set():  # cancelled by its id; a step still queued is skipped
-                raise Cancelled(CANCELLED)
-            if stop is not None and stop.is_set():
-                job.cancel.set()
-                raise Busy("Wavescribe is closing")
-            if time.monotonic() > deadline:
-                job.cancel.set()
+    def status(self) -> list[dict[str, Any]]:
+        """The digests asked for and not made yet, in the order they came, for a page that
+        waits for one: its ``id`` and ``kind``, whether this machine asked for it (``here``),
+        how long ago (``waited_s``), and where it stands. ``state`` is "in_line" (others are
+        being made: ``behind`` is how many must be done before its turn), "waiting" (its call
+        is queued for the model: ``behind`` is how many units of the model's work go before it
+        as things are, and ``behind_what`` their kinds, as ``Pipeline.llm_line`` says them) or
+        "writing" (the model is on its call). ``turn_in_s``, while "waiting", is how long at
+        most until its call goes ahead of the station lines (0: it is ahead of them; alerts,
+        questions and a rule's pass that is due still go first). ``call`` of ``calls`` is the
+        call it waits for or is on, once it has read the store; ``gives_up_in_s`` is how long
+        until it is refused as not made in time."""
+        now = self._timer()
+        with self._lock:
+            line = list(self._line)
+        out = []
+        for i, live in enumerate(line):
+            job = live.job
+            row: dict[str, Any] = {
+                "id": live.request.id,
+                "kind": live.request.kind,
+                "here": live.here,
+                "state": "waiting",
+                "waited_s": round(max(0.0, now - live.asked), 1),
+                "behind": 0,
+                "behind_what": [],
+                "turn_in_s": None,
+                "call": None,
+                "calls": None,
+                "gives_up_in_s": round(max(0.0, live.deadline - now), 1),
+            }
+            if i >= MAX_RUNNING:
+                row.update(state="in_line", behind=i - MAX_RUNNING + 1, behind_what=["digest"])
+            elif job is not None:
+                row.update(call=min(job.calls + 1, job.total), calls=job.total)
+                call = job.call
+                where = self._line_of(call) if self._line_of and call is not None else None
+                if job.running:
+                    row["state"] = "writing"
+                else:
+                    row["turn_in_s"] = round(max(0.0, job.due_at - now), 1)
+                    if where is not None:
+                        row.update(behind=where["behind"], behind_what=list(where["kinds"]))
+            out.append(row)
+        return out
+
+    def _take_turn(self, live: _Live, stop: threading.Event | None) -> None:
+        """Wait for a place among the digests being made, in the order asked. ``Busy`` at once
+        when ``MAX_WAITING`` already wait, with about when a place in the line comes free."""
+        with self._turn:
+            if len(self._line) >= MAX_RUNNING + MAX_WAITING:
+                left = [w.job.left_s() for w in self._line[:MAX_RUNNING] if w.job is not None]
+                after = min(max(RETRY_S / 2, min(left, default=RETRY_S)), self.timeout_s)
                 raise Busy(
-                    "no digest in time: live translation goes first, so the model may "
-                    "be busy; try again in a few minutes"
+                    f"{len(self._line)} digests are already being made or waiting for their turn",
+                    retry_after_s=after,
+                    again=True,
                 )
+            self._line.append(live)
+            try:
+                while self._line.index(live) >= MAX_RUNNING:
+                    self._check(live, stop)
+                    self._turn.wait(self.poll_s)
+            except BaseException:
+                self._line.remove(live)
+                self._turn.notify_all()
+                raise
+
+    def _leave(self, live: _Live) -> None:
+        with self._turn:
+            self._line.remove(live)
+            self._turn.notify_all()
+
+    def _check(self, live: _Live, stop: threading.Event | None) -> None:
+        """Raise when the digest is no longer to be waited for: cancelled by its id (a call
+        still queued is then skipped), the app closing, or not made in time."""
+        self.polls += 1
+        if live.cancel.is_set():
+            raise Cancelled(CANCELLED)
+        if stop is not None and stop.is_set():
+            live.cancel.set()
+            raise Busy("Wavescribe is closing")
+        if self._timer() > live.deadline:
+            live.cancel.set()
+            raise self._crowded(live, "late")
+
+    def _wait(self, live: _Live, job: _Job, stop: threading.Event | None) -> _Job:
+        job.next()
+        while not job.done.wait(self.poll_s):
+            self._check(live, stop)
+            job.requeue()  # a call that found the queue full, or made way in it: once more
+        if job.crowded is not None:
+            raise self._crowded(live, job.crowded)
         if job.error is None and not job.finished:  # it stopped short: cancelled meanwhile
             raise Cancelled(CANCELLED)
         return job
+
+    def _crowded(self, live: _Live, why: str) -> Busy:
+        """The refusal of a digest that wasn't made in time ("late"), or whose call made way
+        for alerts and questions once too often ("alerts"): what kept the model busy while it
+        waited, by name on this machine, and when to ask again. The digest asked for next,
+        within ``OWED_S``, is owed its turn (``_run``), so the time named is a true one."""
+        now = self._timer()
+        waited = max(0.0, now - live.asked)
+        spent = self._spent(waited) if self._spent is not None else {}
+        busy = kept_busy(spent, own=live.request.id, named=live.here)
+        self._owed_until = now + OWED_S
+        if why == "alerts":
+            busy = [b for b in busy if b["kind"] in STOPPED_FOR]
+            what = _listed([busy_words(b) for b in busy]) or "alerts and questions"
+            said = f"{what} kept the model busy"
+        else:
+            what = _listed([busy_words(b) for b in busy])
+            said = (
+                f"{what} kept the model busy for {_about(waited)}"
+                if what
+                else f"the model was busy for {_about(waited)}"
+            ) + ", so no digest was made in time"
+        event(
+            log,
+            "digest_crowded",
+            level=logging.WARNING,
+            id=live.request.id,
+            why=why,
+            waited_s=round(waited),
+            busy=",".join(f"{b['kind']}:{round(b['seconds'])}" for b in busy),
+        )
+        return Busy(said, retry_after_s=RETRY_S, again=True, waited_s=waited, busy_with=busy)
 
     # -- reading the store -----------------------------------------------------------------
 
@@ -814,34 +1124,38 @@ class Digester:
         request: Request,
         exports: Exports | None = None,
         *,
-        timeout: float = TIMEOUT_S,
+        timeout: float | None = None,
         stop: threading.Event | None = None,
     ) -> Digest:
-        """The digest, once the model has made it. Raises ``Unavailable``, ``Busy`` (other
-        digests are waiting, the queue is full, or no answer within ``timeout``), ``Failed``,
-        ``Cancelled`` (by its id, meanwhile: ``cancel``) or ``RequestError`` (a digest with the
-        same id is being made). With nothing said in the window it answers at once, without
-        the model. ``stop`` (the app closing) cancels it: ``Busy`` again, and what is still
-        queued is skipped. The digest made is kept by its id (``kept``)."""
+        """The digest, once the model has made it. While ``MAX_RUNNING`` others are being made
+        it waits in line for its turn, and its calls wait for the model behind live
+        translation, for ``PUT_OFF_S`` in all at most. Raises ``Unavailable``, ``Busy`` (the
+        line is full, or no digest within ``timeout``, by default ``timeout_s``: it says what
+        kept the model busy), ``Failed``, ``Cancelled`` (by its id, meanwhile: ``cancel``) or
+        ``RequestError`` (a digest with the same id is being made). With nothing said in the
+        window it answers without the model. ``stop`` (the app closing) cancels it: ``Busy``
+        again, and what is still queued is skipped. The digest made is kept by its id
+        (``kept``)."""
         here = exports is None
-        cancel = threading.Event()
+        asked = self._timer()
+        deadline = asked + (self.timeout_s if timeout is None else timeout)
+        live = _Live(threading.Event(), here, request, asked, deadline)
         with self._lock:
             if request.id in self._live:
                 raise RequestError(
                     "a digest with this id is already being made: give each its own", "id_in_use"
                 )
             if request.id:
-                self._live[request.id] = _Live(cancel, here)
+                self._live[request.id] = live
         made: Digest | None = None
         try:
             # A turn is taken before the store is read: reading a day of many stations holds
             # the store's read lock for a second, which callers queueing here mustn't multiply.
-            if not self._running.acquire(blocking=False):
-                raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
+            self._take_turn(live, stop)
             try:
-                made = self._run(request, exports, timeout, stop, cancel)
+                made = self._run(request, exports, stop, live)
             finally:
-                self._running.release()
+                self._leave(live)
         finally:
             with self._lock:
                 self._live.pop(request.id, None)
@@ -857,11 +1171,11 @@ class Digester:
         self,
         request: Request,
         exports: Exports | None,
-        timeout: float,
         stop: threading.Event | None,
-        cancel: threading.Event,
+        live: _Live,
     ) -> Digest:
         t0 = time.perf_counter()
+        cancel = live.cancel
         names = {sid: s.name for sid, s in self.stations(exports).items()}
         selection = self.select(request, exports)
         digest = Digest(
@@ -888,8 +1202,27 @@ class Digester:
             prompts = [part for prompt in prompts for part in in_parts(prompt)]
         if not prompts:
             return digest
-        job = _Job(self._submit, request, prompts, names, self._ahead, cancel)
-        job = self._wait(job, timeout, stop)
+        # Its calls wait behind live translation for PUT_OFF_S in all, less what it waited for
+        # its turn among digests. Soon after one that wasn't made, it is owed its turn: no
+        # such wait, and its calls stop only for an alert's translation.
+        now = self._timer()
+        owed = self._owed_until is not None and now < self._owed_until
+        put_off = 0.0 if owed else max(0.0, PUT_OFF_S - (now - live.asked))
+        job = _Job(
+            self._submit,
+            request,
+            prompts,
+            names,
+            self._ahead_owed if owed else self._ahead,
+            cancel,
+            timer=self._timer,
+            deadline=live.deadline,
+            put_off_s=put_off,
+        )
+        live.job = job
+        job = self._wait(live, job, stop)
+        if job.error is None:
+            self._owed_until = None  # the model made a digest: the next waits as usual
         if job.error is not None:
             if isinstance(job.error, Unavailable | Busy):
                 raise job.error
@@ -916,6 +1249,8 @@ class Digester:
         digest.timings = {
             "model_ms": round(job.model_s * 1000),
             "total_ms": round((time.perf_counter() - t0) * 1000),
+            # For its turns: in line behind other digests, then each call for the model.
+            "waited_ms": round((now - live.asked + job.waited_s) * 1000),
         }
         event(
             log,
@@ -926,6 +1261,7 @@ class Digester:
             said=sum(selection.said.values()),
             read=digest.read,
             calls=job.calls,
+            gave_way=job.gave_way_in_all,
             points=len(job.points),
             outcome=digest.outcome,
             **digest.timings,
@@ -935,8 +1271,14 @@ class Digester:
 
 class _Job:
     """One digest's calls to the model, each queued once the previous one is done. Runs on the
-    LLM's thread; ``done`` is set when it has finished (``finished``), failed (``error``) or
-    been cancelled (neither). ``cancel``: cancelled by its id, or no longer waited for."""
+    LLM's thread; ``done`` is set when it has finished (``finished``), failed (``error``),
+    wasn't made in time or kept making way (``crowded``: "late" or "alerts"), or been
+    cancelled (none of them). ``cancel``: cancelled by its id, or no longer waited for.
+
+    A call that finds the model's queue full, or makes way in it for other work, isn't lost:
+    ``requeue``, which whoever waits for the digest calls now and then, queues it again.
+    ``put_off_s`` is how long the calls may wait behind live translation in all, on ``timer``;
+    each call is queued with what is left of it, ``BETWEEN_S`` at least (``Call.put_off_s``)."""
 
     def __init__(
         self,
@@ -946,10 +1288,29 @@ class _Job:
         names: Mapping[str, str],
         ahead: Callable[[], bool] | None = None,
         cancel: threading.Event | None = None,
+        *,
+        timer: Callable[[], float] = time.monotonic,
+        deadline: float = float("inf"),
+        put_off_s: float = PUT_OFF_S,
     ) -> None:
         self._submit = submit
         self._ahead = ahead or (lambda: False)
-        self.gave_way = 0
+        self._timer = timer
+        self.deadline = deadline
+        self.put_off_s = put_off_s
+        self.waited_s = 0.0  # its calls, for the model
+        self._waited = 0.0  # the call being made
+        self.crowded: str | None = None
+        self.running = False  # the model is on one of its calls
+        self.call: Call | None = None  # the one queued or being made
+        self.total = 1 if len(prompts) == 1 else len(prompts) + 1  # calls, the choice included
+        self._queued_at = 0.0
+        self.due_at = 0.0  # when the call queued goes ahead of the station lines, on ``timer``
+        self._unqueued = False  # its call isn't in the queue: no room, or it made way
+        self._n = 0  # the number of the call queued last: an older one that turns up is skipped
+        self._queueing = threading.RLock()
+        self.gave_way = 0  # the call being made, so far
+        self.gave_way_in_all = 0
         self.request = request
         self.prompts = prompts
         self.names = names
@@ -968,19 +1329,59 @@ class _Job:
         self._told: dict[str, Any] = {}  # what the call being made says of itself in the log
 
     def next(self) -> None:
-        if not self._submit(self._step, self._given_up):
-            self._fail(Busy("the model's queue is full; try again in a moment"))
+        """Queue the next call, or the same one again after it gave way."""
+        self._queued_at = self._timer()
+        self._queue()
 
-    def _given_up(self) -> None:
-        """Station lines needed the queue's room: the first thing to make way is a digest."""
-        self._fail(Busy("live translation needed the model's queue; try again in a few minutes"))
+    def requeue(self) -> None:
+        """Queue the call again if it isn't in the queue (it found no room, or made way)."""
+        if self._unqueued and not self.done.is_set():
+            self._queue()
+
+    def left_s(self) -> float:
+        """About how long until it is made: the calls it has left, at what its calls took so
+        far or ``CALL_S`` each."""
+        each = max(CALL_S, self.model_s / self.calls) if self.calls else CALL_S
+        return max(1, self.total - self.calls) * each
+
+    def _queue(self) -> None:
+        with self._queueing:
+            self._n += 1
+            n = self._n
+            # Behind live translation for what is left of the digest's time to wait, and
+            # BETWEEN_S at least, counted from when the call was first queued.
+            now = self._timer()
+            left = max(self.put_off_s - self.waited_s, BETWEEN_S) - (now - self._queued_at)
+            left = max(0.0, left)
+            self.due_at = now + left
+            call = Call(lambda llm: self._step(llm, n), left, (self.request.id,))
+            self.call = call
+            self._unqueued = False
+            queued = self._submit(call, lambda: self._given_up(n))
+            if not queued and n == self._n:
+                self._unqueued = True
+
+    def _given_up(self, n: int) -> None:
+        """More urgent work needed the queue's room, and the first thing to make way is a
+        digest's call: it is queued again (``requeue``)."""
+        if n == self._n:
+            self._unqueued = True
 
     def _fail(self, error: Exception) -> None:
         self.error = error
         self.done.set()
 
-    def _step(self, llm: Any) -> None:
+    def _step(self, llm: Any, n: int) -> None:
+        if n != self._n:  # a call queued again while this one was on its way: made once
+            return
         if self.cancel.is_set():  # cancelled, or no longer waited for: don't spend the model
+            self.done.set()
+            return
+        now = self._timer()
+        self._waited = max(0.0, now - self._queued_at)
+        self.waited_s += self._waited
+        if now > self.deadline:  # too late to begin a call: whoever waited has gone, or goes
+            self.crowded = "late"
             self.done.set()
             return
         if not hasattr(llm, "complete"):
@@ -988,28 +1389,33 @@ class _Job:
                 Unavailable(f"a digest needs an LLM; this run translates with {llm.model_id}")
             )
             return
+        self.running = True
         try:
             if self._ahead():
                 raise _GiveWay
             finished = self._call(llm)
         except _GiveWay:
+            self.running = False
             if self.cancel.is_set():  # the call stopped for good: the model is free at once
                 self.done.set()
                 return
             # From the start again, behind the job that goes first: the model's partial reply
             # can't be resumed.
             self.gave_way += 1
+            self.gave_way_in_all += 1
             if self.gave_way > GIVE_WAY_TIMES:
-                self._fail(
-                    Busy("alerts and questions kept the model busy; try again in a few minutes")
-                )
+                self.crowded = "alerts"
+                self.done.set()
             else:
                 self.next()
             return
         except Exception as e:
+            self.running = False
             log.exception("digest failed")
             self._fail(e)
             return
+        self.running = False
+        self.gave_way = 0
         if finished:
             self.finished = True
             self.done.set()
@@ -1030,7 +1436,15 @@ class _Job:
             taken = time.perf_counter() - t0
             self.model_s += taken
         self.calls += 1  # not for a call that gave way: it is made again
-        event(log, "digest_call", id=self.request.id, **self._told, seconds=round(taken, 2))
+        event(
+            log,
+            "digest_call",
+            id=self.request.id,
+            **self._told,
+            seconds=round(taken, 2),
+            waited=round(self._waited, 2),  # for the model, since it was queued
+            gave_way=self.gave_way,  # times it was begun and stopped for an alert or a question
+        )
         return finished
 
     def _tell(self, stage: str, kept: Sequence[Point], **counts: Any) -> None:

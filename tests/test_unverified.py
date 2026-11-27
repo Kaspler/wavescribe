@@ -81,7 +81,7 @@ class Verifier:
         self._how = how
         self.checker.verify_timeout_s = 0.02 if how == "timeout" else 60.0
 
-    def submit(self, run, name, priority, station=None) -> bool:
+    def submit(self, run, name, priority, station=None, **how) -> bool:
         self.asked += 1
         if self.how in ("queue full", "no model"):
             return False

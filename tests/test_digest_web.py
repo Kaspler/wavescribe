@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import dataclasses
 import http.client
+import itertools
 import json
 import threading
 import time
@@ -15,7 +16,7 @@ from tests.test_pipeline import station
 from tests.test_store import result
 from tests.test_web import start_server
 from wavescribe.config import StationsConfig
-from wavescribe.digest import MAX_RUNNING, Digester
+from wavescribe.digest import MAX_RUNNING, MAX_WAITING, Digester
 from wavescribe.store import Store
 from wavescribe.web.server import REMOTE_ASK_OFF, Handler
 
@@ -41,14 +42,18 @@ def at_once(llm):
 class Serving:
     """The web server with a digester over ``store`` whose model is ``llm``."""
 
-    def __init__(self, store: Store, llm=None, *, submit=None) -> None:
+    def __init__(self, store: Store, llm=None, *, submit=None, **digester) -> None:
         self.server, self.hub, self.pipeline = llm_server(store)
         # Other machines get past the gate (as with --allow-remote-ask --public-read): these
         # tests are about what they get. The gate has its own test.
         self.server.remote_ask = self.server.public_read = True
         self.llm = llm or FakeLlm("- Water is cut tomorrow [1].")
         self.hub.digester = Digester(
-            store, lambda: self.hub.config.stations, submit or at_once(self.llm), clock=lambda: NOW
+            store,
+            lambda: self.hub.config.stations,
+            submit or at_once(self.llm),
+            clock=lambda: NOW,
+            **digester,
         )
 
     def close(self) -> None:
@@ -134,12 +139,39 @@ def test_why_a_digest_failed_stays_on_this_machine(tmp_path: Path) -> None:
         store.close()
 
 
-def test_a_full_queue_is_busy(tmp_path: Path) -> None:
+def test_a_digest_not_made_in_time_says_what_kept_the_model_busy(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    web = Serving(store, submit=lambda run, given_up: False)
+    looks = itertools.count()  # the wait is counted in looks at the time: a second of them
+    web = Serving(
+        store,
+        submit=lambda run, given_up: False,  # no room in the model's queue, however often asked
+        timer=lambda: next(looks) / 100,
+        timeout_s=1.0,
+        poll_s=0.001,
+        spent=lambda last_s: {("translation", ("North FM",)): 0.7, ("rules", ("roads",)): 0.2},
+    )
     try:
-        status, out = post(web.server, {})
-        assert status == 503 and "queue is full" in out["error"]
+        conn = http.client.HTTPConnection(*web.server.server_address, timeout=60)
+        conn.request("POST", "/api/digest", json.dumps({"id": "asked-here-1"}), LOCAL)
+        resp = conn.getresponse()
+        out = json.loads(resp.read())
+        assert resp.status == 503 and resp.getheader("Retry-After") == "60"
+        assert out["error"] == (
+            "live translation of North FM and the alert rule 'roads' kept the model busy for "
+            "a second, so no digest was made in time; try again in a minute"
+        )
+        assert (out["code"], out["id"], out["retry_after_s"]) == ("busy", "asked-here-1", 60)
+        assert 1.0 <= out["waited_s"] < 2.0
+        assert out["busy_with"] == [
+            {"kind": "translation", "names": ["North FM"], "seconds": 0.7},
+            {"kind": "rules", "names": ["roads"], "seconds": 0.2},
+        ]
+        # Another machine learns what kinds of work, and no station's or rule's name.
+        status, elsewhere = post(web.server, {}, FROM_LAN)
+        assert status == 503 and elsewhere["error"].startswith(
+            "live translation and alert rules kept the model busy for a second, so no digest"
+        )
+        assert [b["names"] for b in elsewhere["busy_with"]] == [[], []]
     finally:
         web.close()
         store.close()
@@ -227,21 +259,77 @@ def test_another_machine_is_told_why_it_cant_have_a_digest(tmp_path: Path) -> No
         store.close()
 
 
-def test_a_busy_digester_says_when_to_try_again(tmp_path: Path) -> None:
+def until(condition, what: str) -> None:
+    deadline = time.monotonic() + 60
+    while not condition():
+        assert time.monotonic() < deadline, what
+        time.sleep(0.005)
+
+
+def test_digests_wait_in_line_and_the_status_says_where_each_stands(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    web = Serving(store)
-    for _ in range(MAX_RUNNING):
-        web.hub.digester._running.acquire()
+    web = Serving(store, submit=lambda run, given_up: True, poll_s=0.005)  # never the model's turn
+    d = web.hub.digester
+    ids = [f"waiting-{n}" for n in range(1, MAX_RUNNING + MAX_WAITING + 1)]
+    answers: dict[str, tuple[int, dict]] = {}
+
+    def ask(n: int, rid: str) -> threading.Thread:
+        def one() -> None:
+            conn = http.client.HTTPConnection(*web.server.server_address, timeout=120)
+            headers = FROM_LAN if rid == "waiting-2" else LOCAL
+            conn.request("POST", "/api/digest", json.dumps({"id": rid}), headers)
+            resp = conn.getresponse()
+            answers[rid] = resp.status, json.loads(resp.read())
+
+        thread = threading.Thread(target=one, daemon=True)
+        thread.start()
+        until(lambda: len(d.status()) == n, f"{rid} was never begun")
+        return thread
+
+    threads = [ask(n, rid) for n, rid in enumerate(ids, 1)]
     try:
-        conn = http.client.HTTPConnection(*web.server.server_address, timeout=10)
+        until(lambda: all(r["calls"] for r in d.status()[:MAX_RUNNING]), "none was begun")
+        # A seventh is refused at once, with about when a place in the line comes free.
+        conn = http.client.HTTPConnection(*web.server.server_address, timeout=60)
         conn.request("POST", "/api/digest", json.dumps({}), LOCAL)
         resp = conn.getresponse()
-        assert resp.status == 503 and resp.getheader("Retry-After") == "60"
-        assert "already being made" in json.loads(resp.read())["error"]
+        out = json.loads(resp.read())
+        assert resp.status == 503 and resp.getheader("Retry-After") == "30"
+        assert out["error"] == (
+            "6 digests are already being made or waiting for their turn; try again in 30 seconds"
+        )
+        assert (out["code"], out["retry_after_s"]) == ("busy", 30)
+        assert "waited_s" not in out and "busy_with" not in out
+        # This machine's page sees them all, by the ids that cancel them.
+        conn.request("GET", "/api/state", headers=LOCAL)
+        rows = json.loads(conn.getresponse().read())["status"]["digests"]
+        assert [r["id"] for r in rows] == ids
+        assert [r["state"] for r in rows] == ["waiting"] * 2 + ["in_line"] * 4
+        assert [r["behind"] for r in rows] == [0, 0, 1, 2, 3, 4]
+        assert [r["here"] for r in rows] == [True, False, True, True, True, True]
+        first, third = rows[0], rows[2]
+        assert (first["kind"], first["call"], first["calls"]) == ("digest", 1, 1)
+        assert first["behind_what"] == [] and 0 <= first["turn_in_s"] <= 120
+        assert 0 <= first["waited_s"] < 600 and 0 < first["gives_up_in_s"] <= 600
+        assert (third["behind_what"], third["call"], third["turn_in_s"]) == (["digest"], None, None)
+        # Another machine sees the one another machine asked for, and no id.
+        conn.request("GET", "/api/state", headers=FROM_LAN)
+        [theirs] = json.loads(conn.getresponse().read())["status"]["digests"]
+        assert "id" not in theirs and theirs["here"] is False and theirs["state"] == "waiting"
+        # One that is cancelled leaves the line, and the next takes its turn.
+        assert d.cancel("waiting-1") == "cancelled"
+        until(lambda: [r["id"] for r in d.status()] == ids[1:], "the line never moved up")
+        threads[0].join(60)
+        assert answers["waiting-1"][0] == 409 and answers["waiting-1"][1]["code"] == "cancelled"
+
         status, out = post(web.server, {"minutes": 600}, FROM_LAN)
         assert status == 400 and "from another machine" in out["error"]
         assert (out["code"], out["max_minutes"]) == ("bad_window", 360)
     finally:
+        for rid in ids:
+            d.cancel(rid)
+        for thread in threads:
+            thread.join(60)
         web.close()
         store.close()
 

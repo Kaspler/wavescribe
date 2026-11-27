@@ -408,6 +408,11 @@ class WebHub:
             out["stations"] = {k: {f: v for f, v in s.items() if f not in ("remote", "error")}
                                if isinstance(s, dict) else s
                                for k, s in out["stations"].items()}  # fmt: skip
+        if isinstance(out.get("digests"), list):
+            # A digest's id cancels it: another machine sees those other machines asked for,
+            # without their ids, and nothing of this machine's.
+            out["digests"] = [{k: v for k, v in d.items() if k != "id"}
+                              for d in out["digests"] if not d.get("here")]  # fmt: skip
         return out
 
     def tap(self, station_id: str) -> AudioTap:
@@ -518,6 +523,8 @@ class WebHub:
         if self.app is not None:
             status["stations"].update(self.app.remote_status())
         status["listeners"] = {sid: t.listeners for sid, t in list(self._taps.items())}
+        # The digests asked for and not made yet, and where each stands (Digester.status).
+        status["digests"] = self.digester.status() if self.digester is not None else []
         return status
 
     def start_station(self, station_id: str) -> None:
