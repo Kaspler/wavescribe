@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
 import { dirOf, langName, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
-import { S, loadEarlier, post, running, setNotice } from "../lib/live";
+import { S, linesAround, loadEarlier, post, running, setNotice, startStation } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
 import { noText, overloaded, stateOf } from "../lib/station";
@@ -100,10 +100,17 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
         <h2 id={`col-${st.id}`} dir="auto">{st.name}</h2>
         <span className="col-actions">
           {on ? (
-            <Button size="sm" variant={playing ? "primary" : "ghost"} icon={playing ? "stop" : "speaker"}
-                    disabled={!canListen} onClick={() => toggleAudio(st.id)} aria-pressed={playing}>
-              {playing ? T.stopListening : T.listen}
-            </Button>
+            <>
+              <Button size="sm" variant={playing ? "primary" : "ghost"} icon={playing ? "stop" : "speaker"}
+                      disabled={!canListen} onClick={() => toggleAudio(st.id)} aria-pressed={playing}>
+                {playing ? T.stopListening : T.listen}
+              </Button>
+              {st.listen_only_run && S.canControl && (
+                <Button size="sm" variant="secondary" icon="power" onClick={() => startStation(st.id)} aria-label={T.startWriting(st.name)}>
+                  {T.start}
+                </Button>
+              )}
+            </>
           ) : S.canControl && st.available && !st.disabled ? (
             <>
               {st.kind !== "remote" && (
@@ -148,8 +155,12 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
 
 function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) => void }) {
   const v = useTopics(`utt:${st.id}`, "prefs");
-  const list = S.utts[st.id] || [];
-  const paras = useMemo(() => group(list), [v]);
+  // An older line a link asked for, with the lines around it, shown in place of the live ones
+  // until "Back to live": the lines between it and now aren't loaded, and a gap would read as
+  // silence.
+  const [around, setAround] = useState<Utterance[] | null>(null);
+  const list = around || S.utts[st.id] || [];
+  const paras = useMemo(() => group(list), [v, around]);
   const shown = shownLang(st, P.lang);
   const body = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -196,13 +207,21 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
     let live = true;
     const hold = () => { follow.current = false; keep.current = null; S.reading.add(st.id); setBehind(true); };
     (async () => {
-      for (let i = 0; i < PAGES_BACK && live; i++) {
-        const list = S.utts[st.id] || [];
-        if (list.some((u) => u.id === want.id)) break;
-        const oldest = list.find((u) => u.id != null);
-        if (!oldest || oldest.id! < want.id) break; // newer than the oldest loaded: not kept
+      const loaded = S.utts[st.id] || [];
+      const oldest = loaded.find((u) => u.id != null);
+      // Older than the oldest line loaded: its own window where the server gives one, else page
+      // back to it.
+      if (!loaded.some((u) => u.id === want.id) && oldest && oldest.id! > want.id) {
         hold();
-        if (!(await loadEarlier(st.id).catch(() => 0))) break;
+        const win = await linesAround(st.id, want.id).catch(() => null);
+        if (!live) return;
+        if (win) setAround(win);
+        else {
+          for (let i = 0; i < PAGES_BACK && live; i++) {
+            if ((S.utts[st.id] || []).some((u) => u.id === want.id)) break;
+            if (!(await loadEarlier(st.id).catch(() => 0))) break;
+          }
+        }
       }
       // The column draws what arrived on its next render: look for the line for a few frames.
       for (let f = 0; f < 30 && live; f++) {
@@ -245,7 +264,7 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
   const onScroll = () => {
     const b = body.current!;
     const atEnd = b.scrollHeight - b.scrollTop - b.clientHeight < 48;
-    if (atEnd) follow.current = true;
+    if (atEnd && !around) follow.current = true; // the end of a window of older lines isn't now
     else if (b.scrollTop < lastTop.current) follow.current = false;
     lastTop.current = b.scrollTop;
     if (follow.current) S.reading.delete(st.id);
@@ -281,7 +300,7 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
       <div ref={body} className="transcript" tabIndex={0} onScroll={onScroll}
            role="log" aria-live="off" aria-label={`${st.name}: transcript`}>
         <div className="transcript-inner">
-          {hasHistory && (
+          {hasHistory && !around && (
             <div className="earlier">
               <Button size="sm" variant="ghost" icon={more === "failed" ? "refresh" : "history"} busy={more === "busy"} disabled={more === "none"} onClick={earlier}>
                 {more === "none" ? T.nothingEarlier : more === "failed" ? T.earlierFailed : T.loadEarlier}
@@ -302,7 +321,14 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
         </div>
       </div>
       {behind && (
-        <button type="button" className="jump" onClick={() => { follow.current = true; setBehind(false); S.reading.delete(st.id); onSpan(null); toLive(); }}>
+        <button type="button" className="jump" onClick={() => {
+          follow.current = true;
+          setBehind(false);
+          setAround(null);
+          S.reading.delete(st.id);
+          onSpan(null);
+          requestAnimationFrame(toLive);
+        }}>
           <Icon name="arrowDown" size={14} /> {T.backToLive}
         </button>
       )}

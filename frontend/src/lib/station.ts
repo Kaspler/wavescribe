@@ -42,6 +42,7 @@ export function stateOf(id: string): StationState {
       ? { label: "reconnecting", lamp: "trouble", detail: `Attempt ${s.reconnects}` }
       : { label: "connecting", lamp: "wait", detail: "" };
   }
+  if (st?.listen_only_run) return { label: "playing only", lamp: "on", detail: "Start to write it down" };
   if (noText(st)) return { label: "no text yet", lamp: "on", detail: "Plays now; written down once its speech model is downloaded" };
   if (st?.transcribe === false) return { label: "listening only", lamp: "on", detail: "Played, not written down" };
   if (s.music) return { label: "music", lamp: "dim", detail: "Songs aren't transcribed" };

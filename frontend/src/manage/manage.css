@@ -290,7 +290,8 @@ tr.is-off td { color: var(--ink-3); }
 /* Listen: the stations as one list to play. A whole row is the button; the one playing shows its
    stop in the pointer colour, as the station list's speaker does. */
 .ls-list { border-top: 1px solid var(--rule); }
-.ls-row { border-bottom: 1px solid var(--rule); }
+.ls-row { display: flex; align-items: center; gap: var(--s2); border-bottom: 1px solid var(--rule); }
+.ls-start { flex: none; margin-right: var(--s3); }
 .ls-main {
   display: flex;
   align-items: center;

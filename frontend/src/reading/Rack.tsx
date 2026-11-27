@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
 import { langNameEn, pick, shownLang } from "../lib/lang";
-import { S, post, running } from "../lib/live";
+import { S, post, running, startStation } from "../lib/live";
 import { P, setPrefs, visible } from "../lib/prefs";
 import { MAX_COLS, go, parse, setCols, useHash } from "../lib/router";
 import { levelOf, noText, stateOf } from "../lib/station";
@@ -167,7 +167,13 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
       </button>
       <span className="ch-actions">
         {playing && <span className="ch-playing" title={T.playingNow}><Icon name="speaker" /><span className="sr-only">{T.playingNow}</span></span>}
-        {(!shown || V.shown.length > 1) && (
+        {st.listen_only_run && S.canControl && (
+          <button type="button" className="btn btn-band btn-sm btn-icon ch-btn" onClick={() => startStation(st.id)} aria-label={T.startWriting(st.name)}
+                  title={T.startWriting(st.name)}>
+            <Icon name="power" />
+          </button>
+        )}
+        {(!shown || V.shown.length > 1) && !st.listen_only_run && (
           <button type="button" className="btn btn-band btn-sm btn-icon ch-btn ch-add" onClick={() => read(st.id, true)}
                   aria-label={shown ? T.closeColumn(st.name) : T.readBeside(st.name)} title={shown ? T.closeColumn(st.name) : T.readBeside(st.name)}>
             <Icon name={shown ? "close" : "plus"} />

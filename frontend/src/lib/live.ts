@@ -46,9 +46,13 @@ export function setNotice(text: string) {
 }
 
 /** POSTs a station action; shows the server's reason when it refuses. True when it was done. */
-export async function post(url: string): Promise<boolean> {
+export async function post(url: string, body?: unknown): Promise<boolean> {
   try {
-    const r = await fetch(url, { method: "POST", headers: { "X-Wavescribe": "1" } });
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "X-Wavescribe": "1", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     if (!r.ok) setNotice((await r.json().catch(() => ({}))).error || r.statusText);
     return r.ok;
   } catch {
@@ -256,6 +260,15 @@ function showConn() {
 
 let shared: Shared | null = null;
 
+/** The lines around one stored segment, for showing a line that is no longer loaded; null where
+ * the server doesn't serve them (an older one ignores around_id and sends the newest instead). */
+export async function linesAround(id: string, seg: number, limit = 60): Promise<Utterance[] | null> {
+  const r = await fetch(`/api/history?station=${encodeURIComponent(id)}&around_id=${seg}&limit=${limit}`);
+  if (!r.ok) return null;
+  const list: Utterance[] = await r.json();
+  return Array.isArray(list) && list.some((u) => u.id === seg) ? list : null;
+}
+
 export function connect() {
   const reload = () => loadState().catch((e) => setNotice(`Couldn't load the stations: ${e.message}`));
   shared = share(browserEnv(), {
@@ -284,6 +297,11 @@ export function connect() {
       showConn();
     }
   }, STUCK_MS);
+}
+
+/** Starts a station in its own mode: one started only to play is written down from now on. */
+export async function startStation(id: string) {
+  if (await post(`/api/stations/${id}/start`)) await stationsChanged().catch(() => {});
 }
 
 /** After this tab changed the stations: reloads them here and in the other tabs. */

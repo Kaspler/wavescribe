@@ -3,19 +3,20 @@
 // time.
 import { A, MAX_VOLUME, playLive, setVolume, startAndPlay, stopAudio } from "../lib/audio";
 import { langNameEn } from "../lib/lang";
-import { S, running } from "../lib/live";
+import { S, running, startStation } from "../lib/live";
 import { stateOf } from "../lib/station";
 import { useTopics } from "../lib/store";
 import type { Station } from "../lib/types";
 import { Icon } from "../components/Icon";
-import { Lamp, Section, cx } from "../components/ui";
+import { Button, Lamp, Section, cx } from "../components/ui";
+import { T } from "../reading/strings";
 import { Listen } from "./Listen";
 
 export function ListenPage() {
   useTopics("state", "status", "audio", "conn");
   return (
     <>
-      <Section id="ls-h" title="My stations" description="One click plays a station; a stopped one starts first. Another click stops it."
+      <Section id="ls-h" title="My stations" description="One click plays a station; a stopped one starts only to play, and Start writes it down. Another click stops it."
                actions={<Volume />}>
         {S.stations.length ? (
           <ul className="ls-list">{S.stations.map((st) => <PlayRow key={st.id} st={st} />)}</ul>
@@ -56,7 +57,7 @@ function PlayRow({ st }: { st: Station }) {
     : st.disabled ? "Switched off under Settings, Stations."
     : !st.available ? st.reason || "Unavailable."
     : !S.status?.ready ? "Wavescribe is still starting." : null;
-  const state = on ? stateOf(st.id).label : "off";
+  const state = on ? (st.listen_only_run ? T.playingOnly : stateOf(st.id).label) : "off";
   return (
     <li className={cx("ls-row", playing && "is-playing")}>
       <button type="button" className="ls-main" aria-pressed={playing} disabled={!playing && (!!why || !live)}
@@ -71,6 +72,11 @@ function PlayRow({ st }: { st: Station }) {
         </span>
         <Icon name={playing ? "stop" : "play"} />
       </button>
+      {on && st.listen_only_run && S.canControl && (
+        <Button size="sm" variant="secondary" icon="power" className="ls-start" onClick={() => startStation(st.id)} aria-label={T.startWriting(st.name)}>
+          {T.start}
+        </Button>
+      )}
     </li>
   );
 }

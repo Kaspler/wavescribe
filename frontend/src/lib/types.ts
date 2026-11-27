@@ -15,6 +15,9 @@ export interface Station {
   running: boolean;
   asr_model: string | null;
   transcribe: boolean; // false: listened to, not written down
+  /** Started only to play, for this run: not written down until started again without it. Absent
+   * from servers that can't start a station that way. */
+  listen_only_run?: boolean;
   kind: string;
   disabled: boolean;
   fm_mhz?: number[];

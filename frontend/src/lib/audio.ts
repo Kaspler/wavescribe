@@ -1,6 +1,6 @@
 // The server streams raw 16-bit mono PCM; it is scheduled on a Web Audio clock. This avoids the
 // browsers' media players, which treat endless streams differently (WebKit especially).
-import { S, post, setNotice } from "./live";
+import { S, post, setNotice, stationsChanged } from "./live";
 import { emit } from "./store";
 
 const CUSHION_S = 0.4; // playout delay that absorbs network and chunking jitter
@@ -91,14 +91,21 @@ export function playLive(id: string) {
 }
 
 /** Starts a station that is off and plays it, in one click: the audio context is made inside the
- * click (autoplay rules), and the stream is asked for once the server has started the station. */
+ * click (autoplay rules), and the stream is asked for once the server has started the station.
+ * Where the server can, it is started only to play: listening isn't asking for a transcript, and
+ * Start writes it down. */
 export async function startAndPlay(id: string) {
   stopAudio();
   const a = begin(id);
-  if (!(await post(`/api/stations/${id}/start`))) {
+  const onlyPlay = S.manage && Object.hasOwn(S.byId[id] || {}, "listen_only_run");
+  const ok = onlyPlay
+    ? await post(`/api/manage/stations/${id}/start`, { listen_only: true })
+    : await post(`/api/stations/${id}/start`);
+  if (!ok) {
     if (audio === a) stopAudio();
     return;
   }
+  if (onlyPlay) stationsChanged().catch(() => {});
   if (audio === a) play(a, true);
 }
 
