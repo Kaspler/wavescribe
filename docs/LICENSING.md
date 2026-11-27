@@ -143,6 +143,7 @@ Not in place: the page's sources (`frontend/`) carry no SPDX headers. The reposi
 | CTranslate2 | MIT | ✅ | |
 | sentencepiece | Apache-2.0 | ✅ | Tokeniser for MADLAD-400 |
 | huggingface-hub (+ hf-xet) | Apache-2.0 | ✅ | Used only by `models fetch`. At runtime we set `HF_HUB_OFFLINE=1` and `HF_HUB_DISABLE_TELEMETRY=1`. |
+| truststore | MIT | ✅ | The downloads Wavescribe makes itself (URL models, the station and model catalogues, playlists) check the server's certificate against the operating system's trust store, as huggingface-hub's HTTP client does for its own. Pure Python; it calls the system's certificate verification and bundles no certificates |
 | transformers | Apache-2.0 | ✅ | Pulled in by mlx-lm |
 | Babel | BSD-3-Clause | ✅ | CLDR language names for LLM prompts; ships its data, works offline |
 | SQLite (+ FTS5, via Python's `sqlite3`) | Public domain | ✅ | The store; the trigram tokenizer needs SQLite ≥ 3.34 (`remove_diacritics` ≥ 3.45) |

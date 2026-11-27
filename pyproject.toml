@@ -24,6 +24,7 @@ dependencies = [
     "scipy>=1.14", # SDR demodulation (FIR design, polyphase decimation)
     "onnxruntime>=1.20",
     "huggingface-hub>=0.30",
+    "truststore>=0.10", # downloads check certificates against the system's trust store
     "ctranslate2>=4.5",
     "sentencepiece>=0.2",
     "babel>=2.14", # CLDR language names for LLM prompts

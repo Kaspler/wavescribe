@@ -155,3 +155,51 @@ def test_a_failed_download_leaves_nothing_behind(tmp_path: Path, monkeypatch) ->
     with pytest.raises(ConnectionResetError):
         reg.fetch(e)
     assert list((tmp_path / "m").iterdir()) == []  # no partial file next to the model
+
+
+def test_a_model_download_checks_certificates_against_the_system_trust_store(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import io
+    import ssl
+    import urllib.request
+
+    import truststore
+
+    from wavescribe import httpclient
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    contexts: list = []
+
+    def opened(url: str, timeout: float | None = None, context=None) -> io.BytesIO:
+        contexts.append(context)
+        return io.BytesIO(b"model")
+
+    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    e = entry("m", ("*",))
+    reg = ModelRegistry([e], {"asr": ["m"]}, models_dir=tmp_path)
+    assert reg.fetch(e).read_bytes() == b"model"
+    # Not Python's own certificate list, which a Python from python.org doesn't have.
+    assert isinstance(contexts[0], truststore.SSLContext)
+    assert contexts[0].verify_mode == ssl.CERT_REQUIRED and contexts[0].check_hostname
+    # A certificate file named in the environment still decides (a proxy's own certificate).
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "proxy-ca.pem"))
+    named = httpclient.trust_store()
+    assert type(named) is ssl.SSLContext and named.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_a_download_that_isnt_the_model_says_so_and_installs_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import dataclasses
+    import io
+    import urllib.request
+
+    e = dataclasses.replace(entry("m", ("*",), "url:https://models.example/m.bin"), sha256="0" * 64)
+    reg = ModelRegistry([e], {"asr": ["m"]}, models_dir=tmp_path)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: io.BytesIO(b"<html>sign in"))
+    with pytest.raises(ModelError, match=r"what models\.example sent isn't the model") as failed:
+        reg.fetch(e)
+    assert str(failed.value).endswith("then run the same command again.")
+    assert list((tmp_path / "m").iterdir()) == [] and reg.local_path(e) is None

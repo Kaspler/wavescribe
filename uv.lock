@@ -1350,6 +1350,7 @@ dependencies = [
     { name = "scipy" },
     { name = "sentencepiece" },
     { name = "snowballstemmer" },
+    { name = "truststore" },
 ]
 
 [package.dev-dependencies]
@@ -1373,6 +1374,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.14" },
     { name = "sentencepiece", specifier = ">=0.2" },
     { name = "snowballstemmer", specifier = ">=3.1.1" },
+    { name = "truststore", specifier = ">=0.10" },
 ]
 
 [package.metadata.requires-dev]

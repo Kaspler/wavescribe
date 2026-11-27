@@ -44,6 +44,7 @@ import numpy as np
 
 from wavescribe import __version__, jsonsafe
 from wavescribe.audio import SAMPLE_RATE
+from wavescribe.httpclient import trust_store
 from wavescribe.languages import language_name, primary_subtag, same_language
 from wavescribe.log import event
 from wavescribe.sources.stream import WEB_PROTOCOLS, ffmpeg_error
@@ -309,7 +310,7 @@ def _get_json(url: str, timeout: float) -> Any:
     request = urllib.request.Request(
         url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout, context=trust_store()) as response:
         body = response.read(_MAX_RESPONSE_BYTES + 1)
         if len(body) > _MAX_RESPONSE_BYTES:
             raise ValueError(f"the answer is over {_MAX_RESPONSE_BYTES >> 20} MiB")
@@ -816,7 +817,7 @@ def fetch_playlist(url: str, *, timeout: float = 10) -> list[PlaylistEntry]:
         raise CatalogError(f"{url!r}: only http and https playlists can be fetched")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=trust_store()) as response:
             ctype = response.headers.get_content_type()
             if ctype not in _PLAYLIST_TYPES and (
                 ctype.startswith(("audio/", "video/")) or ctype == "application/ogg"

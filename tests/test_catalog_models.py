@@ -187,9 +187,11 @@ class FakeHub:
         self.searches = searches
         self.fail = fail
         self.requests: list = []
+        self.contexts: list = []
 
-    def __call__(self, request, timeout: float):
+    def __call__(self, request, timeout: float, context=None):
         self.requests.append(request)
+        self.contexts.append(context)
         url = urllib.parse.urlsplit(request.full_url)
         path = urllib.parse.unquote(url.path).removeprefix("/api/models")
         if any(f in request.full_url for f in self.fail):
@@ -376,6 +378,17 @@ def test_search_hf_merges_pipeline_tags_for_translation(hub: FakeHub) -> None:
     assert not llava.offered and "text-only" in llava.reason
     assert not custom.offered and "'other'" in custom.reason
     assert custom.backend == "mlx-lm" and "config/models.local.toml" in custom.reason
+
+
+def test_catalogue_requests_check_certificates_against_the_system_trust_store(
+    hub: FakeHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    search_hf("", "asr")
+    assert hub.contexts and all(isinstance(c, truststore.SSLContext) for c in hub.contexts)
 
 
 def test_search_hf_without_details_still_answers(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -21,11 +21,14 @@ import logging
 import os
 import tempfile
 import tomllib
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 from typing import Any
+
+from wavescribe.httpclient import trust_store
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +40,10 @@ LOCAL_MODELS_PATH = Path("config/models.local.toml")
 # bring-your-own file, whose entries are all tier byo.
 CATALOG_MODELS_PATH = Path("config/models.catalog.toml")
 LEDGER_PATH = Path("data/licenses-accepted.json")
+PART_SUFFIX = ".part"  # a URL model while it downloads, next to where it will be
+# What a failed download tells the person to do. The page shows the same sentences and puts its
+# own words here (downloads.py), so every such sentence uses this constant.
+RETRY = "run the same command again"
 
 
 class ModelError(RuntimeError):
@@ -319,11 +326,15 @@ class ModelRegistry:
         if target.exists():
             return target
         target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent, suffix=PART_SUFFIX, delete=False
+        ) as tmp:
             tmp_path = Path(tmp.name)
             try:
                 digest = hashlib.sha256()
-                with urllib.request.urlopen(entry.location, timeout=60) as resp:
+                with urllib.request.urlopen(
+                    entry.location, timeout=60, context=trust_store()
+                ) as resp:
                     while block := resp.read(1 << 20):
                         digest.update(block)
                         tmp.write(block)
@@ -332,8 +343,12 @@ class ModelRegistry:
                 raise
         if entry.sha256 and digest.hexdigest() != entry.sha256:
             tmp_path.unlink()
+            host = urllib.parse.urlsplit(entry.location).hostname
             raise ModelError(
-                f"{entry.id}: sha256 mismatch (got {digest.hexdigest()}, want {entry.sha256})"
+                f"couldn't download {entry.id}: what {host} sent isn't the model (sha256 mismatch: "
+                f"got {digest.hexdigest()}, want {entry.sha256}), as happens when a Wi-Fi sign-in "
+                "page or a proxy answers instead; nothing was installed: open a web page in a "
+                f"browser to check the connection, then {RETRY}."
             )
         tmp_path.replace(target)
         return target

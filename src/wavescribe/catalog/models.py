@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from wavescribe import __version__, jsonsafe
+from wavescribe.httpclient import trust_store
 
 if TYPE_CHECKING:
     from wavescribe.registry import ModelEntry, ModelRegistry
@@ -653,7 +654,7 @@ def _get_json(url: str, timeout: float) -> Any:
     request = urllib.request.Request(
         url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
     )
-    with urllib.request.urlopen(request, timeout=timeout) as resp:
+    with urllib.request.urlopen(request, timeout=timeout, context=trust_store()) as resp:
         body = resp.read(_MAX_RESPONSE_BYTES + 1)
     if len(body) > _MAX_RESPONSE_BYTES:
         raise ValueError(f"the answer is over {_MAX_RESPONSE_BYTES >> 20} MiB")
