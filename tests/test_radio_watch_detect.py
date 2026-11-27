@@ -354,14 +354,21 @@ def test_clipping_hard_catches_the_signal_and_none_of_its_copies(window: str) ->
 
 
 def test_a_window_rising_with_no_channel_on_top_stays_deaf() -> None:
-    # Two walkie-talkies close by at once, a few dB apart: nothing stands over the rest.
+    # Two walkie-talkies close by at once, a few dB apart: nothing stands over the rest. The
+    # converter clips, so it is an overload, with no one transmitter to name.
     both = [keyed_close(PMR[3], 1.0, 4.0), keyed_close(PMR[11], 1.0, 4.0, amp=1.6)]
     c = catcher()
     reasons = set()
     for iq, t_end in air(6.5, [], noise=0.01, extra=lambda t: both[0](t) + both[1](t)):
         assert c.feed(iq, t_end) == []
         reasons.add(c.detector.deaf_reason)
-    assert reasons == {None, "interference"} and c.overload is None
+    assert reasons == {None, "interference", "overload"}
+    assert c.overload is not None
+    assert c.overload["freq_hz"] is None and c.overload["on_channel"] is None
+    assert c.overload["message"] == (
+        "A very strong signal nearby overloaded Receiver A. Move the radio further away, or "
+        "lower the gain in Settings → Receivers."
+    )  # on the channels, so not said to be off them
 
     # A switching supply: lines every 50 kHz on a raised floor.
     def comb(t: np.ndarray) -> np.ndarray:
@@ -508,6 +515,75 @@ def test_one_overload_is_one_transmitter_named_from_its_start(
     assert {r for t, r in reasons if 1.5 < t < 6.0} == {"overload"}
     deaf = [f for r in caplog.records if r.getMessage() == "watch_deaf" for f in [r.fields]]
     assert deaf[0]["reason"] == "overload" and deaf[0]["mhz"] == pytest.approx(PMR[3] / 1e6)
+
+
+def clipping_noise(start_s: float, stop_s: float = 1e9, amp: float = 0.7) -> Callable:
+    """The converter clipping on a transmitter beyond the window: in the window, only noise
+    risen 37 dB, a sixth of the samples at the converter's limits."""
+    rng = np.random.default_rng(9)
+
+    def noise(t: np.ndarray) -> np.ndarray:
+        on = (t >= start_s) & (t < stop_s)
+        return on * amp * (rng.standard_normal(len(t)) + 1j * rng.standard_normal(len(t)))
+
+    return noise
+
+
+def test_the_converter_clipping_with_no_channel_on_top_is_an_overload_off_the_channels(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="wavescribe")
+    c = catcher()
+    got, reasons, warnings = [], set(), []
+    for iq, t_end in air(6.0, [], noise=0.01, extra=clipping_noise(1.0, 3.0)):
+        got += c.feed(iq, t_end)
+        reasons.add(c.detector.deaf_reason)
+        warnings.append(c.warning)
+    assert got == [] and "overload" in reasons and warnings[-1] is None
+    assert any(w and "It wasn't on one of the channels watched" in w for w in warnings)
+    d = c.detector
+    assert d.overload_hz is None and d.overload_on_channel is False  # nowhere to name
+    assert c.overload is not None and c.overload["freq_hz"] is None
+    assert ("It wasn't on one of the channels watched (446.00625 to 446.19375 MHz), so nothing "
+            "was caught.") in str(c.overload["message"])  # fmt: skip
+    said = [(r.getMessage(), r.fields) for r in caplog.records if r.getMessage().startswith("w")]
+    assert [m for m, _ in said] == ["watch_deaf", "watch_hearing"]
+    assert said[0][1]["reason"] == "overload" and said[0][1]["on_channel"] is False
+    assert said[0][1]["clipped"] > 0.1
+
+    # Without clipping, a rise like it is interference, as before.
+    c = catcher()
+    reasons = set()
+    for iq, t_end in air(6.0, [], noise=0.01, extra=louder(1.0, 3.0, amp=0.3)):
+        assert c.feed(iq, t_end) == []
+        reasons.add(c.detector.deaf_reason)
+    assert reasons == {None, "interference"} and c.overload is None
+
+
+def test_the_converter_clipping_for_good_is_learnt_and_stays_noted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A transmitter that never goes away doesn't leave the watch deaf: learnt as the floor
+    after ten seconds, as interference is, and still noted as an overload while it clips."""
+    caplog.set_level("INFO", logger="wavescribe")
+    c = catcher()
+    got, deaf, warnings = [], [], []
+    for iq, t_end in air(
+        16.5, [Burst(PMR[3], 13.0, 14.0, amp=0.5)], noise=0.01, extra=clipping_noise(1.0)
+    ):
+        got += c.feed(iq, t_end)
+        deaf.append(c.deaf_s)
+        warnings.append(c.warning)
+    assert c.detector.relearnt == 1 and max(d or 0 for d in deaf) == pytest.approx(10, abs=0.6)
+    assert deaf[-1] is None and warnings[-1] is None  # hearing again
+    assert c.overload is not None and c.overload["t"] == pytest.approx(T0 + 16.4, abs=0.1)
+    assert c.overload["on_channel"] is False
+    # Heard through it: a walkie-talkie keyed after it is caught.
+    assert [g.freq_hz for g in got] == [PMR[3]]
+    assert got[0].t_start == pytest.approx(T0 + 13.0, abs=0.1)
+    said = [(r.getMessage(), r.fields) for r in caplog.records if r.getMessage().startswith("w")]
+    assert [m for m, _ in said] == ["watch_deaf", "watch_hearing"]
+    assert said[1][1]["learnt"] is True and said[1][1]["reason"] == "overload"
 
 
 def test_the_history_gives_back_the_dongles_samples() -> None:

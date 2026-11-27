@@ -18,8 +18,9 @@ A strong signal also shows where it isn't: on its neighbours (its own splatter a
 transmitter's noise) and, weaker, mirrored about the receiver's centre. A start 20 dB or more
 under a signal close by, or under its own mirror image, is taken for that signal's shadow.
 Where channels overlap (a 25 kHz channel on a 5 kHz raster), only the strongest of the
-overlapping ones starts. Many channels rising together is interference (USB noise, a strong
-signal just outside the window), not traffic: while it lasts nothing starts and the floors hold.
+overlapping ones starts. Many channels rising together, with the converter not clipping, is
+interference (USB noise, a charger), not traffic: while it lasts nothing starts and the floors
+hold.
 Ten seconds of it without a break is no passing interference but the noise itself risen (a
 charger switched on nearby), so the floors are learnt afresh, as at the start, rather than the
 watch staying deaf for good.
@@ -35,13 +36,25 @@ transmission's, and ends with it.
 Unless the transmission close by is on none of the channels (a walkie-talkie keyed on another
 frequency in the window, or at the receiver's centre): then the channels hear only its products,
 and the channel on top is one of them. While the receiver is overloaded, the strongest signal in
-the whole window is found in the FFT the frame already has, over each bin's floor: the dongle's
-own spike at its centre, always there, is part of the floor and no signal, though a transmission
-on top of it is. When it is on none of the channels and stands over them and over everything else
-in the window, nothing starts, and the overload is said with that frequency where it is clear.
+the whole window is found in the FFT the frame already has, in the bins standing the busy
+threshold over their floors: the dongle's own spike at its centre, always there, is part of the
+floor and no signal, though a transmission on top of it is. When it is on none of the channels
+and stands over them and over everything else in the window, nothing starts, and the overload
+is said with that frequency.
+
+The converter clipping hard with no channel on top is an overload as well, not interference:
+by a transmitter off the channels that isn't clear of the rest, or beyond the window, where it
+isn't seen. Nothing starts, and it is said as off the channels, with no frequency. Where the
+strongest signal is on a channel but stands over nothing (two walkie-talkies close by at once,
+or one not yet clear of its copies), it is an overload with no transmitter known, and that
+channel may still start if it comes to stand over the rest. An overload nothing is caught from
+is learnt as the floor after ten seconds, as interference is, so a transmitter that stays
+doesn't leave the watch deaf; while the converter still clips it stays noted as an overload.
 
 One overload is one transmitter: its channel (or its frequency, off the channels) is fixed once
 it is sure, and no other channel starts until the overload is over.
+
+Clipping is counted per FFT, so each frame has its own share.
 
 Times are counted in samples since the first block, so the caller can find a transmission's
 beginning in its own history of the IQ and demodulate it from there.
@@ -165,6 +178,7 @@ class ActivityDetector:
         self._half_bins = max(1, int(half / bin_hz))  # a channel's measured half, in bins
         # A signal this close to a channel is on it (a radio a little off frequency included).
         self._on_hz = channel_hz / 4
+        self._busy = 10 ** (threshold_db / 10)  # a bin this far over its floor has a signal
         self._usable_hz = rate / 2 - NARROW_MARGIN_HZ  # beyond: the filter's edges, and aliases
         excluded = np.abs(offsets) <= GUARD_HZ
         # A learnt spur is only known to the bin it was learnt at: it may be anywhere in it.
@@ -204,24 +218,34 @@ class ActivityDetector:
         self._pending = np.zeros(0, dtype=np.complex64)
         self._acc = np.zeros(fft, dtype=np.float64)
         self._acc_count = 0
+        self._acc_clips = 0  # samples (I and Q apart) at the converter's limits, this frame
+        self._frame_clipped = 0.0  # their share, in the frame being looked at
         self._samples = 0  # samples fed so far
         self._frame_start = 0
         self._channels = [_Channel() for _ in self.freqs]
         self._deaf_since: int | None = None  # where interference across the window began
         self._blind_since: int | None = None  # and where it last began with no channel on top
         self._interfered = 0  # the end of the last frame with interference
-        # While deaf: "overload" (its transmitter found, on a channel or off them) or
-        # "interference".
+        # While deaf: "overload" (a transmitter on a channel or off them, or the converter
+        # clipping hard with no channel on top) or "interference".
         self.deaf_reason: str | None = None
         self._culprit: int | None = None  # the overload's channel, or OFF_CHANNELS, once sure
-        self._off_frames = 0  # frames in a row with the strongest signal off the channels
+        self._overload_seen = False  # this deafness is an overload: a culprit, or several
+        self._off_frames = 0  # frames in a row overloaded with no channel on top
+        self._off_hz: int | None = None  # where off the channels, the last of them that knew
+        # An overload learnt as the floor while the converter still clips: heard through, and
+        # still noted, until the clipping has stopped for ``CLEAR_S``.
+        self._clip_learnt = False
+        self._clipped_at = 0  # the end of the last frame the converter clipped in
         self.overloaded_at: int | None = None  # the end of the last frame overloaded
         # The last overload's transmitter, one for the whole overload: the channel it was caught
-        # on (``overload_on_channel``), or where it was off the channels, to the kHz (None where
-        # that isn't clear: at the window's edges, where signals from beyond it fold in).
+        # on (``overload_on_channel`` True), or where it was off the channels (False), to the kHz
+        # (None where that isn't clear: at the window's edges, where signals from beyond it fold
+        # in, or with the converter clipping and nothing clear of the rest). Both None when the
+        # strongest signal was on a channel standing over nothing: not known which.
         self.overload_hz: int | None = None
         self.overload_on_channel: bool | None = None
-        self.clipped = 0.0  # share of the last block's samples at the converter's limits
+        self.clipped = 0.0  # share of the last block's samples at the converter's limits (the log)
         self.relearnt = 0  # times the floors were learnt afresh after the noise rose
         self.snr_db = np.zeros(len(self.freqs))  # each channel over its floor, last frame
         self.power_db = np.full(len(self.freqs), -200.0)  # each channel's power, last frame
@@ -243,32 +267,41 @@ class ActivityDetector:
         return (self._frame_start - self._deaf_since) / self.rate
 
     def feed(self, iq: np.ndarray) -> list[Activity]:
-        if len(iq):
-            parts = (
-                iq.view(np.float32) if iq.dtype == np.complex64 else np.stack([iq.real, iq.imag])
-            )
-            self.clipped = float(np.count_nonzero(np.abs(parts) > CLIP_LEVEL)) / (2 * len(iq))
         x = np.concatenate([self._pending, iq]) if len(self._pending) else iq
         whole = len(x) // self._n
         self._pending = x[whole * self._n :].copy()
         out: list[Activity] = []
         if whole == 0:
+            self._samples += len(iq)
             return out
-        blocks = x[: whole * self._n].reshape(whole, self._n) * self._window
-        power = np.abs(sp_fft.fft(blocks, axis=1, workers=1)) ** 2
+        rows = x[: whole * self._n].reshape(whole, self._n)
+        # Clipping is counted per FFT, so each frame has its own: a dongle's block is a quarter
+        # of a second, and the frames before a key-up in it didn't clip.
+        parts = (
+            rows.view(np.float32)
+            if rows.dtype == np.complex64
+            else np.concatenate([rows.real, rows.imag], axis=1)
+        )
+        at_limits = np.abs(parts) > CLIP_LEVEL
+        total = np.count_nonzero(at_limits)
+        self.clipped = float(total) / (2 * whole * self._n)
+        clips = np.count_nonzero(at_limits, axis=1) if total else np.zeros(whole, dtype=np.int64)
+        power = np.abs(sp_fft.fft(rows * self._window, axis=1, workers=1)) ** 2
         k = 0
         while k < whole:
             take = min(whole - k, self._per_frame - self._acc_count)
             self._acc += power[k : k + take].sum(axis=0)
+            self._acc_clips += int(clips[k : k + take].sum())
             self._acc_count += take
             k += take
             if self._acc_count == self._per_frame:
                 frame = np.fft.fftshift(self._acc / (self._per_frame * self._norm))
+                self._frame_clipped = self._acc_clips / (2 * self._frame_samples)
                 end = self._frame_start + self._frame_samples
                 out += self._frame(frame, self._frame_start, end)
                 self._frame_start = end
                 self._acc[:] = 0.0
-                self._acc_count = 0
+                self._acc_count = self._acc_clips = 0
         self._samples += len(iq)
         return out
 
@@ -291,41 +324,64 @@ class ActivityDetector:
         rising_now = sum(1 for i in np.flatnonzero(above) if states[i] != "busy")
         risen = rising_now >= max(4, BROADBAND * len(self.freqs))
         # The channel on top of an overload: it may start, and nothing else.
-        overloading = risen or self.clipped >= CLIPPING
+        clipping = self._frame_clipped >= CLIPPING
+        if clipping:
+            self._clipped_at = end
+        elif self._clip_learnt and end - self._clipped_at >= self._clear:
+            self._clip_learnt = False
+        overloading = risen or clipping
         top = self._on_top(above) if overloading else None
-        off, off_hz = (
-            self._off_channels(power, floor, signal - floor_signal, top)
+        where, off_hz = (
+            self._strongest(power, floor, signal - floor_signal, top)
             if overloading
-            else (False, None)
+            else (None, None)
         )
-        overloaded = off or top is not None  # a transmission close by, this frame
+        off = where == "off"
+        several = False  # the converter clipping, and no channel standing over the rest
+        if clipping and top is None and not off and not self._clip_learnt:
+            if where == "on":
+                # Its strongest signal on a channel, standing over nothing: several close by
+                # at once, or one not yet clear of its copies. Overloaded; nothing is fixed
+                # yet, so that channel starts if it comes to stand over the rest.
+                several = True
+            else:
+                # Overloaded all the same, by a signal on none of the channels that isn't
+                # clear of the rest, or beyond the window, where it isn't seen.
+                off = True
+        self._off_hz = off_hz if off_hz is not None else self._off_hz
+        overloaded = off or several or top is not None  # a transmission close by, this frame
         culprit = self._culprit
-        if off:
+        if off or several:
             top = None  # the channel on top is one of its products
             self._off_frames += 1
             if culprit is None and self._off_frames >= START_FRAMES:
-                culprit = self._culprit = OFF_CHANNELS
-                self.overload_hz, self.overload_on_channel = off_hz, False
+                if off:
+                    culprit = self._culprit = OFF_CHANNELS
+                    self.overload_hz, self.overload_on_channel = self._off_hz, False
+                elif not self._overload_seen:
+                    self.overload_hz = self.overload_on_channel = None  # not known where
+                self._overload_seen = True
         else:
-            self._off_frames = 0
+            self._off_frames, self._off_hz = 0, None
         if culprit is not None and top != culprit:
             top = None  # one transmitter per overload: no other channel starts while it lasts
         if overloaded or risen:
             self._interfered = end
             self._deaf_since = start if self._deaf_since is None else self._deaf_since
-            self.deaf_reason = "overload" if culprit is not None else "interference"
-        if culprit is not None and overloaded:
-            # Sure of it: a transmission close by, not a passing peak, and the rise is its own.
-            if culprit == OFF_CHANNELS and end - self._deaf_since >= self._carrier:
-                # Off the channels for minutes: a carrier nearby, taken as noise, as on a channel.
-                return self._relearn()
+            self.deaf_reason = "overload" if self._overload_seen else "interference"
+        if (self._overload_seen and overloaded) or self._clip_learnt:
+            self.overloaded_at = end  # sure of it: no passing peak
+        if culprit is not None and culprit != OFF_CHANNELS and overloaded:
+            # Caught on its channel: the rise is its own, and ends with it.
             self._blind_since = None
-            self.overloaded_at = end
-        elif risen:
+        elif risen or overloaded:
+            # Interference, or an overload that nothing is caught from: this long without a
+            # break, it is learnt as the floor, so a signal that stays (and clips for good)
+            # doesn't leave the watch deaf.
             if self._blind_since is None:
                 self._blind_since = start
             elif end - self._blind_since >= self._blind:
-                return self._relearn()
+                return self._relearn(clipping)
         elif self._deaf_since is not None and end - self._interfered >= self._clear:
             self._hearing()
         deaf = self._deaf_since is not None
@@ -363,7 +419,7 @@ class ActivityDetector:
                 continue
             c.state, c.last = "busy", end
             if overloaded and self._culprit is None:
-                self._culprit = int(i)
+                self._culprit, self._overload_seen = int(i), True
                 self.overload_hz, self.overload_on_channel = self.freqs[i], True
             out.append(
                 Activity(
@@ -386,10 +442,13 @@ class ActivityDetector:
             np.maximum(floor, 1e-20, out=floor)
         return out
 
-    def _relearn(self) -> list[Activity]:
+    def _relearn(self, clipping: bool = False) -> list[Activity]:
         """The floors learnt afresh from the next frames, as at the start: the noise rose and
-        stayed. Nothing rising goes on; what is being caught ends by itself if it was noise."""
+        stayed. Nothing rising goes on; what is being caught ends by itself if it was noise.
+        Learnt while the converter clips (``clipping``), the overload is still noted while it
+        does, and no longer keeps the watch deaf."""
         self._hearing()
+        self._clip_learnt = clipping
         self.relearnt += 1
         self._floor = None
         for c in self._channels:
@@ -400,33 +459,36 @@ class ActivityDetector:
     def _hearing(self) -> None:
         """Deaf no more: the interference or the overload is over."""
         self._deaf_since = self._blind_since = self.deaf_reason = None
-        self._culprit, self._off_frames = None, 0
+        self._culprit, self._off_frames, self._off_hz = None, 0, None
+        self._overload_seen = False
 
-    def _off_channels(
+    def _strongest(
         self, power: np.ndarray, floor: np.ndarray, excess: np.ndarray, top: int | None
-    ) -> tuple[bool, int | None]:
-        """Whether the strongest signal in the whole window is on none of the channels while the
-        receiver is overloaded: a transmission close by elsewhere, whose products are all the
-        channels hear. Measured over its floor (so the dongle's own spike at the centre, always
-        there, is no signal) and over a channel's width, like a channel. It must stand
+    ) -> tuple[str | None, int | None]:
+        """Where the strongest signal in the whole window is while the receiver is overloaded:
+        "on" a channel, "off" the channels (a transmission close by elsewhere, whose products
+        are all the channels hear), or None when it is off them but not clear of the rest.
+        Measured over its floor, in the bins standing the busy threshold over theirs (so the
+        dongle's own spike at the centre, and a signal learnt as the floor, are no signal) and
+        over a channel's width, like a channel. Off the channels, it must stand
         ``OFF_CHANNEL_DB`` over every other signal in the window beyond its reach (its splatter,
         and its copies as in ``_copies``), the channel on top (``top``) included: one transmitter,
         not a comb of lines. With no channel on top beyond its reach, it must also stand
         ``OVERLOAD_DB`` over every channel beyond its reach, as a channel on top does. Also
-        where it is, to the kHz (its power-weighted middle), or None at the window's edges.
-        ``excess`` is each channel's power over its floor."""
-        over = np.maximum(power - floor, 0.0)
+        where it is off them, to the kHz (its power-weighted middle), or None at the window's
+        edges. ``excess`` is each channel's power over its floor."""
+        over = np.maximum(power - floor * self._busy, 0.0)  # bins a signal is in, as a channel
         width = 2 * self._half_bins + 1
         sums = np.cumsum(np.concatenate([[0.0], over]))
         windows = sums[width:] - sums[:-width]  # over a channel's width, about each bin
         p = int(np.argmax(windows))
         total = float(windows[p])
         if total <= 0:
-            return False, None
+            return None, None
         near_peak = over[p : p + width]
         offset = float(near_peak @ self._offsets[p : p + width]) / total
         if np.abs(self._channel_offsets - offset).min() <= self._on_hz:
-            return False, None  # on a channel: whether it stands over the rest is _on_top's
+            return "on", None  # whether it stands over the rest is _on_top's
         copies = [(k * offset + self.rate / 2) % self.rate - self.rate / 2 for k in (1, -1, -3)]
         centres = self._offsets[self._half_bins : self._half_bins + len(windows)]
         mine = np.zeros(len(windows), dtype=bool)
@@ -436,19 +498,19 @@ class ActivityDetector:
             near |= np.abs(self._channel_offsets - at) <= self._reach
         others = float(windows[~mine].max()) if (~mine).any() else 0.0
         if 10 * np.log10(total / max(others, 1e-20)) < OFF_CHANNEL_DB:
-            return False, None
+            return None, None
         rest = self._measured & ~near
         if not rest.any():
             rest = self._measured
         if not rest.any():
-            return False, None
+            return None, None
         if (top is None or not rest[top]) and (
             10 * np.log10(total / max(float(excess[rest].max()), 1e-20)) < OVERLOAD_DB
         ):
-            return False, None
+            return None, None
         if abs(offset) > self._usable_hz:
-            return True, None
-        return True, round((self.center_hz + offset) / 1e3) * 1_000
+            return "off", None
+        return "off", round((self.center_hz + offset) / 1e3) * 1_000
 
     def _on_top(self, above: np.ndarray) -> int | None:
         """The channel a transmission close by overloads the receiver from: the strongest, when

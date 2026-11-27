@@ -384,8 +384,8 @@ def overload_report(
     seconds); where its transmitter was (``freq_hz``): the channel it was caught on, or, off the
     channels, its frequency to the kHz, None where that isn't clear or known (listening by
     hand); whether that was one of the watch's channels (``on_channel``: true, false, or None
-    listening by hand); and what to do (``message``), with ``also`` said in it
-    (``off_channels``)."""
+    listening by hand, and where no one channel stood out though the strongest signal was on
+    one); and what to do (``message``), with ``also`` said in it (``off_channels``)."""
     return {"t": round(t, 2), "freq_hz": freq_hz, "on_channel": on_channel,
             "message": overloaded(receiver, also=also)}  # fmt: skip
 

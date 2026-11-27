@@ -139,7 +139,9 @@ stations), never one per item. `status()` shows it:
   `deaf: "overload"|"interference"`; and from the moment a transmitter close by overloads its
   receiver until 10 minutes after the overload ended, `overload: {"t": epoch seconds of its last
   moment, "freq_hz": the channel it was caught on, or, on none of the channels, where it was to
-  the kHz (null where that isn't clear), "on_channel": true|false (null listening by hand),
+  the kHz (null where that isn't clear), "on_channel": true|false (null listening by hand, and
+  for a watch overloaded with no one channel standing out though its strongest signal was on
+  one, as two transmitters close by at once; `freq_hz` null too),
   "message": "A very strong signal nearby overloaded Receiver A. Move the radio further away, or
   lower the gain in Settings → Receivers."}`, for the page to show in the watch's column and
   under Caught here (a kind of radio that keeps nothing lists no catch there). With
@@ -857,28 +859,43 @@ reach (three channels either side, those overlapping it, and those about its mir
 third-order copy its I/Q clipping makes at −3 times its offset, folded into the band): that is
 `overload`, a transmitter close by. That channel may start and nothing else does, the floors hold,
 and once it has started the time doesn't count towards learning them afresh. The same holds while
-1 % or more of a block's 8-bit samples are at the converter's limits (`CLIPPING`) with a channel on
-top and no rise: the copies then land on a few channels of their own. A catch busy during an
+1 % or more of a frame's 8-bit samples are at the converter's limits (`CLIPPING`; counted per FFT,
+so the frames before a key-up in the same block don't clip) with a channel on top and no rise: the
+copies then land on a few channels of their own. A catch busy during an
 overload has `reason` `overload`, which wins over `carrier` and `stopped`. The margin is measured on
 synthetic IQ: a walkie-talkie overloading the receiver stands 26 to 48 dB over the rest where the
 converter clips (17.5 dB at worst without clipping); white, sloped and comb noise, USB clicks and a
 carrier clipping from outside the window never more than 12 dB in a frame. A transmitter close by on
-none of the channels (`_off_channels`) leaves only its products on them, and one of those can stand
-over the rest. So in every frame overloaded in that sense (the window risen, or clipping), the frame's
-FFT is searched for the strongest signal in the whole window: the power over the floor (so the
-dongle's spike at the centre, always there, is no signal) summed over a channel's width about each
-bin, its frequency the power-weighted middle of the strongest such window. When that is more than a
+none of the channels leaves only its products on them, and one of those can stand over the rest. So
+in every frame overloaded in that sense (the window risen, or clipping), the frame's FFT is searched
+for the strongest signal in the whole window (`_strongest`): the power over 8 dB (the busy
+threshold) above each bin's floor (so the dongle's spike at the centre, always there, and a signal
+learnt into the floor are no signal) summed over a channel's width about each bin, its frequency the
+power-weighted middle of the strongest such window. When that is more than a
 quarter of a channel's width from every channel, stands 6 dB (`OFF_CHANNEL_DB`) over every other
 signal in the window beyond its reach (its splatter, its mirror and its third-order copy: one
 transmitter, not a comb of lines), and, with no channel on top beyond that reach, 15 dB over every
 channel beyond it, nothing starts. Two such frames in a row make it the overload's transmitter, off
 the channels, named to the kHz, or not named within 60 kHz of the window's edges, where signals from
-beyond fold in. On for 120 s, the floors are learnt afresh, as a carrier on a channel is learnt.
+beyond fold in. The converter clipping with no channel on top is an overload too, not
+interference: when the strongest signal isn't on a channel, or isn't clear of the
+rest, it is an overload off the channels with no frequency (a transmitter beyond the window, where
+it isn't seen, clips the converter all the same); when it is on a channel but stands over nothing
+(two transmitters close by at once), it is an overload with neither (`on_channel` null), and that
+channel may still start if it comes to stand over the rest. A window rising without clipping and
+with no channel on top stays `interference`. An overload nothing is caught from (off the channels,
+or with neither) is learnt into the floors after 10 s without a break, as interference is, so a
+transmitter that stays doesn't leave the watch deaf; learnt while the converter clips, the overload
+stays noted (`overloaded_at`, so the status's `overload`) until it has stopped clipping for 0.5 s,
+and starts nothing new as off the channels meanwhile.
 Measured on synthetic IQ at 2.4 MS/s: such a transmitter stands 10 to 14 dB over every other signal
 with a product 10 dB under it on a channel, and 25 to 33 dB without; the same noise, slopes, combs,
-USB clicks and carrier clipping from outside the window never more than 2 dB; on-channel overloads,
-with the radio up to 3 kHz off its channel, never a frame off the channels. It costs 30 to 50 µs per overloaded frame (20 a second), a
-few per cent of the detector, and nothing otherwise. One overload is one transmitter: its channel
+USB clicks and carrier clipping from outside the window never more than 2 dB (those that clip are
+now overloads off the channels with no frequency, by the rule above); on-channel overloads, with the
+radio up to 3 kHz off its channel, never a frame off the channels. It costs 30 to 60 µs per
+overloaded frame (20 a second), a few per cent of the detector, and nothing otherwise; counting the
+clipping per FFT costs nothing while the converter doesn't clip (16 ms per second of IQ for 16
+channels, before and after). One overload is one transmitter: its channel
 (when it starts) or its frequency off the channels (when sure) is fixed until the overload is over,
 no other channel starts in it, and `deaf_reason` stays `overload` from then on, though a frame may
 have no channel on top. Deafness of 3 s or more, and an overload off the channels at once (no catch

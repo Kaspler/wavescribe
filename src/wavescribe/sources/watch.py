@@ -63,7 +63,7 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 CLOSING_S = 0.8
 QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, dropped and counted
 # Interference across the window this long is logged and shown, not a click. An overload by a
-# transmitter on none of the channels is said at once: no catch says it.
+# transmitter on none of the channels (or beyond the window) is said at once: no catch says it.
 SAY_DEAF_S = 3.0
 INTERFERENCE = "deaf: noise across the whole window; learnt as the new floor if it stays"
 
@@ -133,7 +133,9 @@ class Catcher:
     def deaf(self) -> str | None:
         """Why the watch has been deaf for a few seconds, if it has: ``overload`` (one
         transmitter towers over the rest: caught on its channel, and nothing else; or on none of
-        them, said at once, and nothing caught) or ``interference`` (nothing towers)."""
+        them, or the converter clipping on a signal beyond the window, said at once, and nothing
+        caught; or the converter clipping with no one channel standing out) or ``interference``
+        (nothing towers, and no clipping)."""
         d = self.detector
         if d.deaf_s is None or (d.deaf_s < SAY_DEAF_S and not self._off_channels_now):
             return None

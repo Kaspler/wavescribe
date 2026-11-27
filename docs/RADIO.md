@@ -284,8 +284,8 @@ How it works:
 - Whatever is always there (the dongle's spike at its centre, its own signals learnt with
   `radio spurs --learn`, a beacon) becomes part of the floor. A channel busy for two minutes
   ends as one catch and is then taken as noise.
-- Noise rising on half the channels or more at once is interference, not traffic: nothing is
-  caught while it lasts. If it stays for ten seconds (a charger switched on nearby), it is taken
+- Noise rising on half the channels or more at once, with the receiver not overloaded, is
+  interference, not traffic: nothing is caught while it lasts. If it stays for ten seconds (a charger switched on nearby), it is taken
   as the new floor. The station's status says the watch is deaf while it lasts, and
   `radio watch` prints a line when that starts and when it ends.
 - Unless one channel stands 15 dB or more over all the others beyond its neighbours: that is a
@@ -295,6 +295,11 @@ How it works:
 - A transmitter close by on none of the band's channels (on another frequency the receiver
   hears, or at its centre) is said, not caught: the channels hear only its products, and the
   strongest of them is no transmission. The status says where it was, when that is clear.
+- The receiver's converter clipping (1% of its samples or more at their limits) with no channel
+  standing out is an overload too, not interference, though there is nothing to catch: a
+  transmitter on none of the channels, or beyond what the receiver hears. It is said the same
+  way, with no frequency. Lasting ten seconds, it is taken as the new floor, as interference is,
+  so the watch hears again; the overload stays noted while the receiver clips.
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 
@@ -345,7 +350,8 @@ Limits:
 - **While a transmitter close by overloads the receiver, only its channel is caught.** A weaker
   transmission elsewhere in the window at the same moment is missed; one already being caught
   goes on, marked as overloaded too. Two transmitters that close at once, a few dB apart, leave
-  no channel on top, and the watch is deaf while they last, as with interference. A single
+  no channel on top, and the watch is deaf while they last: an overload with no frequency, said
+  after 3 s, and not said to be off the channels. A single
   strong carrier that comes with noise across the window looks the same as a transmitter close
   by, and is caught as one, or said as one if it is on none of the channels.
 - **One overload is one transmitter.** Its channel is fixed when the watch is first sure of it, and
@@ -353,7 +359,8 @@ Limits:
   (half a second after it), isn't caught. Replies on the same channel are.
 - **A transmitter close by on none of the band's channels is said, not caught**, even where it
   is a transmission someone meant to send (a handheld on a frequency next to the band). One that
-  stays on for two minutes is taken as noise, like a stuck carrier on a channel.
+  stays on for ten seconds is taken as the new floor, as interference is, and the watch hears
+  through it.
 - **Tried on the air only briefly**, with an indoor whip on 2 m, where short transmissions on an
   amateur channel were caught and logged; before that on synthetic signals and with no antenna
   (no false catches in 10 minutes on PMR446 and on 2 m). A first try with a walkie-talkie a few
@@ -397,10 +404,12 @@ the receiver's centre) overloads the receiver the same way, but there is nothing
 channels hear only its products. The watch catches nothing, and the sentence says where it was,
 for example "It was at about 445.906 MHz, not on one of the channels of PMR446 walkie-talkies
 (446.00625 to 446.19375 MHz), so nothing was caught.", before what to do. Where the frequency
-isn't clear (at the very edges of what the receiver hears) it says "It wasn't on one of the
-channels of …". With no catch to carry it, this is said at once, however short the key-up: in
-the status, in the log (`watch_deaf` with `reason=overload` and `on_channel=false`, then
-`watch_hearing`) and by `radio watch`.
+isn't clear (at the very edges of what the receiver hears, or with the receiver clipping on a
+signal it can't see) it says "It wasn't on one of the channels of …". With no catch to carry
+it, this is said at once, however short the key-up: in the status, in the log (`watch_deaf`
+with `reason=overload` and `on_channel=false`, then `watch_hearing`) and by `radio watch`. A
+key-up that lasts is taken as the new floor after ten seconds, and the watch hears again
+(`watch_hearing` with `learnt=true`); the status keeps the overload while the receiver clips.
 
 ## What Wavescribe does with each kind of radio
 
