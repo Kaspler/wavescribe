@@ -12,6 +12,7 @@ import { Search } from "./Search";
 import { PhoneList, StationStrip } from "./PhoneList";
 import { NoneRunning } from "./Rack";
 import { T } from "./strings";
+import { cx } from "../components/ui";
 
 /** How many columns fit: each needs about 22 em of transcript text plus its margin, so larger
  * text means fewer, still readable, columns. */
@@ -37,11 +38,15 @@ export function Reading({ route }: { route: Route }) {
   useTopics("state", "status", "prefs", "narrow");
   const main = useRef<HTMLDivElement>(null);
   const fit = useFit(main);
+  // All live shows what fits at a readable width, and says so when that isn't every station;
+  // "Show all" lays every one out side by side, to scroll across.
+  const [all, setAll] = useState(false);
+  const live = S.stations.filter((s) => visible(s.id) && running(s.id)).map((s) => s.id);
+  const more = route.kind === "live" && !V.narrow && live.length > fit;
 
   let ids: string[] = [];
   if (route.kind === "cols") ids = route.ids.filter((id) => Object.hasOwn(S.byId, id)); // not "constructor"
-  else if (route.kind === "live" && !V.narrow)
-    ids = S.stations.filter((s) => visible(s.id) && running(s.id)).slice(0, fit).map((s) => s.id);
+  else if (route.kind === "live" && !V.narrow) ids = all ? live : live.slice(0, fit);
   if (V.narrow) ids = ids.slice(0, 1);
 
   useEffect(() => setShown(route.kind === "find" || route.kind === "ask" ? [] : ids));
@@ -61,7 +66,13 @@ export function Reading({ route }: { route: Route }) {
     content = (
       <>
         {V.narrow && <StationStrip current={ids[0]} />}
-        <div className="cols" style={{ "--n": ids.length } as React.CSSProperties}>
+        {more && (
+          <p className="cols-note">
+            {all ? T.showingAll(live.length) : T.showingOf(fit, live.length)} ·{" "}
+            <button type="button" onClick={() => setAll(!all)}>{all ? T.fitScreen : T.showAll}</button>
+          </p>
+        )}
+        <div className={cx("cols", more && all && "is-all")} style={{ "--n": ids.length } as React.CSSProperties}>
           {ids.map((id) => <Column key={id} id={id} onlyOne={ids.length === 1 && V.narrow} />)}
         </div>
       </>

@@ -293,9 +293,9 @@ a.playing-label:hover { text-decoration: underline; }
    the pointer colour. The menu shows on hover or focus; on touch screens it is always there. */
 .ch-playing { display: inline-flex; padding: 0 6px; color: var(--accent); }
 .ch-playing svg { width: 15px; height: 15px; }
-.ch-more { opacity: 0; transition: opacity var(--fast) var(--ease); }
-.ch:hover .ch-more, .ch:focus-within .ch-more, .ch-more[aria-expanded="true"] { opacity: 1; }
-@media (hover: none) { .ch-more { opacity: 1; } }
+.ch-more, .ch-add { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.ch:hover .ch-more, .ch:focus-within .ch-more, .ch-more[aria-expanded="true"], .ch:hover .ch-add, .ch:focus-within .ch-add { opacity: 1; }
+@media (hover: none) { .ch-more, .ch-add { opacity: 1; } }
 
 /* The printed scale: fine ticks every 6px from the lamp's column to the edge. */
 .ticks {
@@ -354,6 +354,9 @@ a.playing-label:hover { text-decoration: underline; }
 .reading { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }
 .reading-empty { margin: auto; padding: var(--s10); max-width: 44ch; color: var(--ink-3); font-size: var(--t-md); text-align: center; text-wrap: balance; }
 .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); }
+.cols.is-all { grid-template-columns: repeat(var(--n), minmax(calc(var(--read) * 22 + 64px), 1fr)); overflow-x: auto; }
+.cols-note { padding: 6px var(--s7); border-bottom: 1px solid var(--rule); font-size: var(--t-sm); color: var(--ink-3); }
+.cols-note button { padding: 0; border: 0; background: none; color: var(--ink-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .col + .col { border-left: 1px solid var(--rule); }
 

@@ -84,7 +84,8 @@ function Notice() {
   );
 }
 
-/** 1–9 tune a station in or out · 0 all live · / search · A alerts · Esc back · ? this list */
+/** 1–9 read a station · Shift+1–9 add or take away its column · 0 all live · / search · A alerts ·
+ * Esc back · ? this list */
 function useShortcuts(managing: boolean, setKeys: (v: boolean) => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -106,7 +107,7 @@ function useShortcuts(managing: boolean, setKeys: (v: boolean) => void) {
         const on = S.stations.filter((s) => visible(s.id) && running(s.id));
         const st = on[Number(digit) - 1];
         if (!st) return;
-        if (e.shiftKey || V.narrow) setCols([st.id]);
+        if (!e.shiftKey || V.narrow) setCols([st.id]);
         else setCols(V.shown.includes(st.id) ? V.shown.filter((x) => x !== st.id) : [...V.shown, st.id].slice(-MAX_COLS));
       } else if (e.key === "a" || e.key === "A") toggleRail();
     };
@@ -137,8 +138,8 @@ function Shortcuts({ onClose }: { onClose: () => void }) {
   }, []); // once per opening: a re-render mustn't hand focus back early
   const rows: [React.ReactNode, string][] = [
     [<Kbd>/</Kbd>, "Search or ask"],
-    [<><Kbd>1</Kbd>–<Kbd>9</Kbd></>, "Show or hide a live station as a column, in the list's order"],
-    [<><Kbd>⇧</Kbd><Kbd>1</Kbd>–<Kbd>9</Kbd></>, "Read that station alone"],
+    [<><Kbd>1</Kbd>–<Kbd>9</Kbd></>, "Read a live station, in the list's order"],
+    [<><Kbd>⇧</Kbd><Kbd>1</Kbd>–<Kbd>9</Kbd></>, "Add it as a further column, or take its column away"],
     [<Kbd>0</Kbd>, "All live stations"],
     [<Kbd>A</Kbd>, "Show or hide the alerts"],
     [<Kbd>Esc</Kbd>, "Close the alerts, search, Ask, Listen, Find or Settings"],

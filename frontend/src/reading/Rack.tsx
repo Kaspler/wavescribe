@@ -1,7 +1,8 @@
 // The station list: every station as a channel on the receiver's rack, with its lamp, its level on
-// a printed scale, Start for the ones that are off and a menu for the rest. Clicking a station tunes
-// its column in or out; the orange pointer marks the stations on screen. Playing them is Listen's
-// job. "Edit list" chooses which stations this device shows.
+// a printed scale, Start for the ones that are off and a menu for the rest. Clicking a station reads
+// it; the + beside it (or a click with Shift) adds it as a further column; the orange pointer marks
+// the stations on screen. Playing them is Listen's job. "Edit list" chooses which stations this
+// device shows.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
 import { langNameEn, pick, shownLang } from "../lib/lang";
@@ -26,8 +27,9 @@ function offOpen(): boolean {
   try { return localStorage.getItem(OFF_KEY) !== "closed"; } catch { return true; }
 }
 
-function toggle(id: string, solo: boolean) {
-  if (solo) return setCols([id]);
+/** Reads a station alone, or with `beside` adds it as a further column (or takes it away). */
+function read(id: string, beside: boolean) {
+  if (!beside) return setCols([id]);
   const now = V.shown;
   if (now.includes(id)) setCols(now.filter((x) => x !== id));
   else setCols([...now, id].slice(-MAX_COLS));
@@ -54,6 +56,8 @@ export function Rack() {
   const route = parse(useHash());
   const [editing, setEditing] = useState(false);
   const on = S.stations.filter((s) => visible(s.id) && running(s.id) && !held.has(s.id));
+  // Live: sending now. A station that is down or still connecting is listed, not counted.
+  const live = on.filter((s) => S.live[s.id]?.connected && !S.live[s.id]?.stopping).length;
   const off = S.stations.filter((s) => visible(s.id) && (!running(s.id) || held.has(s.id)));
   const stale = S.conn !== "live";
   const canEdit = S.stations.length > 1 || P.hidden.length > 0;
@@ -68,10 +72,10 @@ export function Rack() {
     <nav className={cx("rack", stale && "is-stale")} aria-label={T.stations}
          onPointerLeave={(e) => { if (e.pointerType === "mouse") letGo(); }}>
       <button type="button" className="rack-all" aria-pressed={route.kind === "live"} title={T.allLiveHint}
-              onClick={() => go("#/")} aria-keyshortcuts="0" aria-label={`${T.allLive}, ${on.length} running`}>
+              onClick={() => go("#/")} aria-keyshortcuts="0" aria-label={`${T.allLive}, ${live} live`}>
         <Icon name="columns" />
         <span>{T.allLive}</span>
-        <span className="rack-count num" aria-hidden="true">{on.length}</span>
+        <span className="rack-count num" aria-hidden="true">{live}</span>
       </button>
       <ol className="rack-list">
         {on.map((st, i) => <Channel key={st.id} st={st} n={i + 1} shown={V.shown.includes(st.id)} stale={stale} />)}
@@ -146,8 +150,7 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
   return (
     <li className={cx("ch", shown && "is-shown", playing && "is-playing")} onPointerEnter={show} onPointerLeave={hide}>
       <button ref={ref} type="button" className="ch-main" aria-pressed={shown} onFocus={show} onBlur={hide}
-              onClick={(e) => { hide(); toggle(st.id, e.altKey || e.metaKey || e.shiftKey); }}
-              onDoubleClick={() => toggle(st.id, true)}
+              onClick={(e) => { hide(); read(st.id, e.altKey || e.metaKey || e.shiftKey); }}
               aria-keyshortcuts={n <= 9 ? String(n) : undefined}
               aria-label={`${st.name}, ${langNameEn(st.language)}, ${stale ? "unknown" : state.label}${shown ? ", shown" : ""}`}>
         <span className="ch-name">
@@ -164,6 +167,12 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
       </button>
       <span className="ch-actions">
         {playing && <span className="ch-playing" title={T.playingNow}><Icon name="speaker" /><span className="sr-only">{T.playingNow}</span></span>}
+        {(!shown || V.shown.length > 1) && (
+          <button type="button" className="btn btn-band btn-sm btn-icon ch-btn ch-add" onClick={() => read(st.id, true)}
+                  aria-label={shown ? T.closeColumn(st.name) : T.readBeside(st.name)} title={shown ? T.closeColumn(st.name) : T.readBeside(st.name)}>
+            <Icon name={shown ? "close" : "plus"} />
+          </button>
+        )}
         <StationMenu st={st} side />
       </span>
       {peek && !shown && <Peek st={st} anchor={ref} />}
@@ -223,7 +232,7 @@ function OffStations({ off }: { off: Station[] }) {
             return (
               <li key={st.id} className={cx("ch", "ch-off", shown && "is-shown")}>
                 <button type="button" className="ch-main" aria-pressed={shown}
-                        onClick={(e) => toggle(st.id, e.altKey || e.metaKey || e.shiftKey)}
+                        onClick={(e) => read(st.id, e.altKey || e.metaKey || e.shiftKey)}
                         title={st.available ? undefined : st.reason || T.unavailable}
                         aria-label={`${st.name}, ${langNameEn(st.language)}, ${state ? state.label : st.available ? T.off.toLowerCase() : T.unavailable}${shown ? ", shown" : ""}`}>
                   <span className="ch-name">
