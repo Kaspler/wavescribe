@@ -190,3 +190,71 @@ def test_test_button_and_reconfigure() -> None:
     wait_for(lambda: len(rec.requests) == 2)
     assert rec.requests[-1][0] == "http://h/y"
     outs.close()
+
+
+class Endpoint:
+    """A real HTTP server on this machine: answers each request with ``status`` (and Location),
+    and records what it got."""
+
+    def __init__(self, status: int = 200, location: str | None = None) -> None:
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        got = self.got = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def answer(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                got.append((self.command, self.path, dict(self.headers), self.rfile.read(length)))
+                self.send_response(status)
+                if location:
+                    self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_GET = do_POST = answer
+
+            def log_message(self, *args) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.mark.parametrize("code", [300, 301, 302, 303, 307, 308])
+def test_a_webhook_that_redirects_failed_and_nothing_goes_elsewhere(code: int) -> None:
+    from wavescribe.outputs import urllib_transport
+
+    elsewhere = Endpoint()
+    hook = Endpoint(code, f"{elsewhere.url}/collect")
+    outs = outputs([{"id": "hook", "url": f"{hook.url}/in", "secret": "s3cret",
+                     "headers": {"Authorization": "Bearer abc"}}], urllib_transport)  # fmt: skip
+    try:
+        entry = outs.test(outs.configs()[0])
+        assert len(hook.got) == 1 and hook.got[0][2]["Authorization"] == "Bearer abc"
+        assert elsewhere.got == []  # neither the header nor the signature went there
+        assert not entry["ok"] and entry["status"] == code and entry["attempts"] == 1
+        assert f"redirected to {elsewhere.url}/collect" in entry["error"]
+        assert "not followed" in entry["error"]
+    finally:
+        outs.close()
+        hook.close()
+        elsewhere.close()
+
+
+def test_a_redirected_alert_is_not_retried() -> None:
+    from wavescribe.httpclient import Redirected
+
+    rec = Recorder([Redirected(302, "https://elsewhere.test/")])
+    sleeps: list[float] = []
+    outs = outputs([{"id": "hook", "url": "http://h/x"}], rec, sleeps=sleeps)
+    outs.on_alert(ALERT, "high", "x", {})
+    wait_for(lambda: outs.recent())
+    entry = outs.recent()[0]
+    assert entry["status"] == 302 and entry["attempts"] == 1 and sleeps == []
+    assert "redirected to https://elsewhere.test/" in entry["error"]
+    outs.close()

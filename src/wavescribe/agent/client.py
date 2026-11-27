@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import IO, Any
 
-from wavescribe import __version__
+from wavescribe import __version__, httpclient
 from wavescribe.agent import DEFAULT_URL
 from wavescribe.events import Seen, resume_point, to_json
 from wavescribe.remote import feed_lines, sse_events
@@ -59,7 +59,8 @@ class Client:
     def __init__(self, url: str = DEFAULT_URL, token: str | None = None) -> None:
         self.url = url.rstrip("/")
         self.token = token
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # No redirects: the token would go wherever one points.
+        self._opener = httpclient.opener(urllib.request.ProxyHandler({}))
 
     def open(
         self,
@@ -88,8 +89,11 @@ class Client:
         request = urllib.request.Request(url, data=data, headers=sent, method=method)
         try:
             return self._opener.open(request, timeout=timeout)
+        except httpclient.Redirected as e:
+            raise Refused(e.status, str(e)) from None
         except urllib.error.HTTPError as e:
-            raise Refused(e.code, _reason(e)) from None
+            moved = httpclient.redirected(e)
+            raise Refused(e.code, str(moved) if moved else _reason(e)) from None
         except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
             why = getattr(e, "reason", None) or e
             why = getattr(why, "strerror", None) or str(why) or type(why).__name__

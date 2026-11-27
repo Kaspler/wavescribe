@@ -27,8 +27,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from wavescribe import __version__
+from wavescribe import __version__, httpclient
 from wavescribe.events import alert_event, as_text, to_json, utterance_event
+from wavescribe.httpclient import Redirected
 from wavescribe.log import event
 from wavescribe.rules import SEVERITIES
 
@@ -42,8 +43,10 @@ ALERT_ATTEMPTS = 6  # ~2 minutes of retries: 2, 4, 8, 16, 32, 60 s
 OTHER_ATTEMPTS = 3
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 
-# transport(url, body, headers, timeout) -> HTTP status; raises OSError when nothing came back
+# transport(url, body, headers, timeout) -> HTTP status; raises OSError when nothing came back,
+# and httpclient.Redirected (never followed) for a redirect
 Transport = Callable[[str, bytes, dict[str, str], float], int]
+_OPENER = httpclient.opener()
 
 
 class OutputError(ValueError):
@@ -148,10 +151,13 @@ class OutputConfig:
 def urllib_transport(url: str, body: bytes, headers: dict[str, str], timeout: float) -> int:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:
             resp.read(65536)
             return int(resp.status)
     except urllib.error.HTTPError as e:
+        moved = httpclient.redirected(e)
+        if moved is not None:
+            raise moved from None
         return int(e.code)
 
 
@@ -395,6 +401,8 @@ class Outputs:
             try:
                 status = self._transport(config.url, body, headers, config.timeout_s)
                 error = None if 200 <= status < 300 else f"HTTP {status}"
+            except Redirected as e:  # not followed: the headers and signature stay here
+                status, error = e.status, str(e)[:300]
             except (OSError, ValueError) as e:  # URLError, timeouts, refused connections
                 status, error = None, str(getattr(e, "reason", e))[:200]
             if error is None:

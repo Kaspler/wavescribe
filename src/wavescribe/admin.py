@@ -489,6 +489,8 @@ def remote_stations(url: str, token: str | None) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
+    from wavescribe import httpclient
+
     url = url.strip().rstrip("/")
     if not url.startswith(("http://", "https://")):
         raise AdminError("the address starts with http:// or https://")
@@ -499,7 +501,8 @@ def remote_stations(url: str, token: str | None) -> dict[str, Any]:
     for key in ("node", "stations"):
         req = urllib.request.Request(f"{url}/feed/v1/{key}", headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            # A redirect isn't followed: the token would go wherever it points.
+            with httpclient.opener().open(req, timeout=10) as resp:
                 out[key] = json.loads(resp.read(2_000_000))
         except urllib.error.HTTPError as e:
             if e.code == 401:

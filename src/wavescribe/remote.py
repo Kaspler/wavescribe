@@ -37,7 +37,7 @@ from typing import Any
 
 import numpy as np
 
-from wavescribe import __version__, jsonsafe
+from wavescribe import __version__, httpclient, jsonsafe
 from wavescribe.asr import Transcript
 from wavescribe.config import _BCP47, Station
 from wavescribe.events import Seen, resume_point
@@ -49,6 +49,7 @@ from wavescribe.segment import Utterance
 log = logging.getLogger(__name__)
 
 READ_TIMEOUT_S = 45.0  # the feed sends a keepalive every 15 s
+_OPENER = httpclient.opener()
 # An utterance event is a few kilobytes. A feed that sends a megabyte without ending a line or
 # an event isn't one, and reading on would hold whatever it sends in memory.
 MAX_EVENT_BYTES = 1024 * 1024
@@ -256,7 +257,7 @@ class RemoteFollower:
         *,
         since: float | None = None,
         stored: Iterable[tuple[str, float]] = (),
-        opener: Callable[..., Any] = urllib.request.urlopen,
+        opener: Callable[..., Any] | None = None,
         sleep: Callable[[float], bool] | None = None,
     ) -> None:
         self.station = station
@@ -268,7 +269,7 @@ class RemoteFollower:
         self._stored = Counter((text, round(duration, 1)) for text, duration in stored)
         self._seen = Seen()  # what a resume sends again is taken once
         self.repeated = 0  # replayed events skipped as already stored or taken
-        self._open = opener
+        self._open = opener or _OPENER.open  # never follows a redirect: the token stays here
         self._stop = threading.Event()
         self._sleep = sleep or self._stop.wait
         self.last_id: str | None = None

@@ -238,6 +238,10 @@ An output is a URL plus filters, set on the page (*Settings → Connections*) an
   full), so a dead endpoint never slows anything else.
 - Every request is logged, with its status, attempts and time. The page shows the log; it is
   also in the store's `deliveries` table.
+- A redirect (any 3xx) is never followed: it is a failed delivery, not tried again, logged
+  with its status and where it pointed (`HTTP 302: redirected to …; not followed`). The
+  `Authorization` header, other headers you set and the signature go only to the URL you
+  gave: set the final address.
 - The page's *Test* button sends one sample event.
 
 **Signatures.** With a secret, each request carries `X-Wavescribe-Timestamp` (Unix seconds)

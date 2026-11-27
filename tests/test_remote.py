@@ -305,3 +305,33 @@ def test_a_follower_outlives_errors_nobody_expected(caplog) -> None:
     assert got == ["dois"] and follower.received == 1
     assert "the store is on fire" in caplog.text
     assert feed.waits == [2.0, 4.0, 2.0]
+
+
+@pytest.mark.parametrize("code", [302, 307])
+def test_a_follower_and_follow_never_take_their_token_where_a_redirect_points(code: int) -> None:
+    from tests.test_outputs import Endpoint
+    from wavescribe.agent.client import Client, Refused
+
+    elsewhere = Endpoint()
+    far = Endpoint(code, f"{elsewhere.url}/feed/v1/events")
+    try:
+        done = threading.Event()
+        node = dataclasses.replace(station("far"), remote=far.url, remote_station="tsf",
+                                   remote_token="wst_s3cret")  # fmt: skip
+        follower = RemoteFollower(node, lambda r: None, sleep=lambda s: done.set() or True)
+        assert done.wait(5)
+        follower._thread.join(5)
+        assert far.got[0][2]["Authorization"] == "Bearer wst_s3cret"
+        assert f"redirected to {elsewhere.url}/feed/v1/events" in (follower.error or "")
+
+        with pytest.raises(Refused) as refused:
+            Client(far.url, token="wst_s3cret").get("/feed/v1/node")
+        assert refused.value.status == code and "not followed" in refused.value.message
+        from wavescribe.admin import AdminError, remote_stations  # the page's "look up"
+
+        with pytest.raises(AdminError, match="not followed"):
+            remote_stations(far.url, "wst_s3cret")
+        assert elsewhere.got == []
+    finally:
+        far.close()
+        elsewhere.close()
