@@ -141,15 +141,21 @@ def utterance_event(
     node: Mapping[str, Any],
     *,
     languages: Iterable[str] = (),
+    via: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """An utterance (the page's payload shape, live or stored) as a feed event."""
+    """An utterance (the page's payload shape, live or stored) as a feed event. ``via``: the
+    ids of the machines a line from another machine passed through before this one, the one
+    that heard it first; this machine's id is the node's (``node.id``)."""
     base = node.get("url")
     seg = u.get("id")
+    sender = {"name": node.get("name"), "url": base}
+    if node.get("id"):
+        sender["id"] = node["id"]
     out: dict[str, Any] = {
         "type": "utterance",
         "version": FEED_VERSION,
         "id": seg,
-        "node": {"name": node.get("name"), "url": base},
+        "node": sender,
         "station": station_ref(u["station"], stations),
         "time": iso(u["t_start"]),
         "t_start": u["t_start"],
@@ -162,6 +168,8 @@ def utterance_event(
     }
     if base and seg is not None and u.get("audio"):
         out["audio_url"] = f"{base}/api/segments/{seg}/audio.wav"
+    if via := list(via):
+        out["via"] = via
     return out
 
 

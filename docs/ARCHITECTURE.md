@@ -355,7 +355,11 @@ per event (`events.py`, version 1: `utterance`, `alert`, `batch`) serves all thr
   once. Clients skip a line a resume sends again by its id (`events.Seen`).
 - `Output`s push it to webhooks.
 - A remote station follows another Wavescribe's feed (`remote.py`), or is created by that
-  machine's pushes to `/feed/v1/ingest`.
+  machine's pushes to `/feed/v1/ingest`. Each machine has a random id (`App.node_id`, kept in
+  ui.toml) in its events' `node.id`; a line passed on carries the ids it passed through
+  (`via`, from `App.via`, which remembers each remote station's path in memory). Ingest and
+  the follower refuse a line that passed through this machine or more than 8 machines
+  (`Heard.refused_by`), which ends the echo between two machines that push to each other.
 
 Feed tokens (scopes `read`, `push`) guard other machines once the first one exists, and any
 request through a proxy always (FEED.md, "Who can read what"); the machine itself needs none to

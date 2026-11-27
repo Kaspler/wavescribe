@@ -39,6 +39,12 @@ Utterance fields:
   `rechecked` that Whisper listened again to a line heard in another language: without `lang:`
   beside it, Whisper heard the station's language and the text is its transcript.
 - `rules`: the alert rules this utterance tripped.
+- `node.id`: the sending machine's id, random, made at its first start and kept in its
+  `config/ui.toml`. It says nothing about the machine.
+- `"via"`: only on a line the sender took from another machine: the ids of the machines it
+  passed through before the sender, the one that heard it first. Wavescribe refuses a pushed
+  or followed line that already passed through it, or through more than 8 machines, so two
+  machines that push to each other never echo a line back and forth.
 - `audio_url`: appears only when the recording is kept and the machine's address is known.
   The page sets that address under Settings → Connections → *For other programs* (*Public URL*).
 - `station.privacy`: the station's privacy class on the machine that heard it (`broadcast`,
@@ -330,6 +336,10 @@ event arrived.
 - It translates only into languages the text didn't arrive with, so the place can translate
   into the local language and the central server into its own.
 - No audio crosses. Each event's `audio_url` points back at the place that kept it.
+- A line can go on from the central server to another, with `via` saying where it has been
+  (*Event format*). It never comes back to a machine it passed through, so places and central
+  servers can push to each other both ways. A machine learns a station's path from its lines
+  as they come, in memory: just after a restart, a line stored before it can come back once.
 
 ## Using Wavescribe from another program
 

@@ -295,10 +295,12 @@ class Outputs:
         node: Callable[[], Mapping[str, Any]] = dict,
         transport: Transport = urllib_transport,
         sleep: Callable[[float], None] = time.sleep,
+        via: Callable[[str], list[str]] = lambda _station: [],
     ) -> None:
         self.store = store
         self._stations = stations
         self._node = node
+        self._via = via  # where a station's lines from another machine have been
         self._transport = transport
         self._sleep = sleep
         self._lock = threading.Lock()
@@ -347,8 +349,9 @@ class Outputs:
         if not workers:
             return
         stations, node = self._stations(), self._node()
+        via = self._via(payload["station"])
         for w in workers:
-            w.put(utterance_event(payload, stations, node, languages=w.config.languages))
+            w.put(utterance_event(payload, stations, node, languages=w.config.languages, via=via))
 
     def on_alert(
         self, alert: Mapping[str, Any], severity: str, text: str, translations: Mapping[str, str]

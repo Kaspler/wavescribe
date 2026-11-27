@@ -224,7 +224,7 @@ def test_status_retention_and_node(node: Running) -> None:
     assert node.call("POST", "/api/manage/retention", {"text_days": -1})[0] == 400
     named = {"name": "kitchen", "public_url": "http://mac.local:9"}
     status, n = node.call("POST", "/api/manage/node", named)
-    assert n == {"name": "kitchen", "url": "http://mac.local:9"}
+    assert n == {"name": "kitchen", "url": "http://mac.local:9", "id": node.app.node_id()}
 
 
 def test_rules_from_the_page(node: Running) -> None:
@@ -1201,3 +1201,42 @@ def test_a_test_push_is_answered_and_leaves_no_station_behind(central: App, batc
     bad = {**(sample["events"][0] if batch_s else sample), "t_start": "yesterday"}
     assert central.ingest(bad) == {"accepted": 0, "rejected": 1, "test": 0}
     outs.close()
+
+
+def test_two_machines_that_push_to_each_other_never_echo(tmp_path: Path) -> None:
+    a, b = Running(make_app(tmp_path, "a")), Running(make_app(tmp_path, "b"))
+    try:
+        for here, there in ((a, b), (b, a)):  # each pushes every utterance to the other
+            _, tok = there.call("POST", "/api/manage/tokens", {"label": "x", "scopes": ["push"]})
+            status, _ = here.call("POST", "/api/manage/outputs", {
+                "name": "other", "url": f"{there.url}/feed/v1/ingest", "events": ["utterance"],
+                "headers": {"Authorization": f"Bearer {tok['token']}"},
+            })  # fmt: skip
+            assert status == 200
+        a.call("POST", "/api/manage/stations/a/start")
+        wait_for(lambda: b.app.store.recent("a-a"))  # a's line, pushed to b
+        # b pushed it on to a, who answered: it passed through a before, so a refuses it.
+        wait_for(lambda: b.app.outputs.status()["other"]["sent"] >= 1)
+        assert not [s.id for s in a.app.config.stations if s.remote]
+        assert {s.id for s in b.app.config.stations if s.remote} == {"a-a"}
+        event = a.app.outputs.recent("other")[0]
+        assert event["ok"]
+    finally:
+        a.close()
+        b.close()
+
+
+def test_a_line_that_passed_through_here_or_too_many_machines_is_refused(central: App) -> None:
+    me = central.node()["id"]
+    assert central.node_id() == me and len(me) == 12  # made once, kept in ui.toml
+    echo = heard("tsf", via=["f00dfeed0001", me])
+    assert push(central, [echo]) == {"accepted": 0, "rejected": 1}
+    far = [f"{i:012x}" for i in range(9)]
+    assert push(central, [heard("tsf", via=far)]) == {"accepted": 0, "rejected": 1}
+    assert push(central, [heard("tsf", via=far[:3])]) == {"accepted": 1, "rejected": 0}
+    # What it passes on says where the line has been: the sender's chain, then the sender.
+    north = {"name": "north", "id": "0000000000aa"}
+    central.ingest({"type": "batch", "node": north,
+                    "events": [heard("tsf", via=far[:3], node=north)]})  # fmt: skip
+    assert central.via("north-tsf") == [*far[:3], "0000000000aa"]
+    assert central.via("a") == []  # its own stations: the event's node says it

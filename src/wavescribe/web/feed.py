@@ -338,6 +338,12 @@ def _context(h: Handler) -> tuple[dict[str, Any], dict[str, Any]]:
     return stations, node_
 
 
+def _via(h: Handler) -> Callable[[str], list[str]]:
+    """Where a station's lines from another machine passed through (``App.via``)."""
+    app = h.server.hub.app
+    return app.via if app is not None else lambda _station: []
+
+
 def node(h: Handler) -> dict[str, Any]:
     hub = h.server.hub
     _, n = _context(h)
@@ -412,7 +418,9 @@ def utterances(h: Handler, query: dict[str, str]) -> None:
         return
     stations_, node_ = _context(h)
     langs = _list(query.get("langs"))
-    events_ = [utterance_event(r, stations_, node_, languages=langs) for r in rows]
+    via = _via(h)
+    events_ = [utterance_event(r, stations_, node_, languages=langs, via=via(r["station"]))
+               for r in rows]  # fmt: skip
     fmt = query.get("format", "json")
     if fmt == "ndjson":
         body = "".join(to_json(e) + "\n" for e in events_)
@@ -509,7 +517,8 @@ def events(h: Handler, query: dict[str, str]) -> None:
         for row in replay:
             if not leaving.utterance(row):
                 continue
-            _write(h, "utterance", utterance_event(row, stations_, node_, languages=langs),
+            _write(h, "utterance", utterance_event(row, stations_, node_, languages=langs,
+                                                   via=_via(h)(row["station"])),
                    cursor.sent(row["id"], mark))  # fmt: skip
         h.wfile.flush()
         next_status = wrote = time.monotonic()
@@ -546,7 +555,8 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 if type(seg) is int and seg <= mark.highest and seg not in waiting:
                     continue  # final before this stream began: replayed, or not asked for
                 stations_, node_ = _context(h)
-                _write(h, "utterance", utterance_event(data, stations_, node_, languages=langs),
+                _write(h, "utterance", utterance_event(data, stations_, node_, languages=langs,
+                                                       via=_via(h)(data["station"])),
                        cursor.sent(seg, queued_at) if type(seg) is int else None)  # fmt: skip
             elif name == "alert" and "alert" in want:
                 data = json.loads(text)

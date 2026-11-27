@@ -70,6 +70,12 @@ MAX_TAG_CHARS = 35  # the longest tag BCP-47 asks software to handle
 MAX_TRANSLATIONS = 32
 MAX_FLAGS = 16
 MAX_FLAG_CHARS = 40
+# A line passes from machine to machine (a place pushes to a central server, which pushes on).
+# Each event names the machines it passed through (``via``) and the one sending it
+# (``node.id``). One that passed through this machine before is an echo; past MAX_HOPS it is
+# going round in a loop of machines that don't know each other's ids.
+MAX_HOPS = 8
+MAX_ID_CHARS = 64
 
 
 class BadEvent(ValueError):
@@ -94,6 +100,21 @@ class Heard:
     text: str
     translations: Mapping[str, str]
     flags: tuple[str, ...]
+    node_id: str | None = None  # the sending machine's id
+    via: tuple[str, ...] = ()  # the machines it passed through before the sender
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        """Every machine it passed through, the sender last."""
+        return (*self.via, self.node_id) if self.node_id else self.via
+
+    def refused_by(self, node_id: str | None) -> str | None:
+        """Why the machine ``node_id`` doesn't take it, or None when it does."""
+        if node_id and node_id in self.path:
+            return "it passed through here before"
+        if len(self.path) > MAX_HOPS:
+            return f"it passed through more than {MAX_HOPS} machines"
+        return None
 
 
 def read_utterance(ev: object, *, now: float | None = None) -> Heard:
@@ -130,6 +151,9 @@ def read_utterance(ev: object, *, now: float | None = None) -> Heard:
     flags = ev.get("flags") or []
     if not isinstance(flags, list) or len(flags) > MAX_FLAGS:
         raise BadEvent(f"flags is not a list of at most {MAX_FLAGS}")
+    via = ev.get("via") or []
+    if not isinstance(via, list) or len(via) > 2 * MAX_HOPS:
+        raise BadEvent(f"via is not a list of at most {2 * MAX_HOPS}")
     return Heard(
         station_id=station_id,
         station_name=_string(station.get("name"), "station.name", MAX_NAME_CHARS),
@@ -143,6 +167,8 @@ def read_utterance(ev: object, *, now: float | None = None) -> Heard:
         text=text,
         translations=translations,
         flags=tuple(f for f in (_string(v, "flags", MAX_FLAG_CHARS) for v in flags) if f),
+        node_id=_string(node.get("id"), "node.id", MAX_ID_CHARS),
+        via=tuple(i for i in (_string(v, "via", MAX_ID_CHARS) for v in via) if i),
     )
 
 
@@ -259,6 +285,7 @@ class RemoteFollower:
         stored: Iterable[tuple[str, float]] = (),
         opener: Callable[..., Any] | None = None,
         sleep: Callable[[float], bool] | None = None,
+        node_id: str | None = None,
     ) -> None:
         self.station = station
         self._ingest = ingest
@@ -270,6 +297,9 @@ class RemoteFollower:
         self._seen = Seen()  # what a resume sends again is taken once
         self.repeated = 0  # replayed events skipped as already stored or taken
         self._open = opener or _OPENER.open  # never follows a redirect: the token stays here
+        self._node_id = node_id  # this machine: a line that passed through it is an echo
+        self.upstream: tuple[str, ...] = ()  # the machines the last line taken passed through
+        self.looped = 0  # lines refused for having passed through here or too many machines
         self._stop = threading.Event()
         self._sleep = sleep or self._stop.wait
         self.last_id: str | None = None
@@ -377,6 +407,10 @@ class RemoteFollower:
             if not self._seen.first(ev):
                 self.repeated += 1  # sent again on a resume
                 continue
+            if heard.refused_by(self._node_id):
+                self.looped += 1
+                continue
+            self.upstream = heard.path
             if by_time and self._already_stored(heard):
                 continue
             self._ingest(to_result(heard, self.station))

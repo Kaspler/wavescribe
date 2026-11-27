@@ -69,6 +69,7 @@ MAX_PUSH_STATIONS = 100
 MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is dropped
 PUSH_ID_CHARS = 40  # a pushed station's id here: <node>-<station>
 PUSH_NODE_CHARS = 16  # what is kept of a long node name in it
+NODE_ID = re.compile(r"[0-9a-f]{12}")  # this machine's id in events (``App.node_id``)
 # Overrides kept even when the station comes out the same without them: what the user confirmed.
 KEPT_OVERRIDES = {"acknowledge", "privacy_floor"}
 
@@ -173,6 +174,7 @@ class App:
         self.keywords_dir = keywords_dir or DEFAULT_KEYWORDS_DIR
         self._lock = threading.RLock()
         self.started_at = time.time()
+        self._node_id = self._make_node_id()  # written once, at the first start
 
         for cap, ids in (settings.get("models") or {}).items():
             try:
@@ -221,6 +223,7 @@ class App:
             store=store,
             stations=lambda: {s.id: s for s in self.config.stations},
             node=self.node,
+            via=self.via,
             **({"transport": outputs_transport} if outputs_transport else {}),
         )
         self.hub.final_hooks.append(self.outputs.on_utterance)
@@ -284,6 +287,10 @@ class App:
         self.downloads = Downloads(registry, on_done=self.models_changed)
         self.followers: dict[str, RemoteFollower] = {}
         self._pushed: dict[str, float] = {}  # pushed station -> when it last sent something
+        # A station from another machine -> the machines its last line passed through, so what
+        # is passed on says so and never comes back (``via``). In memory: a restart learns it
+        # again from the next line.
+        self._upstream: dict[str, tuple[str, ...]] = {}
         self._monitor: Any = None
         self._resources: deque[dict[str, Any]] = deque(maxlen=240)  # an hour at 15 s
         self._last_snapshot: dict[str, Any] | None = None
@@ -325,7 +332,32 @@ class App:
             local = self.host in ("127.0.0.1", "::1", "localhost")
             host = "localhost" if local else f"{socket.gethostname().removesuffix('.local')}.local"
             url = f"http://{host}:{self.port}"
-        return {"name": name, "url": url.rstrip("/")}
+        return {"name": name, "url": url.rstrip("/"), "id": self.node_id()}
+
+    def node_id(self) -> str:
+        """This machine's id in the events it sends: random, made once and kept in ui.toml.
+        Machines that pass lines on list the ids they passed through (``via``), so a line
+        never comes back to one it passed through."""
+        return self._node_id
+
+    def _make_node_id(self) -> str:
+        nid = (self.settings.get("node") or {}).get("id")
+        if isinstance(nid, str) and NODE_ID.fullmatch(nid):
+            return nid
+        made = secrets.token_hex(6)
+        self.settings.update(lambda d: d.setdefault("node", {}).update(id=made))
+        return made
+
+    def via(self, station_id: str) -> list[str]:
+        """The machines a station's lines passed through before this one, the first that heard
+        them first; empty for this machine's own stations."""
+        station = next((s for s in self.config.stations if s.id == station_id), None)
+        if station is None or not station.remote:
+            return []
+        follower = self.followers.get(station_id) if station.remote != "push" else None
+        if follower is not None:
+            return list(follower.upstream)
+        return list(self._upstream.get(station_id, ()))
 
     def set_node(self, name: str | None, public_url: str | None) -> dict[str, Any]:
         if public_url and not re.match(r"^https?://[^\s/]+", public_url):
@@ -814,8 +846,9 @@ class App:
                 recent = self.store.between(last - SENDER_CLOCK_DRIFT_S, last,
                                             station_ids=[station.id])  # fmt: skip
                 stored = [(u["text"], u["duration"]) for u in recent]
-        self.followers[station.id] = RemoteFollower(station, self._take_followed, since=since,
-                                                    stored=stored)  # fmt: skip
+        self.followers[station.id] = RemoteFollower(
+            station, self._take_followed, since=since, stored=stored, node_id=self.node_id()
+        )
 
     def _take_followed(self, result: Result) -> None:
         # The class first: outputs and viewers on other machines ask the station for it.
@@ -879,6 +912,7 @@ class App:
         name = sender.get("name") if isinstance(sender, dict) else None
         node = slug(name[:MAX_NAME_CHARS] if isinstance(name, str) and name else "remote")
         refused: Counter[str] = Counter()
+        me = self.node_id()
         if len(events) > MAX_BATCH_EVENTS:
             refused["too many events in one batch"] = len(events) - MAX_BATCH_EVENTS
         wanted: list[tuple[Heard, str]] = []
@@ -900,6 +934,9 @@ class App:
                     heard = read_utterance(ev)
                 except BadEvent as e:
                     refused[str(e)] += 1
+                    continue
+                if why := heard.refused_by(me):
+                    refused[why] += 1  # an echo of what this machine passed on
                     continue
                 if ev.get("test"):
                     tested += 1  # it would have been taken; that is all a test asks
@@ -925,6 +962,7 @@ class App:
                     from_node += 1
                 if heard.privacy is not None:
                     said[sid] = heard.privacy
+                self._upstream[sid] = heard.path
                 wanted.append((heard, sid))
             unmade = self._unmakeable(new) if new else set()
             if unmade:
