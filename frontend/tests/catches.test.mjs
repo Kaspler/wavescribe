@@ -1,7 +1,7 @@
 // "Caught here": what watches caught, grouped by frequency and filtered.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandsIn, centreIn, filterCatches, groupCatches, hasSpeech, sliceIn, talksNowAndThen, voiceWord, windowWords } from "../src/manage/catches.ts";
+import { bandsIn, centreIn, deviceIn, filterCatches, groupCatches, hasSpeech, sliceIn, stationIn, talksNowAndThen, technical, voiceWord, windowWords } from "../src/manage/catches.ts";
 
 const NOW = 1_800_000_000;
 const caught = (id, freq_hz, ago, more = {}) => ({
@@ -63,6 +63,13 @@ test("what the server's refusals offer is read out of them", () => {
   assert.equal(sliceIn("no band 'x' in the band plan (wavescribe radio bands lists them), or give a range in MHz, e.g. 446.0:446.2"), null);
   assert.equal(centreIn("station w: device 'a' doesn't hear all of PMR446 (16 of its 16 channels are outside its band). Give the device center_mhz = 445.97500, or watch the part it hears"), 445.975);
   assert.equal(centreIn("there is already a station called 'w'"), null);
+  const moved = "station 'w' (w): device 'b' doesn't hear all of PMR446 (16 of its 16 channels are outside its band). Give the device center_mhz = 445.97500, or watch the part it hears";
+  assert.equal(stationIn(moved), "w");
+  assert.equal(stationIn("station 'Walkies' (walkies): device 'a' centre_mhz must be a number"), "walkies", "a stations-file station: its id in brackets");
+  assert.equal(stationIn("Receiver A is scanning: wait for it, or stop the scan."), null);
+  assert.equal(deviceIn(moved), "b");
+  assert.ok(technical(moved), "ids in quotes and setting names go under Details");
+  assert.ok(!technical("Receiver A is scanning: wait for it, or stop the scan."), "a sentence is said as it is");
 });
 
 test("a window in words", () => {

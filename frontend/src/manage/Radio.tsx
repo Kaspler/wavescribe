@@ -8,13 +8,14 @@ import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { type Any, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
-import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
-import { talksNowAndThen } from "./catches";
+import { Caught, WatchBand, keepsWords, useWatchesHere, watchWords } from "./Caught";
+import { centreIn, deviceIn, stationIn, talksNowAndThen, technical } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
-import { type Following, addOnAir, planFor } from "./onair";
+import { type AddResult, type Following, addOnAir, planFor } from "./onair";
+import { Refusal } from "./Refusal";
 import { Ask, type Tuner, useTuner } from "./tuner";
 
 const REGION_NAMES: Record<string, string> = {
@@ -109,6 +110,10 @@ function pickReceiver(v: Any): string {
 }
 
 /** Anything worth listening to: not the receivers' own lines, not a digital service's noise. */
+/** A station the server couldn't build any more, by its id: its error, and for a watch whose
+ * receiver was moved away, that receiver and the centre the watch needs. */
+interface Stranded { id: string; error: string; centre: number | null; device: string | null }
+
 const real = (s: Signal) => !s.spur && s.privacy !== "digital";
 
 const loading = (error: string | null) => <p className="m-loading">{error ? `Couldn't load the radio: ${error}` : "Loading…"}</p>;
@@ -125,6 +130,12 @@ export function OnTheAir() {
   useEvery(10000, reloadStations, canWatch);
   if (!v) return loading(error);
   const watches: Any[] = ((st?.stations || []) as Any[]).filter((s) => s.watch != null);
+  // A station whose settings no longer hold is left out of the list and named only among the
+  // errors: a watch whose receiver was moved away is one, with the centre it needs.
+  const stranded: Stranded[] = Object.entries((st?.errors || {}) as Record<string, string>)
+    .filter(([id]) => !(st?.stations || []).some((x: Any) => x.id === id))
+    .map(([id, error]) => ({ id, error, centre: centreIn(error), device: deviceIn(error) }))
+    .filter((x) => x.centre != null && x.device != null);
   const openAdd = (t: Any) => {
     setAdd(t);
     requestAnimationFrame(() => document.getElementById("rd-tune")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
@@ -146,8 +157,8 @@ export function OnTheAir() {
   return (
     <>
       <Finder v={v} job={job} running={running} onJob={setJob} onAdd={openAdd} reload={reload} tuner={tuner}
-              watches={canWatch ? watches : null} want={want} onWatched={async () => { await reloadStations(); await reload(); await refreshPage(); }} />
-      {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} tuner={tuner} watches={canWatch ? watches : null}
+              watches={canWatch ? watches : null} stations={st?.stations || []} stranded={stranded} want={want} onWatched={async () => { await reloadStations(); await reload(); await refreshPage(); }} />
+      {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} tuner={tuner} watches={canWatch ? watches : null} stations={st?.stations || []}
                           onDone={async () => { setAdd(null); await Promise.all([reload(), reloadStations(), tuner.reload()]); }} />}
       {canWatch && <Caught bands={v.bands} watches={watches} keptNothing={keptNothing} onAdd={openAdd} onChooseBand={firstWatch} />}
       <Heard v={v} onAdd={openAdd} reload={reload} />
@@ -199,10 +210,13 @@ export function Responsibility() {
 
 // -- finding: sweep a band, list what's there ---------------------------------------------------
 
-function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, onWatched }: {
+function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, stations, stranded, want, onWatched }: {
   v: Any; job: Any; running: boolean; onJob: (j: Any) => void; onAdd: (t: Any) => void; reload: () => Promise<void>; tuner: Tuner;
   /** The watch stations, or null where this Wavescribe can't watch a band. */
   watches: Any[] | null;
+  /** Every station, to name one that stands in a watch's way. */
+  stations: Any[];
+  stranded: Stranded[];
   /** A band asked for from elsewhere on the page. */
   want: { id: string; t: number } | null;
   onWatched: () => Promise<void>;
@@ -328,6 +342,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   // A watch of the band, or of a slice of it.
   const ofBand = (w: Any) => w.watch === chosen?.id || (Array.isArray(w.watch) && !!chosen && w.watch[0] >= chosen.start_mhz && w.watch[1] <= chosen.stop_mhz);
   const watched = watchable ? watches.find((w) => w.running && ofBand(w)) : undefined;
+  const lost = watchable && !watched ? stranded.find((x) => x.centre! >= chosen.start_mhz && x.centre! <= chosen.stop_mhz) || null : null;
   const following = ((rx?.stations || []) as Any[]).filter((x) => x.running).map((x) => ({ id: x.id as string, name: x.name as string }));
   // With nothing found yet, one way in: FM, the easiest to hear, on a free receiver.
   const fresh = v.receivers.length > 0 && !!fm && !v.heard.length && !scanJob;
@@ -366,7 +381,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
             Stop watching{Array.isArray(watched.watch) ? ` ${watchWords(watched, v.bands)}` : ""}{watched.device !== device ? ` with Receiver ${rxName(watched.device)}` : ""}
           </ActButton>
         ) : watchable && !watchAsk && (
-          <Button variant="secondary" icon="antenna" disabled={me?.state === "scanning"} onClick={() => setWatchAsk(true)}>
+          <Button id="rd-watch-open" variant="secondary" icon="antenna" disabled={me?.state === "scanning"} onClick={() => setWatchAsk(true)}>
             Watch this band with Receiver {rxName(device)}
           </Button>
         )}
@@ -376,7 +391,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
             {onTheDial && me && me.state !== "scanning" && !liveHere && " Look here shows the band live, without sound."}
           </span>
         )}
-        {pause && !running && (
+        {pause && !running && !watchAsk && (
           <span className="m-hint rd-inline">
             {byHand && `Receiver ${rxName(rx.id)} is tuned by hand: the scan lets it go.`}
             {byHand && holding.length > 0 && " "}
@@ -384,6 +399,9 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
           </span>
         )}
       </div>
+      {lost && !watchAsk && (
+        <p className="m-hint">The watch here stopped when Receiver {rxName(lost.device!)} was moved away. Watching again moves it back.</p>
+      )}
       {next && !running && (
         <p className="m-hint">
           Next, try <button type="button" className="rd-link" onClick={() => pick(next.id)}>{bandWords(next).name}</button>: {bandWords(next).what.replace(/[:.].*$/, "").replace(/^\w/, (c) => c.toLowerCase())}.
@@ -415,9 +433,13 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
       {tuner.ask && <Ask ask={tuner.ask} onYes={tuner.resend} onNo={() => tuner.setAsk(null)} />}
       {watchAsk && watchable && !watched && (
         <WatchBand band={chosen} device={device} holders={following} needsAck={!!v.policies?.[chosen.privacy]?.needs_ack}
-                   free={rxs.find((r) => r.id !== device && r.state === "idle")?.id || null}
-                   existing={watches.find((w) => w.device === device && w.watch === chosen.id) || null}
-                   onDone={async () => { setWatchAsk(false); await onWatched(); }} onCancel={() => setWatchAsk(false)} />
+                   free={rxs.find((r) => r.id !== device && r.state === "idle")?.id || null} others={rxs.filter((r) => r.id !== device).map((r) => r.id)}
+                   watches={watches} lost={lost} stations={stations} bands={v.bands}
+                   onDone={async () => { setWatchAsk(false); await onWatched(); }} onCancel={() => {
+                     setWatchAsk(false);
+                     // The panel closes back onto the button that opened it.
+                     requestAnimationFrame(() => document.getElementById("rd-watch-open")?.focus());
+                   }} />
       )}
     </>
   );
@@ -854,7 +876,12 @@ function followingOn(v: Any, rx: Any, live: Any | undefined, watches: Any[] | nu
   });
 }
 
-function AddFromAir({ v, pre, tuner, watches, onDone }: { v: Any; pre: Any; tuner: Tuner; watches: Any[] | null; onDone: () => Promise<void> }) {
+function AddFromAir({ v, pre, tuner, watches, stations, onDone }: {
+  v: Any; pre: Any; tuner: Tuner; watches: Any[] | null;
+  /** Every station, to name one that keeps the receiver where it is. */
+  stations: Any[];
+  onDone: () => Promise<void>;
+}) {
   const fits = (r: Any, mhz: number) => Math.abs(mhz - r.center_mhz) <= r.span_mhz / 2 - 0.12;
   const f: number = pre.mhz;
   const band = bandAt(v.bands, f);
@@ -869,6 +896,8 @@ function AddFromAir({ v, pre, tuner, watches, onDone }: { v: Any; pre: Any; tune
   const [ack, setAck] = useState(false);
   // The stations adding it would stop, named before anything changes.
   const [stop, setStop] = useState<string[] | null>(null);
+  // A refusal: the server's words, and the station that keeps the receiver where it is, if one does.
+  const [trouble, setTrouble] = useState<{ raw: string; blocker: Any | null } | null>(null);
   useEffect(() => {
     // With no speech model downloaded yet, a new station starts by listening: transcription can follow.
     get("/models").then((m) => {
@@ -887,22 +916,39 @@ function AddFromAir({ v, pre, tuner, watches, onDone }: { v: Any; pre: Any; tune
   const stops = stop || plan?.stops || [];
   const called = name.trim() || pre.name || `${fmtMhz(f, effMode)} MHz`;
   const submit = async (confirmed = false) => {
-    const r = await addOnAir({
-      body: {
-        device, mhz: f, mode: mode || undefined, name: name.trim() || undefined, language: lang.trim(), translate_to: does === "translate" ? to : [],
-        acknowledge: ack, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
-      },
-      mode: effMode, centre: rx.center_mhz, span: rx.span_mhz, following, confirmed,
-      live: !!live, letGo: () => (tuner.dev === device ? tuner.close() : del(`/live/${device}`)),
-    });
+    setTrouble(null);
+    let r: AddResult;
+    try {
+      r = await addOnAir({
+        body: {
+          device, mhz: f, mode: mode || undefined, name: name.trim() || undefined, language: lang.trim(), translate_to: does === "translate" ? to : [],
+          acknowledge: ack, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
+        },
+        mode: effMode, centre: rx.center_mhz, span: rx.span_mhz, following, confirmed,
+        live: !!live, letGo: () => (tuner.dev === device ? tuner.close() : del(`/live/${device}`)),
+      });
+    } catch (e) {
+      const raw = (e as Error).message;
+      const by = stationIn(raw);
+      setTrouble({ raw, blocker: by ? stations.find((x) => x.id === by) || null : null });
+      await tuner.reload();
+      return;
+    }
     if ("wouldStop" in r) { setStop(r.wouldStop); return; }
     setStop(null);
     await refreshPage();
-    if (r.trouble) toast(`${r.station.name} was added and didn't start: ${r.trouble}`, true);
+    if (r.trouble) toast(`${r.station.name} was added and didn't start${technical(r.trouble) ? "" : ` (${r.trouble.replace(/\.$/, "")})`}. Start it from the station list under Read.`, true);
     else toast(does === "listen" ? `${r.station.name} added: play it under Listen` : `Transcribing ${r.station.name}: it's on the reading page`);
     await onDone();
   };
   const beside = stops.length ? [] : (plan?.keeps || []).map((s) => s.name);
+  /** Switches off the station that keeps the receiver where it is, then adds once more. */
+  const switchOff = async (s: Any) => {
+    await post(`/stations/${s.id}`, { disabled: true });
+    if (s.running) await post(`/stations/${s.id}/stop`);
+    await submit(stops.length > 0);
+  };
+  const other = v.receivers.find((r: Any) => r.id !== device)?.id as string | undefined;
   return (
     <Section id="rd-tune" title={`Add ${fmtMhz(f, effMode)} MHz as a station`}
              description="It runs all the time, beside the other stations, within what its kind of radio allows.">
@@ -959,6 +1005,13 @@ function AddFromAir({ v, pre, tuner, watches, onDone }: { v: Any; pre: Any; tune
         <p className="m-line" role="status">
           Receiver {rxName(device)} will follow {called}{beside.length ? ` beside ${and(beside)}` : ""} from now; listening by hand stops.
         </p>
+      )}
+      {trouble && (
+        <Refusal raw={trouble.raw}
+                 said={trouble.blocker ? keepsWords(trouble.blocker, device, v.bands) : technical(trouble.raw) ? `Receiver ${rxName(device)} couldn't take ${called}.` : undefined}>
+          {trouble.blocker && <ActButton size="sm" variant="secondary" run={() => switchOff(trouble.blocker)}>Switch {trouble.blocker.name} off</ActButton>}
+          {other && <Button size="sm" variant="secondary" onClick={() => { setDevice(other); setTrouble(null); setStop(null); }}>Use Receiver {rxName(other)}</Button>}
+        </Refusal>
       )}
       <div className="m-actions">
         <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || !!rx?.scanning} run={() => submit(stops.length > 0)}>

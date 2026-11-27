@@ -117,6 +117,22 @@ export function sliceIn(message: string): [number, number] | null {
   return m ? [+m[1], +m[2]] : null;
 }
 
+/** The station a refusal is about, by its id, where the server's words begin with it
+ * ("station 'walkies': …", or for one from the stations file "station 'Walkies' (walkies): …"). */
+export function stationIn(message: string): string | null {
+  const m = /^station '([^']+)'(?: \(([^)]+)\))?:/.exec(message);
+  return m ? m[2] || m[1] : null;
+}
+
+/** Whether the server's words are its own shorthand (ids in quotes, setting names) rather than a
+ * sentence for the person: those go under Details, below one the page writes. */
+export const technical = (message: string) => /'[a-z0-9_.-]+'|\b[a-z]+_[a-z_]+\b/.test(message);
+
+/** The receiver a refusal is about ("device 'a' doesn't hear all of …"). */
+export function deviceIn(message: string): string | null {
+  return /device '([^']+)'/.exec(message)?.[1] ?? null;
+}
+
 /** Where a refusal says the receiver must be tuned for a watch ("Give the device center_mhz = …"). */
 export function centreIn(message: string): number | null {
   const m = /center_mhz = (\d+(?:\.\d+)?)/.exec(message);

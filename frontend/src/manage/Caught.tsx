@@ -9,9 +9,10 @@ import { P } from "../lib/prefs";
 import { useTopics } from "../lib/store";
 import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
-import { type Any, ApiError, get, listenTo, post, secs, useEvery, useLoad } from "./api";
+import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, and, bandWords, fmtMhz } from "./bands";
-import { type Catch, type Note, RANGES, type Spot, bandsIn, centreIn, filterCatches, groupCatches, sliceIn, voiceWord, windowWords } from "./catches";
+import { type Catch, type Note, RANGES, type Spot, bandsIn, centreIn, filterCatches, groupCatches, sliceIn, stationIn, technical, voiceWord, windowWords } from "./catches";
+import { Refusal } from "./Refusal";
 import { rxName } from "./Receivers";
 
 let known: Promise<boolean> | null = null;
@@ -51,61 +52,102 @@ export const bandNamer = (bands: Band[]) => (id: string) => {
 /** What a watch listens to, in words. */
 export const watchWords = (w: Any, bands: Band[]) => windowWords(w.watch, bandNamer(bands));
 
-const WHAT_IT_DOES = "Listens to every channel of the band at once and writes down whatever is said, with its channel. One receiver is busy with it while it runs.";
+/** Why a station keeps a receiver where it is, in words: what it follows, and that it comes
+ * from the stations file, which the page can switch off but not change. */
+export const keepsWords = (s: Any, device: string, bands: Band[]) =>
+  `${s.name} keeps Receiver ${rxName(device)} where it is${s.watch != null ? `: it watches ${watchWords(s, bands)}` : ""}${s.origin === "file" ? ", from the stations file" : ""}.`;
+
+const WHAT_IT_DOES = "Listens to every channel of the band at once and turns whatever is said into text, with its channel. One receiver is busy with it while it runs.";
 const CAN_MISS = "It can miss a transmission that is weak, very short, or under another one.";
+
+/** Whether two watch windows are the same: a band's id, or a range in MHz. */
+const sameWindow = (a: string | number[], b: string | number[]) =>
+  typeof a === "string" || typeof b === "string" ? a === b : Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+
+/** What became of a try to watch: the server's words, with what the page read out of them. */
+interface Trouble {
+  raw: string;
+  /** The band is wider than a receiver hears: the slice the server offers instead. */
+  slice?: [number, number] | null;
+  /** Another station keeps the receiver where it is. */
+  blocker?: Any | null;
+}
 
 /** The second action on a band whose channels talk now and then: watch it with a receiver.
  * Asks what it needs first (the confirmation, a receiver following stations), then makes the
- * watch station and starts it, or starts the one already made for this band and receiver. */
-export function WatchBand({ band, device, holders, free, needsAck, existing, onDone, onCancel }: {
+ * watch station and starts it, or starts the one already made for this band (or slice) and
+ * receiver. A refusal is said in words, with what can be done. */
+export function WatchBand({ band, device, holders, free, others, needsAck, watches, lost, stations, bands, onDone, onCancel }: {
   band: Band;
   device: string;
   /** Running stations on the receiver, which watching stops: ids and names. */
   holders: { id: string; name: string }[];
   /** An idle receiver to offer instead. */
   free: string | null;
+  /** Every other receiver, for when this one can't move. */
+  others: string[];
   needsAck: boolean;
-  existing: Any | null;
+  watches: Any[];
+  /** A watch of this band left out of the station list since its receiver was moved away. */
+  lost: { id: string; centre: number | null; device: string | null } | null;
+  /** Every station, to name one that keeps the receiver where it is. */
+  stations: Any[];
+  bands: Band[];
   onDone: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [ack, setAck] = useState(false);
-  const [trouble, setTrouble] = useState<string | null>(null);
+  const [trouble, setTrouble] = useState<Trouble | null>(null);
   const box = useRef<HTMLDivElement>(null);
   // The panel replaces the button that opened it: the focus moves into it.
   useEffect(() => { box.current?.querySelector<HTMLElement>("input, button")?.focus(); }, []);
   const name = bandWords(band).name;
-  const slice = trouble ? sliceIn(trouble) : null;
-  const create = async (dev: string, spec: string | number[]) => {
+  /** Moves the receiver where the server says a watch needs it, when that is what it refused,
+   * and tries once more. */
+  const centred = async (dev: string, attempt: () => Promise<unknown>) => {
+    try {
+      await attempt();
+    } catch (e) {
+      const centre = e instanceof ApiError ? centreIn(e.message) : null;
+      if (centre == null) throw e;
+      await post(`/receivers/${dev}`, { center_mhz: centre });
+      await attempt();
+    }
+  };
+  const start = async (dev: string, spec: string | [number, number] = band.id) => {
+    setTrouble(null);
+    const stopped = dev === device ? holders : [];
+    const mine = watches.find((w) => w.device === dev && sameWindow(w.watch, spec));
     const body = {
       name: typeof spec === "string" ? name : `${name} ${spec[0]}–${spec[1]}`, device: dev, watch: spec, language: "auto", start: true,
       ...(needsAck ? { acknowledge: band.privacy } : {}),
     };
     try {
-      await post("/stations", body);
-    } catch (e) {
-      // The receiver must be tuned so the whole window fits: the server says where.
-      const centre = e instanceof ApiError ? centreIn(e.message) : null;
-      if (centre == null) throw e;
-      await post(`/receivers/${dev}`, { center_mhz: centre });
-      await post("/stations", body);
-    }
-  };
-  const start = async (dev: string, spec: string | number[] = band.id) => {
-    setTrouble(null);
-    const stopped = dev === device ? holders : [];
-    try {
       for (const h of stopped) await post(`/stations/${h.id}/stop`);
-      if (existing && existing.device === dev && typeof spec === "string") await post(`/stations/${existing.id}/start`);
-      else await create(dev, spec);
+      // A watch made before starts again: a stopped one, or one whose receiver was moved away,
+      // once the receiver is back where it hears the band.
+      if (!mine && lost && lost.device === dev) {
+        await post(`/receivers/${dev}`, { center_mhz: lost.centre });
+        await post(`/stations/${lost.id}/start`);
+      } else await centred(dev, () => (mine ? post(`/stations/${mine.id}/start`) : post("/stations", body)));
     } catch (e) {
       for (const h of stopped) await post(`/stations/${h.id}/start`).catch(() => {});
-      setTrouble((e as Error).message);
+      const raw = (e as Error).message;
+      const by = stationIn(raw);
+      setTrouble({ raw, slice: sliceIn(raw), blocker: by && by !== mine?.id ? stations.find((x) => x.id === by) || null : null });
       return;
     }
-    toast(`Watching ${name} with Receiver ${rxName(dev)}`);
+    toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
     await onDone();
   };
+  /** Switches off the station that keeps the receiver where it is, then tries again. */
+  const switchOff = async (s: Any) => {
+    await post(`/stations/${s.id}`, { disabled: true });
+    if (s.running) await post(`/stations/${s.id}/stop`);
+    await start(device);
+  };
+  const other = free || others[0] || null;
+  const width = +(band.stop_mhz - band.start_mhz).toFixed(1);
   return (
     <div ref={box} className="m-panel rd-retune" role="group" aria-labelledby="rd-watch-h"
          onKeyDown={(e) => {
@@ -120,15 +162,31 @@ export function WatchBand({ band, device, holders, free, needsAck, existing, onD
         <p className="m-line">
           <Check checked={ack} onChange={setAck}>
             I've checked that I may receive this where I am, and I'm responsible for how I use what's heard.
-            Laws on radio that isn't broadcast differ by country (<code>docs/RADIO.md</code>).
+            Laws on radio that isn't broadcast differ by country (<a className="rd-link" href={docUrl("RADIO.md")} target="_blank" rel="noreferrer">docs/RADIO.md</a>).
           </Check>
         </p>
       )}
-      {trouble && <p className="m-trouble" role="alert">{trouble}</p>}
-      <div className="m-actions">
-        {slice ? (
-          <ActButton variant="primary" disabled={needsAck && !ack} run={() => start(device, slice)}>Watch {slice[0]}–{slice[1]} MHz instead</ActButton>
+      {trouble && (
+        trouble.slice ? (
+          <Refusal raw={trouble.raw} said={`${name} is ${width} MHz wide, more than one receiver hears at once. Watch a slice of it instead:`}>
+            <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(device, trouble.slice!)}>
+              Watch {trouble.slice[0].toFixed(3)}–{trouble.slice[1].toFixed(3)} MHz
+            </ActButton>
+          </Refusal>
+        ) : trouble.blocker ? (
+          <Refusal raw={trouble.raw}
+                   said={keepsWords(trouble.blocker, device, bands)}>
+            <ActButton size="sm" variant="secondary" run={() => switchOff(trouble.blocker)}>Switch {trouble.blocker.name} off</ActButton>
+            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(other)}>Use Receiver {rxName(other)}</ActButton>}
+          </Refusal>
         ) : (
+          <Refusal raw={trouble.raw} said={technical(trouble.raw) ? `Receiver ${rxName(device)} couldn't start watching ${name}.` : undefined}>
+            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(other)}>Use Receiver {rxName(other)}</ActButton>}
+          </Refusal>
+        )
+      )}
+      <div className="m-actions">
+        {!trouble?.slice && (
           <ActButton variant="primary" icon="antenna" disabled={needsAck && !ack} run={() => start(device)}>
             {holders.length ? `Stop ${and(holders.map((h) => h.name))} and watch` : "Start watching"}
           </ActButton>
@@ -191,7 +249,7 @@ export function Caught({ bands, watches, keptNothing, onAdd, onChooseBand }: {
         <div className="m-empty">
           <p>
             Nothing caught yet. A watch listens to every channel of a band at once (walkie-talkies, radio amateurs, boats,
-            aircraft) and writes down whatever is said, with its channel, so a channel that is usually silent shows here
+            aircraft) and turns whatever is said into text, with its channel, so a channel that is usually silent shows here
             the moment someone speaks on it.
           </p>
           <div className="m-actions">
