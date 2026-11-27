@@ -21,6 +21,7 @@ from wavescribe.radio.watch import (
     catch_limit,
     catch_width,
     on_raster,
+    overloaded,
     with_notes,
 )
 
@@ -41,11 +42,16 @@ def _window(spec: str) -> str | tuple[float, float]:
 
 class CatchPrinter:
     """One line per catch as it ends: `[HH:MM:SS] MHz  band, channel  name  seconds  voice`;
-    on stderr, one when the watch goes deaf and one when it hears again (``hearing``)."""
+    on stderr, one when the watch goes deaf and one when it hears again (``hearing``), and what
+    to do when a transmitter close by overloads ``receiver`` (as output names it)."""
 
-    def __init__(self, names: dict[int, dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self, names: dict[int, dict[str, Any]] | None = None, receiver: str = "the receiver"
+    ) -> None:
         self._lock = threading.Lock()
         self._names = names or {}
+        self._overloaded = overloaded(receiver, "with --gain")
+        self._told = 0.0  # when the overload was last said
         self.count = 0
         self.spoken = 0
 
@@ -55,6 +61,8 @@ class CatchPrinter:
         heard = {True: "voice", False: "no voice", None: "not checked"}[catch.voice]
         if catch.reason == "carrier":
             heard = "carrier, learnt as noise"
+        elif catch.reason == "overload":
+            heard += ", receiver overloaded"
         parts = [f"[{stamp}] {mhz_text(catch.freq_hz / 1e6):<10}", catch.label or "?"]
         parts += [f'"{name}"'] if name else []
         parts += [f"{catch.duration:.1f} s", f"{catch.snr_db:.0f} dB"] + ([heard] if heard else [])
@@ -62,15 +70,23 @@ class CatchPrinter:
             self.count += 1
             self.spoken += bool(catch.voice)
             print("  ".join(parts), flush=True)
+            # Too short to be said as deafness: said with its catch, once.
+            if catch.reason == "overload" and self._told < catch.t_start:
+                self._told = catch.t_end
+                _say(self._overloaded, catch.t_end)
 
     def hearing(self, h: Hearing) -> None:
         """A line when the watch goes deaf and one when it hears again: the command line has
         no status to show it in."""
         stamp = time.strftime("%H:%M:%S", time.localtime(h.t))
         said = h.warning or f"hearing again after {h.deaf_s:.0f} s"
+        if h.warning is not None and h.reason == "overload":
+            said = self._overloaded
         if h.warning is None and h.learnt:
             said += ", with that noise as the new floor"
         with self._lock:
+            if h.reason == "overload":
+                self._told = h.t
             print(f"# [{stamp}] {said}", file=sys.stderr, flush=True)
 
 
@@ -269,7 +285,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     )
     catalog = Catalog()
     _old_spurs(catalog, rx, args.receiver)  # a watch doesn't use such a list
-    printer = CatchPrinter(catalog.notes())
+    printer = CatchPrinter(catalog.notes(), rx.name)
     args.stations, args.source, args.tuned_stations = ["watch"], None, [station]
     args.realtime = False
     args.duration = args.minutes * 60 if args.minutes else None

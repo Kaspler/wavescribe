@@ -37,7 +37,8 @@ from wavescribe.dsp.activity import CARRIER_S, Activity, ActivityDetector, IqHis
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import POLICIES, lookup
-from wavescribe.radio.watch import Catch, Hearing, Watch, publish
+from wavescribe.radio.watch import Catch, Hearing, Watch, overloaded, publish
+from wavescribe.radio.words import receiver_name
 from wavescribe.sources import SourceHealth
 from wavescribe.sources.sdr import RtlSdrDevice, shared_device
 
@@ -53,6 +54,8 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 CLOSING_S = 0.8
 QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, dropped and counted
 SAY_DEAF_S = 3.0  # interference across the window this long is logged and shown, not a click
+OVERLOAD_SHOWN_S = 600.0  # an overload stays in the status this long after it ended
+INTERFERENCE = "deaf: noise across the whole window; learnt as the new floor if it stays"
 
 
 @dataclass
@@ -109,18 +112,45 @@ class Catcher:
         self._anchor = (0, 0.0)  # the newest sample's index and wall-clock time
         self.missed = 0  # transmissions no demodulator was free for
         self.short = 0  # shorter than a catch: data bursts, key clicks
-        self._deaf: tuple[float, int] | None = None  # once said: how long, and relearnt then
+        # Once said: how long, the times the floors were relearnt by then, and why.
+        self._deaf: tuple[float, int, str | None] | None = None
 
     @property
     def deaf_s(self) -> float | None:
         return self.detector.deaf_s
 
     @property
-    def warning(self) -> str | None:
-        """What keeps the watch from catching anything right now, for the station's health."""
+    def deaf(self) -> str | None:
+        """Why the watch has been deaf for a few seconds, if it has: ``overload`` (one channel
+        towers over the rest: it is caught, and nothing else) or ``interference`` (none does)."""
         if (self.deaf_s or 0) < SAY_DEAF_S:
             return None
-        return "deaf: noise across the whole window; learnt as the new floor if it stays"
+        return self.detector.deaf_reason
+
+    @property
+    def warning(self) -> str | None:
+        """What keeps the watch from catching anything right now, for the station's health."""
+        deaf = self.deaf
+        if deaf is None:
+            return None
+        return self._overloaded() if deaf == "overload" else INTERFERENCE
+
+    @property
+    def overload(self) -> dict[str, object] | None:
+        """The watch's last overload, while it lasts and for ``OVERLOAD_SHOWN_S`` after: when
+        it was last seen (``t``, epoch seconds), the channel on top (``freq_hz``), and what to
+        do (``message``). Also one too short to be said as deafness: its catch is overloaded."""
+        at = self.detector.overloaded_at
+        if at is None:
+            return None
+        t = self._time(at)
+        if self._anchor[1] - t > OVERLOAD_SHOWN_S:
+            return None
+        return {"t": round(t, 2), "freq_hz": self.detector.overload_hz,
+                "message": self._overloaded()}  # fmt: skip
+
+    def _overloaded(self) -> str:
+        return overloaded(f"Receiver {receiver_name(self.tuning.device.id)}")
 
     @property
     def active(self) -> list[int]:
@@ -159,11 +189,16 @@ class Catcher:
         deaf, said = self.deaf_s, self._deaf
         now = self._anchor[1]
         if deaf is not None and said is not None:
-            self._deaf = (max(said[0], deaf), said[1])
+            self._deaf = (max(said[0], deaf), said[1], said[2])
         elif deaf is not None and deaf >= SAY_DEAF_S:
-            self._deaf = (deaf, self.detector.relearnt)
-            event(log, "watch_deaf", level=logging.WARNING, station=self.station_id)
-            publish(Hearing(self.station_id, now, self.warning))
+            d = self.detector
+            reason = d.deaf_reason
+            self._deaf = (deaf, d.relearnt, reason)
+            on = d.overload_hz if reason == "overload" else None
+            where = self.where(mhz=on / 1e6) if on else {}
+            event(log, "watch_deaf", level=logging.WARNING, station=self.station_id,
+                  reason=reason, clipped=round(d.clipped, 4), **where)  # fmt: skip
+            publish(Hearing(self.station_id, now, self.warning, reason=reason))
         elif deaf is None and said is not None:
             self._deaf = None
             learnt = self.detector.relearnt > said[1]  # the floors, afresh: the noise stayed
@@ -173,8 +208,9 @@ class Catcher:
                 station=self.station_id,
                 deaf_s=round(said[0], 1),
                 learnt=learnt,
+                reason=said[2],
             )
-            publish(Hearing(self.station_id, now, None, said[0], learnt))
+            publish(Hearing(self.station_id, now, None, said[0], learnt, said[2]))
 
     def stop(self) -> list[Catch]:
         """The catches still running, cut where the IQ ends (the dongle stopped)."""
@@ -225,7 +261,8 @@ class Catcher:
             audio=audio.astype(np.float32, copy=False),
             snr_db=round(max(rec.activity.snr_db, a.snr_db), 1),
             peak_db=round(max(rec.activity.power_db, a.power_db), 1),
-            reason=a.reason,
+            # Overloaded says more about what was heard (and what to do) than how it ended.
+            reason="overload" if rec.activity.overload or a.overload else a.reason,
         )
 
 
@@ -298,7 +335,7 @@ class WatchSource:
         finally:
             self._device.detach(self)
             self._health.connected = False
-            self._health.squelch_open = self._health.warning = None
+            self._health.squelch_open = self._health.warning = self._health.deaf = None
             # Caught but not yet heard by the VAD, or still being caught: still caught, so
             # still logged, as far as the IQ went.
             if self._heard is not None:
@@ -374,7 +411,8 @@ class WatchSource:
         h.signal_db = round(float(self._catcher.detector.power_db.max()), 1)
         h.clipped = self._device.clipped
         h.squelch_open = bool(self._catcher.active)
-        h.warning = self._catcher.warning
+        h.warning, h.deaf = self._catcher.warning, self._catcher.deaf
+        h.overload = self._catcher.overload
         for catch in caught:
             self._queue(catch)
 

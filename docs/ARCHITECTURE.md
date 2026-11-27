@@ -134,6 +134,13 @@ stations), never one per item. `status()` shows it:
 - per station, `dropped: {"asr": n, "mt": n, "rules": n}`: utterances never written down, lines
   left untranslated and LLM rule checks that couldn't run, over the last ten minutes (any reason,
   a model that raised included);
+- per watch (`sources/watch.py`), while it has been deaf for 3 s or more, `warning` (a sentence)
+  and `deaf: "overload"|"interference"`; and from the moment a transmitter close by overloads its
+  receiver until 10 minutes after the overload ended, `overload: {"t": epoch seconds of its last
+  moment, "freq_hz": the channel it was caught on, "message": "A very strong signal nearby
+  overloaded Receiver A. Move the radio further away, or lower the gain in Settings →
+  Receivers."}`, for the page to show in the watch's column and under Caught here (a kind of
+  radio that keeps nothing lists no catch there);
 - overall, `load: {"state": "ok"|"behind"|"overloaded", "reason": sentence|null}`. `overloaded`
   when an LLM rule check or an utterance was lost for lack of room in the last ten minutes, text
   is 2 minutes behind, an LLM rule check has waited 2 minutes, translation is 5 minutes behind,
@@ -789,9 +796,23 @@ jump to its level. A start 20 dB under a busy channel within three channels, or 
 about the centre (a receiver shows a weaker mirror of strong signals), is suppressed. While half the
 channels (at least four) rise at once, and for 0.5 s after, nothing starts and the floors hold;
 after 10 s of that without a break the floors are learnt afresh from the median of the next 0.5 s,
-as at the start. Deafness of 3 s or more is logged once (`watch_deaf`, `watch_hearing`), shown as
-the station's `warning` in the status, and published as a `Hearing` each way, which `radio watch`
-prints. A start opens a `NarrowbandDemodulator` for its channel fed
+as at the start. Unless one channel stands 15 dB (`OVERLOAD_DB`) over every channel beyond its own
+reach (three channels either side, those overlapping it, and those about its mirror and about the
+third-order copy its I/Q clipping makes at −3 times its offset, folded into the band): that is
+`overload`, a transmitter close by. That channel may start and nothing else does, the floors hold,
+and once it has started the time doesn't count towards learning them afresh. The same holds while
+1 % or more of a block's 8-bit samples are at the converter's limits (`CLIPPING`) with a channel on
+top and no rise: the copies then land on a few channels of their own. A catch busy during an
+overload has `reason` `overload`, which wins over `carrier` and `stopped`. The margin is measured on
+synthetic IQ: a walkie-talkie overloading the receiver stands 26 to 48 dB over the rest where the
+converter clips (17.5 dB at worst without clipping); white, sloped and comb noise, USB clicks and a
+carrier clipping from outside the window never more than 12 dB in a frame. Deafness of 3 s or more
+is logged once (`watch_deaf` with `reason`, `overload` or `interference`, and the `clipped` share;
+`watch_hearing` with the same `reason`), shown as the station's `warning` (a sentence) and `deaf`
+(the reason) in the status, and published as a `Hearing` (with `reason`) each way, which
+`radio watch` prints; for an overload it prints what to do, with `--gain`, and an overloaded catch
+too short to make the watch deaf prints it with the catch. The status also carries `overload`
+(see `status()`, above). A start opens a `NarrowbandDemodulator` for its channel fed
 from the history 0.3 s before the first frame above the floor (but never before the previous catch's
 audio on that channel ended), at most four at once (`watch_missed` otherwise); an end gives a
 `Catch` with the audio up to 0.3 s after. The dongle's thread queues catches for the station's (16

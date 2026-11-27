@@ -252,8 +252,116 @@ def test_a_lasting_rise_of_the_noise_is_learnt_and_said(caplog: pytest.LogCaptur
     assert max(d or 0 for d in deaf) == pytest.approx(10.0, abs=0.6) and deaf[-1] is None
     assert [g.freq_hz for g in got] == [PMR[3]]
     assert got[0].t_start == pytest.approx(T0 + 15.0, abs=0.1)
-    said = [r.getMessage() for r in caplog.records if r.getMessage().startswith("watch_")]
-    assert [m.split()[0] for m in said] == ["watch_deaf", "watch_hearing"]
+    said = [r for r in caplog.records if r.getMessage().startswith("watch_")]
+    assert [r.getMessage().split()[0] for r in said] == ["watch_deaf", "watch_hearing"]
+    assert [r.fields["reason"] for r in said] == ["interference", "interference"]
+
+
+def keyed_close(
+    freq_hz: int,
+    start_s: float,
+    stop_s: float,
+    *,
+    centre: int = BELOW,
+    amp: float = 2.0,
+    rise: float = 0.15,
+    intermod: bool = True,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """A walkie-talkie keyed a few metres from the antenna (a 1 kHz tone at 2 kHz deviation),
+    with what it does to the receiver: ``amp`` times full scale, so the converter clips, and
+    across the window noise (``rise``: about 24 dB over ``air``'s 0.01) and an intermodulation
+    copy at twice the deviation, 100 kHz up and 30 dB down."""
+    rng = np.random.default_rng(7)
+
+    def overload(t: np.ndarray) -> np.ndarray:
+        on = (t >= start_s) & (t < stop_s)
+        x = amp * np.exp(1j * (2 * np.pi * (freq_hz - centre) * t + 2 * np.sin(2e3 * np.pi * t)))
+        x = x + rise * (rng.standard_normal(len(t)) + 1j * rng.standard_normal(len(t)))
+        if intermod:
+            copy = 2 * np.pi * (freq_hz + 100_000 - centre) * t + 4 * np.sin(2e3 * np.pi * t)
+            x = x + 0.03 * amp * np.exp(1j * copy)
+        return on * x
+
+    return overload
+
+
+def test_a_walkie_talkie_overloading_the_receiver_is_caught_on_its_channel(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="wavescribe")
+    c = catcher()
+    risen, got = [], []
+    for iq, t_end in air(8.5, [], noise=0.01, extra=keyed_close(PMR[3], 2.0, 6.0)):
+        got += c.feed(iq, t_end)
+        risen.append(int((c.detector.snr_db >= c.detector.threshold_db).sum()))
+    # The whole window rose with it, as with interference, where the watch used to stay deaf.
+    assert max(risen) == len(PMR)
+    [caught] = got
+    assert caught.freq_hz == PMR[3] and caught.reason == "overload"
+    assert caught.t_start == pytest.approx(T0 + 2.0, abs=0.1)
+    assert caught.duration == pytest.approx(4.0, abs=0.15)
+    assert dominant_hz(caught.audio) == pytest.approx(1_000, abs=10)  # FM comes through clipping
+    said = {r.getMessage(): r.fields for r in caplog.records if r.getMessage().startswith("watch")}
+    assert said["watch_deaf"]["reason"] == "overload" and said["watch_deaf"]["clipped"] > 0.1
+    assert "mhz" not in said["watch_deaf"]  # walkie-talkies: the log keeps no frequency
+    assert said["watch_hearing"]["reason"] == "overload" and not said["watch_hearing"]["learnt"]
+    assert c.deaf_s is None and c.overload is not None
+    assert c.overload["freq_hz"] == PMR[3]
+    assert c.overload["t"] == pytest.approx(T0 + 6.0, abs=0.1)
+
+
+def test_an_overload_longer_than_it_takes_to_learn_the_noise_is_one_catch() -> None:
+    # Interference this long would be learnt as the new floor; a transmission isn't, so it is
+    # caught all through, and a weak one just after it is heard over the floor as it was.
+    after = Burst(PMR[9], 16.5, 18.0, amp=0.05)
+    c = catcher()
+    got = run(c, air(19.5, [after], noise=0.01, extra=keyed_close(PMR[12], 1.0, 15.0)))
+    assert [(g.freq_hz, g.reason) for g in got] == [(PMR[12], "overload"), (PMR[9], None)]
+    assert got[0].duration == pytest.approx(14.0, abs=0.15)
+    assert c.detector.relearnt == 0
+
+
+@pytest.mark.parametrize("window", ["pmr446", "2 m, about the centre"])
+def test_clipping_hard_catches_the_signal_and_none_of_its_copies(window: str) -> None:
+    # The converter's clipping copies a strong signal elsewhere in the window, 10 to 25 dB under
+    # it: the third-order copy at three times its offset the other way, folded back into the
+    # band, which a window about the centre has inside it.
+    if window == "pmr446":
+        c, centre, f = catcher(), BELOW, PMR[1]
+    else:
+        centre, f = 145_006_250, 145_100_000
+        channels = tuple(144_600_000 + 12_500 * k for k in range(65))
+        device = SdrDevice("a", "00001234", centre, 30.0, FS)
+        watch = Watch((144.6, 145.4), channels, 12_500)
+        c = Catcher(SdrTuning(device, channels[32], mode="nfm", watch=watch))
+    loud = keyed_close(f, 1.0, 4.0, centre=centre, amp=3.0, rise=0.0, intermod=False)
+    got, copies = [], []
+    for iq, t_end in air(6.5, [], centre=centre, noise=0.01, extra=loud):
+        got += c.feed(iq, t_end)
+        others = c.detector.snr_db[np.array(c.watch.channels) != f]
+        copies.append(float(others.max()))
+    assert max(copies) > 40  # the copies are there, well over the noise
+    assert [(g.freq_hz, g.reason) for g in got] == [(f, "overload")]
+
+
+def test_a_window_rising_with_no_channel_on_top_stays_deaf() -> None:
+    # Two walkie-talkies close by at once, a few dB apart: nothing stands over the rest.
+    both = [keyed_close(PMR[3], 1.0, 4.0), keyed_close(PMR[11], 1.0, 4.0, amp=1.6)]
+    c = catcher()
+    reasons = set()
+    for iq, t_end in air(6.5, [], noise=0.01, extra=lambda t: both[0](t) + both[1](t)):
+        assert c.feed(iq, t_end) == []
+        reasons.add(c.detector.deaf_reason)
+    assert reasons == {None, "interference"} and c.overload is None
+
+    # A switching supply: lines every 50 kHz on a raised floor.
+    def comb(t: np.ndarray) -> np.ndarray:
+        on = (t >= 1.0) & (t < 4.0)
+        lines = sum(np.exp(2j * np.pi * (f - BELOW) * t) for f in PMR[1::4])
+        return on * (0.05 * lines + louder(0.0)(t))
+
+    c = catcher()
+    assert run(c, air(6.5, [], noise=0.01, extra=comb)) == [] and c.overload is None
 
 
 def test_the_history_gives_back_the_dongles_samples() -> None:

@@ -770,6 +770,10 @@ class Pipeline:
                 stations[sid]["squelch_open"] = h.squelch_open
             if h.warning is not None:
                 stations[sid]["warning"] = h.warning
+            if h.deaf is not None:  # a watch: why it is deaf, "overload" or "interference"
+                stations[sid]["deaf"] = h.deaf
+            if h.overload is not None:  # a watch: its last overload, {t, freq_hz, message}
+                stations[sid]["overload"] = h.overload
         return {
             "ready": self.ready,
             "stations": stations,

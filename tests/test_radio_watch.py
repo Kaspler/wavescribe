@@ -403,6 +403,68 @@ def test_a_watch_made_deaf_by_noise_says_so_in_its_health() -> None:
     assert deaf.station_id == "walkies" and deaf.warning and deaf.warning.startswith("deaf")
     assert hearing.warning is None and hearing.learnt and deaf.t < hearing.t
     assert hearing.deaf_s == pytest.approx(10, abs=0.5)
+    assert deaf.reason == hearing.reason == "interference"
+
+
+def test_a_watch_overloaded_by_a_walkie_talkie_says_so_and_what_to_do() -> None:
+    from tests.test_radio_watch_detect import keyed_close
+
+    station = watch_station()
+    source = WatchSource(station.id, station.sdr, device=FakeDevice([]))
+    said = watches.overloaded("Receiver A")
+    assert said == ("A very strong signal nearby overloaded Receiver A. Move the radio further "
+                    "away, or lower the gain in Settings → Receivers.")  # fmt: skip
+    seen = []
+    heard: list[watches.Hearing] = []
+    stop_listening = watches.subscribe_hearing(heard.append)
+    try:
+        for i, (iq, t_end) in enumerate(air(9.0, [], noise=0.01, extra=keyed_close(PMR[5], 1, 6))):
+            source._feed(iq, t_end, i == 0)
+            h = source.health
+            seen.append((h.deaf, h.warning, h.overload))
+    finally:
+        stop_listening()
+    # While it lasts: why the watch is deaf, and what to do; after it, when it was and where.
+    assert ("overload", said) in {(d, w) for d, w, _ in seen}
+    deaf, warning, overload = seen[-1]
+    assert deaf is None and warning is None
+    assert overload == {"t": pytest.approx(T0 + 6.0, abs=0.1), "freq_hz": PMR[5], "message": said}
+    assert [(h.reason, h.warning) for h in heard] == [("overload", said), ("overload", None)]
+    caught = source._q.get_nowait()
+    assert caught is not None and caught.freq_hz == PMR[5] and caught.reason == "overload"
+
+
+def test_the_page_hears_of_a_watchs_overload_in_its_status() -> None:
+    from tests.test_radio_watch_detect import keyed_close
+
+    station = watch_station()
+    start = time.time() - 9.0  # air that ends now
+    loud = keyed_close(PMR[5], 1.0, 6.0)
+    blocks = [(iq, start + t_end - T0) for iq, t_end in air(9.0, [], noise=0.01, extra=loud)]
+    device = FakeDevice(blocks)
+    pipeline = Pipeline(
+        [station],
+        Plan(vad=(ENTRY, Path()), asr={station.id: (ENTRY, Path())}, mt=None),
+        lambda _r: None,
+        source_factory=lambda st: WatchSource(st.id, st.sdr, device=device),
+        vad_factory=lambda _path: EnergyVad(),
+        transcriber_factory=lambda _e, _p: Speaker(),
+    )
+    runner = threading.Thread(target=pipeline.run, daemon=True)
+    runner.start()
+    try:
+        deadline = time.monotonic() + 20
+        while device.feeding is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert device.feeding is not None
+        device.feeding.join(20)  # all of the air heard
+        status = pipeline.status()["stations"][station.id]
+    finally:
+        pipeline.stop(drain=True)
+        runner.join(10)
+    assert status["overload"]["freq_hz"] == PMR[5]
+    assert status["overload"]["message"] == watches.overloaded("Receiver A")
+    assert "deaf" not in status and "warning" not in status  # over: the watch hears again
 
 
 def test_a_watch_uses_a_spur_list_only_where_it_says_how_finely_it_was_learnt(

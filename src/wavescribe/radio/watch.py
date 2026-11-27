@@ -296,7 +296,10 @@ class Catch:
     audio: np.ndarray = field(repr=False)  # 16 kHz mono float32
     snr_db: float = 0.0  # the strongest it was over the channel's noise floor
     peak_db: float = 0.0  # the channel's strongest power, dBFS
-    reason: str | None = None  # "carrier": on for minutes, learnt into the noise floor
+    # "overload": heard through a receiver it overloaded (a transmitter close by); else how it
+    # ended, if not by going quiet: "carrier" (on for minutes, learnt into the noise floor) or
+    # "stopped" (the watch or its receiver stopped).
+    reason: str | None = None
     station_id: str = ""
     privacy: str = "private"  # the watch's class: what is kept of it (radio/bandplan.py)
     band: str | None = None  # the band plan entry the frequency is in
@@ -371,16 +374,26 @@ def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
     return rows
 
 
+def overloaded(receiver: str, where: str = "in Settings → Receivers") -> str:
+    """What a watch says when a transmitter close by overloads its receiver: ``receiver`` as
+    the sentence names it ("Receiver A"), and ``where`` its gain is set."""
+    return (f"A very strong signal nearby overloaded {receiver}. Move the radio further away, "
+            f"or lower the gain {where}.")  # fmt: skip
+
+
 @dataclass(frozen=True)
 class Hearing:
-    """A watch made deaf by noise across its whole window (``warning`` says so), or hearing
-    again (``warning`` None) after ``deaf_s``, with the noise learnt as the floor if it stayed."""
+    """A watch made deaf across its whole window (``warning`` says so), or hearing again
+    (``warning`` None) after ``deaf_s``, with the noise learnt as the floor if it stayed.
+    ``reason``: "overload" (a transmitter close by, caught on its channel; nothing else is) or
+    "interference" (noise)."""
 
     station_id: str
     t: float  # when (epoch seconds)
     warning: str | None
     deaf_s: float = 0.0
     learnt: bool = False
+    reason: str | None = None
 
 
 # Who hears about catches: the store keeps them, the command line prints them. A catch is

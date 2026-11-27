@@ -356,6 +356,33 @@ def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(
     assert "again" not in capsys.readouterr().err
 
 
+def test_radio_watch_says_what_to_do_when_a_walkie_talkie_overloads_the_receiver(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from wavescribe.radio.watch import Hearing, overloaded
+    from wavescribe.radio.watch_cli import CatchPrinter
+
+    printer = CatchPrinter(receiver="receiver A")
+    said = ("A very strong signal nearby overloaded receiver A. Move the radio further away, "
+            "or lower the gain with --gain.")  # fmt: skip
+
+    def caught(t: float) -> Catch:
+        audio = np.zeros(16_000, dtype=np.float32)
+        return Catch(446_006_250, "nfm", t, t + 2.0, t - 0.3, audio, 66.0, reason="overload",
+                     label="PMR446 walkie-talkies, channel 1", voice=True)  # fmt: skip
+
+    printer(caught(1_000.0))  # too short to be said as deafness: said with its catch
+    out, err = capsys.readouterr()
+    assert out.rstrip().endswith("2.0 s  66 dB  voice, receiver overloaded")
+    assert err.endswith(f"] {said}\n")
+    # Longer: said once, when the watch goes deaf, not again with the catch.
+    printer.hearing(Hearing("watch", 1_013.0, overloaded("Receiver A"), reason="overload"))
+    printer(caught(1_010.0))
+    printer.hearing(Hearing("watch", 1_014.0, None, 4.4, reason="overload"))
+    err = capsys.readouterr().err
+    assert err.count(said) == 1 and "] hearing again after 4 s\n" in err
+
+
 # -- the routes --------------------------------------------------------------------------------
 
 

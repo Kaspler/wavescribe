@@ -24,6 +24,8 @@ class SourceHealth:
     rds: dict[str, object] | None = None  # SDR FM only: what the station says about itself
     squelch_open: bool | None = None  # SDR NFM/AM only: someone is transmitting
     warning: str | None = None  # what keeps it from hearing right now (a watch made deaf)
+    deaf: str | None = None  # a watch, with ``warning``: why, "overload" or "interference"
+    overload: dict[str, object] | None = None  # a watch: its last overload (sources/watch.py)
     error: str | None = None  # why it is down and trying again, while it is (streams)
     retry_at: float | None = None  # time.monotonic() of the next try, while it is down
 

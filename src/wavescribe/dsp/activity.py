@@ -18,11 +18,19 @@ A strong signal also shows where it isn't: on its neighbours (its own splatter a
 transmitter's noise) and, weaker, mirrored about the receiver's centre. A start 20 dB or more
 under a signal close by, or under its own mirror image, is taken for that signal's shadow.
 Where channels overlap (a 25 kHz channel on a 5 kHz raster), only the strongest of the
-overlapping ones starts. Many channels rising together is interference or overload (USB noise,
-a strong signal just outside the window), not traffic: while it lasts nothing starts and the
-floors hold. Ten seconds of it without a break is no passing interference but the noise itself
-risen (a charger switched on nearby), so the floors are learnt afresh, as at the start, rather
-than the watch staying deaf for good.
+overlapping ones starts. Many channels rising together is interference (USB noise, a strong
+signal just outside the window), not traffic: while it lasts nothing starts and the floors hold.
+Ten seconds of it without a break is no passing interference but the noise itself risen (a
+charger switched on nearby), so the floors are learnt afresh, as at the start, rather than the
+watch staying deaf for good.
+
+Unless one channel towers over the rest: a walkie-talkie keyed a few metres from the antenna
+overloads the dongle (its converter clips, its tuner mixes), and the whole window rises with the
+products, tens of dB under the transmission itself. That channel is caught, marked ``overload``,
+and nothing else starts while it lasts: the rest is its products. The same holds while the
+converter clips hard with no rise, where the products land on a few channels of their own. The
+floors hold, and the time doesn't count towards learning them afresh: the rise is the
+transmission's, and ends with it.
 
 Times are counted in samples since the first block, so the caller can find a transmission's
 beginning in its own history of the IQ and demodulate it from there.
@@ -52,6 +60,15 @@ SHADOW_CHANNELS = 3  # how far "nearby" reaches, in channels
 BROADBAND = 0.5  # this share of the channels rising at once (and at least four): interference
 CLEAR_S = 0.5  # interference is over once this long has passed without it
 BLIND_S = 10.0  # interference this long without a break: the noise rose, learnt afresh
+# The strongest channel this far over every channel beyond its own splatter, while the window
+# rises (or the converter clips hard): a transmission close by overloading the receiver, not
+# interference. Measured on synthetic IQ: a walkie-talkie overloading the receiver stands 26 to
+# 48 dB over the rest where the converter clips, 17.5 dB in the worst case without clipping (the
+# rest lifted 40 dB); noise, slopes, combs, USB clicks and a carrier clipping from outside the
+# window never more than 12 dB in any frame, under 5 dB as a rule.
+OVERLOAD_DB = 15.0
+CLIPPING = 0.01  # this share of the 8-bit samples at the converter's limits: clipping hard
+CLIP_LEVEL = 0.992  # |I| or |Q| this high is a sample at 0 or 255 (``iq_from_u8``)
 
 
 @dataclass(frozen=True)
@@ -67,6 +84,7 @@ class Activity:
     snr_db: float = 0.0  # the strongest it was over its noise floor
     power_db: float = 0.0  # the channel's strongest power, dBFS
     reason: str | None = None  # an end that wasn't the signal going: "carrier"
+    overload: bool = False  # the receiver was overloaded while it lasted, so far
 
 
 @dataclass
@@ -77,6 +95,7 @@ class _Channel:
     last: int = 0  # end of the last frame above, while busy
     snr_db: float = 0.0
     power_db: float = -200.0
+    overload: bool = False
 
 
 class ActivityDetector:
@@ -144,6 +163,16 @@ class ActivityDetector:
         apart = np.abs(np.subtract.outer(self.freqs, self.freqs)).astype(float)
         self._nearby = (apart > 0) & (apart <= SHADOW_CHANNELS * max(step, channel_hz))
         self._overlapping = (apart > 0) & (apart < channel_hz)
+        # Where an overloaded receiver makes copies of a signal itself: its mirror about the
+        # centre, and the third-order product of its I and Q clipping at three times its offset
+        # the other way (folded back into the band), only 10 to 15 dB under it. Channels that
+        # near either are no measure of how far it stands over the rest.
+        offsets_hz = np.array(self.freqs, dtype=float) - center_hz
+        reach = SHADOW_CHANNELS * max(step, channel_hz)
+        self._copies = np.zeros((len(self.freqs), len(self.freqs)), dtype=bool)
+        for k in (-1, -3):
+            at = (k * offsets_hz + rate / 2) % rate - rate / 2
+            self._copies |= np.abs(at[:, None] - offsets_hz[None, :]) <= reach
 
         self._floor: np.ndarray | None = None
         self._first_frames: list[np.ndarray] = []
@@ -154,7 +183,12 @@ class ActivityDetector:
         self._frame_start = 0
         self._channels = [_Channel() for _ in self.freqs]
         self._deaf_since: int | None = None  # where interference across the window began
+        self._blind_since: int | None = None  # and where it last began with no channel on top
         self._interfered = 0  # the end of the last frame with interference
+        self.deaf_reason: str | None = None  # while deaf: "overload" or "interference"
+        self.overloaded_at: int | None = None  # the end of the last frame overloaded
+        self.overload_hz: int | None = None  # the channel on top then
+        self.clipped = 0.0  # share of the last block's samples at the converter's limits
         self.relearnt = 0  # times the floors were learnt afresh after the noise rose
         self.snr_db = np.zeros(len(self.freqs))  # each channel over its floor, last frame
         self.power_db = np.full(len(self.freqs), -200.0)  # each channel's power, last frame
@@ -169,12 +203,18 @@ class ActivityDetector:
 
     @property
     def deaf_s(self) -> float | None:
-        """How long interference across the window has kept anything from starting, or None."""
+        """How long interference or overload across the window has kept anything (but the
+        channel on top, overloaded) from starting, or None; ``deaf_reason`` says which."""
         if self._deaf_since is None:
             return None
         return (self._frame_start - self._deaf_since) / self.rate
 
     def feed(self, iq: np.ndarray) -> list[Activity]:
+        if len(iq):
+            parts = (
+                iq.view(np.float32) if iq.dtype == np.complex64 else np.stack([iq.real, iq.imag])
+            )
+            self.clipped = float(np.count_nonzero(np.abs(parts) > CLIP_LEVEL)) / (2 * len(iq))
         x = np.concatenate([self._pending, iq]) if len(self._pending) else iq
         whole = len(x) // self._n
         self._pending = x[whole * self._n :].copy()
@@ -215,12 +255,22 @@ class ActivityDetector:
         holding = self.snr_db >= self.threshold_db - STAY_DB
         states = [c.state for c in self._channels]
         rising_now = sum(1 for i in np.flatnonzero(above) if states[i] != "busy")
-        if rising_now >= max(4, BROADBAND * len(self.freqs)):
+        risen = rising_now >= max(4, BROADBAND * len(self.freqs))
+        # The channel on top of an overload: it may start, and nothing else.
+        top = self._on_top(above) if risen or self.clipped >= CLIPPING else None
+        if top is not None or risen:
             self._interfered = end
-            if self._deaf_since is None:
-                self._deaf_since = start
-            elif end - self._deaf_since >= self._blind:
-                self._deaf_since = None
+            self._deaf_since = start if self._deaf_since is None else self._deaf_since
+            self.deaf_reason = "overload" if top is not None else "interference"
+        if top is not None and states[top] == "busy":
+            # It started: a transmission close by, not a passing peak, and the rise is its own.
+            self._blind_since = None
+            self.overloaded_at, self.overload_hz = end, self.freqs[top]
+        elif risen:
+            if self._blind_since is None:
+                self._blind_since = start
+            elif end - self._blind_since >= self._blind:
+                self._deaf_since = self._blind_since = self.deaf_reason = None
                 self.relearnt += 1
                 self._floor = None  # from the next frames, as at the start
                 for c in self._channels:
@@ -228,13 +278,14 @@ class ActivityDetector:
                         c.state, c.frames = "quiet", 0
                 return []
         elif self._deaf_since is not None and end - self._interfered >= self._clear:
-            self._deaf_since = None
+            self._deaf_since = self._blind_since = self.deaf_reason = None
         deaf = self._deaf_since is not None
 
         out: list[Activity] = []
         for i in np.flatnonzero(above | np.array([s != "quiet" for s in states])):
             c = self._channels[i]
             if c.state == "busy":
+                c.overload |= top is not None
                 if holding[i]:
                     c.last = end
                     c.snr_db = max(c.snr_db, float(self.snr_db[i]))
@@ -245,12 +296,13 @@ class ActivityDetector:
                 elif end - c.last >= self._hang:
                     out.append(self._end(i))
                 continue
-            if not above[i] or deaf:
-                c.state, c.frames = "quiet", 0
+            if not above[i] or (deaf and i != top):
+                c.state, c.frames, c.overload = "quiet", 0, False
                 continue
             if c.state == "quiet":
                 c.state, c.frames, c.first = "rising", 0, start
                 c.snr_db, c.power_db = -200.0, -200.0
+            c.overload |= top is not None
             c.frames += 1
             c.snr_db = max(c.snr_db, float(self.snr_db[i]))
             c.power_db = max(c.power_db, float(self.power_db[i]))
@@ -263,7 +315,13 @@ class ActivityDetector:
             c.state, c.last = "busy", end
             out.append(
                 Activity(
-                    "start", int(i), self.freqs[i], c.first, snr_db=c.snr_db, power_db=c.power_db
+                    "start",
+                    int(i),
+                    self.freqs[i],
+                    c.first,
+                    snr_db=c.snr_db,
+                    power_db=c.power_db,
+                    overload=c.overload,
                 )
             )
 
@@ -275,6 +333,23 @@ class ActivityDetector:
             floor[learn] += rate[learn] * (power[learn] - floor[learn])
             np.maximum(floor, 1e-20, out=floor)
         return out
+
+    def _on_top(self, above: np.ndarray) -> int | None:
+        """The channel a transmission close by overloads the receiver from: the strongest, when
+        it stands ``OVERLOAD_DB`` over every channel beyond its own splatter (three channels
+        either side, and those overlapping it) and its copies (``_copies``), wherever they are
+        in the window. None when no channel does: interference, or traffic on several channels."""
+        snr = np.where(self._measured, self.snr_db, -np.inf)
+        i = int(np.argmax(snr))
+        if not above[i]:
+            return None
+        rest = self._measured & ~self._overlapping[i]
+        rest[i] = False
+        if (rest & ~self._nearby[i] & ~self._copies[i]).any():  # a window wider than those
+            rest &= ~self._nearby[i] & ~self._copies[i]
+        if not rest.any():
+            return None
+        return i if snr[i] - snr[rest].max() >= OVERLOAD_DB else None
 
     def _shadowed(self, i: int, above: np.ndarray, mirror_db: np.ndarray) -> bool:
         """Whether channel ``i`` rising is the shadow of a stronger signal: its own splatter
@@ -295,7 +370,9 @@ class ActivityDetector:
     def _end(self, i: int, reason: str | None = None) -> Activity:
         c = self._channels[i]
         kind = "short" if c.last - c.first < self._min and reason != "carrier" else "end"
-        out = Activity(kind, i, self.freqs[i], c.first, c.last, c.snr_db, c.power_db, reason)
+        out = Activity(
+            kind, i, self.freqs[i], c.first, c.last, c.snr_db, c.power_db, reason, c.overload
+        )
         self._channels[i] = _Channel()
         return out
 

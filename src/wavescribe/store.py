@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS catches (
     snr_db REAL,
     peak_db REAL,
     voice INTEGER,                      -- 1 someone spoke, 0 nobody did, NULL not checked
-    reason TEXT,                        -- 'carrier': on for minutes, learnt into the floor
+    reason TEXT,                        -- 'carrier': on for minutes; 'overload': too close
     privacy TEXT NOT NULL               -- the watch's class, which decides how long it stays
 );
 CREATE INDEX IF NOT EXISTS catches_time ON catches (t_start);
