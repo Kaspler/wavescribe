@@ -9,12 +9,17 @@ import { ago, day, hm } from "../lib/time";
 import { ActButton, Advanced, Field, Input, Lamp, LinkButton, Section, Table, Tag, cx } from "../components/ui";
 import { T } from "../reading/strings";
 import { type Any, bytes, get, mb, num, post, secs, useEvery, useLoad } from "./api";
+import { checksLine } from "./checks";
 
 const kept = (v: string, old: number | null) => (v.trim() === "" ? old : +v);
 
 export function Status() {
   const { data: s, error, reload } = useLoad(() => get("/status"));
   useEvery(5000, reload);
+  // Whether a rule that is on asks the model to confirm its matches: the checks' line is said
+  // then, even before the first check. Rules change on another page, so once is enough.
+  const { data: rules } = useLoad(() => get("/rules").then((v) => v.rules as Any[]).catch(() => [] as Any[]));
+  const verifyOn = !!rules?.some((r) => r.enabled && r.verify);
   if (!s) return <p className="m-loading">{error ? `Couldn't load the status: ${error}` : "Loading…"}</p>;
   return (
     <>
@@ -22,7 +27,7 @@ export function Status() {
       <Machine s={s} />
       {Object.keys(s.outputs || {}).length > 0 && <OutputHealth outs={s.outputs} />}
       <Advanced id="health-pipeline" label="Models and queues">
-        <Pipeline s={s} />
+        <Pipeline s={s} verifyOn={verifyOn} />
       </Advanced>
     </>
   );
@@ -195,12 +200,13 @@ function Trace({ values, times, max, unit, label }: { values: (number | null)[];
   );
 }
 
-function Pipeline({ s }: { s: Any }) {
+function Pipeline({ s, verifyOn }: { s: Any; verifyOn: boolean }) {
   const pl = s.pipeline || {};
   const models = pl.models || {};
   const errors = Object.entries(models.errors || {});
   const dropped = Object.entries(pl.dropped || {});
   const llm = s.llm_rules;
+  const checks = llm ? checksLine(llm.verify, verifyOn) : null;
   return (
     <Section id="st-pipe" title="What's loaded"
              description={`Speech: ${(models.asr || []).join(", ") || "none loaded"} · translation: ${models.mt || "loads when first needed"}`}>
@@ -213,6 +219,7 @@ function Pipeline({ s }: { s: Any }) {
       <p className="m-hint">
         {dropped.length ? `Dropped since start: ${dropped.map(([k, v]) => `${k} ${v}`).join(", ")}. ` : "Nothing dropped since start. "}
         {llm && `Described rules: ${llm.checks} checks, ${llm.matches} matches${llm.last_ms ? `, the last took ${(llm.last_ms / 1000).toFixed(1)} s` : ""}${llm.error ? `, error: ${llm.error}` : ""}. `}
+        {checks && `${checks} `}
         This node: {s.node?.name} ({s.node?.url || location.origin}).
       </p>
     </Section>

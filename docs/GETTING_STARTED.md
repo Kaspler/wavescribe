@@ -710,7 +710,10 @@ passes that on to Wavescribe, but not the SIGINT that Ctrl-C sends in a Terminal
 
 - Settings → **Health** shows memory, processor and graphics load, battery, disk, and how far
   behind each station is. If the Mac struggles, translate fewer stations: translation is the
-  heaviest part.
+  heaviest part. Under *Models and queues*, while a rule has *Let the model confirm* on (or
+  once a check was made), it counts the word matches the model was asked to confirm since
+  Wavescribe started: confirmed, rejected, not run and why (timed out, failed, model busy, no
+  model loaded), and held to be asked again ([section 7](#7-get-alerts)).
 - **Check everything** with `uv run wavescribe doctor` ([Troubleshooting](#troubleshooting)).
 - **Update:** stop Wavescribe, then `git pull` (or download the ZIP again) and `uv sync`. With
   the service, run `uv run wavescribe service install` again afterwards to restart it on the

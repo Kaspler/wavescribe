@@ -54,13 +54,14 @@ f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 d6b4328d5ad20a75a99f0a145baebcce8d9a3e39 frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
 c138c9b65a912f941b656ac7dfd36410bbabe86e frontend/src/manage/Stations.tsx
-9c29a5a64234f7bcbc04b47dd6ba12d2e9254a94 frontend/src/manage/Status.tsx
+5349b36cb15b9033f93e3502956d4d1f65bcfbb2 frontend/src/manage/Status.tsx
 400870632417f97c3e30bf57f952230978ae7d12 frontend/src/manage/SummarySchedule.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 995950933ff4308317d22f1aa5a40406bc36fafa frontend/src/manage/bandplan.ts
 16baa601a050446286a84ab9edd1f44752f442d7 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
+0f8b4e87a0bf15d0d9147f1eb7622150eeda1f8e frontend/src/manage/checks.ts
 8462bc03da016801dfd7271eefbb09367d9cdfc9 frontend/src/manage/dial.ts
 5809d78929ef5668680544b0366c7c8ad02bb409 frontend/src/manage/drafts.ts
 566be0651cd586525b96998225f1d504a261e47d frontend/src/manage/manage.css
@@ -107,6 +108,7 @@ a57655d576ebf8eb77ee500e59d01afc6ba38c1f frontend/tests/auth.test.mjs
 3aa5b94f8179c81ab92f627b1192032b51754fe4 frontend/tests/behind.test.mjs
 e92d3893e448ccf8bb74903a3d9c2ad9e0b5ca92 frontend/tests/catches.test.mjs
 b8346db81c1de59110f722a54d1476a7c987e0a9 frontend/tests/channels.test.mjs
+e11e0ac519a80d2b24f64c9ab337d6dcb8beb600 frontend/tests/checks.test.mjs
 cf67357d79e25e10e9b0e9e3299c3e3f3973c8cd frontend/tests/colNote.test.mjs
 ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
 25416519f29f0bc1ce9095757f1c28fa0753b57e frontend/tests/digest.test.mjs
