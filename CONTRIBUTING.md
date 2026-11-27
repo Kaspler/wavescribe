@@ -95,7 +95,9 @@ radio, and the radio code is tested on synthetic signals.
   models compared on recorded clips)
 - **The commands:** `cli.py` builds every command; [docs/COMMANDS.md](docs/COMMANDS.md) lists
   them with their options, and `tests/test_docs_commands.py` fails when a command or an option
-  is missing from it
+  is missing from it. A message that tells someone what to run builds the command with
+  `invocation.typed()`: `uv run wavescribe …` in a Wavescribe folder, `wavescribe …` where it
+  is installed as a package; `tests/test_invocation.py` fails on a hint that spells it out
 
 ## Conventions
 

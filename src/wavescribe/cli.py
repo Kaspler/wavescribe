@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from wavescribe import __version__
 from wavescribe.events import local_time  # standard library only: cheap at start
+from wavescribe.invocation import typed  # likewise
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -27,15 +28,6 @@ if TYPE_CHECKING:
 DATA_DIR = Path("data")
 DEFAULT_SETTINGS = Path("config/ui.toml")  # settings.DEFAULT_SETTINGS_PATH, without its imports
 NC_HELP = "acknowledge that a restricted model is for non-commercial use only"
-
-
-def typed(command: str) -> str:
-    """A Wavescribe command as it is typed in this install, for a line that says what to run
-    next: in a clone it runs through uv (``uv run wavescribe serve``), which is how the README
-    and the guide start it; installed as a package, it is ``wavescribe serve``."""
-    clone = Path(__file__).resolve().parents[2]
-    in_clone = (clone / "pyproject.toml").is_file() and (clone / "uv.lock").is_file()
-    return f"uv run wavescribe {command}" if in_clone else f"wavescribe {command}"
 
 
 def _size(gb: float | None) -> str:
@@ -150,8 +142,8 @@ def cmd_models_accept(args: argparse.Namespace) -> int:
 def credits_markdown(registry: ModelRegistry) -> str:
     """Attribution for every installed model (CC-BY and friends require it)."""
     lines = ["# Third-party models", "",
-             "Models installed by `wavescribe models fetch`, downloaded from their rights holders.",
-             ""]  # fmt: skip
+             f"Models installed by `{typed('models fetch')}`, downloaded from their rights "
+             "holders.", ""]  # fmt: skip
     for e in registry.entries():
         if registry.local_path(e) is None:
             continue
@@ -198,12 +190,12 @@ def cmd_listen(args: argparse.Namespace) -> int:
         if s.remote:
             raise ValueError(
                 f"station {s.id!r} is transcribed by another Wavescribe, not on this machine; "
-                "read it on the page (wavescribe serve)"
+                f"read it on the page ({typed('serve')})"
             )
         if not s.transcribe:
             raise ValueError(
                 f"station {s.id!r} is only listened to (transcribe = false), so there is no "
-                "text to print; hear it on the page (wavescribe serve) or set transcribe = true"
+                f"text to print; hear it on the page ({typed('serve')}) or set transcribe = true"
             )
         if s.out_of_reach and not args.source:  # before the models load, which takes a while
             raise ValueError(f"station {s.id!r}: {s.out_of_reach}")
@@ -640,7 +632,8 @@ def cmd_search(args: argparse.Namespace) -> int:
     from wavescribe.store import HIT_END, HIT_START, Store
 
     if not " ".join(args.query).strip(' "\u201c\u201d\u201e\u00ab\u00bb*'):
-        print("wavescribe: give words to search for, e.g. wavescribe search flood", file=sys.stderr)
+        print(f"wavescribe: give words to search for, e.g. {typed('search flood')}",
+              file=sys.stderr)  # fmt: skip
         return 2
     path = DATA_DIR / "wavescribe.db"
     if not path.exists():

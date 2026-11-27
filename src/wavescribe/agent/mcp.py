@@ -48,6 +48,7 @@ from typing import IO, Any
 from wavescribe import __version__
 from wavescribe.agent.client import STREAM_TIMEOUT_S, Client, Refused, Unreachable, live
 from wavescribe.events import alert_event, utterance_event
+from wavescribe.invocation import typed
 from wavescribe.remote import feed_lines, sse_events
 
 log = logging.getLogger(__name__)
@@ -856,7 +857,7 @@ class Server:
                 if key in args:
                     raise BadParams(
                         f"{key} needs control, which this server was started without "
-                        "(wavescribe mcp --allow-control)"
+                        f"({typed('mcp --allow-control')})"
                     )
         check(args, tool.schema)
         if not self._slots.acquire(blocking=False):

@@ -32,6 +32,7 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import percentile_filter, uniform_filter1d
 
+from wavescribe.invocation import typed
 from wavescribe.log import event
 from wavescribe.radio.bandplan import (
     TUNER_RANGE_HZ,
@@ -880,7 +881,7 @@ def band_range(band_id: str, region: str) -> tuple[int, int]:
     b = region_band(band_id, region)
     if b is None:
         raise ScanError(
-            f"no band {band_id!r} in {region_text(region)}: `wavescribe radio bands` lists those "
+            f"no band {band_id!r} in {region_text(region)}: `{typed('radio bands')}` lists those "
             'there, and [radio] region in the stations file (e.g. region = "2") or the page\'s '
             "Radio tab sets the region"
         )

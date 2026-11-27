@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from wavescribe.invocation import typed
 from wavescribe.radio.bandplan import (
     AUTO,
     POLICIES,
@@ -66,7 +67,7 @@ def resolve_receiver(name: str, config: Any) -> Receiver:
         return Receiver(name, 30.0, 0, f"the dongle {masked_serial(name)}")
     known = ", ".join([d.id for d in config.devices] if config else []) or "none in the config"
     plugged = ", ".join(masked_serial(s) for s in serials) or "none"
-    where = "; Settings → Receivers and `wavescribe doctor` show their serials" if serials else ""
+    where = f"; Settings → Receivers and `{typed('doctor')}` show their serials" if serials else ""
     raise ValueError(f"no receiver {name!r} (configured: {known}; plugged in: {plugged}"
                      f"{where})")  # fmt: skip
 
@@ -92,13 +93,13 @@ def busy(rx: Receiver, on_the_page: str | None, held: dict[str, Any] | None = No
         serve = "; if it is serve, " + (
             f"do it from the page instead: {on_the_page}" if on_the_page else "stop it"
         )
-        return ScanError(f"{rx.name} is busy: another program has it open (`wavescribe serve`, "
-                         "an SDR program, or another rtl_ tool). Close it, or use another "
+        return ScanError(f"{rx.name} is busy: another program has it open (Wavescribe's "
+                         "serve, an SDR program, or another rtl_ tool). Close it, or use another "
                          f"receiver{serve}")  # fmt: skip
     if held.get("serve"):
         instead = f"Do it from the page instead: {on_the_page}. Or stop serve" if on_the_page else (
             "Stop serve")  # fmt: skip
-        return ScanError(f"{rx.name} is busy: Wavescribe itself has it open (`wavescribe serve`, "
+        return ScanError(f"{rx.name} is busy: Wavescribe itself has it open (serve, "
                          f"process {held['wavescribe_pid']}). {instead}, or use another "
                          "receiver")  # fmt: skip
     if held.get("other_wavescribe"):
@@ -221,7 +222,7 @@ def _old_spurs(catalog: Any, rx: Receiver, receiver: str) -> None:
     info = catalog.spur_info().get(rx.serial)
     if info and info.get("count") and not info.get("bin_hz"):
         print(f"# {rx.name}'s spurs were learnt by an earlier version, which missed narrow "
-              f"ones: learn them again with `wavescribe radio spurs {receiver} --learn`",
+              f"ones: learn them again with `{typed(f'radio spurs {receiver} --learn')}`",
               file=sys.stderr)  # fmt: skip
 
 
@@ -266,7 +267,7 @@ def cmd_spurs(args: argparse.Namespace) -> int:
         freqs = catalog.spurs(serial)
         if not freqs:
             print(f"No spurs learnt for {rx.name}. Disconnect its antenna, then run "
-                  f"`wavescribe radio spurs {args.receiver} --learn`.")  # fmt: skip
+                  f"`{typed(f'radio spurs {args.receiver} --learn')}`.")  # fmt: skip
         else:
             _old_spurs(catalog, rx, args.receiver)
         for f in freqs:
@@ -308,10 +309,10 @@ def cmd_heard(args: argparse.Namespace) -> int:
         config = _config(args)
         ids = [d.id for d in config.devices] if config is not None else []
         if ids:
-            print(f"Nothing heard yet: scan first, e.g. `wavescribe radio scan {ids[0]} fm`.",
+            print(f"Nothing heard yet: scan first, e.g. `{typed(f'radio scan {ids[0]} fm')}`.",
                   file=where)  # fmt: skip
         else:
-            print("Nothing heard yet: scan first, e.g. `wavescribe radio scan <receiver> fm`, "
+            print(f"Nothing heard yet: scan first, e.g. `{typed('radio scan <receiver> fm')}`, "
                   "where <receiver> is a dongle's serial (Settings → Receivers) or the "
                   "id of a [[device]] in the stations file.", file=where)  # fmt: skip
         return 0

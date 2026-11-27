@@ -43,6 +43,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from wavescribe.invocation import typed
+
 LABEL = "io.github.kaspler.wavescribe"
 LAUNCHCTL = "/bin/launchctl"
 CAFFEINATE = "/usr/bin/caffeinate"
@@ -364,7 +366,7 @@ def preflight(ns: argparse.Namespace, workdir: Path,
 
     if not (workdir / "config").is_dir() and not (workdir / "pyproject.toml").is_file():
         raise ServiceError(f"{workdir} isn't a Wavescribe folder (no config/): run "
-                           "`wavescribe service install` in the folder you run it in")  # fmt: skip
+                           f"`{typed('service install')}` in the folder you run it in")  # fmt: skip
     if ns.open:
         raise ServiceError("--open doesn't apply to a background service: open the page "
                            f"yourself at http://localhost:{ns.port}")  # fmt: skip
@@ -404,20 +406,20 @@ def describe(st: dict[str, Any], home: Path | None = None) -> list[str]:
     """``service status`` for people."""
     lines = [f"Wavescribe service ({st['label']})"]
     if not st["installed"] and not st["loaded"]:
-        return [*lines, "  not installed: `wavescribe service install` runs `serve` in the "
+        return [*lines, f"  not installed: `{typed('service install')}` runs `serve` in the "
                 "background, starts it at login and restarts it after a crash"]  # fmt: skip
     lines.append(
         f"  plist:     {_short(st['plist'], home)}"
         + ("" if st["installed"] else " (missing, but the job is still loaded)")
     )
     if not st["loaded"]:
-        lines.append("  loaded:    no (run `wavescribe service install` to load it again)")
+        lines.append(f"  loaded:    no (run `{typed('service install')}` to load it again)")
     elif st["running"]:
         runs = f", started {st['runs']} times since it was loaded" if (st["runs"] or 0) > 1 else ""
         lines.append(f"  loaded:    yes, running (pid {st['pid']}){runs}")
     else:
-        again = ("it exited cleanly, so launchd leaves it stopped; `wavescribe service "
-                 "install` starts it again") if st["last_exit"] == "0" else (
+        again = (f"it exited cleanly, so launchd leaves it stopped; `{typed('service install')}` "
+                 "starts it again") if st["last_exit"] == "0" else (
                  "launchd tries again within 30 s; the log says why it stopped")  # fmt: skip
         lines.append(f"  loaded:    yes, NOT running: {again}")
     if st["last_exit"] or st["last_signal"]:
@@ -425,7 +427,7 @@ def describe(st: dict[str, Any], home: Path | None = None) -> list[str]:
         sig = f", signal {st['last_signal']}" if st["last_signal"] else ""
         lines.append(f"  last exit: {exit_}{sig}")
     if st["serve_args"] is not None:
-        lines.append(f"  runs:      wavescribe serve {' '.join(st['serve_args'])}".rstrip())
+        lines.append(f"  runs:      serve {' '.join(st['serve_args'])}".rstrip())
         lines.append(f"  in:        {_short(st['workdir'], home)}")
         if st["keep_awake"]:
             lines.append("  awake:     caffeinate -i keeps the Mac from idle sleep while it "
@@ -475,8 +477,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not st["running"]:
         print(f"It isn't running yet: see {_short(st['log'])}", file=sys.stderr)
     where = "localhost" if not ns.lan else "<this Mac's name>.local"
-    print(f"The page: http://{where}:{ns.port}. `wavescribe service status` shows how it's "
-          "doing; `wavescribe doctor` checks what it needs.")  # fmt: skip
+    print(f"The page: http://{where}:{ns.port}. `{typed('service status')}` shows how it's "
+          f"doing; `{typed('doctor')}` checks what it needs.")  # fmt: skip
     return 0
 
 

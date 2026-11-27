@@ -39,6 +39,7 @@ from wavescribe.audio import SAMPLE_RATE, AudioChunk
 from wavescribe.config import Station, StationsConfig, transcribed_languages
 from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
+from wavescribe.invocation import typed
 from wavescribe.pipeline import Pipeline, Plan, Result
 from wavescribe.web import digest, feed
 from wavescribe.web.audio import AudioTap
@@ -927,7 +928,7 @@ class Handler(BaseHTTPRequestHandler):
         """Why this request may not change anything, as true for a proxy as for the LAN."""
         if self._proxied():
             return ("through a proxy the page's controls are off, also on the Wavescribe machine; "
-                    "there, `wavescribe token` and the agent tools still reach them")  # fmt: skip
+                    f"there, `{typed('token')}` and the agent tools still reach them")  # fmt: skip
         return "read-only from the LAN: change things on the Wavescribe machine"
 
     def _holds_key(self) -> bool:

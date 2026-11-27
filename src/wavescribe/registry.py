@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from wavescribe.httpclient import trust_store
+from wavescribe.invocation import typed
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class ModelEntry:
 
 def accept_command(entry: ModelEntry) -> str:
     nc = " --non-commercial" if entry.tier == "restricted" else ""
-    return f"wavescribe models accept {entry.id} --license '{entry.license}'{nc}"
+    return typed(f"models accept {entry.id} --license '{entry.license}'{nc}")
 
 
 class Licenses:
@@ -243,7 +244,7 @@ class ModelRegistry:
         ids = " ".join(e.id for e in candidates)
         raise ModelError(
             f"no {capability} model for {language!r} is installed; "
-            f"run: wavescribe models fetch {candidates[0].id}  (candidates: {ids})"
+            f"run: {typed('models fetch ' + candidates[0].id)}  (candidates: {ids})"
         )
 
     def installed(self, model_id: str, language: str = "*") -> tuple[ModelEntry, Path]:
@@ -255,7 +256,7 @@ class ModelRegistry:
         path = self.local_path(entry)
         if path is None:
             raise ModelError(
-                f"{model_id} is not installed; run: wavescribe models fetch {model_id}"
+                f"{model_id} is not installed; run: {typed('models fetch ' + model_id)}"
             )
         return entry, path
 

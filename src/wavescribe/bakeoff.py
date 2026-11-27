@@ -28,6 +28,7 @@ import numpy as np
 
 from wavescribe.asr import load_transcriber
 from wavescribe.audio import SAMPLE_RATE, AudioChunk
+from wavescribe.invocation import typed
 from wavescribe.registry import ModelRegistry
 from wavescribe.segment.vad import SileroVad, VadSegmenter
 
@@ -79,7 +80,7 @@ def write_wav(path: Path, samples: np.ndarray) -> None:
 def read_wav(path: Path) -> np.ndarray:
     with wave.open(str(path), "rb") as w:
         if (w.getnchannels(), w.getsampwidth(), w.getframerate()) != (1, 2, SAMPLE_RATE):
-            raise ValueError(f"{path}: expected 16 kHz mono 16-bit PCM (use `wavescribe record`)")
+            raise ValueError(f"{path}: expected 16 kHz mono 16-bit PCM (use `{typed('record')}`)")
         raw = w.readframes(w.getnframes())
     return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
 
@@ -167,7 +168,7 @@ def run_model(
     entry = registry.get(model_id)
     path = registry.local_path(entry)
     if path is None:
-        raise ValueError(f"{model_id} is not installed; run: wavescribe models fetch {model_id}")
+        raise ValueError(f"{model_id} is not installed; run: {typed('models fetch ' + model_id)}")
     t0 = time.perf_counter()
     transcriber = load_transcriber(entry, path)
     load_s = time.perf_counter() - t0

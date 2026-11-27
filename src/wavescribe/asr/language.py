@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from wavescribe.asr import Transcriber, Transcript
+from wavescribe.invocation import typed
 from wavescribe.registry import ModelError
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ OUTSIDE = 0.1  # the station's languages together less likely than this: it's no
 
 NEEDS = (
     "language 'auto' needs a speech model that tells languages apart: "
-    "wavescribe models fetch whisper-large-v3-turbo; or give the one language spoken, e.g. "
+    f"{typed('models fetch whisper-large-v3-turbo')}; or give the one language spoken, e.g. "
     '--language pt-PT (language = "pt-PT" in the stations file)'
 )
 
@@ -87,7 +88,7 @@ def plan_detecting(
         if path is None and entry.backend == "mlx-audio":
             if chosen:
                 raise ModelError(
-                    f"{entry.id} is not installed; run: wavescribe models fetch {entry.id}"
+                    f"{entry.id} is not installed; run: {typed('models fetch ' + entry.id)}"
                 )
             continue
         detects = detects_languages(entry, path)

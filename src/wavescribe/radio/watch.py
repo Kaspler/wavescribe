@@ -22,6 +22,7 @@ import numpy as np
 from wavescribe.audio import SAMPLE_RATE
 from wavescribe.dsp import DEFAULT_CHANNEL_HZ, NARROW_MARGIN_HZ, OFF_CENTRE_HZ
 from wavescribe.dsp.activity import THRESHOLD_DB
+from wavescribe.invocation import typed
 from wavescribe.radio.bandplan import (
     AUTO,
     STRICTNESS,
@@ -222,7 +223,7 @@ def _plan(
             band = find(spec)
         except KeyError:
             raise WatchError(
-                f"no band {spec!r} in the band plan (wavescribe radio bands lists them), "
+                f"no band {spec!r} in the band plan ({typed('radio bands')} lists them), "
                 "or give a range in MHz, e.g. 446.0:446.2",
                 "unknown_band",
             ) from None
@@ -234,7 +235,7 @@ def _plan(
         if not pair or any(isinstance(x, bool) or not isinstance(x, int | float) for x in spec):
             raise WatchError(
                 "'watch' is two frequencies in MHz, e.g. [446.0, 446.2], or a band id from "
-                '`wavescribe radio bands`, e.g. "pmr446"',
+                f'`{typed("radio bands")}`, e.g. "pmr446"',
                 "bad_window",
             )
         lo, hi = round(spec[0] * 1e6), round(spec[1] * 1e6)

@@ -24,7 +24,7 @@ import huggingface_hub
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from wavescribe import cli, modelfetch
+from wavescribe import invocation, modelfetch
 from wavescribe.cli import main
 from wavescribe.registry import Licenses, ModelEntry, ModelRegistry
 
@@ -211,12 +211,12 @@ def test_one_model_is_one_model_in_every_line(
 
 
 def test_the_next_command_is_printed_as_it_is_typed_in_this_install(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    setup: Setup, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert cli.typed("serve --open") == "uv run wavescribe serve --open"  # a clone, as here
-    installed = tmp_path / "site-packages" / "wavescribe" / "cli.py"
-    monkeypatch.setattr(cli, "__file__", str(installed))
-    assert cli.typed("serve --open") == "wavescribe serve --open"
+    monkeypatch.setattr(invocation, "invocation", lambda: "wavescribe")  # installed, not a clone
+    assert main(["models", "fetch", "small"]) == 0
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last == "Done. The model is installed. Start Wavescribe with: wavescribe serve --open"
 
 
 # -- Before anything is downloaded ---------------------------------------------------------------

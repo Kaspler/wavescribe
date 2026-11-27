@@ -10,6 +10,7 @@ import pytest
 
 from tests.test_agent import HEARD_KEYS
 from wavescribe.cli import main
+from wavescribe.invocation import typed
 from wavescribe.radio import cli as radio_cli
 from wavescribe.radio import holders
 
@@ -92,7 +93,7 @@ def test_a_scan_shows_the_sweeps_warnings_and_flags_old_spurs(
     assert main(["radio", "scan", "a", "144:146"]) == 0
     err = capsys.readouterr().err
     assert "# warning: the tuner's PLL didn't lock twice" in err
-    assert "learn them again with `wavescribe radio spurs a --learn`" in err
+    assert f"learn them again with `{typed('radio spurs a --learn')}`" in err
 
 
 @pytest.mark.parametrize(
@@ -186,7 +187,7 @@ SERVE_HOLDS = {"pid": 4001, "program": "rtl_sdr", "other_wavescribe": True,
     ("held", "said"),
     [
         (SERVE_HOLDS,
-         "receiver A is busy: Wavescribe itself has it open (`wavescribe serve`, process 4000). "
+         "receiver A is busy: Wavescribe itself has it open (serve, process 4000). "
          "Do it from the page instead: Find → On the air, which pauses the receiver's stations "
          "for the scan. Or stop serve, or use another receiver"),
         ({**SERVE_HOLDS, "serve": False},
@@ -197,7 +198,7 @@ SERVE_HOLDS = {"pid": 4001, "program": "rtl_sdr", "other_wavescribe": True,
          "receiver A is busy: sdrpp (process 3001) has it open. Close it, or use another "
          "receiver"),
         # Not known for sure (not macOS, or the registry didn't say): nothing is named.
-        (None, "receiver A is busy: another program has it open (`wavescribe serve`, an SDR "
+        (None, "receiver A is busy: another program has it open (Wavescribe's serve, an SDR "
                "program, or another rtl_ tool). Close it, or use another receiver; if it is "
                "serve, do it from the page instead: Find → On the air, which pauses the "
                "receiver's stations for the scan"),

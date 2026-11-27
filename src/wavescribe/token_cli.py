@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from wavescribe.agent import DEFAULT_URL
+from wavescribe.invocation import typed
 
 DATA_DIR = Path("data")
 SCOPES = ("read", "push")
@@ -32,7 +33,7 @@ def _client(args: argparse.Namespace) -> tuple[Any, dict[str, str]] | str:
     key = load_key(DATA_DIR)
     if key is None:
         return (f"no control key in {DATA_DIR}/: run this in the folder Wavescribe runs in "
-                "(where `wavescribe serve` was started), with Wavescribe running")  # fmt: skip
+                f"(where `{typed('serve')}` was started), with Wavescribe running")  # fmt: skip
     return Client(args.url), {KEY_HEADER: key}
 
 
@@ -84,7 +85,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 def cmd_revoke(args: argparse.Namespace) -> int:
     known = {t["id"]: t for t in _call(args, "GET", "/outputs").get("tokens") or []}
     if args.id not in known:
-        raise SystemExit(f"wavescribe token: no token {args.id!r} (`wavescribe token list` "
+        raise SystemExit(f"wavescribe token: no token {args.id!r} (`{typed('token list')}` "
                          "shows them)")  # fmt: skip
     _call(args, "DELETE", f"/tokens/{args.id}")
     print(f"# revoked {args.id} ({known[args.id].get('label', '')}): streams using it have "

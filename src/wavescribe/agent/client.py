@@ -26,6 +26,7 @@ from wavescribe import __version__, httpclient
 from wavescribe.agent import DEFAULT_URL
 from wavescribe.digest import TIMEOUT_S as DIGEST_WAIT_S
 from wavescribe.events import Seen, resume_point, to_json
+from wavescribe.invocation import typed
 from wavescribe.remote import feed_lines, sse_events
 from wavescribe.web.server import CONTROL_HEADER
 
@@ -108,7 +109,7 @@ class Client:
             why = getattr(e, "reason", None) or e
             why = getattr(why, "strerror", None) or str(why) or type(why).__name__
             raise Unreachable(
-                f"no Wavescribe answers at {self.url} ({why}); start it with `wavescribe serve`"
+                f"no Wavescribe answers at {self.url} ({why}); start it with `{typed('serve')}`"
             ) from None
 
     def get(self, path: str, query: dict[str, Any] | None = None) -> Any:

@@ -19,6 +19,7 @@ from tests.test_agent import CATCH_KEYS
 from tests.test_radio_watch import watch_station
 from tests.test_radio_watch_detect import PMR
 from tests.test_store import result
+from wavescribe.invocation import typed
 from wavescribe.radio import cli as radio_cli
 from wavescribe.radio.bandplan import apply_policies, exports
 from wavescribe.radio.catalog import Catalog
@@ -326,7 +327,7 @@ def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
     argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--acknowledge"]
     args = build_parser().parse_args(argv)
     assert args.func(args) == 0
-    assert "learn them again with `wavescribe radio spurs a --learn`" in capsys.readouterr().err
+    assert f"learn them again with `{typed('radio spurs a --learn')}`" in capsys.readouterr().err
 
 
 def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(

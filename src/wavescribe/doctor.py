@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from wavescribe.invocation import typed
+
 if TYPE_CHECKING:
     from wavescribe.registry import ModelEntry, ModelRegistry
     from wavescribe.service import Launchd
@@ -537,10 +539,10 @@ class Doctor:
             accepted = [e for e in candidates if registry.licenses.accepted(e)]
             entry = (accepted or candidates)[0]
         if not registry.licenses.accepted(entry):
-            return f"{accept_command(entry)}, then: wavescribe models fetch {entry.id}"
+            return f"{accept_command(entry)}, then: {typed('models fetch ' + entry.id)}"
         self.missing[entry.id] = entry.size_gb or 0.0
         size = f" ({size_text(entry.size_gb * GB)})" if entry.size_gb else ""
-        return (f"wavescribe models fetch {entry.id}{size}, or download it under Settings → "
+        return (f"{typed('models fetch ' + entry.id)}{size}, or download it under Settings → "
                 "Languages and models")  # fmt: skip
 
     @staticmethod
@@ -876,7 +878,7 @@ class Doctor:
                 g,
                 "service",
                 SKIP,
-                "not installed: `wavescribe service install` runs "
+                f"not installed: `{typed('service install')}` runs "
                 "serve in the background, restarts it after a crash, keeps the Mac awake",
             )
         elif st["running"]:
@@ -889,18 +891,18 @@ class Doctor:
             last = st["last_exit"] or "unknown"
             self.add(g, "service", FAIL, f"installed but not running (last exit {last})",
                      f"read {short(st['log'])}, fix what it says, then run "
-                     "`wavescribe service install` again", log=st["log"])  # fmt: skip
+                     f"`{typed('service install')}` again", log=st["log"])  # fmt: skip
         else:
             self.add(g, "service", FAIL, "installed but not loaded, so it won't start",
-                     "wavescribe service install")  # fmt: skip
+                     typed("service install"))  # fmt: skip
         if st and st["workdir"] and Path(st["workdir"]).resolve() != self.workdir.resolve():
             self.add(g, "service folder", WARN, f"the service runs in {short(st['workdir'])}, "
                      "not in this folder, so these checks are of another setup",
                      f"run doctor in {short(st['workdir'])}")  # fmt: skip
         if st and (st["log_bytes"] or 0) > SERVICE_LOG_WARN_BYTES:
             self.add(g, "service log", WARN, f"{short(st['log'])} is "
-                     f"{st['log_bytes'] / MB:.0f} MB", "`wavescribe service install` moves it "
-                     "aside")  # fmt: skip
+                     f"{st['log_bytes'] / MB:.0f} MB", f"`{typed('service install')}` moves "
+                     "it aside")  # fmt: skip
 
         if self.host.platform != "darwin":
             return

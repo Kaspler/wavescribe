@@ -48,13 +48,14 @@ from wavescribe.config import (
     build_station,
     radio_policy,
 )
+from wavescribe.invocation import typed
 from wavescribe.refusal import said
 
 log = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS_PATH = Path("config/ui.toml")
 HEADER = (
-    "# Written by the Wavescribe page (wavescribe serve). Your hand-edited stations.toml and\n"
+    f"# Written by the Wavescribe page ({typed('serve')}). Your hand-edited stations.toml and\n"
     "# alerts.toml are never touched: what you change on the page is kept here and laid over\n"
     "# them. Safe to edit while Wavescribe is stopped; delete it to undo every page change.\n"
 )

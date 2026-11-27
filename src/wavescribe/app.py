@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 
 from wavescribe.config import ConfigError, Station, StationsConfig, confirmed, transcribed_languages
 from wavescribe.events import NODE_ID
+from wavescribe.invocation import typed
 from wavescribe.languages import language_name
 from wavescribe.log import event
 from wavescribe.outputs import OutputConfig, OutputError, Outputs
@@ -102,7 +103,7 @@ def _plays_meanwhile(reason: str) -> str:
     """Why a station that should be written down only plays: its models aren't downloaded."""
     if reason == NO_VAD:
         return ("Plays without text until the speech models are downloaded: Settings → Languages "
-                "and models, or `wavescribe models fetch`.")  # fmt: skip
+                f"and models, or `{typed('models fetch')}`.")  # fmt: skip
     return f"Plays without text until its speech model is downloaded: {reason}"
 
 

@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from wavescribe.asr.checks import check_transcript
+from wavescribe.invocation import typed
 from wavescribe.languages import same_language
 from wavescribe.log import event
 from wavescribe.radio.bandplan import logged_text
@@ -100,8 +101,8 @@ class Rechecker:
             known = next((e for s in wanting for e in rechecker._candidates(s.language)), None)
             if known is not None:
                 log.info("lines heard in another language than their station's aren't checked "
-                         "again: that needs %s (wavescribe models fetch %s)", known.id,
-                         known.id)  # fmt: skip
+                         "again: that needs %s (%s)", known.id,
+                         typed("models fetch " + known.id))  # fmt: skip
         return rechecker
 
     def _candidates(self, language: str) -> list[ModelEntry]:

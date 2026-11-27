@@ -90,7 +90,7 @@ def test_a_receiver_another_program_holds_is_refused_before_anything_starts(
     assert main(argv) == 1
     err = capsys.readouterr().err
     assert err.splitlines() == [
-        "wavescribe: receiver A is busy: Wavescribe itself has it open (`wavescribe serve`, "
+        "wavescribe: receiver A is busy: Wavescribe itself has it open (serve, "
         "process 4000). Stop serve, or use another receiver"
     ]
     assert starts(spawns) == 0
@@ -106,7 +106,7 @@ def test_a_receiver_rtl_sdr_finds_busy_ends_the_watch_at_once_with_no_count(
     assert time.monotonic() - t0 < 10  # not the minute asked for
     err = capsys.readouterr().err
     assert err.splitlines()[-1] == (
-        "wavescribe: receiver A is busy: another program has it open (`wavescribe serve`, an "
+        "wavescribe: receiver A is busy: another program has it open (Wavescribe's serve, an "
         "SDR program, or another rtl_ tool). Close it, or use another receiver; if it is "
         "serve, stop it"
     )

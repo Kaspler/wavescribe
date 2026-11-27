@@ -21,6 +21,7 @@ from wavescribe.cli import main
 from wavescribe.config import ConfigError
 from wavescribe.digest.schedule import Schedule
 from wavescribe.digest.speech import SPOKEN_CHARS, Speaker, Speech, spoken
+from wavescribe.invocation import typed
 
 EN = Voice("Lesya", "An alert.")
 VOICES = {"en": EN}
@@ -512,7 +513,7 @@ def test_an_agent_may_read_a_digest_aloud_only_with_allow_control(tmp_path: Path
         assert error == {  # what to do about it, rather than that there is no such argument
             "code": -32602,
             "message": "Invalid params: speak needs control, which this server was started "
-            "without (wavescribe mcp --allow-control)",
+            f"without ({typed('mcp --allow-control')})",
         }
         mcp.close()
 
