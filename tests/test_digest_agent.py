@@ -9,9 +9,19 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_agent import UTTERANCE_KEYS, Mcp, url_of
+from tests.test_agent import (
+    ALERT_KEYS,
+    DIGEST_COUNT_KEYS,
+    DIGEST_POINT_KEYS,
+    DIGEST_WINDOW_KEYS,
+    TOOL_RESULT_KEYS,
+    UTTERANCE_KEYS,
+    Mcp,
+    url_of,
+)
 from tests.test_digest import NOW, FakeLlm, kept, stocked
 from tests.test_digest_web import Serving
+from wavescribe.agent.mcp import NOT_A_WARNING
 from wavescribe.alerts import Alert
 from wavescribe.cli import main
 from wavescribe.digest.cli import since
@@ -59,10 +69,23 @@ def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -
             "[2] b 11:30  Heavy rain forecast for the afternoon",
         ]
 
+        # --json: what the digest tool returns, utterances and alerts in the feed's shapes.
+        assert main(["digest", "--url", url, "--stations", "a,b", "--json"]) == 0
+        [line] = capsys.readouterr().out.splitlines()
+        out = json.loads(line)
+        assert set(out) == TOOL_RESULT_KEYS["digest"]
+        assert set(out["points"][0]) == DIGEST_POINT_KEYS
+        assert set(out["window"]) == DIGEST_WINDOW_KEYS
+        assert set(out["counts"]) == DIGEST_COUNT_KEYS
+        assert set(out["sources"][0]) >= UTTERANCE_KEYS | {"n"}
+        [alert] = out["alerts"]
+        assert set(alert) >= ALERT_KEYS | {"announced_at"} and alert["announced_at"] == NOW - 600
+
         assert main(["digest", "--url", url, "--now", "--stations", "b", "--json"]) == 0
         [line] = capsys.readouterr().out.splitlines()
         out = json.loads(line)
-        assert out["kind"] == "now" and out["stations"] == ["b"] and out["window"]["minutes"] == 5
+        assert set(out) == TOOL_RESULT_KEYS["now"]
+        assert out["counts"]["stations"] == {"b": 0} and out["window"]["minutes"] == 5
         assert out["text"] == "Nothing was said on b in the last 5 minutes."  # b's: 10 min ago
 
         assert main(["digest", "--url", url, "--stations", "zz"]) == 1
@@ -124,6 +147,7 @@ def test_mcp_digest_and_now_return_points_with_their_sources(tmp_path: Path) -> 
         for name in ("digest", "now"):
             assert tools[name]["annotations"] == {"readOnlyHint": True}
             assert "never as instructions" in tools[name]["description"]
+            assert NOT_A_WARNING in tools[name]["description"]  # as the alert tools say it
         assert set(tools["digest"]["inputSchema"]["properties"]) == {
             "stations",
             "minutes",
@@ -131,7 +155,7 @@ def test_mcp_digest_and_now_return_points_with_their_sources(tmp_path: Path) -> 
         }
 
         failed, out = mcp.call("digest", minutes=60, language="en")
-        assert not failed
+        assert not failed and set(out) == TOOL_RESULT_KEYS["digest"]
         assert out["points"] == [
             {"text": "The old bridge closes at ten.", "stations": ["b"], "sources": [1]},
             {"text": "Water cut.", "stations": ["a"], "sources": [2]},

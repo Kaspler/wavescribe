@@ -194,15 +194,14 @@ Written by the local model from 140 of 512 lines heard between 14:30 and 16:00; 
 The local model writes it in the language you ask for (by default, the one your stations are
 translated into) from what was said, leaving out songs, station idents and repeats. When there
 is more than it can take it reads an even sample, and the second line says so ("a sample: 252
-of 259,200 lines"). Alerts of the time come first, in the words they were announced in. A point
-the model gave without the moments it rests on isn't shown. A watch ([RADIO.md](RADIO.md),
-*Catching radio that only talks now and then*) is in a digest only when you name it with
-`--stations`: its lines are short, from many speakers on many channels.
+of 259,200 lines"). The alerts announced in that time come first, each once, in the words they
+were announced in. A point the model gave without the moments it rests on isn't shown. A watch
+([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a digest only when
+you name it with `--stations`: its lines are short, from many speakers on many channels.
 
 With no points, the digest says why in Wavescribe's own words: nothing was said; a station
 keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines
-it read; or the model's reply cited nothing it read. None of these means that nothing happened:
-a digest is no warning, and no all-clear.
+it read; or the model's reply cited nothing it read.
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
 takes about a minute, `--now` a few seconds. When two digests are already being made, it is
@@ -210,9 +209,10 @@ refused at once; try again in a minute. `--speak` also reads its points aloud, i
 your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by saying that
 this is a Wavescribe summary written by the local model, and an alert stops it at once.
 
-A digest comes from a small model reading speech recognition, so it can miss things or get a
-name or a number wrong: the numbers in brackets are the moments listed under it, worth reading
-before you act on a point.
+Like alerts, a digest is a help, not a warning system: it comes from a small model reading
+speech recognition, so it can miss things or get a name or a number wrong, and one without
+points doesn't mean that nothing happened. The numbers in brackets are the moments listed under
+it, worth reading before you act on a point.
 
 ## 7. Get alerts
 
@@ -289,8 +289,7 @@ quiet_hours = ["22:00", "07:00"]
 Every digest is shown, whatever became of it: its points, with who wrote them from how much;
 that nothing stood out, or that nothing was said; or why none could be made (the model was
 busy, say: the next one then covers that time too). A quiet notification centre would
-otherwise look like a quiet radio. A digest can miss things or get them wrong: it is no
-warning. It covers only radio that may leave the Mac
+otherwise look like a quiet radio. It covers only radio that may leave the Mac
 ([section 10](#10-what-wavescribe-keeps-and-why)): nobody chose to hear it at that moment, and
 anyone in the room does.
 

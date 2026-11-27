@@ -97,19 +97,19 @@ LANGUAGE = {
     "stations are translated into).",
 }
 DIGEST = (
-    "Returns {text, points, sources, alerts, window, counts, outcome, notice, unread}: text is "
-    "the digest as plain lines; points are {text, stations, sources}, sources being numbers "
-    "among the returned sources, the utterances cited, each with its n; alerts are those "
-    "announced in the window, as the alerts tool gives them, apart from the points; outcome is "
-    "points, nothing_said, not_read (unread names the stations and why), nothing_stood_out or "
+    "Returns {text, points, sources, alerts, window, counts, outcome, unread, notice, "
+    "language}: text is the digest as plain lines; points are {text, stations, sources}, "
+    "sources being numbers among the returned sources, the utterances cited, each with its n; "
+    "alerts are those announced in the window, each once, as the alerts tool gives them with "
+    "announced_at (seconds since 1970), apart from the points; outcome is points, "
+    "nothing_said, not_read (unread names the stations and why), nothing_stood_out or "
     "unsourced (the model cited nothing, so nothing is shown), and text then says which in "
     "Wavescribe's own words; notice says that the local model wrote it and from how much of "
     "what was said. The points come from a small model reading a sample of speech "
-    "recognition: check the sources before relying on them. A digest can miss things or get "
-    "them wrong and is no warning system: never present it, or one without points, as an "
-    "all-clear, and point the user to official warnings when safety is at stake. It covers "
-    "all radio kept on this machine, including radio that isn't broadcast. Fails with the "
-    "reason when no language model is loaded. "
+    "recognition: check the sources before relying on them; a digest without points doesn't "
+    "mean that nothing happened. " + NOT_A_WARNING + "It covers all radio kept on this "
+    "machine, including radio that isn't broadcast. Fails with the reason when no language "
+    "model is loaded. "
 )
 SPEAK = {
     "type": "boolean",
@@ -574,7 +574,11 @@ class Tools:
         return self._digest({"kind": "now", **body})
 
     def _digest(self, body: dict[str, Any]) -> Any:
-        out = self.client.digest(body)
+        return self.digested(self.client.digest(body))
+
+    def digested(self, out: dict[str, Any]) -> dict[str, Any]:
+        """A digest as ``POST /api/digest`` gives it, as the tools and ``wavescribe digest
+        --json`` give it: its utterances and alerts in the feed's shapes, as everywhere else."""
         sources = out["sources"]
         cited = [{"n": s["n"], **e} for s, e in zip(sources, self._events(sources), strict=True)]
         kept = (
@@ -591,7 +595,10 @@ class Tools:
         return {
             **{k: out[k] for k in kept if k in out},
             "sources": cited,
-            "alerts": self._alerts(out["alerts"]),
+            "alerts": [
+                {**e, "announced_at": a["announced_at"]}
+                for a, e in zip(out["alerts"], self._alerts(out["alerts"]), strict=True)
+            ],
         }
 
     def status(self, args: dict[str, Any], cancelled: threading.Event) -> Any:

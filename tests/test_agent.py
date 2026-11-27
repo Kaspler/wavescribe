@@ -76,7 +76,14 @@ TOOL_RESULT_KEYS = {
     "catches": {"catches"},
     "ask": {"answer", "sources", "plan"},
     "status": {"node", "stations", "status", "ask", "mt_model", "noncommercial", "store"},
-}
+    "digest": {"text", "points", "sources", "alerts", "window", "counts", "outcome", "unread",
+               "notice", "language"},  # also `wavescribe digest --json`'s line
+    "now": {"text", "points", "sources", "alerts", "window", "counts", "outcome", "unread",
+            "notice", "language"},
+}  # fmt: skip
+DIGEST_POINT_KEYS = {"text", "stations", "sources"}
+DIGEST_WINDOW_KEYS = {"since", "until", "minutes"}
+DIGEST_COUNT_KEYS = {"said", "read", "skipped", "calls", "uncited", "stations"}
 DOCS = Path(__file__).parents[1] / "docs"
 
 
@@ -85,7 +92,8 @@ def test_every_json_shape_is_documented_field_by_field() -> None:
     tools = (DOCS / "AGENT_TOOLS.md").read_text(encoding="utf-8")
     assert [k for k in sorted(UTTERANCE_KEYS | ALERT_KEYS) if f'"{k}"' not in feed] == []
     shapes = [MODEL_KEYS, HEARD_KEYS, CATCH_KEYS, CHECK_KEYS, SUMMARY_KEYS, SERVICE_KEYS,
-              TOOL_STATION_KEYS, *TOOL_RESULT_KEYS.values()]  # fmt: skip
+              TOOL_STATION_KEYS, *TOOL_RESULT_KEYS.values(), DIGEST_POINT_KEYS,
+              DIGEST_WINDOW_KEYS, DIGEST_COUNT_KEYS]  # fmt: skip
     named = set()  # each field in code: `name`, or in a result written `{a, b: null}`
     prose = re.sub(r"```.*?```", "", tools, flags=re.S)  # not the examples
     for span in re.findall(r"`([^`\n]+)`", prose):

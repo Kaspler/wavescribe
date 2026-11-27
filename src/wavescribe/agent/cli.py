@@ -37,15 +37,18 @@ def cmd_follow(args: argparse.Namespace) -> int:
 
 def cmd_digest(args: argparse.Namespace) -> int:
     from wavescribe.agent.client import Refused, Unreachable
+    from wavescribe.agent.mcp import Tools
     from wavescribe.digest.cli import body, render
     from wavescribe.events import to_json
 
+    client = _client(args)
     try:
-        out = _client(args).digest(body(args))
+        out = client.digest(body(args))
+        shown = to_json(Tools(client).digested(out)) if args.json else render(out)
     except (Unreachable, Refused) as e:
         print(f"wavescribe: {e}", file=sys.stderr)
         return 1
-    print(to_json(out) if args.json else render(out))
+    print(shown)
     speech = out.get("speech") or {"started": True}
     if not speech["started"]:
         print(f"wavescribe: not read aloud: {speech['error']}", file=sys.stderr)

@@ -270,8 +270,8 @@ Steps (`digest/__init__.py`):
    there is one, without songs (flagged as another language), utterances of under three words
    (idents, greetings) and repeats. The stations share about 36,000 characters fairly, at most
    a prompt each (a quiet station leaves what it doesn't need to the others), sampled evenly
-   over the window when one said more. Another machine's request sees only what may leave
-   this one.
+   over the window when one said more. Without stations named, those heard in the window,
+   watches left out. Another machine's request sees only what may leave this one.
 2. **Write.** The excerpts go to the translation LLM in prompts of about 12,000 characters
    (about 10 s each on a recent Mac), each station whole in one of them. A prompt asks for a
    few one-line points in the reader's language, the most important first, each citing the
@@ -289,23 +289,31 @@ Steps (`digest/__init__.py`):
    whether a job of priority under 1 waits (an alert's translation, a rule check, a question,
    a model load) and stops, to start again from scratch behind it; after three times the
    digest gives up and says so. Reading a prompt can't be stopped, so an alert's translation
-   can still wait that long: about 10 s for a full prompt on a recent Mac. At most two
+   can still wait that long: about 10 s for a full prompt on a recent Mac. When the queue is
+   full, a digest's call is the first thing any other work takes the place of, and it takes
+   nobody's; the digest then says that live translation needed the room. A digest waiting,
+   however long, is neither a station behind nor dropped work in the status. At most two
    digests are made at once; a digest takes its turn before reading the store, and a third
    is refused at once (503 with `Retry-After`).
 
 The answer says what became of the digest (`outcome`: `points`, `nothing_said`, `not_read` with
 the stations and why in `unread`, `nothing_stood_out` or `unsourced`) and who wrote it from how
-much (`notice`: the local model, lines read of those said, the window). Alerts of the window
-(medium and above, not still being delivered) come with it in the words they were announced
-in. For another machine, a digest covers six hours at most, reads and counts only words that
-may leave, names no station that may not, and needs a feed token once the feed asks for one.
+much (`notice`: the local model, lines read of those said, the window). The alerts announced
+in the window come with it in the words they were announced in: each incident once, at the time
+it was announced (first, or when it got more serious), about what was said, medium and above,
+and none nobody was told about. A digest spends the model as a question does, so it passes the
+same gate (`do_POST`): from another machine only with `serve --allow-remote-ask`, and through a
+proxy with a read token unless `--public-read`. For another machine, a digest covers six hours
+at most, reads and counts only words that may leave, and names no station that may not.
+Reading it aloud is a control: this machine only, never through a proxy.
 
 Read aloud, a digest takes the alerts' voice for its language and never sounds like an alert:
 it opens with a fixed sentence (`summary` in `[speak.<lang>]`, built in for English) saying it
 is a Wavescribe summary, of which stations and hours, written by the local model from how many
 lines; names the earlier alerts about what was said only by time and rule (`earlier`); then
 reads its points. A digest without points is shown, never read. Each sentence is a `say` of
-its own, which an arriving alert or the app closing stops at once.
+its own, which an alert being spoken or the app closing stops at once; a reminder, never
+spoken, leaves it.
 
 Scheduled digests run at the first real minute whose local time is on a period, so a change of
 the clocks neither skips nor repeats one, at least a minute apart; each covers the time since
