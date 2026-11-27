@@ -355,7 +355,7 @@ def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
         })  # fmt: skip
     out: dict[str, Any] = {"devices": devices, "rtl_sdr": _which("rtl_sdr")}
     if scan:
-        out["dongles"] = sdr.list_dongles()
+        out["dongles"] = sdr.recent_dongles()
     return out
 
 

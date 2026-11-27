@@ -138,7 +138,7 @@ def parse_schedule(
         raise refused(
             f"unknown keys {sorted(unknown)}; it takes {sorted(KEYS)}",
             "unknown_keys",
-            None,
+            sorted(unknown)[0],  # the first of them, for a form that marks one field
             keys=sorted(unknown),
         )
     every = raw.get("every_minutes", 60)

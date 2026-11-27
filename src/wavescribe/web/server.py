@@ -67,6 +67,8 @@ INFLIGHT_MAX_S = 900.0
 REVOKED_MAX = 1024  # feed token ids remembered as revoked (ids are random, never reused)
 MAX_LISTENERS = 8  # audio listeners per station
 CONTROL_HEADER = "X-Wavescribe"  # required on changes: a cross-site form can't set it
+# A write without the header the page sends: refused, so another site's form can't make one.
+NO_HEADER = {"error": f"missing {CONTROL_HEADER} header", "code": "no_header"}
 
 # On every response. The page has no inline script or style, so the policy needs no exceptions;
 # frame-ancestors and X-Frame-Options stop another site from framing the control centre.
@@ -773,7 +775,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": self._controls_off()}, HTTPStatus.FORBIDDEN)
             return
         if self.headers.get(CONTROL_HEADER) != "1":
-            self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
+            self._json(NO_HEADER, HTTPStatus.FORBIDDEN)
             return
         if hub.app is None:
             self._json({"error": "this run has no page controls"}, HTTPStatus.CONFLICT)
@@ -801,7 +803,7 @@ class Handler(BaseHTTPRequestHandler):
         cancelled = digest.cancel_id(url.path)
         if url.path in ("/api/ask", digest.PATH) or cancelled is not None:
             if self.headers.get(CONTROL_HEADER) != "1":
-                self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
+                self._json(NO_HEADER, HTTPStatus.FORBIDDEN)
                 return
             if not self._is_local() and not getattr(self.server, "remote_ask", False):
                 self._json({"error": REMOTE_ASK_OFF}, HTTPStatus.FORBIDDEN)
@@ -820,7 +822,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": self._controls_off()}, HTTPStatus.FORBIDDEN)
             return
         if self.headers.get(CONTROL_HEADER) != "1":
-            self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
+            self._json(NO_HEADER, HTTPStatus.FORBIDDEN)
             return
         if url.path == digest.SPEAK_PATH:  # the speakers are in this machine's room
             digest.speak(self)

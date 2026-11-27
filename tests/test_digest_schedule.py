@@ -371,6 +371,7 @@ def test_the_page_sets_the_schedule_in_place_of_the_files_at_once(
         body = {"every_minutes": 15, "stations": ["b"], "quiet_hours": ["22:00", "07:00"]}
         status, view = node.call("POST", SCHEDULE, body)
         assert status == 200 and view["source"] == "page" and view["running"]
+        assert view["file_has_schedule"] is True  # what "use the file's again" brings back
         assert view["schedule"] == {**body, "language": "en", "speak": False}
         assert stopped == [started[0]] and started[0]._closed.is_set()
         assert app.digests is started[1] and app.digests.schedule.every_minutes == 15
@@ -382,8 +383,8 @@ def test_the_page_sets_the_schedule_in_place_of_the_files_at_once(
             ({"stations": ["zz"]}, "unknown_station", "stations"),
             ({"speak": True}, "no_voice", "speak"),
             ({"quiet_hours": ["22:00"]}, "bad_quiet_hours", "quiet_hours"),
-            ({"enabled": "no"}, "bad_enabled", None),
-            ({"notify": True}, "unknown_keys", None),
+            ({"enabled": "no"}, "bad_enabled", "enabled"),
+            ({"notify": True}, "unknown_keys", "notify"),
         ):
             status, out = node.call("POST", SCHEDULE, wrong)
             assert (status, out["code"], out.get("field")) == (400, code, field), wrong
@@ -395,6 +396,14 @@ def test_the_page_sets_the_schedule_in_place_of_the_files_at_once(
         assert view["schedule"]["every_minutes"] == 15 and app.digests is None
         assert saved(app) == {**body, "off": True} and stopped[-1] is started[1]
 
+        # What a form can't send is refused with a code, and the field where there is one.
+        assert node.call("POST", SCHEDULE, ["every_minutes"]) == (
+            400, {"error": "expected a JSON object", "code": "bad_body"})  # fmt: skip
+        status, err = node.call("POST", SCHEDULE, {**body, "enabled": "yes"})
+        assert status == 400 and (err["code"], err["field"]) == ("bad_enabled", "enabled")
+        status, err = node.call("POST", SCHEDULE, {**body, "evry": 15})
+        assert status == 400 and (err["code"], err["field"], err["keys"]) == (
+            "unknown_keys", "evry", ["evry"])  # fmt: skip
         # Another machine: never, not even to look.
         status, _ = node.call("GET", SCHEDULE, headers={"X-Forwarded-For": "192.168.1.20"})
         assert status == 403
@@ -415,7 +424,8 @@ def test_the_pages_schedule_is_used_at_start_and_a_broken_one_is_skipped(
     app = make_app(tmp_path, page=page)
     try:
         assert app.digests.schedule == Schedule(20, "en", ("a",))
-        assert app.digest_schedule_view()["source"] == "page"
+        view = app.digest_schedule_view()
+        assert view["source"] == "page" and view["file_has_schedule"] is False
     finally:
         app.pipeline.stop()
         app.close()

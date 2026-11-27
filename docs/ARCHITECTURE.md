@@ -939,7 +939,7 @@ where it was) each way, which `radio watch` prints; for an overload it prints wh
 `--gain`, and an overloaded catch too short to make the watch deaf prints it with the catch. The
 status also carries `overload` (see `status()`, above). Listening by hand (`radio/live.py`) gives the same `overload` object in
 its view while the dongle's converter clips 1% or more of the samples, and for 10 minutes after,
-with `freq_hz` null: it doesn't tell which signal on the window clipped it. A start opens a `NarrowbandDemodulator` for its channel fed
+with `freq_hz` and `on_channel` null: it doesn't tell which signal on the window clipped it. A start opens a `NarrowbandDemodulator` for its channel fed
 from the history 0.3 s before the first frame above the floor (but never before the previous catch's
 audio on that channel ended), at most four at once (`watch_missed` otherwise); an end gives a
 `Catch` with the audio up to 0.3 s after. The dongle's thread queues catches for the station's (16

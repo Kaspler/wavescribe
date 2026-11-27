@@ -370,6 +370,22 @@ def list_dongles(command: str = "rtl_test", timeout: float = 3.0) -> list[dict[s
     return parse_dongles(text)
 
 
+DONGLES_FOR_S = 5.0  # the page asks on every load of several screens: one listing serves them
+_listed: tuple[object, float, list[dict[str, str]]] | None = None
+
+
+def recent_dongles() -> list[dict[str, str]]:
+    """``list_dongles`` for the page: the listing of the last few seconds, rather than a
+    subprocess for each screen that shows receivers. A dongle plugged in shows after
+    ``DONGLES_FOR_S`` at the latest."""
+    global _listed
+    listing = list_dongles  # as it is now: a test's stand-in is asked afresh
+    now = time.monotonic()
+    if _listed is None or _listed[0] is not listing or now - _listed[1] > DONGLES_FOR_S:
+        _listed = (listing, now, listing())
+    return [dict(d) for d in _listed[2]]
+
+
 def reads_as_index(serial: str) -> bool:
     """Whether the rtl tools may read ``serial`` as a device index: they try -d as a number
     first (C strtol, base 0, so a leading 0 means octal) and use it when it is below the number

@@ -1286,6 +1286,9 @@ class App:
             "enabled": shown is not None and not (page or {}).get("off"),
             "source": source,
             "file": str(path) if path else None,
+            # Whether the alerts file has a [digest] of its own, also while the page's is used:
+            # what "use the file's again" would bring back.
+            "file_has_schedule": raw.get("digest") is not None,
             "schedule": schedule.table() if schedule is not None else None,
             "running": self.digests is not None,
             "next_at": (
@@ -1311,7 +1314,7 @@ class App:
             raise ChangeError(ALERTS_OFF, "alerts_off")
         enabled = body.get("enabled", True)
         if not isinstance(enabled, bool):
-            raise ChangeError("enabled must be true or false", "bad_enabled")
+            raise ChangeError("enabled must be true or false", "bad_enabled", field="enabled")
         table = {k: v for k, v in body.items() if k != "enabled" and v is not None}
         schedule = self._check_digest_schedule(table)
         # every_minutes always: an empty table would be left out of ui.toml, and the file's

@@ -64,7 +64,7 @@ def dispatch(app: App, method: str, path: str, query: dict[str, str], body: Any)
 
 def _body(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict):
-        raise ChangeError("expected a JSON object")
+        raise ChangeError("expected a JSON object", "bad_body")
     return body
 
 

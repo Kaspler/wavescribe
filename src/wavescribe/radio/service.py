@@ -176,10 +176,10 @@ class RadioService:
 
     def new_dongles(self) -> list[dict[str, str]]:
         """Dongles on USB that no receiver uses yet (listing them opens none)."""
-        from wavescribe.sources.sdr import list_dongles
+        from wavescribe.sources.sdr import recent_dongles
 
         known = {d.serial for d in self.app.config.devices}
-        return [d for d in list_dongles() if d["serial"] not in known]
+        return [d for d in recent_dongles() if d["serial"] not in known]
 
     # -- what is kept of each class of radio (the user decides; docs/RADIO.md) --------------
 
