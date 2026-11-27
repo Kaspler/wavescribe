@@ -227,7 +227,8 @@ export function saidBy(point: Point, a: Answer): string | null {
  * made), "failed" (the model failed), "refused" (the request can't be served as asked), "token"
  * (a read token is needed), "unreachable" (no answer at all). `code` is the server's for it, and
  * `text` its sentence, shown as it is; `retry` whether trying again can help, and `retryAt` when
- * (busy: seconds since 1970, from Retry-After); `maxMinutes` the longest window, for a window
+ * (busy: a whole second since 1970, from Retry-After, so the time the page names to the second
+ * is the time trying again becomes possible); `maxMinutes` the longest window, for a window
  * refused as too long. */
 export interface Failure {
   kind: "off_here" | "unavailable" | "busy" | "failed" | "refused" | "token" | "unreachable";
@@ -271,14 +272,40 @@ export function failureOf(status: number, data: unknown, o: { retryAfter?: strin
     : status >= 500 ? "failed"
     : "refused";
   const after = Number.parseInt(o.retryAfter ?? "", 10);
-  const retryAt = kind === "busy" ? (o.now ?? Date.now() / 1000) + (Number.isFinite(after) && after > 0 ? after : 60) : null;
+  const given = Number.isFinite(after) && after > 0;
+  // A refusal the page has no code for, sent with a time to try again (a server newer than this
+  // page, say), is a wait as "busy" is: its sentence as it is, and its time.
+  const waits = kind === "busy" || (given && (status === 429 || status === 503));
+  const retryAt = waits ? Math.ceil((o.now ?? Date.now() / 1000) + (given ? after : 60)) : null;
   const max = Number(d.max_minutes);
   return {
     kind, code, text,
-    retry: kind === "busy" || kind === "failed" || code === "id_in_use",
+    retry: waits || kind === "failed" || code === "id_in_use",
     retryAt,
     maxMinutes: code === "bad_window" && Number.isFinite(max) && max > 0 ? max : null,
   };
+}
+
+/** How long until a refused request may be tried again, in ms: nothing once `retryAt` is here,
+ * or when the refusal named no time. */
+export const retryWait = (retryAt: number | null, nowMs: number): number =>
+  retryAt == null ? 0 : Math.max(0, retryAt * 1000 - nowMs);
+
+// -- the stations ------------------------------------------------------------------------------
+
+/** A station a summary can cover: one this device shows that is running now. */
+export interface Coverable {
+  id: string;
+  /** A watch (every channel of a band): short lines from many speakers, so it is in a summary
+   * only when chosen, as on the command line. */
+  watch: boolean;
+}
+
+/** The stations a summary covers: every running station in the reader's list, whether or not its
+ * column is on screen, but for the ones the reader left out in the summary's own choice
+ * (`picked`: id to in or out); a watch is out until chosen. */
+export function coveredStations(list: Coverable[], picked: Record<string, boolean> = {}): string[] {
+  return list.filter((s) => (Object.hasOwn(picked, s.id) ? picked[s.id] : !s.watch)).map((s) => s.id);
 }
 
 // -- reading aloud ---------------------------------------------------------------------------

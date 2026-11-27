@@ -278,7 +278,6 @@ a.playing-label:hover { text-decoration: underline; }
 .ch-sub > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ch-sub > span:first-child { flex: none; max-width: 100%; }
 /* Why a station is in trouble, in its row: "Retrying (9 attempts so far)". */
-.ch-why { display: block; padding-left: 16px; font-size: var(--t-xs); line-height: 1.35; color: var(--band-lamp-trouble); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ch-sub > span + span::before { content: "·"; margin-right: 6px; }
 .ch-sub .is-trouble { color: var(--band-lamp-trouble); }
 .ch-actions {
@@ -404,6 +403,16 @@ a.playing-label:hover { text-decoration: underline; }
 .col-empty { padding: var(--s8) 0 0 64px; max-width: calc(52ch + 64px); color: var(--ink-3); font-size: var(--t-md); text-wrap: pretty; }
 .col-empty-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); }
 .col-empty-link:hover { color: var(--ink); }
+/* Why no new line is coming, where the next line would be: the lamp in the margin the times
+   are in, the sentence in the text's own column, quieter than the text. */
+.col-note { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 12px; margin-top: var(--s7); font-size: var(--t-md); line-height: 1.5; color: var(--ink-2); }
+.col-note.is-alone { margin-top: var(--s8); }
+.col-note-lamp { display: flex; justify-content: flex-end; align-items: center; height: 21px; }
+.col-note-body { min-width: 0; max-width: 52ch; text-wrap: pretty; }
+.col-note-more { margin-top: var(--s3); font-size: var(--t-sm); color: var(--ink-3); }
+.col-note-more summary { width: fit-content; cursor: pointer; color: var(--ink-2); }
+.col-note-more summary:hover { color: var(--ink); }
+.col-note-more p { margin-top: var(--s2); overflow-wrap: anywhere; }
 
 /* Until the speech models are downloaded: said once, at the top of the reading area. */
 .firstrun {
@@ -483,8 +492,23 @@ button.ts:hover svg, button.ts:focus-visible svg { opacity: 1; }
 @keyframes u-flash { 0%, 55% { background: var(--accent-tint); } }
 @media (prefers-reduced-motion: reduce) { .u-flash { animation: none; background: var(--accent-tint); } }
 .u-untranslated { color: var(--ink-2); }
-/* Words said in another language are what was said, not a fallback: full contrast, chip too. */
+/* Words heard in another language are what was written down, not a fallback: full contrast,
+   chip too. Its chip is a button: what "heard as" means is said beside it. */
 .u-other .u-lang { color: var(--ink-2); }
+button.u-hint { font-family: inherit; background: none; cursor: help; text-decoration: underline dotted; text-decoration-color: var(--rule-strong); text-underline-offset: 2px; }
+button.u-hint:hover, button.u-hint:focus-visible { color: var(--ink); border-color: var(--ink-3); }
+.u-tip {
+  position: fixed;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 8px 10px;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  color: var(--ink-2);
+  text-wrap: pretty;
+  pointer-events: none;
+  transform-origin: top left;
+}
 .is-linked { background: var(--accent-tint); }
 .para-text .u[data-k] { cursor: default; }
 .u-pending { color: var(--ink-3); }
@@ -575,6 +599,7 @@ mark.found { color: inherit; background: var(--accent-tint); border-radius: 2px;
 .alerts-head .seg button { min-height: 22px; padding: 0 8px; font-size: var(--t-sm); }
 .alerts-none { padding: var(--s5) 0; color: var(--ink-3); }
 .alerts-none a { color: var(--ink-2); }
+.alerts-why { padding-top: 0; color: var(--ink-2); line-height: 1.5; text-wrap: pretty; }
 .alerts-more { margin-top: 8px; padding: 0; border: 0; background: none; color: var(--ink-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .alerts-foot { margin-top: var(--s4); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-3); text-wrap: pretty; }
 .alerts-foot.is-trouble { color: var(--trouble-ink); }
@@ -603,6 +628,8 @@ mark.found { color: inherit; background: var(--accent-tint); border-radius: 2px;
 .sev-medium i { border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--alert); }
 .sev-low { color: var(--ink-3); font-weight: 600; }
 .sev-low i { width: 5px; height: 5px; margin: 0 1.5px; border-radius: 50%; background: var(--ink-3); }
+/* Raised without the LLM's check: said beside the severity, in words, never in an alert's red. */
+.alert-unchecked { flex: none; color: var(--ink-2); font-weight: 600; }
 .alert-rule { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-weight: 600; }
 .alert-time { margin-left: auto; color: var(--ink-3); flex: none; }
 .alert-text {
@@ -742,6 +769,12 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .sum-pick-h { font-size: var(--t-md); font-weight: 650; overflow-wrap: anywhere; }
 .sum-pick-what { margin-top: calc(-1 * var(--s2)); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-3); text-wrap: pretty; }
 .sum-pick-for { font-size: var(--t-ui); font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+/* Which stations: said in a line, with the choice of fewer folded under it. */
+.sum-pick-who { display: grid; gap: var(--s2); justify-items: start; }
+.sum-pick-change { padding: 0; border: 0; background: none; color: var(--ink-2); font-size: var(--t-sm); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); }
+.sum-pick-change:hover { color: var(--ink); }
+.sum-pick-chips { display: grid; gap: var(--s3); padding-top: var(--s2); }
+.sum-pick-chips .chip { max-width: 100%; height: auto; min-height: 26px; padding-block: 3px; overflow-wrap: anywhere; text-align: left; }
 .sum-pick-job { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2) var(--s4); padding: var(--s3) 0; border-block: 1px solid var(--rule); font-size: var(--t-sm); color: var(--ink-2); }
 .sum-pick-acts { display: flex; gap: 4px; margin-left: auto; }
 .sum-pick-list { display: grid; border-top: 1px solid var(--rule); }
@@ -791,7 +824,9 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .sum-title .btn { margin-left: auto; }
 .sum-meta { display: flex; flex-wrap: wrap; column-gap: 6px; font-size: var(--t-sm); line-height: 18px; color: var(--ink-3); }
 .sum-meta > span + span::before { content: "·"; margin-right: 6px; }
-.sum-stations { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.sum-stations { display: block; overflow-wrap: anywhere; text-wrap: pretty; }
+details.sum-stations > summary { cursor: pointer; }
+details.sum-stations > p { padding: 2px 0 2px 14px; }
 .sum-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s5) var(--s7) var(--s10); }
 .sum-notice { padding-bottom: var(--s5); border-bottom: 1px solid var(--rule); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-3); text-wrap: pretty; }
 .sum-late { padding: var(--s4) 0; border-bottom: 1px solid var(--rule); font-size: var(--t-sm); line-height: 1.45; color: var(--ink-2); text-wrap: pretty; }
@@ -973,6 +1008,7 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
   .ts { justify-content: flex-start; height: auto; margin-bottom: 2px; }
   button.ts svg { opacity: 1; }
   .col-empty { padding-left: 0; }
+  .col-note { grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; }
   .firstrun { flex-wrap: wrap; padding: var(--s5) var(--s6); }
   .firstrun .btn { margin-left: calc(16px + var(--s6)); }
   .panel-head { padding: var(--s5) var(--s6) var(--s4); }

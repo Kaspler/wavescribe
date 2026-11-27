@@ -1,12 +1,13 @@
 // One station's transcript: paragraphs split at pauses, times in the margin, newest at the bottom.
-import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
 import { dirOf, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
 import { S, linesAround, loadEarlier, post, running, setNotice, startStation, stationsChanged } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
-import { noText, overloaded, stateOf } from "../lib/station";
+import { nextTry, noText, overloaded, stateOf } from "../lib/station";
 import { useTopics } from "../lib/store";
 import { ago, hm, hms, whenLabel } from "../lib/time";
 import type { Station, Utterance } from "../lib/types";
@@ -20,6 +21,7 @@ import { useBandPlan } from "../manage/bandplan";
 const FLASH_MS = 2400; // how long a line asked for by a link stays marked
 const PAGES_BACK = 20; // how far "Load earlier" may page back to reach such a line
 import { channelHeads, channelText } from "./channels";
+import { colNote, steady } from "./colNote";
 import { StationMenu } from "./StationMenu";
 import { NowLine } from "./Summary";
 import { T } from "./strings";
@@ -158,7 +160,7 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
           <span className="col-state is-trouble">{away ? T.outOfReach : cant}</span>
         ) : (stale || !speech) && (
           <span className={cx("col-state", state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>
-            {stale ? T.reconnecting : state.why || state.label}
+            {stale ? T.reconnecting : state.label}
           </span>
         )}
         {last && !speech && <span className="num">{T.lastText(last)}</span>}
@@ -322,7 +324,6 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
   };
 
   const hasHistory = S.hasStore && list.some((u) => u.id != null);
-  const on = running(st.id);
   return (
     <div className="transcript-wrap">
       <div ref={body} className="transcript" tabIndex={0} onScroll={onScroll}
@@ -338,14 +339,7 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
           {paras.map((p, i) => (
             <ParaView key={p.utts[0].key} para={p} st={st} shown={shown} src={P.src} channel={heads[i]} />
           ))}
-          {!list.length && (
-            <p className="col-empty">
-              {!on ? (!st.disabled && st.out_of_reach ? null : T.stationOff) : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
-              {on && noText(st) && S.manage && (
-                <> <button type="button" className="col-empty-link" onClick={() => go("#/settings/languages")}>{T.getModels}</button></>
-              )}
-            </p>
-          )}
+          <ColFoot st={st} empty={!list.length} />
         </div>
       </div>
       {behind && (
@@ -361,6 +355,67 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
         </button>
       )}
     </div>
+  );
+}
+
+/** The foot of a column's text, where the next line would come. While none is coming it says
+ * why, calmly, and since when (colNote.ts): music is playing and is skipped, no voice is heard,
+ * or the station can't be reached, with the source's own words for that under "Details". With
+ * no text at all it says what the column waits for; "Waiting for speech…" only while the station
+ * is being heard. */
+function ColFoot({ st, empty }: { st: Station; empty: boolean }) {
+  useTopics("status", "conn", "state", `utt:${st.id}`);
+  const shown = useRef<{ kind: string; since: number | null }>({ kind: "", since: null });
+  const on = running(st.id);
+  const live = S.live[st.id];
+  const list = S.utts[st.id];
+  const last = list?.[list.length - 1];
+  const note = on && S.conn === "live" ? colNote(live, {
+    kind: st.kind,
+    writes: st.transcribe !== false && !noText(st) && !st.listen_only_run,
+    lastText: last && last.t_start != null ? last.t_start + last.duration : null,
+    watched: S.upSince[st.id] ?? null,
+    now: Date.now() / 1000,
+  }) : null;
+  if (note) {
+    const next = "since" in note ? note.since : null;
+    const since = shown.current.kind === note.kind ? steady(shown.current.since, next) : next;
+    shown.current = { kind: note.kind, since };
+    const when = since != null ? whenLabel(since) : null;
+    return (
+      <div className={cx("col-note", empty && "is-alone")}>
+        <span className="col-note-lamp"><Lamp state={note.kind === "down" ? "trouble" : note.kind === "connecting" ? "wait" : "dim"} /></span>
+        {note.kind === "down" ? (
+          <div className="col-note-body">
+            <p>{T.colDown[note.what]} {T.colKeepsTrying}{when ? ` ${T.colNothingSince(when)}` : ""}</p>
+            {note.error && (
+              <details className="col-note-more">
+                <summary>{T.details}</summary>
+                <p dir="auto">{note.error}</p>
+                <p className="num">{nextTry({ retry_in_s: note.retryIn ?? undefined })}</p>
+              </details>
+            )}
+          </div>
+        ) : (
+          <p className="col-note-body">
+            {note.kind === "connecting" ? T.colConnecting
+              : note.kind === "music" ? T.colMusic(when!)
+              : note.kind === "quiet" ? T.colQuiet(when!)
+              : T.colUnwritten(when!)}
+          </p>
+        )}
+      </div>
+    );
+  }
+  shown.current = { kind: "", since: null };
+  if (!empty) return null;
+  return (
+    <p className="col-empty">
+      {!on ? (!st.disabled && st.out_of_reach ? null : T.stationOff) : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
+      {on && noText(st) && S.manage && (
+        <> <button type="button" className="col-empty-link" onClick={() => go("#/settings/languages")}>{T.getModels}</button></>
+      )}
+    </p>
   );
 }
 
@@ -429,8 +484,52 @@ function labelOf(u: Utterance, st: Station, shown: string): string {
   const [, lang, state] = pick(u, st, shown);
   const other = otherLang(u);
   if (state === "untranslated") return langNameEn(lang);
-  if (other) return T.saidIn(langNameEn(other));
+  if (other) return T.heardAs(langNameEn(other));
   return st.language === "auto" && sameLang(shown, st.language) && u.language ? langNameEn(u.language) : "";
+}
+
+/** A chip whose few words need a sentence: said beside it on hover and on focus, and on a tap
+ * where there is neither. The sentence is the chip's description for a screen reader. */
+function HintChip({ label, hint }: { label: string; hint: string }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const chip = useRef<HTMLButtonElement>(null);
+  const tip = useRef<HTMLSpanElement>(null);
+  const id = useId();
+  useLayoutEffect(() => {
+    if (!open || !chip.current || !tip.current) return setPos(null);
+    const r = chip.current.getBoundingClientRect();
+    const w = tip.current.offsetWidth, h = tip.current.offsetHeight;
+    const below = r.bottom + 6 + h <= innerHeight - 8;
+    setPos({ left: Math.max(8, Math.min(innerWidth - w - 8, r.left)), top: below ? r.bottom + 6 : Math.max(8, r.top - h - 6) });
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const outside = (e: PointerEvent) => { if (!chip.current?.contains(e.target as Node)) close(); };
+    addEventListener("scroll", close, true); // the text moved from under it
+    document.addEventListener("pointerdown", outside);
+    return () => { removeEventListener("scroll", close, true); document.removeEventListener("pointerdown", outside); };
+  }, [open]);
+  return (
+    <>
+      <button ref={chip} type="button" className="u-lang u-hint" lang="en" dir="ltr" aria-describedby={id}
+              onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }}
+              onPointerLeave={(e) => { if (e.pointerType === "mouse" && document.activeElement !== chip.current) setOpen(false); }}
+              onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+              onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+              onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); } }}>
+        {label}
+      </button>
+      {createPortal(
+        <span ref={tip} id={id} role="tooltip" className="pop u-tip" lang="en" dir="ltr"
+              style={open ? { left: pos?.left ?? -9999, top: pos?.top ?? 0 } : { display: "none" }}>
+          {hint}
+        </span>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; shown: string; linked: boolean; label: boolean }) {
@@ -448,8 +547,8 @@ function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; s
       </span>
     );
   }
+  // What "heard as" means is the chip's own hint, on hover, focus or a tap.
   const title = [
-    other ? `Said in ${langNameEn(other)}: maybe a song or a clip in another language` : "",
     hits.length ? `Alert rule: ${[...new Set(hits.map((h) => h.rule))].join(", ")}` : "",
     state === "untranslated" ? `Not translated into ${langNameEn(shown)}` : "",
   ].filter(Boolean).join(" · ");
@@ -458,7 +557,9 @@ function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; s
     <span data-k={u.key} data-u={u.id ?? undefined} lang={lang} dir="auto" title={title || undefined}
           className={cx("u", fresh && "u-fresh", state === "untranslated" && "u-untranslated", other && "u-other",
                         sev && text !== u.text && `u-hit kw-${sev}`, linked && "is-linked")}>
-      {label && <span className="u-lang">{labelOf(u, st, shown)}</span>}
+      {label && (other
+        ? <HintChip label={labelOf(u, st, shown)} hint={T.heardAsWhy(langNameEn(other), st.language === "auto" ? null : langNameEn(st.language))} />
+        : <span className="u-lang">{labelOf(u, st, shown)}</span>)}
       {utteranceWords(u, text)}{" "}
     </span>
   );

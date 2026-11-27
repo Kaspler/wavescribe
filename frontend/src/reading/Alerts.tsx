@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { playReplay } from "../lib/audio";
 import { skippedChecks } from "../lib/behind";
 import { langNameEn, sameLang } from "../lib/lang";
-import { S } from "../lib/live";
+import { S, running } from "../lib/live";
 import { P } from "../lib/prefs";
 import { MAX_COLS, setCols } from "../lib/router";
+import { noText } from "../lib/station";
 import { useTopics } from "../lib/store";
 import { hm, isoTime, whenLabel } from "../lib/time";
 import type { Alert } from "../lib/types";
@@ -14,6 +15,7 @@ import { V, railShown, showLine, toggleRail } from "../lib/view";
 import { Icon } from "../components/Icon";
 import { Button, Segmented, cx, toast } from "../components/ui";
 import { alertSpans, excerptStart, findTerms } from "./alertText";
+import { withoutWordLists } from "./rulesNote";
 import { T } from "./strings";
 import { withInaudible, withMarks } from "./text";
 
@@ -41,6 +43,10 @@ export function AlertList({ max, compact }: { max?: number; compact?: boolean })
   const { list, also } = alertList();
   const rec = list.filter(recent);
   const shown = (all ? list : rec).slice(0, all ? 50 : max ?? 50);
+  // The stations being written down here now, none in a language the topic rules have a word
+  // list for: such rules can't match, which an empty list wouldn't say.
+  const heard = S.stations.filter((s) => running(s.id) && s.transcribe && !noText(s) && !s.listen_only_run && s.kind !== "remote");
+  const without = withoutWordLists(S.topicLanguages, heard);
   return (
     <div className={cx("alerts", compact && "is-compact")}>
       <div className="alerts-head">
@@ -55,10 +61,18 @@ export function AlertList({ max, compact }: { max?: number; compact?: boolean })
           {shown.map((a) => <AlertItem key={a.id} a={a} also={also.get(a.id) || []} fresh={a.id === S.freshAlert} />)}
         </ol>
       ) : (
-        <p className="alerts-none">
-          {!list.length ? T.alertsNoneAtAll : list.some((a) => a.severity === "low") ? T.alertsOnlyLow(list.filter((a) => a.severity === "low").length) : T.alertsNone}
-          {S.manage && <> {T.alertRulesHint} <a href="#/settings/alerts">{T.alertRules}</a>.</>}
-        </p>
+        <>
+          <p className="alerts-none">
+            {!list.length ? T.alertsNoneAtAll : list.some((a) => a.severity === "low") ? T.alertsOnlyLow(list.filter((a) => a.severity === "low").length) : T.alertsNone}
+            {S.manage && !without && <> {T.alertRulesHint} <a href="#/settings/alerts">{T.alertRules}</a>.</>}
+          </p>
+          {without && (
+            <p className="alerts-none alerts-why">
+              {T.alertsNoWordList(without.map(langNameEn), (S.topicLanguages || []).map(langNameEn))} {T.alertsAnyLanguage}
+              {S.manage && <> {T.alertsAddUnder} <a href="#/settings/alerts">{T.alertRules}</a>.</>}
+            </p>
+          )}
+        </>
       )}
       {!all && rec.length > shown.length && (
         <button type="button" className="alerts-more" onClick={() => setAll(true)}>
@@ -120,6 +134,7 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
       <button type="button" className="alert-sum" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="alert-line">
           <span className={`sev sev-${a.severity}`}><i aria-hidden="true" />{SEV_WORD[a.severity]}</span>
+          {a.checked === false && <span className="alert-unchecked" title={a.reason || T.notCheckedWhy}>{T.notChecked}</span>}
           <span className="alert-rule">{human(a.rule)}{also.length ? ` + ${also.map(human).join(", ")}` : ""}</span>
           <time className="alert-time num" dateTime={isoTime(a.first_at)}>{whenLabel(a.first_at)}</time>
         </span>
@@ -149,6 +164,7 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
             </p>
           )}
           {a.reason && !reasoned && !noSegment && <p className="alert-reason">{a.reason}</p>}
+          {a.checked === false && !a.reason && <p className="alert-reason">{T.notCheckedWhy}</p>}
           {!noSegment && (
             <div className="alert-actions">
               {S.hasStore && (
@@ -187,7 +203,7 @@ export function AlertAnnouncer() {
     const a = S.alerts.get(id);
     if (!a || a.severity === "low") return;
     const where = a.stations.map((s) => S.byId[s]?.name || s).join(", ");
-    const msg = `${SEV_WORD[a.severity]} alert, ${human(a.rule)}, on ${where}`;
+    const msg = `${SEV_WORD[a.severity]} alert${a.checked === false ? `, ${T.notChecked}` : ""}, ${human(a.rule)}, on ${where}`;
     if (a.severity === "critical") setUrgent(msg);
     else setPolite(msg);
     // Where the rail isn't on screen, a new alert also shows for a moment; the bell keeps the count.

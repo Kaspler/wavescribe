@@ -14,13 +14,18 @@ import { MAX_COLS, setCols } from "../lib/router";
 import { emit } from "../lib/store";
 import { V, showLine } from "../lib/view";
 import { heard } from "./aloud";
-import { type Answer, type Choice, type Failure, answerOf, digestBody, failure, failureOf, newId, nowBody, speechOf } from "./digest";
+import {
+  type Answer, type Choice, type Coverable, type Failure, answerOf, coveredStations, digestBody, failure, failureOf, newId, nowBody, speechOf,
+} from "./digest";
 import { T } from "./strings";
 
 export interface Job {
   /** The request's id, by which it is cancelled. */
   id: string;
   stations: string[];
+  /** How many running stations the reader's list had when it was asked, so the panel can say
+   * that it covers fewer; absent for a summary of one station asked from its menu. */
+  followed?: number;
   choice: Choice;
   /** When it was asked, in ms, and how long the answer took. */
   asked: number;
@@ -43,6 +48,9 @@ export const Sm = {
   /** Read the next one aloud on this machine as soon as it is made: whoever wants to hear it may
    * be away from the screen by then. Any answer with points can be read aloud later too. */
   speak: false,
+  /** The reader's own choice of stations for the next summary, by id: in or out. A station not
+   * named here is in, a watch out (digest.ts, coveredStations). Kept for this tab. */
+  picked: {} as Record<string, boolean>,
 };
 
 let ctl: AbortController | null = null;
@@ -62,10 +70,21 @@ function keep() {
   }
 }
 
-/** The stations being read: the columns on screen, else every running station shown here. */
-export function readingStations(): string[] {
-  if (V.shown.length) return V.shown.filter((id) => Object.hasOwn(S.byId, id));
-  return S.stations.filter((s) => visible(s.id) && !!S.live[s.id] && !S.live[s.id].stopping).map((s) => s.id);
+/** The stations the reader follows: every running station this device's list shows, whether or
+ * not its column is on screen (the columns show only as many as fit). */
+export function followedStations(): Coverable[] {
+  return S.stations.filter((s) => visible(s.id) && !!S.live[s.id] && !S.live[s.id].stopping)
+    .map((s) => ({ id: s.id, watch: s.watch != null }));
+}
+
+/** The stations the next summary covers: the followed ones, but for those left out in the
+ * summary's own choice. */
+export const summaryStations = (): string[] => coveredStations(followedStations(), Sm.picked);
+
+/** Takes a station into the next summary, or leaves it out. */
+export function pickStations(ids: string[]) {
+  for (const s of followedStations()) Sm.picked[s.id] = ids.includes(s.id);
+  emit("summary");
 }
 
 /** The language to ask in: the one the page is read in, when one of `stations` is translated
@@ -145,13 +164,14 @@ async function tellCancel(id: string, keepalive = false): Promise<string | null>
   }
 }
 
-/** Asks for a summary of `stations` over `choice`; the answer opens beside the columns. */
-export async function askSummary(choice: Choice, stations: string[]) {
+/** Asks for a summary of `stations` over `choice`; the answer opens beside the columns.
+ * `followed`: how many running stations the reader's list has, when the summary is of them. */
+export async function askSummary(choice: Choice, stations: string[], followed?: number) {
   if (Sm.job?.state === "working") return;
   const speak = Sm.speak && S.canControl;
   const id = newId();
   const job: Job = {
-    id, stations, choice, asked: Date.now(), took: null, state: "working", cancel: null, answer: null, failure: null,
+    id, stations, followed, choice, asked: Date.now(), took: null, state: "working", cancel: null, answer: null, failure: null,
     speak,
   };
   const mine = new AbortController();

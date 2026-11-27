@@ -1,5 +1,10 @@
 // Everything the reading view says, in one place, so the reader's language can be added
 // as a translation of this table rather than a change to every component.
+/** "A", "A and B", "A, B and C". */
+const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
+/** ", about 1.5 GB", ", a few megabytes", or nothing while the size isn't known. */
+const about = (gb: number | null) => (gb == null ? "" : gb >= 0.1 ? `, about ${gb.toFixed(1)} GB` : ", a few megabytes");
+
 export const T = {
   search: "Search or ask",
   searchHint: "Search everything heard, or ask a question about it",
@@ -23,6 +28,13 @@ export const T = {
   alertsNone: "Nothing serious in the last 12 hours.",
   alertsOnlyLow: (n: number) => `Nothing serious in the last 12 hours; ${n} low ${n === 1 ? "alert is" : "alerts are"} under All.`,
   alertsNoneAtAll: "No alerts yet.",
+  // None of the stations being written down is in a language the topic rules have a word list
+  // for (rulesNote.ts). `lists`: the languages that have one, if any.
+  alertsNoWordList: (langs: string[], lists: string[]) =>
+    `The rules that listen for topics can't match on the stations running now: they need a word list in the station's language, and there is none for ${T.oneOf(langs)}` +
+    `${lists.length ? ` (only for ${and(lists)})` : ""}.`,
+  alertsAnyLanguage: "Two kinds of rule work in any language: one with your own words, and one that describes in plain language what to listen for.",
+  alertsAddUnder: "Add one under",
   notTranslated: (lang: string) => `${lang}, not translated`,
   wordsStayThere: "The words stay on the Wavescribe machine.",
   mentions: (n: number) => `${n} mentions`,
@@ -33,6 +45,10 @@ export const T = {
   lineGone: "That line is no longer kept: the transcript shows what is.",
   original: "Original",
   notDelivered: "not delivered",
+  // An alert whose rule asks the LLM to check a match, raised without its answer: why is in the
+  // alert's reason, in the server's words; this is said when it gives none.
+  notChecked: "not checked",
+  notCheckedWhy: "The model that checks this rule's matches didn't answer in time, so it was raised without that check.",
   partlyDelivered: "partly delivered",
   listen: "Listen",
   stopListening: "Stop listening",
@@ -43,15 +59,35 @@ export const T = {
   live: "Live",
   backToLive: "Back to live",
   waiting: "Waiting for speech…",
+  // The foot of a column while no new line is coming (colNote.ts): what is happening, since when.
+  colMusic: (since: string) => `Music is playing, and music is skipped. No speech since ${since}; the text goes on when speech does.`,
+  colQuiet: (since: string) => `No speech since ${since}: silence, or music without a voice. The text goes on when speech does.`,
+  colUnwritten: (since: string) => `Nothing written down since ${since}. Singing, jingles and sound that isn't clear speech are left out; the text goes on when speech does.`,
+  colConnecting: "Connecting to the station…",
+  colDown: {
+    stream: "This station's stream can't be reached.",
+    receiver: "This station's receiver isn't answering.",
+    remote: "The Wavescribe this station comes from can't be reached.",
+  },
+  colKeepsTrying: "Wavescribe keeps trying.",
+  colNothingSince: (since: string) => `Nothing has been heard from it since ${since}.`,
+  details: "Details",
   listenOnly: "Listen only: this station isn't written down. Turn transcription on in Settings.",
   noText: "no text yet",
   noTextYet: "No text yet: this station plays now, and is written down once its speech model is downloaded.",
   getModels: "Get the models",
   firstRunTitle: "No text yet: Wavescribe needs its speech models",
   firstRunBody: (gb: number | null) =>
-    `They are downloaded once${gb == null ? "" : gb >= 0.1 ? `, about ${gb.toFixed(1)} GB` : ", a few megabytes"}; ` +
+    `They are downloaded once${about(gb)}; ` +
     "after that everything runs on this Mac without the internet. Meanwhile every station plays " +
     "under Listen.",
+  // Only some stations wait: they are named (counted past three), with the model they wait for.
+  firstRunSome: (names: string[]) => `No text yet for ${names.length > 3 ? `${names.length} stations` : and(names)}`,
+  speechModelFor: (langs: string[], id: string) => `the speech model for ${and(langs)} (${id})`,
+  firstRunSomeBody: (waiting: number, models: string[], gb: number | null, ready: number) =>
+    `${waiting === 1 ? "It waits" : "They wait"} for ${models.length ? and(models) : waiting === 1 ? "its speech model" : "their speech models"}` +
+    `, downloaded once${about(gb)}; meanwhile ${waiting === 1 ? "it plays" : "they play"} under Listen. ` +
+    `The other ${ready === 1 ? "station is" : `${ready} stations are`} ready.`,
   stationOff: "This station is stopped.",
   start: "Start",
   startStation: (name: string) => `Start ${name}`,
@@ -70,7 +106,11 @@ export const T = {
   stopStationConfirm: "Stop it for everyone",
   translating: "translating",
   inaudible: "inaudible",
-  saidIn: (lang: string) => `said in ${lang}`,
+  // A line the speech model wrote in another language than the station's. The page can't tell
+  // a guest speaking that language from the model slipping into it, so the words are true of both.
+  heardAs: (lang: string) => `heard as ${lang}`,
+  heardAsWhy: (lang: string, station: string | null) =>
+    `Speech recognition wrote this in ${lang}, not ${station ?? "the station's language"}. Either ${lang} was spoken here (a guest, a clip, a song), or it misheard, and these words may be wrong.`,
   thinking: "Thinking… usually under a minute",
   thinkingHere: "Thinking… usually under a minute on this Mac",
   lastText: (ago: string) => `last text ${ago} ago`,
@@ -144,8 +184,20 @@ export const T = {
   summaryHint: "Summary: a few points from what was said while you weren't reading",
   summaryOf: (name: string) => `Summary of ${name}`,
   summaryWhat: "A few points from what was said, each with the lines it rests on. Up to a minute on the translation model; live translation goes first.",
-  summaryFor: (names: string[]) => `Of ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}`,
+  // Of every running station in the reader's list: by name while they are few, else counted.
+  summaryFor: (names: string[], of: number) => {
+    const few = and(names);
+    if (names.length === of) return of > 4 ? `Of all ${of} running stations` : `Of ${few}`;
+    return names.length > 4 ? `Of ${names.length} of the ${of} running stations` : `Of ${few} (${names.length} of the ${of} running)`;
+  },
+  summaryNone: "No station is chosen: choose at least one.",
   summaryNoStation: "No station is running, so there is nothing to summarise.",
+  chooseStations: "Choose stations",
+  summaryStations: "Stations to summarise",
+  summaryStationsWhat: "Every running station in your list is covered, whether or not its column is on screen. A station left out here stays out until this page is loaded again.",
+  summaryCovers: (names: string[]) => `Covers ${and(names)}`,
+  summaryCoversCount: (n: number) => `Covers ${n} stations`,
+  summaryOutOf: (n: number, of: number) => `${n} of the ${of} running`,
   summaryWindow: "What to summarise",
   lastMinutes: (n: number) => (n === 60 ? "The last hour" : `The last ${n} minutes`),
   sinceLooked: "Since you last looked",

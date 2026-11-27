@@ -2,9 +2,51 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ALERT_SPEECH_S, MAX_MINUTES, REMOTE_MINUTES, answerOf, asSentence, cutAt, digestBody, failureOf, lastNight, linksOf, newId,
-  nowBody, readingAt, saidBy, shown, sinceClock, speakResult, speechOf, spokenSeconds, untilClock, windowProblem,
+  ALERT_SPEECH_S, MAX_MINUTES, REMOTE_MINUTES, answerOf, asSentence, coveredStations, cutAt, digestBody, failureOf, lastNight, linksOf, newId,
+  nowBody, readingAt, retryWait, saidBy, shown, sinceClock, speakResult, speechOf, spokenSeconds, untilClock, windowProblem,
 } from "../src/reading/digest.ts";
+
+test("a summary covers every running station in the list, not the columns on screen", () => {
+  // Three run; the page has room for two columns. What is on screen isn't asked about at all.
+  const running = [{ id: "test-fr", watch: false }, { id: "test-de", watch: false }, { id: "test-it", watch: false }];
+  assert.deepEqual(coveredStations(running), ["test-fr", "test-de", "test-it"]);
+  // Fewer is the reader's own choice, made in the summary's menu.
+  assert.deepEqual(coveredStations(running, { "test-de": false }), ["test-fr", "test-it"]);
+  assert.deepEqual(coveredStations(running, { "test-fr": false, "test-de": false, "test-it": false }), []);
+  // A choice about a station that no longer runs changes nothing.
+  assert.deepEqual(coveredStations(running, { "test-gone": true, constructor: false }), ["test-fr", "test-de", "test-it"]);
+});
+
+test("a watch is in a summary only when chosen", () => {
+  const running = [{ id: "test-fr", watch: false }, { id: "test-band", watch: true }];
+  assert.deepEqual(coveredStations(running), ["test-fr"]);
+  assert.deepEqual(coveredStations(running, { "test-band": true }), ["test-fr", "test-band"]);
+});
+
+test("a refusal the page doesn't know, with a time to try again, waits until then", () => {
+  const f = failureOf(503, { error: "a summary is ahead of this one", code: "queue_full", position: 2, extra: { x: 1 } },
+    { retryAfter: "30", now: 1000.5 });
+  assert.deepEqual([f.code, f.text, f.retry, f.retryAt], ["queue_full", "A summary is ahead of this one.", true, 1031]);
+  // Without a time it is the server's sentence, as before.
+  assert.deepEqual([failureOf(409, { error: "no", code: "something_new" }).retry, failureOf(409, { error: "no", code: "something_new" }).retryAt], [false, null]);
+  // An answer with fields this page doesn't know is still an answer, those fields kept.
+  const a = answerOf({ ...answer(), queue: { position: 1 } });
+  assert.deepEqual(a.queue, { position: 1 });
+});
+
+test("trying again becomes possible at the second the button names", () => {
+  // Refused at 21:03:50.4 with Retry-After: 60. The time named is a whole second, and the wait
+  // ends exactly there: not at the start of its minute, not most of a minute after it.
+  const refused = Date.UTC(2026, 10, 27, 21, 3, 50, 400) / 1000;
+  const f = failureOf(503, { error: "try again in a minute", code: "busy" }, { retryAfter: "60", now: refused });
+  assert.equal(f.retryAt, Date.UTC(2026, 10, 27, 21, 4, 51) / 1000);
+  assert.equal(Number.isInteger(f.retryAt), true);
+  assert.equal(retryWait(f.retryAt, Date.UTC(2026, 10, 27, 21, 4, 0)), 51000); // the minute it falls in has begun: not yet
+  assert.equal(retryWait(f.retryAt, f.retryAt * 1000 - 1), 1);
+  assert.equal(retryWait(f.retryAt, f.retryAt * 1000), 0);
+  assert.equal(retryWait(f.retryAt, f.retryAt * 1000 + 5000), 0);
+  assert.equal(retryWait(null, 0), 0); // a failure that names no time can be tried again at once
+});
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
 

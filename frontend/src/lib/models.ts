@@ -57,6 +57,27 @@ export function neededModels(m: ModelsView): Need[] {
   return [...out.values()];
 }
 
+/** A speech model some stations wait for: the languages of theirs it is for, and its size. */
+export interface Awaited {
+  id: string;
+  languages: string[];
+  gb: number | null;
+}
+
+/** The speech models the stations in `languages` wait for (each station's own language tag), in
+ * the order the languages come; a language no missing model is for is left out. */
+export function awaitedModels(languages: string[], needs: Need[]): Awaited[] {
+  const out = new Map<string, Awaited>();
+  for (const lang of languages) {
+    const need = needs.find((n) => n.what.includes(lang));
+    if (!need) continue;
+    const have = out.get(need.entry.id);
+    if (!have) out.set(need.entry.id, { id: need.entry.id, languages: [lang], gb: need.entry.size_gb });
+    else if (!have.languages.includes(lang)) have.languages.push(lang);
+  }
+  return [...out.values()];
+}
+
 /** Whether a model can be downloaded with one click, or needs its licence accepted first. */
 export const needsLicence = (e: ModelEntry) => (e.tier === "opt-in" || e.tier === "restricted") && !e.accepted;
 

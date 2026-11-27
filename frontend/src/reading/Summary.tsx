@@ -10,17 +10,19 @@ import { useTopics } from "../lib/store";
 import { hm, hms, whenLabel } from "../lib/time";
 import { V } from "../lib/view";
 import { Icon } from "../components/Icon";
-import { Button, Check, LinkButton, cx, useDismiss } from "../components/ui";
+import { Button, Check, ChoiceChips, LinkButton, cx, useDismiss } from "../components/ui";
 import { SEV_WORD, human } from "./Alerts";
 import { SourceRow } from "./Ask";
 import { langNameEn } from "../lib/lang";
 import { Aloud, readAloud, stopReading } from "./aloud";
 import {
-  type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, lastNight, linksOf, readingAt, saidBy, shown,
-  sinceClock, untilClock, windowProblem,
+  type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, lastNight, linksOf, readingAt, retryWait, saidBy,
+  shown, sinceClock, untilClock, windowProblem,
 } from "./digest";
 import { T } from "./strings";
-import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary, speakNext } from "./summaries";
+import {
+  type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, followedStations, openLine, pickStations, showSummary, speakNext, summaryStations,
+} from "./summaries";
 
 const names = (ids: string[]) => ids.map((id) => S.byId[id]?.name || id);
 
@@ -59,7 +61,7 @@ function reveal() {
   requestAnimationFrame(() => document.getElementById("sum-h")?.focus({ preventScroll: true }));
 }
 
-/** The header's control: always in the same place, for the stations being read. */
+/** The header's control: always in the same place, for the stations the reader follows. */
 export function SummaryButton() {
   useTopics("summary");
   const [open, setOpen] = useState(false);
@@ -76,7 +78,7 @@ export function SummaryButton() {
       </Button>
       {open && (
         <div ref={pop} className="pop sum-pop" role="dialog" aria-label={T.summary}>
-          <Chooser stations={readingStations()} onDone={() => setOpen(false)} />
+          <Chooser onDone={() => setOpen(false)} />
         </div>
       )}
     </span>
@@ -104,21 +106,26 @@ function OffWhat({ code }: { code: string | null }) {
   );
 }
 
-/** The window is the only choice; the stations are those being read (or the one whose menu it
- * came from). The last summary asked comes first, whatever became of it, as it may have been
- * answered while closed; another waits until one being made is cancelled. */
-export function Chooser({ stations, onDone, one }: { stations: string[]; onDone: () => void; one?: boolean }) {
-  useTopics("summary", "state");
+/** The window, and which stations: every running station in the reader's list, whether or not
+ * its column is on screen, unless the reader leaves some out here (`one`: the station whose menu
+ * it came from, alone). The last summary asked comes first, whatever became of it, as it may
+ * have been answered while closed; another waits until one being made is cancelled. */
+export function Chooser({ onDone, one }: { onDone: () => void; one?: string }) {
+  useTopics("summary", "state", "status", "prefs");
   const uid = useId();
   const [time, setTime] = useState("");
   const [end, setEnd] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const job = Sm.job;
   const busy = making(job);
   const longest = S.canControl ? MAX_MINUTES : REMOTE_MINUTES;
+  const followed = one ? [] : followedStations();
+  const stations = one ? [one] : summaryStations();
+  const off = busy || !stations.length;
   const ask = (choice: Choice) => {
     onDone();
-    askSummary(choice, stations);
+    askSummary(choice, stations, one ? undefined : followed.length);
     reveal();
   };
   const since = (e: React.FormEvent) => {
@@ -154,14 +161,31 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
           <p className="sum-said">{T.summaryOff(S.digest)}</p>
           <OffWhat code={S.digestCode} />
         </div>
-      ) : !stations.length ? (
+      ) : !one && !followed.length ? (
         <p className="sum-pick-for">{T.summaryNoStation}</p>
       ) : (
         <>
-          {!one && <p className="sum-pick-for" dir="auto">{T.summaryFor(list)}</p>}
+          {!one && (
+            <div className="sum-pick-who">
+              <p className="sum-pick-for" dir="auto">{stations.length ? T.summaryFor(list, followed.length) : T.summaryNone}</p>
+              {followed.length > 1 && (
+                <button type="button" className="sum-pick-change" aria-expanded={choosing} aria-controls={`${uid}-who`}
+                        onClick={() => setChoosing(!choosing)}>
+                  {T.chooseStations}
+                </button>
+              )}
+              {choosing && (
+                <div id={`${uid}-who`} className="sum-pick-chips">
+                  <ChoiceChips label={T.summaryStations} options={followed.map((s) => [s.id, S.byId[s.id]?.name || s.id] as [string, string])}
+                               value={stations} onChange={pickStations} />
+                  <p className="sum-pick-sub">{T.summaryStationsWhat}</p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="sum-pick-list" role="group" aria-label={T.summaryWindow}>
             {away != null && (
-              <button type="button" disabled={busy} onClick={() => ask({ kind: "away", at: away })}>
+              <button type="button" disabled={off} onClick={() => ask({ kind: "away", at: away })}>
                 <span className="sum-pick-two">
                   <span>{T.sinceLooked} <span className="num sum-pick-at">{whenLabel(away)}</span></span>
                   <span className="sum-pick-sub">{T.sinceLookedWhat}</span>
@@ -170,12 +194,12 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
               </button>
             )}
             {SPANS.map((m) => (
-              <button key={m} type="button" disabled={busy} onClick={() => ask({ kind: "minutes", minutes: m })}>
+              <button key={m} type="button" disabled={off} onClick={() => ask({ kind: "minutes", minutes: m })}>
                 {T.lastMinutes(m)}<Icon name="right" />
               </button>
             ))}
             {night && (
-              <button type="button" disabled={busy} onClick={() => ask({ kind: "night", ...night })}>
+              <button type="button" disabled={off} onClick={() => ask({ kind: "night", ...night })}>
                 <span>{T.lastNight} <span className="num sum-pick-at">{hm(night.at)}–{hm(night.until)}</span></span>
                 <Icon name="right" />
               </button>
@@ -183,21 +207,21 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
             <form className="sum-pick-since" onSubmit={since}>
               <div className="sum-pick-row">
                 <label htmlFor={`${uid}-t`}>{T.sinceTime}</label>
-                <input id={`${uid}-t`} className="input num" type="time" name="since" autoComplete="off" value={time} disabled={busy} required
+                <input id={`${uid}-t`} className="input num" type="time" name="since" autoComplete="off" value={time} disabled={off} required
                        onChange={(e) => { setTime(e.target.value); setProblem(null); }}
                        aria-invalid={problem ? true : undefined} aria-describedby={problem ? `${uid}-p` : undefined} />
                 <label htmlFor={`${uid}-u`}>{T.untilTime}</label>
-                <input id={`${uid}-u`} className="input num" type="time" name="until" autoComplete="off" value={end} disabled={busy}
+                <input id={`${uid}-u`} className="input num" type="time" name="until" autoComplete="off" value={end} disabled={off}
                        onChange={(e) => { setEnd(e.target.value); setProblem(null); }} aria-describedby={`${uid}-h`} />
               </div>
               <div className="sum-pick-row">
                 <span className="sum-pick-sub" id={`${uid}-h`}>{T.untilHint}</span>
-                <Button type="submit" size="sm" variant="secondary" disabled={busy || !time}>{T.summarise}</Button>
+                <Button type="submit" size="sm" variant="secondary" disabled={off || !time}>{T.summarise}</Button>
               </div>
             </form>
           </div>
           {problem && <p className="sum-pick-why" id={`${uid}-p`} role="alert">{problem}</p>}
-          {S.canControl && <Check checked={Sm.speak} disabled={busy} onChange={speakNext}>{T.readAloudWhenReady}</Check>}
+          {S.canControl && <Check checked={Sm.speak} disabled={off} onChange={speakNext}>{T.readAloudWhenReady}</Check>}
           {busy && <p className="sum-pick-why">{T.oneAtATime}</p>}
         </>
       )}
@@ -213,7 +237,7 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
     // A phone opened at #/summary before anything was asked: the choice, as the page.
     return phone ? (
       <section className="sum is-phone" aria-label={T.summary}>
-        <div className="sum-body"><Chooser stations={readingStations()} onDone={() => {}} /></div>
+        <div className="sum-body"><Chooser onDone={() => {}} /></div>
       </section>
     ) : null;
   }
@@ -235,7 +259,7 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
           <span>{choiceLabel(job.choice)}</span>
           {a && <span className="num">{whenLabel(a.window.since)}–{hm(a.window.until)}</span>}
         </p>
-        <p className="sum-meta sum-stations" dir="auto">{(a ? a.stations.map((id) => a.names[id] || id) : names(job.stations)).join(", ")}</p>
+        <Covers names={a ? a.stations.map((id) => a.names[id] || id) : names(job.stations)} followed={job.followed} />
       </header>
       <div className="sum-body" aria-busy={making(job)}>
         <Body job={job} />
@@ -244,6 +268,23 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
     </section>
   );
 }
+
+/** Which stations the summary covers, by name: said in full, so that a station left out is
+ * seen to be left out. A long list folds under its count. `followed`: how many running stations
+ * the reader's list had when it was asked, said when the summary covers fewer. */
+function Covers({ names, followed }: { names: string[]; followed?: number }) {
+  const fewer = followed != null && names.length < followed ? ` (${T.summaryOutOf(names.length, followed)})` : "";
+  if (names.length <= MANY) return <p className="sum-meta sum-stations" dir="auto">{T.summaryCovers(names)}{fewer}</p>;
+  return (
+    <details className="sum-meta sum-stations">
+      <summary>{T.summaryCoversCount(names.length)}{fewer}</summary>
+      <p dir="auto">{names.join(", ")}</p>
+    </details>
+  );
+}
+
+/** More stations than this are counted, their names a click away. */
+const MANY = 4;
 
 /** What screen readers are told once the state changes; the ticking time isn't read out. */
 function said(job: Job): string {
@@ -277,7 +318,7 @@ function Body({ job }: { job: Job }) {
     );
   }
   if (job.state === "cancelled") return <p className="sum-said">{cancelText(job)}</p>;
-  if (job.state === "failed" && job.failure) return <Failed f={job.failure} again={() => askSummary(job.choice, job.stations)} />;
+  if (job.state === "failed" && job.failure) return <Failed f={job.failure} again={() => askSummary(job.choice, job.stations, job.followed)} />;
   if (!job.answer) return null;
   return (
     <>
@@ -359,18 +400,22 @@ function Failed({ f, again }: { f: Failure; again: () => void }) {
   );
 }
 
-/** Try again; while the server is busy, not before the time it gave, which the button names. */
+/** Try again; while the server is busy, not before the time it gave, which the button names to
+ * the second: it can be pressed from that second on. A browser slows the timers of a tab left in
+ * the background, so coming back to the tab looks at the clock again. */
 function Again({ f, again, variant }: { f: Failure; again: () => void; variant: "secondary" | "ghost" }) {
   const [, tick] = useState(0);
-  const wait = f.retryAt != null ? f.retryAt * 1000 - Date.now() : 0;
+  const wait = retryWait(f.retryAt, Date.now());
   useEffect(() => {
     if (wait <= 0) return;
-    const t = setTimeout(() => tick((n) => n + 1), wait + 100);
-    return () => clearTimeout(t);
-  }, [wait > 0]);
+    const look = () => tick((n) => n + 1);
+    const t = setTimeout(look, wait + 20); // a timer may run a moment early: just past the second
+    document.addEventListener("visibilitychange", look);
+    return () => { clearTimeout(t); document.removeEventListener("visibilitychange", look); };
+  }, [wait > 0, f.retryAt]);
   return (
     <Button size="sm" variant={variant} icon="refresh" disabled={wait > 0} onClick={again}>
-      {wait > 0 ? T.tryAgainAt(hm(f.retryAt)) : T.tryAgain}
+      {wait > 0 ? <span className="num">{T.tryAgainAt(hms(f.retryAt))}</span> : T.tryAgain}
     </Button>
   );
 }

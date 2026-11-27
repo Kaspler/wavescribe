@@ -23,6 +23,9 @@ export const S = {
   stations: [] as Station[],
   byId: {} as Record<string, Station>,
   live: {} as Record<string, Live>,
+  /** Since when this page has seen each running station connected without a break (seconds
+   * since 1970): a column says that nothing was written down only for the time it watched. */
+  upSince: {} as Record<string, number>,
   status: null as Status | null,
   canControl: false,
   audioRate: 16000,
@@ -33,6 +36,8 @@ export const S = {
   digest: null as string | null,
   digestCode: null as string | null,
   mtModel: null as string | null,
+  /** /api/state's topic_languages: where the rules that listen for topics have a word list. */
+  topicLanguages: null as string[] | null,
   noncommercial: [] as string[],
   node: { name: "", url: "" },
   utts: {} as Record<string, Utterance[]>,
@@ -109,6 +114,7 @@ export async function loadState() {
   S.digest = state.digest ?? null;
   S.digestCode = state.digest_code ?? null;
   S.mtModel = state.mt_model;
+  S.topicLanguages = Array.isArray(state.topic_languages) ? state.topic_languages : null;
   S.noncommercial = state.noncommercial || [];
   S.node = state.node;
   if (P.lang === null) {
@@ -137,6 +143,9 @@ const lookedUp = new Set<string>();
 function applyStatus(status: Status) {
   S.status = status;
   S.live = status.stations || {};
+  const now = Date.now() / 1000;
+  S.upSince = Object.fromEntries(Object.entries(S.live).filter(([, s]) => s?.connected && !s.stopping)
+    .map(([id]) => [id, S.upSince[id] ?? now]));
   // Stations added or removed elsewhere (another tab, a phone, the command line) reach the page
   // without a reload: by the server's count of station changes where it sends one, else by a
   // running station this page doesn't know, looked up once.

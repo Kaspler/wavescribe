@@ -42,7 +42,7 @@ export function StationMenu({ st, onlyOne, side }: { st: Station; onlyOne?: bool
               onClick={() => setOpen(!open)} />
       {open && pick ? (
         <div ref={menu} className="pop sum-pop menu-pick" role="dialog" aria-label={T.summaryOf(st.name)}>
-          <Chooser stations={[st.id]} one onDone={close} />
+          <Chooser one={st.id} onDone={close} />
         </div>
       ) : open && (
         <div ref={menu} className={cx("pop", "menu", side && "menu-side")} role="menu" aria-label={st.name}

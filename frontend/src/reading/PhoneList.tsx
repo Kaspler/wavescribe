@@ -2,6 +2,7 @@
 // and Edit list to choose which stations this device shows.
 import { useState } from "react";
 import { pick, shownLang } from "../lib/lang";
+import { placeRows } from "../lib/hold";
 import { S, post, running, startThere } from "../lib/live";
 import { P, visible } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
@@ -20,13 +21,15 @@ import { withInaudible } from "./text";
 export function PhoneList() {
   useTopics("state", "status", "prefs", "conn", "held");
   const [editing, setEditing] = useState(false);
-  const on = S.stations.filter((s) => visible(s.id) && running(s.id) && !held.has(s.id));
-  const off = S.stations.filter((s) => visible(s.id) && (!running(s.id) || held.has(s.id)));
+  // A station just started keeps its row among the stopped ones for a moment (held.ts).
+  const { on, off, stopped } = placeRows(S.stations.filter((s) => visible(s.id)), running,
+    (id) => !!S.live[id]?.connected, (id) => held.has(id));
   const canEdit = S.stations.length > 1 || P.hidden.length > 0;
   return (
     <div className="phone">
       <AlertList max={3} compact />
-      <section className="phone-stations" aria-labelledby="ph-st" onPointerLeave={(e) => { if (e.pointerType === "mouse") letGo(); }}>
+      <section className="phone-stations" aria-labelledby="ph-st" onPointerMove={() => held.stir()}
+               onPointerLeave={(e) => { if (e.pointerType === "mouse") letGo(); }}>
         <div className="phone-head">
           <h2 id="ph-st" className="phone-h">{editing ? T.showHere : T.stations}</h2>
           {(canEdit || editing) && (
@@ -49,11 +52,11 @@ export function PhoneList() {
           <>
             <ul>
               {on.map((st) => <Row key={st.id} st={st} />)}
-              {!on.length && S.loaded && <li className="phone-empty"><NoneRunning off={off.length} /></li>}
+              {!on.length && off.length === stopped && S.loaded && <li className="phone-empty"><NoneRunning off={off.length} /></li>}
             </ul>
             {off.length > 0 && (
               <details className="phone-off">
-                <summary>{T.offCount(off.length)}</summary>
+                <summary>{T.offCount(stopped)}</summary>
                 <ul>{off.map((st) => <Row key={st.id} st={st} />)}</ul>
               </details>
             )}
@@ -90,7 +93,7 @@ function Row({ st }: { st: Station }) {
         </span>
         <span className="phone-sub">
           {spoken(st)}
-          {on && !stale && state.why ? ` · ${state.why}` : !on && !st.disabled && st.out_of_reach ? ` · ${T.outOfReach}` : !on && !st.available ? ` · ${T.unavailable}` : !on && noText(st) ? ` · ${T.noText}` : ""}
+          {!on && !st.disabled && st.out_of_reach ? ` · ${T.outOfReach}` : !on && !st.available ? ` · ${T.unavailable}` : !on && noText(st) ? ` · ${T.noText}` : ""}
           {ago ? ` · ${T.lastText(ago)}` : ""}
         </span>
         {on && last.length > 0 && (
@@ -101,8 +104,8 @@ function Row({ st }: { st: Station }) {
       </button>
       {!on && ((S.canControl && st.available && !st.disabled) || there) && (
         <Button size="sm" variant="ghost" icon="power" className="phone-start" disabled={!S.status?.ready}
-                onClick={(e) => {
-                  hold(st.id, e);
+                onClick={() => {
+                  hold(st.id);
                   if (!there) post(`/api/stations/${st.id}/start`);
                   else { startThere(st.id); setCols([st.id]); }
                 }} aria-label={T.startStation(st.name)}>

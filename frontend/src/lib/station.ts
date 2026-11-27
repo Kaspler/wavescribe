@@ -13,7 +13,6 @@ export interface StationState {
   label: string;
   lamp: Lamp;
   detail: string; // a longer explanation for a tooltip
-  why?: string; // the reason, where there is room to print it (a column's head, a phone's row)
 }
 
 /** A station that should be written down but has no speech model downloaded yet: it plays,
@@ -22,7 +21,7 @@ export const noText = (st: Station | undefined): boolean =>
   !!st && st.transcribe && !st.asr_model && st.kind !== "remote" && st.available && !st.disabled;
 
 /** "next try in 12 s", from the moment the status was sent. */
-const nextTry = (s: Live) =>
+export const nextTry = (s: Pick<Live, "retry_in_s">) =>
   s.retry_in_s != null && s.retry_in_s >= 1 ? `next try in ${Math.ceil(s.retry_in_s)} s` : "trying again now";
 
 export function stateOf(id: string): StationState {
@@ -32,10 +31,9 @@ export function stateOf(id: string): StationState {
   if (s.stopping) return { label: "stopping", lamp: "wait", detail: "" };
   if (!s.connected) {
     const what = s.signal_db != null ? "receiver" : "stream"; // SDRs report a signal level
-    if (s.error) {
-      const why = `${s.error} · ${nextTry(s)}`;
-      return { label: `${what} down`, lamp: "trouble", detail: why, why: `down: ${why}` };
-    }
+    // The source's own words for why are a tooltip here; the column says it in plain words and
+    // keeps them under "Details" (reading/colNote.ts).
+    if (s.error) return { label: `${what} down`, lamp: "trouble", detail: `${s.error} · ${nextTry(s)}` };
     if (s.reconnects >= 3)
       return { label: `${what} down`, lamp: "trouble", detail: `Retrying (${s.reconnects} attempts so far)` };
     return s.reconnects
@@ -45,12 +43,12 @@ export function stateOf(id: string): StationState {
   if (st?.listen_only_run) return { label: "playing only", lamp: "on", detail: "Start to write it down" };
   if (noText(st)) return { label: "no text yet", lamp: "on", detail: "Plays now; written down once its speech model is downloaded" };
   if (st?.transcribe === false) return { label: "listen only", lamp: "on", detail: "Played, not written down" };
-  if (s.music) return { label: "music", lamp: "dim", detail: "Songs aren't transcribed" };
+  if (s.music) return { label: "music", lamp: "dim", detail: "Music is skipped, not written down" };
   if (s.in_speech) return { label: "speech", lamp: "speech", detail: "Someone is talking" };
   if (s.squelch_open === false)
     return { label: "channel quiet", lamp: "dim", detail: "Nobody is transmitting on this channel" };
   if (s.quiet_s >= QUIET_S)
-    return { label: `quiet ${ago(s.quiet_s)}`, lamp: "dim", detail: "Adverts, silence, or music the gate let through" };
+    return { label: `quiet ${ago(s.quiet_s)}`, lamp: "dim", detail: "No speech: silence, or music without a voice" };
   return { label: "listening", lamp: "on", detail: "" };
 }
 

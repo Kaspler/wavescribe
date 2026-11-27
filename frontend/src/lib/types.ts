@@ -92,6 +92,10 @@ export interface Alert {
   delivered_at?: number | null;
   kind: string;
   reason: string | null;
+  /** A rule with a check by the LLM: true when it confirmed the match, false when it couldn't
+   * answer (the alert was raised without it, and `reason` says why and at what severity), null
+   * or absent when nothing was checked. */
+  checked?: boolean | null;
   summaries: Record<string, string>;
   /** What this event changed; live events only (lib/alerts.ts). */
   change?: "new" | "escalated" | "reminder" | "ended" | "update";
@@ -117,8 +121,12 @@ export interface Overload {
 export interface Live {
   connected: boolean;
   reconnects: number;
+  /** Seconds since audio last arrived from its source; null when none has yet. */
+  last_data_age?: number | null;
   in_speech: boolean;
+  /** The music gate dropped its last utterance as a song, and it is still playing or just ended. */
   music: boolean;
+  /** Seconds since an utterance last passed the gate (since it was started, when none has). */
   quiet_s: number;
   level: number;
   stopping: boolean;
@@ -174,6 +182,9 @@ export interface PageState {
   audio_rate: number;
   recent: Utterance[];
   alerts: Alert[];
+  /** The languages (primary subtags) in which a rule that listens for topics has a word list;
+   * null when no rule that is on listens for topics, or alerts are off (reading/rulesNote.ts). */
+  topic_languages?: string[] | null;
   status: Status;
   node: { name: string; url: string };
   manage: boolean;

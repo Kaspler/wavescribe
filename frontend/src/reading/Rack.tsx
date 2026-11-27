@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
 import { pick, shownLang } from "../lib/lang";
+import { placeRows } from "../lib/hold";
 import { S, post, running, startStation, startThere } from "../lib/live";
 import { P, setPrefs, visible } from "../lib/prefs";
 import { MAX_COLS, go, parse, setCols, useHash } from "../lib/router";
@@ -55,10 +56,11 @@ export function Rack() {
   useTopics("state", "status", "prefs", "shown", "conn", "audio", "held");
   const route = parse(useHash());
   const [editing, setEditing] = useState(false);
-  const on = S.stations.filter((s) => visible(s.id) && running(s.id) && !held.has(s.id));
-  // Live: sending now. A station that is down or still connecting is listed, not counted.
-  const live = on.filter((s) => S.live[s.id]?.connected && !S.live[s.id]?.stopping).length;
-  const off = S.stations.filter((s) => visible(s.id) && (!running(s.id) || held.has(s.id)));
+  // Live: sending now. A station that is down or still connecting is listed, not counted. A
+  // station just started keeps its row among the stopped ones for a moment (held.ts); the counts
+  // say what runs all the same.
+  const { on, off, live, stopped } = placeRows(S.stations.filter((s) => visible(s.id)), running,
+    (id) => !!S.live[id]?.connected, (id) => held.has(id));
   const stale = S.conn !== "live";
   const canEdit = S.stations.length > 1 || P.hidden.length > 0;
   if (editing) {
@@ -70,7 +72,7 @@ export function Rack() {
   }
   return (
     <nav className={cx("rack", stale && "is-stale")} aria-label={T.stations}
-         onPointerLeave={(e) => { if (e.pointerType === "mouse") letGo(); }}>
+         onPointerMove={() => held.stir()} onPointerLeave={(e) => { if (e.pointerType === "mouse") letGo(); }}>
       <button type="button" className="rack-all" aria-pressed={route.kind === "live"} title={T.allLiveHint}
               onClick={() => go("#/")} aria-keyshortcuts="0" aria-label={`${T.allLive}, ${live} live`}>
         <Icon name="columns" />
@@ -79,9 +81,9 @@ export function Rack() {
       </button>
       <ol className="rack-list">
         {on.map((st, i) => <Channel key={st.id} st={st} n={i + 1} shown={V.shown.includes(st.id)} stale={stale} />)}
-        {!on.length && S.loaded && <li className="rack-empty"><NoneRunning off={off.length} /></li>}
+        {!on.length && off.length === stopped && S.loaded && <li className="rack-empty"><NoneRunning off={off.length} /></li>}
       </ol>
-      {off.length > 0 && <OffStations off={off} />}
+      {off.length > 0 && <OffStations off={off} stopped={stopped} />}
       {(S.manage || canEdit) && (
         <div className="rack-foot">
           {S.manage && (
@@ -161,7 +163,6 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
           <span>{spoken(st)}</span>
           {word && <span className={cx(state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>{word}</span>}
         </span>
-        {!stale && state.lamp === "trouble" && state.detail && <span className="ch-why" title={state.detail}>{state.detail}</span>}
         <span className="ticks" style={{ "--lv": level.toFixed(3) } as React.CSSProperties} aria-hidden="true">
           <span className="ticks-lit" />
         </span>
@@ -214,7 +215,9 @@ function Peek({ st, anchor }: { st: Station; anchor: React.RefObject<HTMLButtonE
   );
 }
 
-function OffStations({ off }: { off: Station[] }) {
+/** `off`: the rows listed here; `stopped`: how many of them aren't running (a station just
+ * started keeps its row for a moment). */
+function OffStations({ off, stopped }: { off: Station[]; stopped: number }) {
   const [open, setOpenState] = useState(offOpen);
   const setOpen = (v: boolean) => {
     setOpenState(v);
@@ -223,10 +226,10 @@ function OffStations({ off }: { off: Station[] }) {
   return (
     <section className="rack-off" aria-label={T.notRunning}>
       <button type="button" className="rack-head" aria-expanded={open} onClick={() => setOpen(!open)}
-              aria-label={`${T.notRunning}: ${off.length}`}>
+              aria-label={`${T.notRunning}: ${stopped}`}>
         <Icon name="right" className="rack-chev" />
         {T.off}
-        <span className="rack-count num" aria-hidden="true">{off.length}</span>
+        <span className="rack-count num" aria-hidden="true">{stopped}</span>
       </button>
       {open && (
         <ol className="rack-list">
@@ -257,8 +260,8 @@ function OffStations({ off }: { off: Station[] }) {
                 {(startable || there) && !started && (
                   <span className="ch-actions">
                     <button type="button" className="btn btn-band btn-sm ch-btn ch-start" disabled={!S.status?.ready}
-                            onClick={(e) => {
-                              hold(st.id, e);
+                            onClick={() => {
+                              hold(st.id);
                               if (!there) post(`/api/stations/${st.id}/start`);
                               else { startThere(st.id); read(st.id, false); }
                             }} aria-label={T.startStation(st.name)}>

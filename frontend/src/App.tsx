@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { wanted } from "./lib/auth";
-import { S, running, setNotice, switchOnAndStart } from "./lib/live";
+import { S, loadState, running, setNotice, switchOnAndStart } from "./lib/live";
 import { visible } from "./lib/prefs";
 import { MAX_COLS, go, movedHash, parse, setCols, useHash } from "./lib/router";
 import { useTopics } from "./lib/store";
@@ -29,6 +29,12 @@ export function App() {
   // as the start.
   const elsewhere = route.kind === "listen" || route.kind === "add" || route.kind === "settings";
   const area = elsewhere && S.manage ? route : null;
+  // Back from Settings: what was changed there (a rule, a language) is in what the page loads.
+  const was = useRef(area?.kind);
+  useEffect(() => {
+    if (was.current === "settings" && !area) loadState().catch(() => {});
+    was.current = area?.kind;
+  }, [area?.kind]);
   const [keys, setKeys] = useState(false);
   useShortcuts(elsewhere, setKeys);
   const rail = !area && railShown();

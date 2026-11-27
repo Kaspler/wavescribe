@@ -173,9 +173,22 @@ rewritten.
   all your stations to play: one click plays a station, starting it first if it is off, and one
   volume serves them all. Below them, **On the air here** lists what your receivers have found,
   each a click from playing.
-- **The transcript** shows what was said, with its translation. Lines dimmed as another
-  language are usually songs or a guest speaking another language. Music is shown as *music*
-  and skipped.
+- **The transcript** shows what was said, with its translation. Until a line's translation
+  arrives, its words as heard are shown in grey. A line that isn't translated into the language
+  you read in keeps its own words, with a small label naming their language.
+- **"heard as …"** before a line means the speech recognition wrote it in another language
+  than the station's: someone may really have spoken that language (a guest, a clip, a song),
+  or the recognition slipped and the words may be wrong. It can't tell which, so read such
+  lines with care; hovering over or focusing the label says the same.
+- **When no new line is coming**, the foot of the column says why and since when, in place of
+  the next line: *Music is playing, and music is skipped* (songs are never written down), *No
+  speech since …* for silence or music without a voice, or that nothing was written down since
+  a time while a voice is heard (singing and jingles are left out). The text goes on by itself
+  when speech does. The lamp in the station list says the same: a green ring.
+- **A stream that can't be reached** says so in its column (*This station's stream can't be
+  reached. Wavescribe keeps trying.*) with when it was last heard; **Details** under it has
+  the stream's own error and when the next try is. *Waiting for speech…* appears only while
+  the station is being heard.
 - **Click a time** to hear that moment again.
 - **The Aa button** (Display) sets the text size, light or dark theme, which language you
   **read in**, and whether the original is shown beside the translation. These are yours alone:
@@ -235,9 +248,12 @@ said or cite the wrong moment, so read its moments before you rely on it.
 
 On the page, press **Summary** at the top of Read and choose how far back: the last 15 minutes,
 the last hour, since a time (or between two), last night (by day, on the Wavescribe machine), or
-since you last looked when this browser knows. It covers the stations you are reading; a
-column's **⋯** menu asks for that station alone, or *What are they talking about now?* in a line
-under its name. The points come beside the columns (on a phone, in their place); press a point's
+since you last looked when this browser knows. It covers every running station in your list,
+whether or not its column is on screen ("Showing 2 of 3" changes nothing); **Choose stations**
+in the same menu leaves some out until the page is loaded again, and the summary names the
+stations it covers. A column's **⋯** menu asks for that station alone, or *What are they
+talking about now?* in a line under its name. When the model is busy, **Try again at …** names
+the second from which the button works. The points come beside the columns (on a phone, in their place); press a point's
 time to read that line in the transcript. **Cancel** stops one being written, on the server too,
 and so does leaving the page. On the Wavescribe machine, **Read it aloud** under a summary has
 the Mac read it and **Stop** ends that; *Read it aloud on this Mac when it's ready* reads one as

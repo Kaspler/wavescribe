@@ -1,20 +1,12 @@
-// A station started from an off list keeps its row until the pointer leaves the list, so the row
-// under the pointer doesn't jump away to the running ones. Touch has no "leave": a few seconds.
-import type { MouseEvent } from "react";
+// A station started from an off list keeps its row for a moment (lib/hold.ts): until the pointer
+// leaves the list, or a few seconds after the last start or the last movement over it.
+import { makeHolds } from "../lib/hold";
 import { emit } from "../lib/store";
 
-const HOLD_TOUCH_MS = 4000;
-export const held = new Set<string>();
-let release = 0;
+export const held = makeHolds<number>(
+  { set: (f, ms) => window.setTimeout(f, ms), clear: (h) => clearTimeout(h) },
+  () => emit("held"),
+);
 
-export function hold(id: string, e: MouseEvent) {
-  held.add(id);
-  clearTimeout(release);
-  if ((e.nativeEvent as PointerEvent).pointerType !== "mouse") release = window.setTimeout(letGo, HOLD_TOUCH_MS);
-}
-
-export function letGo() {
-  if (!held.size) return;
-  held.clear();
-  emit("held");
-}
+export const hold = (id: string) => held.hold(id);
+export const letGo = () => held.release();
