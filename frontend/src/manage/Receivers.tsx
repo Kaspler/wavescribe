@@ -1,8 +1,9 @@
 // Receivers: the RTL-SDR dongles, their tuning, and what they hear; and the pieces the pages that
 // use a receiver share: its name, the switch between receivers, and a dongle put to use in one step.
 import { useEffect, useRef, useState } from "react";
-import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act } from "../components/ui";
-import { type Any, del, docUrl, get, post, useLoad } from "./api";
+import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act, toast } from "../components/ui";
+import { type Any, ApiError, del, docUrl, get, post, useLoad } from "./api";
+import { and } from "./bands";
 
 /** A receiver as the page names it: receiver "c" is Receiver C, as on a front panel. */
 export const rxName = (id: string) => (id.length === 1 ? id.toUpperCase() : id);
@@ -212,6 +213,19 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
   const [gain, setGain] = useState(String(d.gain_db));
   const [rate, setRate] = useState(String(d.sample_rate));
   const [ppm, setPpm] = useState(String(d.ppm ?? 0));
+  // The server's question before a retune leaves stations out; nothing has changed while it is asked.
+  const [asked, setAsked] = useState<{ question: string; stops: string[] } | null>(null);
+  const apply = async (confirmed = false) => {
+    setAsked(null);
+    try {
+      await post(`/receivers/${d.id}`, { center_mhz: +center, gain_db: +gain, sample_rate: +rate, ppm: Math.round(+ppm) || 0, retune: confirmed });
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ question: e.message, stops: e.data.holders || [] }); return; }
+      throw e;
+    }
+    toast("Receiver retuned; its stations restarted");
+    await reload();
+  };
   const over = d.clipped > 0.001;
   return (
     <Section id={`dv-${d.id}`} title={`Receiver ${rxName(d.id)}`}
@@ -268,11 +282,16 @@ function Device({ d, reload }: { d: Any; reload: () => Promise<void> }) {
           </>
         )}
       </Advanced>
+      {asked && <p className="m-line" role="status">{asked.question}</p>}
       <div className="m-actions">
-        <ActButton variant="primary" done="Receiver retuned; its stations restarted"
-                   run={async () => { await post(`/receivers/${d.id}`, { center_mhz: +center, gain_db: +gain, sample_rate: +rate, ppm: Math.round(+ppm) || 0 }); await reload(); }}>
-          Apply
-        </ActButton>
+        {asked ? (
+          <>
+            <ActButton variant="primary" run={() => apply(true)}>{asked.stops.length ? `Stop ${and(asked.stops)} and apply` : "Apply all the same"}</ActButton>
+            <Button variant="ghost" onClick={() => setAsked(null)}>Keep it as it is</Button>
+          </>
+        ) : (
+          <ActButton variant="primary" run={() => apply()}>Apply</ActButton>
+        )}
       </div>
     </Section>
   );
