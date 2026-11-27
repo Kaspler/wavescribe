@@ -242,7 +242,10 @@ An output is a URL plus filters, set on the page (*Settings → Connections*) an
   with its status and where it pointed (`HTTP 302: redirected to …; not followed`). The
   `Authorization` header, other headers you set and the signature go only to the URL you
   gave: set the final address.
-- The page's *Test* button sends one sample event.
+- The page's *Test* button sends one sample event, once, with no retries. A sample alert has
+  `"rule": "test"` and `"status": "test"`; in CAP it is `<status>Test</status>` and
+  `<scope>Restricted</scope>` with a `<restriction>` saying it is a test, so a CAP consumer
+  never shows it to the public.
 
 **Signatures.** With a secret, each request carries `X-Wavescribe-Timestamp` (Unix seconds)
 and `X-Wavescribe-Signature: sha256=<hex>`, the HMAC-SHA256 of `"<timestamp>.<body>"` keyed

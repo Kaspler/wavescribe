@@ -258,3 +258,23 @@ def test_a_redirected_alert_is_not_retried() -> None:
     assert entry["status"] == 302 and entry["attempts"] == 1 and sleeps == []
     assert "redirected to https://elsewhere.test/" in entry["error"]
     outs.close()
+
+
+def test_the_cap_test_alert_says_it_is_a_test_and_not_for_the_public() -> None:
+    import xml.etree.ElementTree as ET
+
+    from wavescribe.alerts.cap import NS
+
+    rec = Recorder()
+    outs = outputs([{"id": "hub", "url": "http://h/cap", "format": "cap"}], rec)
+    outs.test(outs.configs()[0])
+    root = ET.fromstring(rec.requests[0][1])
+    head = [(el.tag.split("}")[1], el.text) for el in root if not el.tag.endswith("info")]
+    tags = [tag for tag, _ in head]
+    values = dict(head)
+    # CAP 1.2: Test is "technical testing only, all recipients disregard"; Restricted needs
+    # its <restriction>, right after <scope>.
+    assert values["status"] == "Test" and values["scope"] == "Restricted"
+    assert tags[tags.index("scope") + 1] == "restriction" and values["restriction"]
+    assert root.find(f"{{{NS}}}info") is not None
+    outs.close()

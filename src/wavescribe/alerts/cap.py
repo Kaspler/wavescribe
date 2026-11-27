@@ -21,6 +21,7 @@ from typing import Any
 NS = "urn:oasis:names:tc:emergency:cap:1.2"
 SEVERITY = {"critical": "Extreme", "high": "Severe", "medium": "Moderate", "low": "Minor"}
 CATEGORY = {"silence": "Infra", "traffic": "Transport"}  # station alerts; words are "Other"
+TEST_RESTRICTION = "A test of a Wavescribe output, for its receiver only: disregard."
 
 
 def _seconds(epoch: float) -> int:
@@ -60,9 +61,14 @@ def to_cap(alert: dict[str, Any], *, station_names: dict[str, str] | None = None
         f"{incident}-{change}-{_seconds(alert['last_at'])}" if update else incident)  # fmt: skip
     sub(root, "sender", sender)
     sub(root, "sent", _time(alert["last_at"]))
-    sub(root, "status", "Actual")
+    test = alert.get("status") == "test"  # an output's Test button
+    sub(root, "status", "Test" if test else "Actual")  # Test: "all recipients disregard"
     sub(root, "msgType", "Update" if update else "Alert")
-    sub(root, "scope", "Public")  # derived from public broadcasts
+    if test:  # for nobody but the receiver being tried; Restricted needs its <restriction>
+        sub(root, "scope", "Restricted")
+        sub(root, "restriction", TEST_RESTRICTION)
+    else:
+        sub(root, "scope", "Public")  # derived from public broadcasts
     kind = alert.get("kind") or "keyword"
     if kind in CATEGORY:
         note = f"Seen by Wavescribe on the station's status ({kind}), not in what was said."
