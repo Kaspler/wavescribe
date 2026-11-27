@@ -329,6 +329,9 @@ Limits:
   than the one opposite it about the centre is missed too.
 - **In a window centred between two channels** (a band wider than about 0.9 MHz), the two
   channels next to the centre lie close to the dongle's spike and are the least sensitive.
+- **Started from a terminal (`radio watch`), a receiver that sends nothing when the watch starts
+  ends it with an error.** Once it has sent data, a receiver that drops out and comes back (an
+  unplugged or reset dongle) is picked up again by itself, as under `serve`.
 - **Busy bands queue up.** Catches go through speech recognition one after another, so on a band
   with many transmissions their words come later. Beyond 16 waiting, more are counted in the log
   (`watch_behind`) and not kept.
