@@ -462,7 +462,9 @@ def test_real_models_recheck_and_cost(tmp_path: Path) -> None:
     gap = np.zeros(2 * SAMPLE_RATE, dtype=np.float32)
     audio = np.concatenate([gap, clips["pt"], gap, clips["en"], gap])
     st = station("a", translate_to=())
-    plan, _ = plan_available(reg, [st], translate=False, use_gate=False)
+    plan, unavailable = plan_available(reg, [st], translate=False, use_gate=False)
+    if st.id in unavailable:  # say, no speech detector where this folder looks (a worktree)
+        pytest.skip(unavailable[st.id])
     results: list[Result] = []
     rechecked: list[Result] = []
     pipeline = Pipeline([st], plan, results.append, on_rechecked=rechecked.append,
