@@ -194,7 +194,7 @@ uv run wavescribe digest --now --stations tsf               # what is TSF on abo
 
 ```
 TSF Rádio Notícias, RTP Antena 1, 14:30-16:00
-Written by the local model from 140 of 512 lines heard between 14:30 and 16:00; it can miss things or get them wrong.
+Written by the local model from 140 of 512 lines, spread evenly between 14:30 and 16:00; it can miss things or get them wrong.
 
 ! high 15:12 TSF Rádio Notícias: Water cut tomorrow between nine and one o'clock
 
@@ -207,8 +207,12 @@ Written by the local model from 140 of 512 lines heard between 14:30 and 16:00; 
 
 The local model writes it in the language you ask for (by default, the one your stations are
 translated into) from what was said, leaving out songs, station idents and repeats. When there
-is more than it can take it reads an even sample, and the second line says so ("a sample: 252
-of 259,200 lines"). The alerts announced in that time (notified or spoken, not only logged)
+is more than it can take it reads an even sample of each station, from the start of the time
+to its end, and the second line says so ("140 of 512 lines, spread evenly", or "a sample: 252
+of 259,200 lines" when it is thin). A small model asked about a long stretch at once writes
+about what it reads first, so a digest asks about it a part at a time (three parts for a busy
+station) and then chooses the points that matter most, the latest first when two matter as
+much. The alerts announced in that time (notified or spoken, not only logged)
 come first, each once, in the words they were announced in. A point the model gave without the
 moments it rests on isn't shown, nor one that shares no word with the moments it cites (a cheap
 check: it catches a point that cites another story, not one that gets a detail wrong). A point
@@ -230,7 +234,7 @@ Wavescribe was started, it says that too ("Wavescribe started at 14:55: before t
 was heard unless an earlier run was listening").
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
-takes about a minute, `--now` from a few seconds to a minute. When two digests are already being
+takes a minute or two, `--now` from a few seconds to a minute. When two digests are already being
 made, it is refused at once; try again in a minute. `--speak` also reads its points aloud, in
 the voice your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by
 saying that this is a Wavescribe summary written by the local model, and an alert stops it at

@@ -2,6 +2,7 @@
 import dataclasses
 import itertools
 import json
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from wavescribe.digest import (
     RequestError,
     Unavailable,
     fair_shares,
+    in_parts,
     in_turn,
     merged,
     parse_choice,
@@ -263,8 +265,12 @@ def test_more_points_than_asked_are_taken_in_turn_from_each_station() -> None:
         return p.text[0]
 
     assert [p.text for p in in_turn(points, heard_on)] == ["a0", "b0", "a1", "b1", "a2", "a3"]
-    assert [p.text for p in pick(points, 3, heard_on)] == ["a0", "a1", "b0"]
-    assert [p.text for p in pick(points, 5, heard_on)] == ["a0", "a1", "a2", "b0", "b1"]
+    # A station's share is spread over its list, first and last: a small model that lists
+    # more than asked lists them in the order it read them, so the first few would be the
+    # start of the window.
+    assert [p.text for p in pick(points, 3, heard_on)] == ["a0", "a3", "b0"]
+    assert [p.text for p in pick(points, 5, heard_on)] == ["a0", "a2", "a3", "b0", "b1"]
+    assert [p.text for p in pick(points[:4], 1, heard_on)] == ["a0"]
     assert pick(points, 9, heard_on) == points
 
 
@@ -332,9 +338,16 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
         for i in range(120):
             add(store, sid, f"{sid} frase {i} " + "palavras " * 30, NOW - 3500 + i * 25)
     queued: list[str] = []
+    none = "NONE: Nothing of substance."
     llm = FakeLlm(
-        "- First note on a [1].\n- Second note on a [2].",
+        "- First note on a [1].\n- Second note on a [2].",  # a, the first part of the hour
+        none,
+        "- Latest note on a [1].",  # a, the last part
+        none,
+        none,
         "- A note on b [1].",
+        none,
+        none,
         "- A note on c [1].",
         "The most important: 1+4, 3, 9, 3",
     )
@@ -349,19 +362,78 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
     # In English, which the lines are neither in nor translated into: no note's words checked.
     digest = d.run(d.request({"minutes": 60, "language": "en"}))
 
-    assert digest.calls == 4 and len(llm.prompts) == 4  # three prompts of notes, one choice
-    assert [{p[p.index("[1] ") + 4]} for p in llm.prompts[:3]] == [{"a"}, {"b"}, {"c"}]
-    choice = llm.prompts[3]
-    # A station at a time, so that the first station's notes don't come first.
-    shown = "[1] a: First note on a.\n[2] b: A note on b.\n[3] c: A note on c.\n[4] a: Second"
-    assert shown in choice and "Which 5 of them matter most" in choice
-    # The note joined to the first is left out, sources and all: a join isn't trusted. Two
-    # chosen of five asked for, the note left out makes up the rest.
+    # A prompt a station, each read in three parts of the hour, and one choice.
+    assert digest.calls == 10 and len(llm.prompts) == 10
+    assert [p[p.index("[1] ") + 4] for p in llm.prompts[:9]] == list("aaabbbccc")
+    starts = [re.search(r"^\[1\] \w, (\d\d:\d\d)$", p, re.M)[1] for p in llm.prompts[:9]]
+    assert starts[0] < starts[1] < starts[2] and starts[:3] == starts[3:6]  # oldest first
+    choice = llm.prompts[9]
+    # A part at a time, the latest first, so that neither the start of the hour nor the first
+    # station comes first; each note with the time of what it rests on.
+    assert re.search(r"^\[1\] a, \d\d:\d\d: Latest note on a\.$", choice, re.M)
+    shown = re.sub(r", \d\d:\d\d:", ":", choice)
     assert (
-        digest.text() == "- a: First note on a. [1]\n- c: A note on c. [2]\n- b: A note on b. [3]"
+        "[1] a: Latest note on a.\n[2] b: A note on b.\n[3] c: A note on c.\n"
+        "[4] a: First note on a.\n[5] a: Second note on a." in shown
     )
-    assert digest.read == sum(p.count("\n[") + 1 for p in llm.prompts[:3]) - 3
+    assert "Which 5 of them matter most" in choice and "of two that matter as much" in choice
+    # The note joined to the first is left out, sources and all: a join isn't trusted. Two
+    # chosen of five asked for, the notes left out make up the rest, in the order shown.
+    assert digest.text() == (
+        "- a: Latest note on a. [1]\n- c: A note on c. [2]\n- b: A note on b. [3]\n"
+        "- a: Second note on a. [4]"
+    )
+    assert digest.read == sum(p.count("\n[") for p in llm.prompts[:9])
     store.close()
+
+
+class ReadsInOrder(FakeLlm):
+    """A small model as it was seen to behave: it writes about the first excerpts it reads,
+    whatever the window, and chooses the first notes it is shown."""
+
+    def complete(self, messages, *, max_tokens=512, on_text=None) -> str:
+        content = messages[-1]["content"]
+        self.prompts.append(content)
+        if "Excerpts:" not in content:
+            return "1, 2, 3, 4, 5"
+        excerpts = re.findall(r"^\[(\d+)\] [^\n]*\n([^.\n]*)", content, re.M)
+        return "\n".join(f"- {text} [{n}]." for n, text in excerpts[:2])
+
+
+def test_the_end_of_a_long_window_reaches_the_digest(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    padding = ". " + "Mais palavras sobre o mesmo assunto " * 7
+    for i in range(120):  # three times what one station may have read, in an hour
+        said, en = (
+            (f"A câmara discutiu o orçamento, ponto {i}", f"The council discussed the budget {i}")
+            if i < 80
+            else (f"A ponte do porto fecha ao meio-dia, aviso {i}", f"Harbour bridge shut {i}")
+        )
+        add(store, "a", said + padding, NOW - 3600 + 15 + i * 30, en=en + padding)
+    llm = ReadsInOrder()
+    d = digester(store, llm, stations=[station("a")])
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+
+    excerpts = [p for p in llm.prompts if "Excerpts:" in p]
+    assert len(excerpts) == 3 and "Harbour bridge" in excerpts[-1]  # the last part on its own
+    assert not any("Harbour bridge" in p for p in excerpts[:2])
+    assert any("Harbour bridge" in p["text"] for p in out["points"])
+    assert "The council discussed the budget" in out["points"][1]["text"]  # the rest is there
+    assert out["counts"]["read"] == 38
+    assert out["notice"] == (
+        "Written by the local model from 38 of 120 lines, spread evenly between 11:00 and "
+        "12:00; it can miss things or get them wrong."
+    )
+    store.close()
+
+
+def test_a_prompt_is_read_in_parts_of_the_window() -> None:
+    lines = [line(i) for i in range(40)]  # a prompt of 12,000 characters
+    parts = in_parts(lines)
+    assert [len(p) for p in parts] == [13, 14, 13]
+    assert [ln for p in parts for ln in p] == lines  # whole, in order
+    assert in_parts(lines[:19]) == [lines[:19]]  # 5,700 characters: under one and a half
+    assert len(in_parts(lines[:20])) == 2
 
 
 def test_a_point_rests_on_a_few_moments(tmp_path: Path) -> None:
@@ -476,19 +548,22 @@ def test_an_unreadable_choice_keeps_notes_from_each_station(tmp_path: Path) -> N
     for sid in ("a", "b"):
         for i in range(200):
             add(store, sid, f"{sid} frase {i} " + "palavras " * 30, NOW - 3500 + i * 17)
-    notes = "\n".join(f"- Note {i} [{i}]." for i in range(1, 7))
-    llm = FakeLlm(notes, notes, "These all matter.")
+    # Two prompts, a station each, each read in three parts of the hour.
+    notes = [f"- The {part} news [1].\n- More {part} news [2]." for part in ("early", "middle")]
+    notes = [*notes, "- The late news [1].\n- More late news [2]."]
+    llm = FakeLlm(*notes, *notes, "These all matter.")
     d = digester(store, llm, stations=[station("a"), station("b")])
     digest = d.run(d.request({"minutes": 60}))
+    # One from each part in turn, the latest first, so each station in turn too.
     assert [(digest.stations_of(p), p.text) for p in digest.points] == [
-        (["a"], "Note 1."),
-        (["b"], "Note 1."),
-        (["a"], "Note 2."),
-        (["b"], "Note 2."),
-        (["a"], "Note 3."),
+        (["a"], "The late news."),
+        (["b"], "The late news."),
+        (["a"], "The middle news."),
+        (["b"], "The middle news."),
+        (["a"], "The early news."),
     ]
     # Eight notes "joined" are no story told eight times: none of them is left out.
-    lumped = FakeLlm(notes, notes, "1+2+3+4+5+6+7+8")
+    lumped = FakeLlm(*notes, *notes, "1+2+3+4+5+6+7+8")
     d = digester(store, lumped, stations=[station("a"), station("b")])
     assert len(d.run(d.request({"minutes": 60})).points) == 5
     store.close()
@@ -512,14 +587,15 @@ def test_nothing_of_substance_is_said_in_words_of_its_own(tmp_path: Path) -> Non
     store.close()
 
 
-def test_one_prompt_saying_nothing_stood_out_doesnt_speak_for_the_others(tmp_path) -> None:
+def test_one_part_saying_nothing_stood_out_doesnt_speak_for_the_others(tmp_path) -> None:
     store = Store(tmp_path / "w.db")
     for sid in ("a", "b"):
         for i in range(80):
             add(store, sid, f"{sid} frase {i} " + "palavras " * 30, NOW - 3500 + i * 40)
     d = digester(store, FakeLlm("NONE: Nothing of substance.", "Sorry, no idea.", "1"))
     digest = d.run(d.request({"minutes": 60}))
-    assert digest.calls == 2 and not digest.nothing and digest.points == []
+    # Two prompts of three parts: no note from any, so no choice to make.
+    assert digest.calls == 6 and not digest.nothing and digest.points == []
     assert digest.text().startswith("The model's reply cited none of the lines it read")
     store.close()
 

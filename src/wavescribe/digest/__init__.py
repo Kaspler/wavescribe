@@ -21,19 +21,27 @@ Input is bounded. Lines heard as another language than the station's (mostly son
 idents and repeats are skipped. Each station then gets a fair share of ``DIGEST_CHARS``, at
 most one prompt (``STAGE_CHARS``), sampled evenly over the window when it said more. The
 shares are read in as many prompts as they fill, rounded: reading the prompt is most of a
-call's time, so a prompt more is worth it for half a prompt more to read. One prompt is the
-digest. Several are two stages: the stations are spread over the prompts, each of which
-gives notes with their sources, and a last, short call chooses the notes that matter most.
-It answers with the notes' numbers rather than rewriting them: asked to rewrite many notes
-into a few, a small model repeats them all, in order; asked for numbers, it chooses. It joins
-the notes of one story with "+", so the story is chosen once; the point is the first of them,
-with its own sources, as the joins are too often wrong to take the others' on their word.
-When it chooses fewer than asked, the notes it left out make up the rest, a station at a time.
-The stages split by station rather than by time because one station's programme reads
-coherently, its words can't be credited to another station within a prompt, and a quiet
-station keeps its share next to a chatty one. A single station is sampled rather than split:
-news repeats itself through the hour, and a story that runs for a few minutes is in an even
-sample of a fifth of what was said.
+call's time, so a prompt more is worth it for half a prompt more to read. The stations are
+spread over the prompts, whole: one station's programme reads coherently, its words can't be
+credited to another station within a prompt, and a quiet station keeps its share next to a
+chatty one. A single station is sampled rather than given more prompts: news repeats itself
+through the hour, and a story that runs for a few minutes is in an even sample of a fifth of
+what was said.
+
+What the model writes isn't spread as evenly as what it reads: asked for five points from
+fifty excerpts, oldest first, a small model writes about the first stories it reads and stops,
+or lists them all in order. So a digest asks about the window a part at a time: each prompt
+is cut by time into parts of about ``PART_CHARS``, as many as it fills, rounded, and each part
+gives a few notes with their sources. A window that fills one part is the digest, written in
+one call. Otherwise a last, short call chooses the notes that matter most. It answers with
+the notes' numbers rather than rewriting them: asked to rewrite many notes into a few, a small
+model repeats them all, in order; asked for numbers, it chooses. It favours the notes it reads
+first, so they are shown a part at a time, one note from each in turn, the latest part first:
+neither the start of the window nor one station has the digest to itself, and what was said
+last, which someone who missed it most needs, comes first. It joins the notes of one story
+with "+", so the story is chosen once; the point is the first of them, with its own sources,
+as the joins are too often wrong to take the others' on their word. When it chooses fewer
+than asked, the notes it left out make up the rest, in the order shown.
 
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
@@ -55,8 +63,8 @@ import secrets
 import sys
 import threading
 import time
-from collections import OrderedDict
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections import Counter, OrderedDict
+from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -101,13 +109,16 @@ GIVE_WAY_BELOW = 1.0
 GIVE_WAY_TIMES = 3  # then it gives up, rather than start the same call again and again
 # One prompt's excerpts, as for Ask: about 3k tokens, which a recent Mac reads in about 10 s.
 STAGE_CHARS = 12_000
-DIGEST_CHARS = 36_000  # every station's excerpts together: at most three prompts of notes
+DIGEST_CHARS = 36_000  # every station's excerpts together: at most three prompts
+# A part of a prompt asked about on its own: some 15 excerpts, a few stories, so that a few
+# notes cover it to its end. Three calls read a prompt in about the time one does.
+PART_CHARS = STAGE_CHARS // 3
 EXCERPT_CHARS = 600  # per utterance, rarely reached: a cut one invites the model to guess the rest
 HEADER_CHARS = 30  # "[12] Deutschlandfunk, 23:05" and the blank line before it
 MIN_WORDS = 3  # fewer are greetings and station idents ("Bom dia.", "TSF.")
 FETCH_PER_STATION = 600  # rows read per station, evenly spread, before the budget
 POINTS = {"digest": 5, "now": 2}
-NOTE_POINTS = 6  # asked for per prompt in the first of two stages; more are kept
+NOTE_POINTS = 3  # asked for per part of the window when there are several; more are kept
 POINT_WORDS = 25
 POINT_CHARS = 300  # what is kept of a point: a reply in prose is cut at a sentence's end
 # The lines a point keeps of those it cites: what the prompt asks for, and a check a reader
@@ -123,7 +134,7 @@ SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a recei
 # Never announced: still being checked or translated, announced by another alert, or only
 # logged, as its severity's actions said (no notification, no voice).
 UNANNOUNCED = ("pending", "covered", "logged")
-TIMEOUT_S = 240.0  # three prompts of notes and the choice, behind whatever backlog there is
+TIMEOUT_S = 240.0  # nine parts of notes and the choice, behind whatever backlog there is
 MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
 KEPT = 8  # answers kept in memory by id, to be read aloud again without being made again
 # A request's id, when the asker gives one: long enough that nobody else guesses it (a UUID).
@@ -306,14 +317,20 @@ class Digest:
         sample = "a sample: " if self.read * SAMPLE < said else ""
         return f"{sample}{self.read:,} of {_lines(said)}"
 
+    def sampled(self) -> bool:
+        """Whether the model read only some of what was said, beyond the songs, idents and
+        repeats left out: an even sample of each station over the window."""
+        return self.read + self.skipped < sum(self.said.values())
+
     def notice(self) -> str | None:
         """Who wrote the digest, from what: None when the model wasn't asked. With ``late``,
         when the window reaches back before Wavescribe started."""
         if not self.calls:
             return None
+        heard = ", spread evenly" if self.sampled() else " heard"
         written = (
-            f"Written by the local model from {self.coverage()} heard {_clock_span(self.request)}"
-            "; it can miss things or get them wrong."
+            f"Written by the local model from {self.coverage()}{heard} "
+            f"{_clock_span(self.request)}; it can miss things or get them wrong."
         )
         late = self.late()
         return f"{written} {late}" if late else written
@@ -760,6 +777,8 @@ class Digester:
         if cancel.is_set():  # while the store was read
             raise Cancelled(CANCELLED)
         prompts = plan_prompts(selection.lines)
+        if request.kind == "digest":  # "now" is about the last excerpts: one call reads them
+            prompts = [part for prompt in prompts for part in in_parts(prompt)]
         if not prompts:
             return digest
         job = _Job(self._submit, request, prompts, names, self._ahead, cancel)
@@ -832,7 +851,7 @@ class _Job:
         self.finished = False
         self.cancel = cancel if cancel is not None else threading.Event()
         self.error: Exception | None = None
-        self.notes: list[Point] = []
+        self.notes: list[list[Point]] = []  # of each part of the window, in the order read
         self.points: list[Point] = []
         self.nones = 0  # replies that said nothing of substance was said
         self.uncited = 0
@@ -911,18 +930,17 @@ class _Job:
             points = self._reply(llm, messages, lines)
             self.points = pick(points, POINTS[r.kind], self._station)
             return True
-        if self.calls < len(self.prompts):  # the first stage: notes from one prompt
+        if self.calls < len(self.prompts):  # the first stage: notes on one part of the window
             lines = self.prompts[self.calls]
             messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
-            self.notes += self._reply(llm, messages, lines)
-            if self.calls + 1 < len(self.prompts) or len(self.notes) > 1:
+            self.notes.append(self._reply(llm, messages, lines))
+            noted = [note for notes in self.notes for note in notes]
+            if self.calls + 1 < len(self.prompts) or len(noted) > 1:
                 return False
-            self.points = list(self.notes)  # nothing to choose from
+            self.points = noted  # nothing to choose from
             return True
-        # A small model favours the first notes it reads: a station at a time, the first
-        # station would have the digest to itself.
-        notes = in_turn(self.notes, self._station)
-        messages = choice_messages(r, notes, self.names, self._stations_of)
+        notes = self._to_choose()
+        messages = choice_messages(r, notes, self.names, self._stations_of, when=self._when)
         reply = llm.complete(messages, max_tokens=CHOICE_TOKENS, on_text=self._give_way)
         groups = parse_choice(reply, len(notes), POINTS["digest"])
         chosen = [g[0] for g in groups]
@@ -942,6 +960,19 @@ class _Job:
         self.nones += parsed.none
         self.uncited += parsed.uncited + unsourced
         return merged(points)
+
+    def _to_choose(self) -> list[Point]:
+        """The notes to choose from: one from each part of the window in turn, the latest part
+        first, each part's in the order the model gave them. A small model favours the first
+        notes it reads: in the order written, the start of the window (or the first station)
+        would have the digest to itself."""
+        latest = sorted(range(len(self.notes)), key=lambda i: -self.prompts[i][-1].t)
+        part = {id(note): i for i, notes in enumerate(self.notes) for note in notes}
+        return in_turn([n for i in latest for n in self.notes[i]], lambda n: part[id(n)])
+
+    def _when(self, point: Point) -> float:
+        """When the last of the moments a point rests on was heard."""
+        return max(self._lines[i].t for i in point.ids)
 
     def _give_way(self, _text: str) -> None:
         if self.cancel.is_set() or self._ahead():
@@ -1018,9 +1049,10 @@ def spread(lines: Sequence[Line], budget: int) -> list[Line]:
     return []
 
 
-def in_turn(points: Sequence[Point], station: Callable[[Point], str]) -> list[Point]:
-    """The points a station at a time, one each in turn, each station's in the order given."""
-    queues: dict[str, list[Point]] = {}
+def in_turn(points: Sequence[Point], station: Callable[[Point], Hashable]) -> list[Point]:
+    """The points a station (or whatever ``station`` tells them apart by) at a time, one each
+    in turn, in the order the stations first come, each station's in the order given."""
+    queues: dict[Hashable, list[Point]] = {}
     for p in points:
         queues.setdefault(station(p), []).append(p)
     out: list[Point] = []
@@ -1031,10 +1063,26 @@ def in_turn(points: Sequence[Point], station: Callable[[Point], str]) -> list[Po
 
 def pick(points: Sequence[Point], count: int, station: Callable[[Point], str]) -> list[Point]:
     """At most ``count`` points, in the order given. When there are more (a small model lists
-    every story, a station at a time, however few it is asked for), they are taken in turn
-    from each station, so that one station's list doesn't crowd out the others."""
-    chosen = {id(p) for p in in_turn(points, station)[:count]}
+    every story, a station at a time and in the order it read them, however few it is asked
+    for), each station has as many as taking them in turn gives it, so that one station's list
+    doesn't crowd out the others, spread over its list: its first, which should be the most
+    important, and its last, the latest when the model wrote them in the order it read them.
+    Never just the first few, which would be the start of the window."""
+    share = Counter(station(p) for p in in_turn(points, station)[:count])
+    queues: dict[str, list[Point]] = {}
+    for p in points:
+        queues.setdefault(station(p), []).append(p)
+    chosen = {id(p) for sid, queue in queues.items() for p in _ends(queue, share[sid])}
     return [p for p in points if id(p) in chosen]
+
+
+def _ends(items: Sequence[Point], k: int) -> list[Point]:
+    """``k`` of ``items`` at most, evenly spaced from the first to the last."""
+    if k >= len(items):
+        return list(items)
+    if k <= 1:
+        return list(items[:k])
+    return [items[round(i * (len(items) - 1) / (k - 1))] for i in range(k)]
 
 
 def plan_prompts(
@@ -1066,6 +1114,21 @@ def plan_prompts(
         sample = (line for sid in group for line in spread(lines[sid], inner[sid]))
         prompts.append(sorted(sample, key=lambda x: x.t))
     return [p for p in prompts if p]
+
+
+def in_parts(lines: Sequence[Line], size: int = PART_CHARS) -> list[list[Line]]:
+    """A prompt's excerpts (``lines``, oldest first) as consecutive stretches of the window of
+    about ``size`` characters each, as many as they fill, rounded, each excerpt in the part its
+    middle falls in. Each part is asked about on its own, so that what the model writes covers
+    the whole window, not the stories it read first."""
+    total = sum(line.size for line in lines)
+    count = max(1, int(total / size + 0.5))
+    parts: list[list[Line]] = [[] for _ in range(count)]
+    done = 0
+    for line in lines:
+        parts[min(count - 1, int((done + line.size / 2) * count / total))].append(line)
+        done += line.size
+    return [p for p in parts if p]
 
 
 # -- prompts and replies -----------------------------------------------------------------------
@@ -1117,11 +1180,17 @@ def choice_messages(
     notes: Sequence[Point],
     names: Mapping[str, str],
     stations_of: Callable[[Iterable[int]], list[str]],
+    *,
+    when: Callable[[Point], float] | None = None,
 ) -> list[dict[str, str]]:
     """The prompt of the second stage: the first stage's notes, numbered, each with the
-    stations its sources were heard on, to choose from."""
+    stations its sources were heard on and, given ``when``, the time of the last of them, to
+    choose from."""
+    wide = request.minutes > 20 * 60  # a window over a day boundary needs the weekday
     blocks = [
-        f"[{i + 1}] {_names(stations_of(note.ids), names)}: {note.text}"
+        f"[{i + 1}] {_names(stations_of(note.ids), names)}"
+        + (f", {local_time(when(note), '%a %H:%M' if wide else TIME_FORMAT)}" if when else "")
+        + f": {note.text}"
         for i, note in enumerate(notes)
     ]
     count = POINTS["digest"]
@@ -1129,9 +1198,10 @@ def choice_messages(
         f"Notes on what each station said {_span(request)} (local time), written from their "
         "transcripts:\n\n" + "\n".join(blocks) + f"\n\nWhich {count} of them matter most to "
         "someone who missed it, with at least one from each station? Warnings and dangers "
-        "first, then decisions and events that touch many people, then the rest. Notes that "
-        'tell the same story count as one: join their numbers with "+".\nReply with one line: '
-        'the numbers, the most important first, like "3+9, 7, 1, 12, 5".'
+        "first, then decisions and events that touch many people, then the rest; of two that "
+        "matter as much, the later. Notes that tell the same story count as one: join their "
+        'numbers with "+".\nReply with one line: the numbers, the most important first, like '
+        '"3+9, 7, 1, 12, 5".'
     )
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
 

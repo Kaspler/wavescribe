@@ -313,24 +313,31 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    over the window when one said more. Without stations named, those heard in the window,
    watches left out. Another machine's request sees only what may leave this one.
 2. **Write.** The excerpts go to the translation LLM in prompts of about 12,000 characters
-   (about 10 s each on a recent Mac), each station whole in one of them. A prompt asks for a
-   few one-line points in the reader's language, the most important first, each citing the
-   excerpts it rests on as `[n]`; the stations a point names come from those excerpts, never
-   from the model's words. A range (`[1-23]`) is read whole. A point that cites none of them is
+   (about 10 s each on a recent Mac), each station whole in one of them, and each prompt in
+   parts of the window of about 4,000 characters, as many as it fills, rounded: asked for five
+   points from fifty excerpts, oldest first, a small model writes about the first stories it
+   reads (a real twenty-minute digest of one station had every point in its first seven
+   minutes), and reading a prompt in three calls costs about what one does. A part asks for a
+   few one-line points (notes) in the reader's language, the most important first, each
+   citing the excerpts it rests on as `[n]`; the stations a point names come from those
+   excerpts, never from the model's words. A range (`[1-23]`) is read whole. A point that cites none of them is
    dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
    folded words of four letters or more, compared by their first six, numbers, and pairs of
    characters in scripts written without spaces; checked only when one of the lines has text in
    the reader's language). A point keeps three of its excerpts at most, those that share a word
    with it first, spread over all it cited; two points citing the same excerpts are one. A point
    is cut at a sentence's end to 300 characters, and a reply of `NONE` is never shown: only when
-   every prompt said so does the digest say, in Wavescribe's words, that nothing stood out in
-   the lines read. When the shares fill one and a half prompts or more, they are spread
-   over two or three, and a short second call picks the five points that matter most, by
-   number, from the notes shown a station at a time, since a small model favours what it reads
-   first.
+   every part said so does the digest say, in Wavescribe's words, that nothing stood out in
+   the lines read. A window that fills one part is the digest, in one call (so is `now`,
+   which is about the last excerpts); otherwise a short last call picks the five points that
+   matter most, by number, from the notes shown one from each part in turn, the latest part
+   first, each with the time of what it rests on, since a small model favours what it reads
+   first; of two that matter as much, it is asked for the later. When a model lists more
+   points than asked, each station's share is spread over its list, first and last, never
+   its first few. When the model read a sample, the notice says it was spread evenly.
 3. **Queue.** Each call is a job of its own at the lowest priority, behind every station's
    translation, so live translation runs between them; an hour of two busy stations takes
-   about a minute while they are translated. While a call generates, it checks between tokens
+   a minute or two while they are translated. While a call generates, it checks between tokens
    whether a job of priority under 1 waits (an alert's translation, a rule check, a question,
    a model load) and stops, to start again from scratch behind it; after three times the
    digest gives up and says so. Reading a prompt can't be stopped, so an alert's translation
