@@ -6,7 +6,7 @@
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import type { Any } from "./api";
-import { type Band, bandWords } from "./bands";
+import { type Band, and, bandWords } from "./bands";
 import { type Segment, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks } from "./dial";
 import { rxName } from "./Receivers";
 import { type Marker, Scope } from "./Scope";
@@ -263,7 +263,6 @@ export interface RxStatus {
   holders: string[];
 }
 
-export const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "");
 
 /** A receiver's state from what the radio view (`r`: stations, scan) and the tuner (`live`: where
  * the dongle is tuned now, whether it is tuned by hand and answering) say about it. */
@@ -288,6 +287,10 @@ export function rxStatus(r: Any, live: Any | undefined, job: Any | null): RxStat
   }
   if (running.length) {
     return { ...base, state: "stations", lamp: "on", words: `following ${and(running)}` };
+  }
+  // Another program holding the dongle (another Wavescribe, say) is why it can't be used now.
+  if (r.held_elsewhere) {
+    return { ...base, state: "trouble", lamp: "trouble", words: `in use elsewhere: ${r.held_elsewhere.reason || "another program holds it"}` };
   }
   return { ...base, state: "idle", lamp: "off", words: "idle" };
 }

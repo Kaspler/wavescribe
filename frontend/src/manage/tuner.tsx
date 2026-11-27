@@ -7,11 +7,18 @@ import { A, stopAudio } from "../lib/audio";
 import { S } from "../lib/live";
 import { useTopics } from "../lib/store";
 import { ApiError, type Any, del, get, post, useEvery, useLoad } from "./api";
-import { bandLine, fmtMhz } from "./bands";
+import { and, bandLine, fmtMhz } from "./bands";
+
+import { rxName } from "./Receivers";
 import { snap } from "./Scope";
 
 /** The gains an RTL-SDR's tuner offers, in dB. */
 export const GAINS = [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
+/** A few gains named by what they are for, low to high: the rest are under "More". The tuner
+ * has no automatic gain (a receiver's own gain is set under Settings, Receivers). */
+const GAIN_WORDS: [number, string][] = [[20.7, "Low"], [29.7, "Medium"], [38.6, "High"], [49.6, "Highest"]];
+/** A step in kHz as read: at most two decimals ("8.33 kHz", not 8.333333). */
+const khz = (k: number) => `${+k.toFixed(2)} kHz`;
 /** Tuning steps for each demodulation, the usual one first, in kHz. */
 export const STEPS: Record<string, number[]> = { wfm: [100, 200, 50], nfm: [12.5, 6.25, 25, 5], am: [25, 8.33, 9, 5] };
 export const MODES = [
@@ -98,7 +105,7 @@ export function useTuner(first: () => Any | null = () => null) {
   const receivers: Any[] = all?.receivers || [];
   const [dev, setDevState] = useState<string>("");
   const [st, setSt] = useState<Any | null>(null);
-  const [ask, setAsk] = useState<{ code: string; message: string; body: Any; holders?: string[] } | null>(null);
+  const [ask, setAsk] = useState<{ code: string; message: string; body: Any; holders?: string[]; dev: string } | null>(null);
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
   useTopics("audio");
@@ -162,8 +169,14 @@ export function useTuner(first: () => Any | null = () => null) {
       if (play || (wanted.current && !player.current)) startPlayer(s.audio);
       return s;
     } catch (e) {
+      // Once someone has said a receiver's stations may pause for listening, they aren't asked
+      // again for that receiver until the browser session ends.
+      if (e instanceof ApiError && e.code === "busy" && !body.pause && pausesFine(dev)) {
+        busy.current = false;
+        return tune({ ...body, pause: true }, play);
+      }
       if (e instanceof ApiError && (e.code === "acknowledge" || e.code === "busy")) {
-        setAsk({ code: e.code, message: e.message, body: { ...body, ...(play ? { _play: true } : {}) }, holders: e.data.holders });
+        setAsk({ code: e.code, message: e.message, body: { ...body, ...(play ? { _play: true } : {}) }, holders: e.data.holders, dev });
         return null;
       }
       toast((e as Error).message, true);
@@ -178,6 +191,7 @@ export function useTuner(first: () => Any | null = () => null) {
   };
   const resend = async (extra: Any) => {
     if (!ask) return;
+    if (extra.pause) pausesFine(ask.dev, true);
     const { _play, ...body } = ask.body;
     await tune({ ...body, ...extra }, !!_play);
   };
@@ -335,10 +349,10 @@ export function TuneControls({ t, steps, play }: { t: Tuner; steps: Steps; play:
     <div className="lv-controls">
       <div className="lv-group" role="group" aria-label="Tuning">
         <Button size="sm" variant="secondary" icon="left" aria-label="Seek down" title="Seek down: the next signal below" onClick={() => seek(-1)} />
-        <Button size="sm" variant="secondary" icon="minus" aria-label={`Down ${stepKhz} kHz`} onClick={() => step(-1)} />
+        <Button size="sm" variant="secondary" icon="minus" aria-label={`Down ${khz(stepKhz)}`} onClick={() => step(-1)} />
         <Select aria-label="Step" value={String(stepKhz)} onChange={(e) => setStepKhz(+e.target.value)}
-                options={steps.steps.map((k) => [String(k), `${k} kHz`])} />
-        <Button size="sm" variant="secondary" icon="plus" aria-label={`Up ${stepKhz} kHz`} onClick={() => step(1)} />
+                options={steps.steps.map((k) => [String(k), khz(k)])} />
+        <Button size="sm" variant="secondary" icon="plus" aria-label={`Up ${khz(stepKhz)}`} onClick={() => step(1)} />
         <Button size="sm" variant="secondary" icon="right" aria-label="Seek up" title="Seek up: the next signal above" onClick={() => seek(1)} />
       </div>
       <Segmented label="Demodulation" value={st.mode} onChange={(m) => tune({ mhz: st.mhz, mode: m })} options={[...MODES]} />
@@ -354,7 +368,9 @@ export function TuneControls({ t, steps, play }: { t: Tuner; steps: Steps; play:
       <label className="lv-slider">
         <span>Gain</span>
         <Select aria-label="Receiver gain" value={String(st.gain_db)} onChange={(e) => tune(keep({ mhz: st.mhz, gain_db: +e.target.value }))}
-                options={[...new Set([st.gain_db, ...GAINS])].sort((a, b) => a - b).map((g) => [String(g), `${g} dB`])} />
+                options={[...GAIN_WORDS.map(([g, w]) => [String(g), `${w}, ${g} dB`] as [string, string]),
+                          ...(GAIN_WORDS.some(([g]) => g === st.gain_db) ? [] : [[String(st.gain_db), `${st.gain_db} dB`] as [string, string]])]}
+                groups={[["More", GAINS.filter((g) => g !== st.gain_db && !GAIN_WORDS.some(([w]) => w === g)).map((g) => [String(g), `${g} dB`] as [string, string])]]} />
       </label>
       <div className="lv-group lv-audio">
         {t.playing ? (
@@ -367,6 +383,19 @@ export function TuneControls({ t, steps, play }: { t: Tuner; steps: Steps; play:
   );
 }
 
+const PAUSE_KEY = "ws-pause-ok";
+/** Whether this session already agreed that receiver `dev`'s stations pause while listening by
+ * hand; `yes` records that it did. */
+function pausesFine(dev: string, yes = false): boolean {
+  try {
+    const ok: string[] = JSON.parse(sessionStorage.getItem(PAUSE_KEY) || "[]");
+    if (yes && !ok.includes(dev)) sessionStorage.setItem(PAUSE_KEY, JSON.stringify([...ok, dev]));
+    return yes || ok.includes(dev);
+  } catch {
+    return yes; // without storage it asks each time
+  }
+}
+
 /** A refusal the user can answer: confirm they may receive this class of radio, or pause the
  * stations that hold the dongle. */
 export function Ask({ ask, onYes, onNo }: { ask: Any; onYes: (extra: Any) => Promise<void>; onNo: () => void }) {
@@ -376,7 +405,11 @@ export function Ask({ ask, onYes, onNo }: { ask: Any; onYes: (extra: Any) => Pro
   useEffect(() => { panel.current?.scrollIntoView({ block: "nearest" }); }, []);
   return (
     <div ref={panel} className="m-panel lv-ask" role="alertdialog" aria-labelledby="lv-ask-t">
-      <p id="lv-ask-t" className="m-line">{ask.message}</p>
+      <p id="lv-ask-t" className="m-line">
+        {ask.code === "busy" && ask.holders?.length
+          ? `Receiver ${rxName(ask.dev)} is following ${and(ask.holders)}. Listening here pauses ${ask.holders.length === 1 ? "it" : "them"} until you stop.`
+          : ask.message}
+      </p>
       {ask.code === "acknowledge" ? (
         <>
           <p className="m-line">
@@ -391,7 +424,7 @@ export function Ask({ ask, onYes, onNo }: { ask: Any; onYes: (extra: Any) => Pro
         </>
       ) : (
         <div className="m-actions">
-          <ActButton variant="primary" run={() => onYes({ pause: true })}>Pause {ask.holders?.length === 1 ? ask.holders[0] : "them"} while I listen</ActButton>
+          <ActButton variant="primary" run={() => onYes({ pause: true })}>Pause {ask.holders?.length > 1 ? "them" : "it"} and listen</ActButton>
           <Button variant="ghost" onClick={onNo}>Cancel</Button>
         </div>
       )}

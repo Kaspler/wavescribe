@@ -67,6 +67,10 @@ export function useEvery(ms: number, fn: () => unknown, on = true) {
   }, [ms, on]);
 }
 
+/** A guide in the repository's docs folder, as a link (it needs the internet; the same file is
+ * in the Wavescribe folder). */
+export const docUrl = (name: string) => `https://github.com/Kaspler/wavescribe/blob/main/docs/${name}`;
+
 /** Opens Tune by hand on a frequency (from a scan result, say). */
 export const HANDOFF = "ws-listen";
 export function listenTo(mhz: number, mode?: string | null, device?: string) {

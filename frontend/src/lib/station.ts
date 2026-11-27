@@ -27,7 +27,7 @@ const nextTry = (s: Live) =>
 
 export function stateOf(id: string): StationState {
   const s = S.live[id];
-  if (!s) return { label: "off", lamp: "off", detail: "Not running" };
+  if (!s) return { label: "stopped", lamp: "off", detail: "Not running" };
   const st = S.byId[id];
   if (s.stopping) return { label: "stopping", lamp: "wait", detail: "" };
   if (!s.connected) {
@@ -44,7 +44,7 @@ export function stateOf(id: string): StationState {
   }
   if (st?.listen_only_run) return { label: "playing only", lamp: "on", detail: "Start to write it down" };
   if (noText(st)) return { label: "no text yet", lamp: "on", detail: "Plays now; written down once its speech model is downloaded" };
-  if (st?.transcribe === false) return { label: "listening only", lamp: "on", detail: "Played, not written down" };
+  if (st?.transcribe === false) return { label: "listen only", lamp: "on", detail: "Played, not written down" };
   if (s.music) return { label: "music", lamp: "dim", detail: "Songs aren't transcribed" };
   if (s.in_speech) return { label: "speech", lamp: "speech", detail: "Someone is talking" };
   if (s.squelch_open === false)

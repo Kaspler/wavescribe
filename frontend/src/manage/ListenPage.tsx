@@ -57,7 +57,7 @@ function PlayRow({ st }: { st: Station }) {
     : st.disabled ? "Switched off under Settings, Stations."
     : !st.available ? st.reason || "Unavailable."
     : !S.status?.ready ? "Wavescribe is still starting." : null;
-  const state = on ? (st.listen_only_run ? T.playingOnly : stateOf(st.id).label) : "off";
+  const state = on ? (st.listen_only_run ? T.playingOnly : stateOf(st.id).label) : "stopped";
   return (
     <li className={cx("ls-row", playing && "is-playing")}>
       <button type="button" className="ls-main" aria-pressed={playing} disabled={!playing && (!!why || !live)}

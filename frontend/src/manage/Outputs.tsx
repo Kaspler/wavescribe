@@ -45,7 +45,7 @@ export function Outputs() {
           {rows.map((d) => (
             <tr key={d.id}>
               <td className="num">{hms(d.t)}</td>
-              <td>{d.output_id || d.output}</td>
+              <td>{v.outputs.find((o: Any) => o.id === d.output_id)?.name || d.output_id || d.output}</td>
               <td>{d.event}{d.ref ? ` ${d.ref}` : ""}</td>
               <td>{d.ok ? <Tag tone="good">{d.status ?? "ok"}</Tag> : <Tag tone="warn">{d.status ?? "failed"}</Tag>}</td>
               <td className="num">{d.attempts}</td>
@@ -136,7 +136,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
         <div className="m-form">
             {v.rules.length > 0 && (
               <Field label="Only these rules" hint="None selected: every rule." wide>
-                <ChoiceChips label="Rules" options={v.rules.map((r: Any) => r.id)} value={rules} onChange={setRules} />
+                <ChoiceChips label="Rules" options={v.rules.map((r: Any) => [r.id, r.id.replace(/[-_]+/g, " ").replace(/^./, (c: string) => c.toUpperCase())] as [string, string])} value={rules} onChange={setRules} />
               </Field>
             )}
             <Field label="Only these stations" hint="None selected: every station." wide>

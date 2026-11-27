@@ -100,7 +100,7 @@ function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: 
                      toast(`${added.name} added${start ? " and starting" : ""}`);
                      await onDone();
                    }}>
-          Add station
+          Add as a station
         </ActButton>
         <Check checked={start} onChange={setStart}>Start now</Check>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>

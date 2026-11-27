@@ -5,11 +5,11 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { type Any, ApiError, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
-import { type Band, bandLine, bandWords, fmtMhz } from "./bands";
+import { type Any, docUrl, ApiError, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
+import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
-import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, and, heardIn, mhzText, rxStatus } from "./DialView";
+import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
 import { bandAt as narrowestAt, bandOfWindow, bestCentre, kindOf, lookTune, onDial } from "./dial";
 import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
 import { MODE_HINT } from "./Stations";
@@ -97,10 +97,15 @@ const NEXT_BANDS = ["airband", "airband-25", "marine", "weather-us", "pmr446", "
 
 const fmBand = (v: Any): Any | undefined => v.bands.find((b: Any) => b.mode === "wfm" && b.privacy === "broadcast" && b.tunable);
 
+/** The receiver that made a scan: by the receiver it names, else by its dongle's serial (a scan
+ * saved before scans named their receiver). */
+const scanRx = (v: Any, scan: Any): Any | undefined =>
+  scan && (v.receivers.find((r: Any) => scan.device && r.id === scan.device) || v.receivers.find((r: Any) => r.serial === scan.serial));
+
 /** The receiver a scan starts on: the one that scanned last (most likely the one with an antenna;
  * if it's busy, the button says what the scan pauses), else a free one. Switching stays one press. */
 function pickReceiver(v: Any): string {
-  const last = v.receivers.find((r: Any) => r.serial === v.last_scan?.serial);
+  const last = scanRx(v, v.last_scan);
   return (last || v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0])?.id || "";
 }
 
@@ -539,7 +544,7 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
   const common = shown.length > 1 && shown.every((s) => s.label === shown[0].label) ? shown[0].label : null;
   const failed = sweeping?.phase === "error" && sweeping.error !== "cancelled";
   const picture = sweeping?.spectrum ? sweeping : still?.spectrum ? still : null;
-  const scanner = picture && v.receivers.find((r: Any) => r.serial === picture.serial);
+  const scanner = picture && scanRx(v, picture);
   const running = !!sweeping && !["done", "error"].includes(sweeping.phase);
   const heading = live ? `What Receiver ${rxName(tuner.dev)} hears, live`
     : picture === sweeping && running ? `${scanner ? `Receiver ${rxName(scanner.id)}` : "A receiver"} is sweeping ${name}`
@@ -623,7 +628,7 @@ function ScanProgress({ job }: { job: Any }) {
 /** After a scan that found nothing, or couldn't run: which receiver it was, the likely cause, and
  * the other receivers and a dongle not in use yet, each one press from the same scan again. */
 function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (device: string) => Promise<void> }) {
-  const device: string | undefined = result.device ?? v.receivers.find((r: Any) => r.serial === result.serial)?.id;
+  const device: string | undefined = result.device ?? scanRx(v, result)?.id;
   const others: Any[] = v.receivers.filter((r: Any) => r.id !== device);
   // Listing the dongles opens none of them, so asking costs a running station nothing.
   const { data: spare, reload: look } = useLoad(() => get("/radio?dongles=1").then((x) => (x.dongles || []) as Any[]));
@@ -906,7 +911,7 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
         <p className="m-line">
           <Check checked={ack} onChange={setAck}>
             I've checked that I may receive this where I am, and I'm responsible for how I use what's heard.
-            Laws on radio that isn't broadcast differ by country (<code>docs/RADIO.md</code>).
+            Laws on radio that isn't broadcast differ by country (<a className="rd-link" href={docUrl("RADIO.md")} target="_blank" rel="noreferrer">docs/RADIO.md</a>).
           </Check>
         </p>
       )}
@@ -921,7 +926,7 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
       )}
       <div className="m-actions">
         <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || !!rx?.scanning} run={() => submit(false)}>
-          Add station
+          Add as a station
         </ActButton>
         <Button variant="ghost" onClick={() => onDone()}>Cancel</Button>
       </div>

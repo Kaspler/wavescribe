@@ -2,7 +2,7 @@
 // use a receiver share: its name, the switch between receivers, and a dongle put to use in one step.
 import { useEffect, useRef, useState } from "react";
 import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act } from "../components/ui";
-import { type Any, del, get, post, useLoad } from "./api";
+import { type Any, del, docUrl, get, post, useLoad } from "./api";
 
 /** A receiver as the page names it: receiver "c" is Receiver C, as on a front panel. */
 export const rxName = (id: string) => (id.length === 1 ? id.toUpperCase() : id);
@@ -39,9 +39,9 @@ export function UseDongle({ dongles, tools, what, then, look }: { dongles: Any[]
   if (!tools || !dongles.length) {
     return (
       <>
-        <p className="m-line">{PLUG_IN}</p>
+        <p className="m-line">{tools ? PLUG_IN : NO_TOOLS}</p>
         <div className="m-actions"><ActButton icon="refresh" run={async () => { await look(); }}>Look again</ActButton></div>
-        <NotWorking tools={tools} />
+        <NotWorking tools />
       </>
     );
   }
@@ -64,7 +64,11 @@ export function UseDongle({ dongles, tools, what, then, look }: { dongles: Any[]
 
 /** What to plug in, when no dongle is in sight. The tools behind it wait under "Not working?". */
 const PLUG_IN = (
-  <>Plug in an RTL-SDR dongle with an antenna; the hardware guide (<code>docs/HARDWARE.md</code> in the Wavescribe folder) says which to buy.</>
+  <>Plug in an RTL-SDR dongle with an antenna; the hardware guide (<a className="rd-link" href={docUrl("HARDWARE.md")} target="_blank" rel="noreferrer">docs/HARDWARE.md</a>) says which to buy.</>
+);
+/** Without the rtl-sdr tools no dongle can be seen, plugged in or not: that comes first. */
+const NO_TOOLS = (
+  <>Wavescribe can't see dongles yet: the rtl-sdr tools it uses aren't installed. Install them with <code>brew install librtlsdr</code>, then look again.</>
 );
 
 /** Why a plugged-in dongle may not show, and the tools Wavescribe needs to see one. */
@@ -103,7 +107,10 @@ export function FirstReceiver({ dongles, tools, taken, look, onAdded }: { dongle
       <Table caption="Dongles on USB" cols={[{ label: "Dongle" }, { label: "Serial" }, { label: "", width: "1%" }]}>
         {dongles.map((d) => (
           <tr key={d.serial}>
-            <td>{d.vendor || d.maker || ""} {d.product || d.model || ""}</td>
+            <td>
+              {d.vendor || d.maker || ""} {d.product || d.model || ""}
+              {d.held_elsewhere?.reason && <span className="rd-sub">In use: {d.held_elsewhere.reason}</span>}
+            </td>
             <td className="mono">{d.serial}</td>
             <td className="rd-act">
               <ActButton size="sm" icon="plus" done="Receiver added"

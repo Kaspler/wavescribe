@@ -11,7 +11,7 @@ import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag
 import { type Any, ApiError, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, bandWords, fmtMhz } from "./bands";
 import { type Catch, type Note, RANGES, type Spot, bandsIn, centreIn, filterCatches, groupCatches, sliceIn, voiceWord, windowWords } from "./catches";
-import { and } from "./DialView";
+import { and } from "./bands";
 import { rxName } from "./Receivers";
 
 let known: Promise<boolean> | null = null;

@@ -143,3 +143,6 @@ export const bandWords = (b: { id: string; name: string }): BandWords => WORDS[b
 /** 98.6 for broadcast FM; 446.00625, 118.050 for channels (at least three decimals). */
 export const fmtMhz = (mhz: number, mode?: string | null) =>
   mode === "wfm" ? mhz.toFixed(1) : mhz.toFixed(5).replace(/(\.\d{3}\d*?)0+$/, "$1");
+
+/** "A", "A and B", "A, B and C". */
+export const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "");

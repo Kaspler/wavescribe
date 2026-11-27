@@ -5,7 +5,7 @@ import { Icon } from "../components/Icon";
 import {
   ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LangPicker, LinkButton, Section, Segmented, Select, Tag, act, cx,
 } from "../components/ui";
-import { type Any, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
+import { type Any, docUrl, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { changedFields } from "./drafts";
 
 export function Stations() {
@@ -79,7 +79,7 @@ function StationRow({ s, devices, reload }: { s: Any; devices: string[]; reload:
       </div>
       <p className="m-item-sub">
         {langNameEn(s.language)}
-        {s.transcribe === false ? " · listening only, not written down" : (
+        {s.transcribe === false ? " · listen only, not written down" : (
           <>
             {intoOthers(s).length ? ` → ${intoOthers(s).map(langNameEn).join(", ")}` : (s.translate_to || []).length ? "" : " · not translated"}
             {" · "}speech {s.asr_model || (s.remote ? "at the source" : "no model installed")}
@@ -110,7 +110,7 @@ function RegionNote({ s, reload }: { s: Any; reload: () => Promise<void> }) {
       <p className="m-line">
         <Check checked={ok} onChange={setOk}>
           I've checked that I may receive this where I am, and I'm responsible for how I use what's heard.
-          Laws on radio that isn't broadcast differ by country (<code>docs/RADIO.md</code>).
+          Laws on radio that isn't broadcast differ by country (<a className="rd-link" href={docUrl("RADIO.md")} target="_blank" rel="noreferrer">docs/RADIO.md</a>).
         </Check>
       </p>
       <div className="m-actions">

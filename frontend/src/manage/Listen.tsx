@@ -68,21 +68,21 @@ export function Listen() {
                play={() => { stopPlayer(); startPlayer(st.audio); }}
                onKept={async () => { stopPlayer(); setSt(null); await reload(); await refreshPage(); }} />
       ) : (
-        <Start receivers={receivers} radio={radio} dev={dev} onRx={(id) => moveTo(id, null)} tune={(b) => tune(b, true)} />
+        <Start receivers={receivers} dev={dev} onRx={(id) => moveTo(id, null)} tune={(b) => tune(b, true)} />
       )}
+      <BandChips radio={radio} onBand={(m, md) => { remember("ws-listen-mhz", String(m)); return tune({ mhz: m, mode: md }, true); }} />
     </>
   );
 }
 
 // -- before listening ------------------------------------------------------------------------
 
-function Start({ receivers, radio, dev, onRx, tune }: { receivers: Any[]; radio: Any; dev: string; onRx: (id: string) => void; tune: (b: Any) => Promise<Any> }) {
+function Start({ receivers, dev, onRx, tune }: { receivers: Any[]; dev: string; onRx: (id: string) => void; tune: (b: Any) => Promise<Any> }) {
   const [mhz, setMhz] = useState(remember("ws-listen-mhz") || "");
   const [mode, setMode] = useState<string>("");
   const rx = receivers.find((r) => r.id === dev);
   const f = +mhz;
   const go = (m: number, md?: string) => { remember("ws-listen-mhz", String(m)); return tune({ mhz: m, mode: md || undefined }); };
-  const bands: Any[] = (radio?.bands || []).filter((b: Any) => b.mode && b.tunable && b.privacy !== "digital");
   return (
     <>
       <Section id="lv-start" title="Tune by hand"
@@ -104,18 +104,24 @@ function Start({ receivers, radio, dev, onRx, tune }: { receivers: Any[]; radio:
           <span className="m-hint rd-inline">Every band at once, and where each receiver is: <a className="rd-link" href="#/add/air">the dial</a> under Find.</span>
         </div>
       </Section>
-      {bands.length > 0 && (
-        <Section id="lv-bands" title="Bands where you are" description="Start at a band, then seek or scan through it.">
-          <div className="lv-chips">
-            {bands.map((b) => (
-              <Button key={b.id} size="sm" variant="secondary" onClick={() => go(b.channels_mhz?.[0] ?? +(b.mode === "wfm" ? b.start_mhz + 0.1 : b.start_mhz).toFixed(5), b.mode)}>
-                {b.name}
-              </Button>
-            ))}
-          </div>
-        </Section>
-      )}
     </>
+  );
+}
+
+/** The bands where you are, one press to the start of each: before listening and while. */
+function BandChips({ radio, onBand }: { radio: Any; onBand: (mhz: number, mode: string) => unknown }) {
+  const bands: Any[] = (radio?.bands || []).filter((b: Any) => b.mode && b.tunable && b.privacy !== "digital");
+  if (!bands.length) return null;
+  return (
+    <Section id="lv-bands" title="Bands where you are" description="Start at a band, then seek or scan through it.">
+      <div className="lv-chips">
+        {bands.map((b) => (
+          <Button key={b.id} size="sm" variant="secondary" onClick={() => onBand(b.channels_mhz?.[0] ?? +(b.mode === "wfm" ? b.start_mhz + 0.1 : b.start_mhz).toFixed(5), b.mode)}>
+            {b.name}
+          </Button>
+        ))}
+      </div>
+    </Section>
   );
 }
 
