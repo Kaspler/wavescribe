@@ -718,6 +718,25 @@ def test_a_choice_of_fewer_notes_than_asked_is_a_shorter_digest(tmp_path: Path) 
     store.close()
 
 
+def test_a_part_keeps_twice_the_notes_asked_for_spread_over_its_list(tmp_path) -> None:
+    store = Store(tmp_path / "w.db")
+    for i in range(240):
+        add(store, "a", f"a frase {i} " + "palavras " * 12, NOW - 3500 + i * 14)
+    letters = "ABCDEFGHIJKL"
+    # A model that lists every excerpt of the first part, asked for three notes.
+    listed = "\n".join(f"- Note {c} [{n}]." for n, c in enumerate(letters, 1))
+    llm = FakeLlm(listed, "- A middle note [1].", "- A late note [1].", "2, 8")
+    d = digester(store, llm, stations=[station("a")])
+    digest = d.run(d.request({"minutes": 60, "language": "en"}))
+    assert len(llm.prompts) == 4 and min(p.count("\n[") for p in llm.prompts[:3]) >= 12
+    choice = llm.prompts[3]
+    # Six of the twelve, spread over its list with the first and the last, not the first six.
+    assert re.findall(r"Note ([A-L])\.", choice) == list("ACEHJL")
+    assert len(re.findall(r"^\[\d+\] ", choice, re.M)) == 8
+    assert [p.text for p in digest.points] == ["A middle note.", "Note L."]
+    store.close()
+
+
 def test_nothing_of_substance_is_said_in_words_of_its_own(tmp_path: Path) -> None:
     store = stocked(tmp_path)
     add(

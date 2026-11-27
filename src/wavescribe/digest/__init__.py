@@ -46,7 +46,8 @@ with "+", so the story is chosen once; the point is the first of them, with its 
 as the joins are too often wrong to take the others' on their word. When it chooses fewer
 than asked, the digest has fewer points: it left the others out on purpose (advertising, a
 station's trailers). Only when its reply names no note do the notes stand in, in the order
-shown.
+shown. A part's notes are bounded (``NOTE_KEPT``), spread over the model's list, so that a
+model that lists every excerpt doesn't make the choice's prompt long.
 
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
@@ -132,6 +133,7 @@ MIN_WORDS = 3  # fewer are greetings and station idents ("Bom dia.", "TSF.")
 FETCH_PER_STATION = 600  # rows read per station, evenly spread, before the budget
 POINTS = {"digest": 5, "now": 2}
 NOTE_POINTS = 3  # asked for per part of the window when there are several; more are kept
+NOTE_KEPT = 2 * NOTE_POINTS  # of a part at most: what bounds the choice's prompt, not a filter
 POINT_WORDS = 25
 POINT_CHARS = 300  # what is kept of a point: a reply in prose is cut at a sentence's end
 # The lines a point keeps of those it cites: what the prompt asks for, and a check a reader
@@ -951,8 +953,7 @@ class _Job:
             self.next()
 
     def _call(self, llm: Llm) -> bool:
-        """One call to the model; True when it was the last. Notes beyond those asked for are
-        kept for the choice (the answer's length bounds them); points are not."""
+        """One call to the model; True when it was the last."""
         self.model = llm.model_id
         t0 = time.perf_counter()
         try:
@@ -973,7 +974,10 @@ class _Job:
         if self.calls < len(self.prompts):  # the first stage: notes on one part of the window
             lines = self.prompts[self.calls]
             messages = excerpt_messages(r, lines, self.names, points=NOTE_POINTS)
-            self.notes.append(self._reply(llm, messages, lines))
+            given = self._reply(llm, messages, lines)
+            # A model that lists every excerpt gives a dozen: some of them, from the first to
+            # the last, keep the choice's prompt short. Which matter is the choice's to say.
+            self.notes.append(_ends(given, NOTE_KEPT))
             noted = [note for notes in self.notes for note in notes]
             if self.calls + 1 < len(self.prompts) or len(noted) > 1:
                 return False

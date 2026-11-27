@@ -364,7 +364,9 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    first; of two that matter as much, it is asked for the later. When it picks fewer than
    five, the digest has fewer points: the notes it left out, it left out on purpose (on real
    transcripts, mostly advertising and trailers), so nothing makes the number up. Only a reply
-   that names no note is replaced, by the notes in the order shown. When a
+   that names no note is replaced, by the notes in the order shown. A part keeps six notes at
+   most, twice those asked for, spread over the model's list from its first to its last: that
+   bounds the choice's prompt when a model lists every excerpt, and filters nothing. When a
    model lists more points than asked in a digest of one call, each station's share is spread
    over its list, first and last, never its first few. When the model read a sample, the
    notice says it was spread evenly.
