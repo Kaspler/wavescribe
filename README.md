@@ -70,8 +70,9 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 - **Alerts** from keywords, regular expressions or a plain-language description ("residents are
   told to leave"), and when a station goes silent or an FM station starts a traffic
   announcement, as a notification, a spoken alert in your language, or a webhook.
-- **Search and Ask**: everything heard is kept and searchable, and a question is answered with
-  the moments it was said.
+- **Search and Ask**: what was said is kept and searchable, and a question is answered with
+  the moments it was said. By default, radio that isn't broadcast is kept for a few days or
+  not at all ([docs/RADIO.md](docs/RADIO.md)).
 - **Several stations at once**, from internet streams or from one or more RTL-SDR receivers: FM
   broadcast, and (experimental) walkie-talkie, amateur, marine and aviation channels.
 - **Finds stations**: scans a band, names FM stations from their RDS, and turns any frequency

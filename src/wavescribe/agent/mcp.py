@@ -165,8 +165,10 @@ TOOLS = (
         "The radio stations Wavescribe is set up to listen to. " + ABOUT + "Returns "
         "{stations}, each with id (other tools take it), name, language (BCP-47), translate_to, "
         "kind (stream: internet radio; sdr: a radio receiver; remote: another Wavescribe), "
-        "running, connected, last_heard (seconds since 1970) and lag (seconds from speech to "
-        "text).",
+        "running, connected, last_heard (seconds since 1970) and lag: null, or over the last "
+        "ten minutes n (lines written down) and the seconds from the end of speech to its text "
+        "(text_p50, the median; text_p95) and to its translations (translated_p50, "
+        "translated_p95).",
         NO_ARGUMENTS,
     ),
     Tool(

@@ -102,8 +102,10 @@ Alert fields:
 - `reason`: the LLM's one-line reason, when it was involved.
 - `text`: what was announced, in the source language.
 - `translations`: only translations checked to be in their target language.
-- `context`: the two utterances just before it on the same station (an output sends as many
-  as its `context` setting says), leaving out what may not leave this machine.
+- `context`: up to two utterances stored just before its first mention (`segment_id`), on
+  the same station, oldest first, each with `id`, `time`, `station` (its id), `text` and
+  `translations`. What may not leave this machine is left out, and a station alert has none.
+  An output sends as many as its `context` setting says (0 to 10).
 - `status`: where the alert stands on this machine. `pending` while it is checked or its
   translations awaited; once announced, `delivered` (every action worked), `partial` (some
   reached someone), `failed` (none did) or `logged` (it had no action but the log);

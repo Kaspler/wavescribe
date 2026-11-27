@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,9 @@ SERVICE_KEYS = {"label", "plist", "installed", "loaded", "running", "pid", "stat
                 "log_bytes", "full_log"}  # fmt: skip
 TOOL_STATION_KEYS = {"id", "name", "language", "translate_to", "kind", "running", "connected",
                      "last_heard", "lag"}  # fmt: skip
+LAG_KEYS = {"n", "text_p50", "text_p95", "translated_p50", "translated_p95"}  # a station's lag
+# What add_station's result promises; the rest of it is the page's own.
+ADDED_STATION_KEYS = {"id", "name", "language", "kind", "running", "available", "reason"}
 TOOL_RESULT_KEYS = {
     "stations": {"stations"},
     "recent": {"utterances", "next_after_id", "more"},
@@ -93,8 +97,8 @@ def test_every_json_shape_is_documented_field_by_field() -> None:
     tools = (DOCS / "AGENT_TOOLS.md").read_text(encoding="utf-8")
     assert [k for k in sorted(UTTERANCE_KEYS | ALERT_KEYS) if f'"{k}"' not in feed] == []
     shapes = [MODEL_KEYS, HEARD_KEYS, CATCH_KEYS, CHECK_KEYS, SUMMARY_KEYS, SERVICE_KEYS,
-              TOOL_STATION_KEYS, *TOOL_RESULT_KEYS.values(), DIGEST_POINT_KEYS,
-              DIGEST_WINDOW_KEYS, DIGEST_COUNT_KEYS]  # fmt: skip
+              TOOL_STATION_KEYS, LAG_KEYS, ADDED_STATION_KEYS, *TOOL_RESULT_KEYS.values(),
+              DIGEST_POINT_KEYS, DIGEST_WINDOW_KEYS, DIGEST_COUNT_KEYS]  # fmt: skip
     named = set()  # each field in code: `name`, or in a result written `{a, b: null}`
     prose = re.sub(r"```.*?```", "", tools, flags=re.S)  # not the examples
     for span in re.findall(r"`([^`\n]+)`", prose):
@@ -477,10 +481,14 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
             # An agent is told that no alert, and no digest, is no all-clear.
             assert ("as an all-clear" in t["description"]) == (t["name"] in WARNED_TOOLS)
 
+        pipeline._lag["a"] = deque([(time.time(), 1.5, 4.0)])  # a line written down lately
         failed, data = mcp.call("stations")
         assert not failed and [s["id"] for s in data["stations"]] == ["a", "b"]
         assert set(data) == TOOL_RESULT_KEYS["stations"]
         assert all(set(s) == TOOL_STATION_KEYS for s in data["stations"])
+        lag = data["stations"][0]["lag"]
+        assert set(lag) == LAG_KEYS and lag["n"] == 1 and lag["translated_p95"] == 4.0
+        assert data["stations"][1]["lag"] is None  # nothing written down since the start
         assert data["stations"][0]["kind"] == "stream"
 
         _, recent = mcp.call("recent")
@@ -645,7 +653,7 @@ def test_mcp_control_tools_only_with_allow_control(tmp_path: Path) -> None:
         failed, added = mcp.call(
             "add_station", name="Rádio Nova", url="http://example.test/nova", language="es-ES"
         )
-        assert not failed and added["id"] == "radio-nova"
+        assert not failed and added["id"] == "radio-nova" and set(added) >= ADDED_STATION_KEYS
         failed, why = mcp.call(  # a name in use, whatever its case: refused, as documented
             "add_station", name=" rádio NOVA", url="http://example.test/two", language="es-ES"
         )
