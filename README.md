@@ -6,9 +6,9 @@
 </h1>
 
 **Wavescribe listens to the radio for you.** It follows several stations at once, writes down
-what is said, translates it into your language, and **alerts you when something you care about
-comes up**: a road closure, a strike, a water cut, a wildfire. It works with internet radio, and
-with FM and other radio through an inexpensive RTL-SDR receiver. Everything runs on your Mac,
+what is said, translates it into your language, and **can alert you when something you care
+about comes up**: a road closure, a strike, a water cut, a wildfire. It works with internet radio,
+and with FM and other radio through an inexpensive RTL-SDR receiver. Everything runs on your Mac,
 with no cloud and no account.
 
 ![The Wavescribe page following three synthetic test broadcasts (text-to-speech, not real stations) in French, German and Spanish, each sentence shown with its machine translation into English, and a "Road closed" alert raised by the German traffic report](assets/demo.gif)
