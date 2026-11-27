@@ -406,6 +406,18 @@ short name in lowercase letters, digits and dashes, such as `road-closed`), type
 closed*), and press **Suggest in each language**: the local model proposes the same terms in
 each station's language. Read them, fix any that are wrong, and save.
 
+- **Suggestions are proposals.** The model can offer a word that means something else (a
+  word for a holiday break where you asked for a strike), and nothing in Wavescribe can tell.
+  Check each one, or ask someone who reads the language, before you save. A suggestion that
+  isn't written in its language's script (an English word left in a Hebrew list, a Greek
+  word in an Arabic one) is left out; a wrong word in the right script is not caught.
+- **It asks for one language at a time**, between the station work, and takes up to two
+  minutes in all. A language can come back empty: the model's reply was cut short or couldn't
+  be read, the model was busy, or the time ran out before it got there. When nothing at all
+  comes back, the page says so and why, instead of adding anything; press it again later, or
+  type the words yourself. With a translator that isn't a language model (MADLAD), there are
+  no suggestions.
+
 - **Severity** decides what happens. *Low* is only highlighted in the transcript. *Medium*
   shows a notification on the Mac. *High* and *critical* are also **spoken aloud**, in the
   languages you choose. You can change what each level does.

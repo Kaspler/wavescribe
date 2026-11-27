@@ -514,6 +514,16 @@ reads a playlist or follows another Wavescribe.
   licence, reorder the chains; search Hugging Face; the translation languages.
 - **Alerts:** keyword and LLM rules ("Words to listen for", "Describe it in your words"), a
   try-it box, term suggestions in each station language, actions per severity, voices.
+  Suggestions (`POST /api/manage/rules/suggest`, `rules/suggest.py`) ask the LLM one language
+  at a time, each a job in its queue where questions go (priority 0.4), with a reply budget of
+  40 + 16 tokens per word asked for (3 per term, 6 to 20) and two minutes for the whole
+  request; the words of a cut reply that are whole are kept, and a word not in its language's
+  script (that of the language's own name in CLDR, or of any script CLDR has it in) is left
+  out. The answer has `terms` ({language: words}, as before), `languages` ({language: {words,
+  why, dropped, message}}, `why` one of `cut`, `unreadable`, `busy`, `timeout`, `no_llm`,
+  `none`, `script`, or null), `count`, `empty`, `message`, `note` and `at`; with no word at all
+  it is a 400 whose `error` says why: `code` `no_suggestions` with the same fields beside it,
+  or `no_llm` when the run has no LLM to ask.
 - **Receivers:** dongles, centre and gain; sample rate, ppm and a spectrum and waterfall under
   *Advanced*; the region whose band plan names each frequency; each receiver's own signals.
 - **Storage and privacy:** how long text and audio are kept, the audio cap, and what is kept

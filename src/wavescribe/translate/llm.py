@@ -47,6 +47,9 @@ class LlmTranslator:
         self._max_tokens = max_tokens
         self._model, self._tokenizer = load(str(model_path))
         self.last_stats: dict[str, float] = {}
+        # How the last completion ended: "length" when it was cut at max_tokens, "stop" when
+        # the model ended it; None when the backend doesn't say.
+        self.last_finish_reason: str | None = None
 
     def _prompt(self, text: str, source: str, target: str) -> str:
         return self._tokenizer.apply_chat_template(
@@ -77,7 +80,8 @@ class LlmTranslator:
         on_text: Callable[[str], None] | None = None,
     ) -> str:
         """A chat completion (greedy, no thinking), with each piece of text passed to ``on_text``
-        as it's generated. ``last_stats`` gets the prompt and generation speeds."""
+        as it's generated. ``last_stats`` gets the prompt and generation speeds, and
+        ``last_finish_reason`` whether the reply was cut."""
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
 
@@ -86,6 +90,7 @@ class LlmTranslator:
         )
         parts: list[str] = []
         r = None
+        self.last_finish_reason = None
         for r in stream_generate(
             self._model,
             self._tokenizer,
@@ -104,4 +109,5 @@ class LlmTranslator:
                 "generation_tokens": r.generation_tokens,
                 "generation_tps": round(r.generation_tps, 1),
             }
+            self.last_finish_reason = getattr(r, "finish_reason", None)
         return "".join(parts).strip()

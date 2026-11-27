@@ -518,49 +518,27 @@ def _radio_forget(app: App, m, q, b) -> Any:
 
 
 def suggest_terms(app: App, terms: list[str], languages: list[str]) -> dict[str, Any]:
-    """The user's keywords in each station language, from the LLM, for them to review. The
-    alert path itself never translates: the terms are saved per language and matched on the
-    source text."""
+    """The user's keywords in each station language, from the LLM, for them to check
+    (rules/suggest.py): per language the words or why there are none, and how many in all.
+    When no word came back at all the answer is a refusal that says why, with the same fields
+    beside it, so nothing reads as suggestions added."""
     import json
-    import threading
 
-    from wavescribe.languages import language_name
-    from wavescribe.rules.llm import parse_matches
+    from wavescribe.rules import suggest
 
-    terms = [t.strip() for t in terms if t.strip()][:30]
-    langs = [x for x in dict.fromkeys(languages) if x][:12]
+    terms = [t.strip() for t in terms if t.strip()][: suggest.MAX_TERMS]
+    langs = [x for x in dict.fromkeys(languages) if x][: suggest.MAX_LANGUAGES]
     if not terms or not langs:
         raise ChangeError("give some words and at least one language")
-    done, box = threading.Event(), {}
-
-    def run(llm: Any) -> None:
-        try:
-            if not hasattr(llm, "complete"):
-                box["error"] = f"suggestions need an LLM; this run translates with {llm.model_id}"
-                return
-            names = ", ".join(f'"{x}" ({language_name(x)})' for x in langs)
-            user = (
-                "These words should raise an alert when a radio station says them: "
-                + "; ".join(terms)
-                + f".\nGive the words and short phrases a broadcaster would use for the same "
-                f"things in each of these languages: {names}. Base forms, no explanations. "
-                'Reply with one JSON object, e.g. {"pt": ["corte de água", "sem água"]}.'
-            )
-            reply = llm.complete([{"role": "user", "content": user}], max_tokens=400)
-            data = next(iter(parse_matches(reply)), {})
-            box["terms"] = {lang: [str(w) for w in data.get(lang, []) if str(w).strip()][:20]
-                            for lang in langs}  # fmt: skip
-        except Exception as e:
-            box["error"] = str(e)[:200]
-        finally:
-            done.set()
-
-    if not app.pipeline.request_llm(run, "suggest", 0.4):
-        raise ChangeError("there is no LLM in this run (or its queue is full)")
-    if not done.wait(120):
-        raise ChangeError("no answer from the LLM in time")
-    if "error" in box:
-        raise ChangeError(box["error"])
-    box["note"] = json.dumps(terms, ensure_ascii=False)
-    box["at"] = time.time()
-    return box
+    mt = app.plan.mt
+    if mt is None or mt[0].backend != "mlx-lm":
+        using = f"; this run translates with {mt[0].id}" if mt else ""
+        raise ChangeError(f"suggestions need an LLM{using}", suggest.NO_LLM)
+    out = suggest.suggest(lambda run: app.pipeline.request_llm(run, "suggest", 0.4), terms, langs)
+    out["note"] = json.dumps(terms, ensure_ascii=False)
+    out["at"] = time.time()
+    if not out["count"]:
+        whys = {e["why"] for e in out["languages"].values()}
+        code = suggest.NO_LLM if whys == {suggest.NO_LLM} else "no_suggestions"
+        raise ChangeError(out.pop("message"), code, **out)
+    return out
