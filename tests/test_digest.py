@@ -17,9 +17,12 @@ from wavescribe.digest import (
     DIGEST_CHARS,
     MAX_RUNNING,
     POINT_CHARS,
+    QUIET_S,
+    QUIET_UNKNOWN_S,
     STAGE_CHARS,
     SYSTEM,
     Busy,
+    Digest,
     Digester,
     Line,
     Parsed,
@@ -34,9 +37,11 @@ from wavescribe.digest import (
     parse_points,
     pick,
     plan_prompts,
+    quiet_limits,
     sourced,
     spread,
     stated,
+    unheard,
 )
 from wavescribe.radio.bandplan import exports
 from wavescribe.store import Store
@@ -814,7 +819,11 @@ def test_nothing_said_needs_no_model(tmp_path: Path) -> None:
     d = digester(store, llm)
     out = d.run(d.request({"minutes": 30, "stations": ["a"]})).payload()
     assert llm.prompts == [] and out["outcome"] == "nothing_said" and out["notice"] is None
-    assert out["text"] == "Nothing was said on a in the last 30 minutes."
+    # Nor did any other station have a line, then or in the hour before.
+    assert out["text"] == (
+        "Nothing was said on a in the last 30 minutes. Nothing was written down from any station "
+        "in that time: Wavescribe may not have been listening."
+    )
     store.close()
 
 
@@ -826,7 +835,7 @@ def test_a_window_of_only_music_says_so(tmp_path: Path) -> None:
         return played
 
     d = Digester(store, lambda: STATIONS, lambda run, given_up: True, clock=lambda: NOW,
-                 music=music)  # fmt: skip
+                 music=music, started=NOW - 60 * MIN)  # fmt: skip
     out = d.run(d.request({"kind": "now", "stations": ["a"], "minutes": 2})).payload()
     assert out["outcome"] == "nothing_said"
     assert out["text"] == (
@@ -844,28 +853,188 @@ def test_a_window_of_only_music_says_so(tmp_path: Path) -> None:
     store.close()
 
 
-def test_a_window_from_before_wavescribe_started_says_so(tmp_path: Path) -> None:
-    store = stocked(tmp_path)
-    llm = FakeLlm("- Water is cut tomorrow [1].")
+def talk(store: Store, sid: str, since: float, until: float, every: float = 2 * MIN) -> None:
+    """A line of made-up talk on ``sid`` every ``every`` seconds from ``since``."""
+    for i in range(int((until - since) // every)):
+        add(store, sid, f"{sid} fala de mais uma coisa, a de agora {i}", since + i * every)
 
-    def started(at: float) -> Digester:
-        return Digester(
-            store, lambda: STATIONS, lambda run, given_up: run(llm) or True, clock=lambda: NOW,
-            started=at,
-        )  # fmt: skip
 
-    late = "Wavescribe started at 11:55: before then, nothing was heard unless an earlier run "
-    late += "was listening."
-    d = started(NOW - 5 * MIN)
+def started(store: Store, llm: FakeLlm, at: float | None) -> Digester:
+    """A digester of a run that started at ``at``."""
+    return Digester(
+        store, lambda: STATIONS, lambda run, given_up: run(llm) or True, clock=lambda: NOW,
+        started=at,
+    )  # fmt: skip
+
+
+WRITTEN = "it can miss things or get them wrong."
+
+
+def test_a_run_started_in_a_window_an_earlier_run_heard_says_nothing_of_it(tmp_path) -> None:
+    store = Store(tmp_path / "w.db")
+    talk(store, "a", NOW - 120 * MIN, NOW)  # an earlier run, until two minutes ago
+    llm = FakeLlm("- Something was said [1].")
+    d = started(store, llm, NOW - 60)
+    out = d.run(d.request({"minutes": 30, "language": "en"})).payload()
+    # The store has the window's lines, whoever wrote them down: nothing to say of the start.
+    assert out["outcome"] == "points" and out["counts"]["said"] == 15
+    assert out["notice"] == (
+        f"Written by the local model from all 15 lines heard between 11:30 and 12:00; {WRITTEN}"
+    )
+    store.close()
+
+
+def test_a_stretch_with_no_line_from_any_station_is_named(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    # Two stations, a line each every two minutes for hours: neither is known to go ten minutes
+    # without one. Then twenty minutes with nothing from either, and both again.
+    for sid, later in (("a", 0), ("b", 60)):
+        talk(store, sid, NOW - 360 * MIN + later, NOW - 40 * MIN)
+        talk(store, sid, NOW - 20 * MIN + later, NOW)
+    llm = FakeLlm("- Something was said [1].")
+    d = digester(store, llm)
+    out = d.run(d.request({"minutes": 60, "stations": ["a"], "language": "en"})).payload()
+    assert out["notice"].endswith(f"{WRITTEN} Nothing was heard between 11:18 and 11:40.")
+    # A window that starts within it says so of its start only.
+    out = d.run(d.request({"minutes": 35, "stations": ["a"], "language": "en"})).payload()
+    assert out["notice"].endswith(f"{WRITTEN} Nothing was heard before 11:40.")
+    # A run that started at 11:30 has listened since, with nothing to write down at first.
+    d = started(store, llm, NOW - 30 * MIN)
+    out = d.run(d.request({"minutes": 60, "stations": ["a"], "language": "en"})).payload()
+    assert out["notice"].endswith(f"{WRITTEN} Nothing was heard between 11:18 and 11:30.")
+    store.close()
+
+
+def test_a_window_that_starts_before_anything_was_heard_says_so(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    talk(store, "a", NOW - 25 * MIN, NOW)
+    llm = FakeLlm("- Something was said [1].")
+    d = digester(store, llm)
     out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
-    assert out["outcome"] == "points" and out["notice"].endswith(late)
-    out = d.run(d.request({"minutes": 30, "stations": ["c"]})).payload()  # c said nothing
+    assert out["notice"].endswith(f"{WRITTEN} Nothing was heard before 11:35.")
+    # Without a model there is no notice: the text says it. From its start, at 11:33, this run
+    # listened.
+    d = started(store, llm, NOW - 27 * MIN)
+    out = d.run(d.request({"minutes": 60, "stations": ["c"]})).payload()  # c said nothing
     assert out["notice"] is None
-    assert out["text"] == f"Nothing was said on c in the last 30 minutes. {late}"
-    # Started before the window: nothing to say about it.
-    d = started(NOW - 61 * MIN)
+    assert out["text"] == (
+        "Nothing was said on c in the last 60 minutes. Nothing was heard before 11:33."
+    )
+    # Started before the window: it listened all through it.
+    d = started(store, llm, NOW - 61 * MIN)
     out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
-    assert "started" not in out["notice"]
+    assert out["notice"].endswith(WRITTEN)
+    store.close()
+
+
+def test_a_station_playing_music_is_no_stretch_nothing_was_heard_in(tmp_path: Path) -> None:
+    llm = FakeLlm("- Something was said [1].")
+    # Twenty minutes without a line from a, while b is written down all through them.
+    store = Store(tmp_path / "two.db")
+    talk(store, "a", NOW - 360 * MIN, NOW - 40 * MIN)
+    talk(store, "a", NOW - 20 * MIN, NOW)
+    talk(store, "b", NOW - 360 * MIN + 60, NOW)
+    d = digester(store, llm)
+    out = d.run(d.request({"minutes": 60, "stations": ["a"], "language": "en"})).payload()
+    assert out["notice"].endswith(WRITTEN)
+    store.close()
+    # The only station, of which nothing shows how long it goes quiet: not for twenty minutes.
+    store = Store(tmp_path / "one.db")
+    talk(store, "a", NOW - 180 * MIN, NOW - 40 * MIN)
+    talk(store, "a", NOW - 20 * MIN, NOW)
+    d = digester(store, llm)
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert out["notice"].endswith(WRITTEN)
+    store.close()
+    # Three quarters of an hour is longer than anything says a station goes quiet for,
+    store = Store(tmp_path / "long.db")
+    talk(store, "a", NOW - 180 * MIN, NOW - 55 * MIN)
+    talk(store, "a", NOW - 10 * MIN, NOW)
+    d = digester(store, llm)
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert out["notice"].endswith(f"{WRITTEN} Nothing was heard between 11:02 and 11:50.")
+    # unless this run was listening all the while.
+    d = started(store, llm, NOW - 120 * MIN)
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert out["notice"].endswith(WRITTEN)
+    store.close()
+
+
+def lines_of(sid: str, since: float, until: float, every: float) -> list[tuple[str, float, float]]:
+    return [
+        (sid, since + i * every, since + i * every + 1)
+        for i in range(int((until - since) // every))
+    ]
+
+
+def test_a_stations_quiet_limit_is_from_pauses_another_station_was_heard_through() -> None:
+    day = NOW - 24 * 60 * MIN
+    often = lines_of("often", day, NOW, 50)  # no pause of a minute: nothing shows its limit
+    music = lines_of("music", day, NOW, 12 * MIN)  # twelve minutes of songs between its lines
+    news = lines_of("news", day, day + 600 * MIN, 3 * MIN)  # stopped fourteen hours ago
+    new = lines_of("new", NOW - 30 * MIN, NOW, 3 * MIN)  # too few pauses to go by
+    heard = sorted([*often, *music, *news, *new], key=lambda h: h[1])
+    limits = quiet_limits(heard)
+    assert limits == {
+        "often": QUIET_UNKNOWN_S,
+        "music": 1.5 * (12 * MIN - 1),
+        "news": QUIET_S,  # half as long again as three minutes, and ten at least
+        "new": QUIET_UNKNOWN_S,
+    }
+    # Alone, a station's pauses show nothing: nobody may have been listening.
+    assert quiet_limits(music) == {"music": QUIET_UNKNOWN_S}
+
+    def without(since: float, until: float) -> list[tuple[str, float, float]]:
+        return [h for h in heard if not since < h[1] < until]
+
+    # A quarter of an hour with no line: under the limit of the station of songs, and the
+    # station of news, long silent, has nothing to say of it.
+    gap = (NOW - 45 * MIN, NOW - 30 * MIN)
+    assert unheard(without(*gap), NOW - 60 * MIN, NOW) == []
+    # Twenty minutes is over it.
+    gap = (NOW - 50 * MIN, NOW - 30 * MIN)
+    [(a, b)] = unheard(without(*gap), NOW - 60 * MIN, NOW)
+    assert gap[0] - 50 <= a <= gap[0] + 1 and b == gap[1]
+    # A stretch is cut to the window, and ends where this run started.
+    [(a, b)] = unheard(without(*gap), NOW - 45 * MIN, NOW)
+    assert (a, b) == (NOW - 45 * MIN, gap[1])
+    [(a, b)] = unheard(without(*gap), NOW - 60 * MIN, NOW, started=NOW - 31 * MIN)
+    assert b == NOW - 31 * MIN
+    assert unheard(without(*gap), NOW - 60 * MIN, NOW, started=NOW - 51 * MIN) == []
+    # Under ten minutes of the window, a stretch isn't named.
+    assert unheard(without(*gap), NOW - 39 * MIN, NOW) == []
+    # Nothing at all: the whole window.
+    assert unheard([], NOW - 60 * MIN, NOW) == [(NOW - 60 * MIN, NOW)]
+
+
+def test_stretches_nothing_was_heard_in_are_said_in_a_sentence(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    d = digester(store)
+    hour = Digest(d.request({"minutes": 60, "stations": ["a"]}), {}, {}, 0, [], {})
+
+    def said(*gaps: tuple[float, float]) -> str | None:
+        return dataclasses.replace(
+            hour, gaps=[(NOW + a * MIN, NOW + b * MIN) for a, b in gaps]
+        ).unheard()
+
+    assert said() is None
+    assert said((-60, -40), (-30, -15), (-12, 0)) == (
+        "Nothing was heard before 11:20, between 11:30 and 11:45 and after 11:48."
+    )
+    assert said((-60, 0)) == (
+        "Nothing was written down from any station in that time: Wavescribe may not have been "
+        "listening."
+    )
+    # More than three are counted.
+    day = Digest(d.request({"minutes": 24 * 60, "stations": ["a"]}), {}, {}, 0, [], {})
+    day.gaps = [
+        (NOW - h * 60 * MIN, NOW - h * 60 * MIN + (50 if h == 3 else 40) * MIN)
+        for h in (9, 7, 5, 3)
+    ]
+    assert day.unheard() == (
+        "Nothing was heard for 2 h 50 min of that time, in 4 stretches, the longest between "
+        "Wed 09:00 and Wed 09:50."
+    )
     store.close()
 
 
@@ -879,6 +1048,7 @@ def test_a_station_that_keeps_no_text_or_isnt_running_is_not_read(tmp_path: Path
         lambda run, given_up: True,
         clock=lambda: NOW,
         running=lambda: {"a"},
+        started=NOW - 60 * MIN,
     )
     out = d.run(d.request({"minutes": 30, "stations": ["a", "b", "pmr"]})).payload()
     assert out["outcome"] == "nothing_said"
@@ -938,7 +1108,10 @@ def test_only_songs_and_idents_need_no_model(tmp_path: Path) -> None:
     out = d.run(d.request({"minutes": 30, "stations": ["a", "b"]})).payload()
     assert llm.prompts == [] and out["outcome"] == "nothing_stood_out"
     assert out["counts"]["skipped"] == 2 and out["unread"] == {}
-    assert out["text"] == "Only music, station idents and repeats among the 2 lines said."
+    assert out["text"] == (
+        "Only music, station idents and repeats among the 2 lines said. Nothing was heard "
+        "before 11:55."
+    )
     store.close()
 
 
@@ -1248,4 +1421,19 @@ def test_the_store_counts_utterances_per_station_in_a_window(tmp_path: Path) -> 
     assert store.count(since=NOW - 3600, until=NOW) == {"a": 3, "b": 3}
     assert store.count(station_ids=["b"], since=NOW - 25 * MIN, until=NOW) == {"b": 2}
     assert store.count(since=NOW - 3600, until=NOW, exports=exports([station("b")])) == {"b": 3}
+    store.close()
+
+
+def test_the_store_gives_the_times_of_what_every_station_said(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    assert store.heard(since=NOW - 35 * MIN, until=NOW) == [
+        ("b", NOW - 30 * MIN, NOW - 30 * MIN + 1),
+        ("b", NOW - 20 * MIN, NOW - 20 * MIN + 1),
+        ("b", NOW - 10 * MIN, NOW - 10 * MIN + 1),
+    ]
+    assert [sid for sid, _, _ in store.heard(since=NOW - 3600, until=NOW)] == list("aaabbb")
+    # Another machine learns the times of what may leave, no others.
+    leaving = exports([station("a")])
+    assert [h[0] for h in store.heard(since=NOW - 3600, until=NOW, exports=leaving)] == list("aaa")
+    assert Store(tmp_path / "empty.db").heard(since=0.0, until=NOW) == []
     store.close()

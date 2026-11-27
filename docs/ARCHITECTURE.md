@@ -407,8 +407,28 @@ The answer says what became of the digest (`outcome`: `points`, `nothing_said`, 
 the stations and why in `unread`, `nothing_stood_out` or `unsourced`; with nothing kept from a
 station whose songs the gate dropped in the window, `nothing_said` says it played music, from
 `Pipeline.music_heard`) and who wrote it from how
-much (`notice`: the local model, lines read of those said, the window, and when Wavescribe
-started if that was within it: before then only an earlier run heard anything). The alerts
+much (`notice`: the local model, lines read of those said, the window, and the stretches of
+it in which nothing was heard). Those are judged from the store (`Digester.gaps`, `unheard`),
+not from when this run started, since a run started a minute ago reads what an earlier one
+wrote down. The store keeps no record of when a station was listened to, only the lines
+(`Store.heard`), and a stretch without lines is a station playing music as often as Wavescribe
+not running: on a day of three talk and news stations, each went 3 to 25 minutes without a
+line several times while another was being written down, yet all together never for 4
+minutes, apart from a restart. So the lines of every station the asker may see count, whichever
+the digest is about, and only a stretch with none from any of them can be one nobody listened
+in. It is one when it lasts longer than the shortest limit of the stations heard until it
+began; a station's limit (`quiet_limits`) is half as long again as its longest pause of the
+last day that another station's lines, one every five minutes at least, show Wavescribe
+listened through, ten minutes at least and an hour at most, and thirty minutes for a station
+with fewer than twenty such pauses (a new one, or the only one, whose pauses show nothing). A
+stretch that no line came before in the hour before the window always is one. This run's
+start is used one way only: it has listened since, so a stretch ends there at the latest.
+Each is cut to the window and named when it takes over ten minutes of it ("Nothing was heard
+between 16:50 and 17:05", "before", "after"; more than three are counted). Known limits: a
+restart shorter than the limit isn't named; with one station, an earlier run's hour of music
+is; and a stretch of this run in which a station dropped or the machine slept isn't, as
+nothing in the store tells it from silence. A record of when each station was listened to
+would settle all three. The alerts
 announced in the window come with it in the words they were announced in: each incident once,
 at the time it was announced (first, or when it got more serious; the first mention of one
 whose delivery reached nobody, which the store keeps no time for), about what was said, medium

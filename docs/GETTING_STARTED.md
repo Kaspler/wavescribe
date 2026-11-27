@@ -242,9 +242,13 @@ said was written down because the station played music (a voice over a song goes
 only music, idents and repeats were written down; a station keeps no text (walkie-talkies,
 digital voice) or isn't running; nothing stood out in the lines it read (only advertising and
 the station's own promotion, say); or the model's reply
-cited nothing it read, or nothing that backs its points, words, names and numbers. When the time asked for starts before
-Wavescribe was started, it says that too ("Wavescribe started at 14:55: before then, nothing
-was heard unless an earlier run was listening").
+cited nothing it read, or nothing that backs its points, words, names and numbers. When nothing was heard for part
+of the time asked for, it says that too ("Nothing was heard between 16:50 and 17:05", or
+"before 14:55"). It goes by what was written down, from any of your stations, not by when
+Wavescribe was last started: after a restart, a digest still reads what was heard before it.
+A station that plays music while another talks leaves no such gap, and a stretch has to last
+longer than your stations are known to go quiet: ten minutes at least, half an hour for a
+station it has heard little of. A restart of a few minutes isn't mentioned.
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
 takes a minute or two, `--now` from a few seconds to a minute. When two digests are already being

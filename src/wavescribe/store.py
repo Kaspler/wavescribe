@@ -1099,6 +1099,26 @@ class Store:
             ).fetchall()
         return {r[0]: r[1] for r in rows}
 
+    def heard(
+        self, *, since: float, until: float, exports: Exports | None = None
+    ) -> list[tuple[str, float, float]]:
+        """When something was written down in a time range: the station, start and end of each
+        utterance kept, oldest first. The store keeps no record of when a station was
+        listened to; these moments are all it knows of it."""
+        where, args = _window_sql(None, since, until, exports)
+        with self._read_lock:
+            rows = self._reader.execute(
+                # Station by station, which the index is on: a time range alone would read
+                # every row. The stations are found by seeking each next id in that index.
+                "WITH RECURSIVE ids (id) AS (SELECT MIN(station_id) FROM segments UNION ALL "
+                "SELECT (SELECT MIN(station_id) FROM segments WHERE station_id > ids.id) "
+                "FROM ids WHERE ids.id IS NOT NULL) "
+                "SELECT s.station_id, s.t_start, s.t_end FROM segments s "
+                f"WHERE s.station_id IN (SELECT id FROM ids){where} ORDER BY s.t_start",
+                args,
+            ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
     def last_heard(self) -> dict[str, float]:
         """When each station last had something stored."""
         with self._lock:

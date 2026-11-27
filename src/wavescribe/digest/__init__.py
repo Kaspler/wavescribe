@@ -54,6 +54,17 @@ gave, how many were kept and why the others weren't, the span of time the kept o
 how long it took. No words of what was said: enough to tell, of a digest whose points all come
 from one end of its window, whether the model wrote it so or the points were lost here.
 
+A digest also says when nothing was heard for part of its window, and judges that from the
+store, not from when this run started: a run started a minute ago reads what an earlier one
+wrote down. The store keeps no record of when a station was listened to, only the lines, and
+a stretch without lines is a station playing music as often as Wavescribe not running. What
+tells them apart is the other stations: while one of them is written down, Wavescribe is
+listening, so only a stretch with no line from any station can be one nobody listened in
+(``unheard``), and only when it outlasts what a station heard until then is known to do
+(``quiet_limits``, from its pauses of the last day that other stations' lines show Wavescribe
+listened through). The start of this run is used one way only: from then on Wavescribe was
+listening, so a stretch ends there at the latest.
+
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
 once the previous call is done: live translation runs between the calls, and a digest waits
@@ -68,6 +79,8 @@ again without being made again.
 
 from __future__ import annotations
 
+import bisect
+import itertools
 import logging
 import re
 import secrets
@@ -164,6 +177,20 @@ KEPT = 8  # answers kept in memory by id, to be read aloud again without being m
 # A request's id, when the asker gives one: long enough that nobody else guesses it (a UUID).
 REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 TIME_FORMAT = "%H:%M"
+# When a stretch without a line counts as one nobody listened in. On a day of three talk and
+# news stations, each went from 3 to 25 minutes without a line (music, mostly) several times
+# while another was being written down, yet all of them together never for 4 minutes, apart
+# from a restart. So a station's limit is its own: half as long again as its longest pause of
+# the last day that other stations' lines show Wavescribe listened through.
+QUIET_S = 10 * 60.0  # a limit at least, and the least of a window a stretch takes to be named
+QUIET_MAX_S = 60 * 60.0  # and at most: the time before a window in which lines are looked for
+QUIET_UNKNOWN_S = 30 * 60.0  # of a station with too few such pauses: longer than any seen
+QUIET_MARGIN = 1.5
+QUIET_PAUSES = 20  # such pauses a station needs before its own limit is believed
+QUIET_HISTORY_S = 24 * 3600.0  # before a window's end: the time its stations' pauses are from
+PAUSE_S = 60.0  # between two lines of a station, for it to be a pause
+WITNESS_S = 5 * 60.0  # another station written down this often through a pause shows it was one
+UNHEARD_NAMED = 3  # stretches named one by one; more are counted, and the longest named
 
 SYSTEM = (
     "You tell people what radio stations said while they weren't listening, using only the "
@@ -325,7 +352,7 @@ class Digest:
     unread: dict[str, str] = field(default_factory=dict)  # station -> why it wasn't read
     model: str | None = None
     timings: dict[str, int] = field(default_factory=dict)
-    started: float | None = None  # when this run of Wavescribe started, when known
+    gaps: list[tuple[float, float]] = field(default_factory=list)  # nothing was heard in them
     music: list[str] = field(default_factory=list)  # stations whose music was dropped in it
 
     def stations_of(self, point: Point) -> list[str]:
@@ -370,8 +397,8 @@ class Digest:
         return self.read + self.skipped < sum(self.said.values())
 
     def notice(self) -> str | None:
-        """Who wrote the digest, from what: None when the model wasn't asked. With ``late``,
-        when the window reaches back before Wavescribe started."""
+        """Who wrote the digest, from what: None when the model wasn't asked. With
+        ``unheard``, when nothing was heard for part of the window."""
         if not self.calls:
             return None
         heard = ", spread evenly" if self.sampled() else " heard"
@@ -379,35 +406,56 @@ class Digest:
             f"Written by the local model from {self.coverage()}{heard} "
             f"{_clock_span(self.request)}; it can miss things or get them wrong."
         )
-        late = self.late()
-        return f"{written} {late}" if late else written
+        unheard = self.unheard()
+        return f"{written} {unheard}" if unheard else written
 
-    def late(self) -> str | None:
-        """That this run of Wavescribe started within the window, when it did: what was said
-        before is in the store only if an earlier run heard it, and the window's length says
-        nothing of how long anything listened."""
+    def unheard(self) -> str | None:
+        """That nothing was heard for part of the window, when the store says so (``gaps``):
+        the window's length says nothing of how long anything listened."""
         r = self.request
-        if self.started is None or self.started <= r.since:
+        if not self.gaps:
             return None
-        day = datetime.fromtimestamp(self.started).date() != datetime.fromtimestamp(r.until).date()
-        at = local_time(self.started, f"{'%a ' if day else ''}{TIME_FORMAT}")
-        return (
-            f"Wavescribe started at {at}: before then, nothing was heard unless an earlier run "
-            "was listening."
-        )
+        if self.gaps[0][0] <= r.since and self.gaps[0][1] >= r.until:
+            return (
+                "Nothing was written down from any station in that time: Wavescribe may not "
+                "have been listening."
+            )
+        day = datetime.fromtimestamp(r.since).date() != datetime.fromtimestamp(r.until).date()
+        fmt = f"{'%a ' if day else ''}{TIME_FORMAT}"
+
+        def named(a: float, b: float) -> str:
+            if a <= r.since:
+                return f"before {local_time(b, fmt)}"
+            if b >= r.until:
+                return f"after {local_time(a, fmt)}"
+            return f"between {local_time(a, fmt)} and {local_time(b, fmt)}"
+
+        if len(self.gaps) > UNHEARD_NAMED:
+            minutes = round(sum(b - a for a, b in self.gaps) / 60)
+            took = (
+                f"{minutes} min" if minutes < 120 else f"{minutes // 60} h {minutes % 60:02d} min"
+            )
+            longest = max(self.gaps, key=lambda gap: gap[1] - gap[0])
+            return (
+                f"Nothing was heard for {took} of that time, in {len(self.gaps)} stretches, the "
+                f"longest {named(*longest)}."
+            )
+        parts = [named(a, b) for a, b in self.gaps]
+        listed = f"{', '.join(parts[:-1])} and {parts[-1]}" if len(parts) > 1 else parts[0]
+        return f"Nothing was heard {listed}."
 
     def text(self) -> str:
         """The digest as plain text: a point a line with the numbers of its sources, or the
         sentences that say why there are none, in words of Wavescribe's own (and, when the
-        model wasn't asked and so there is no notice, ``late``)."""
+        model wasn't asked and so there is no notice, ``unheard``)."""
         if self.outcome == "points":
             n = self.numbered()
             return "\n".join(
                 f"- {self.heard_on(p)}{p.text} [{', '.join(str(n[i]) for i in p.ids)}]"
                 for p in self.points
             )
-        late = None if self.calls else self.late()
-        return " ".join(s for s in (self._none(), late) if s)
+        unheard = None if self.calls else self.unheard()
+        return " ".join(s for s in (self._none(), unheard) if s)
 
     def _none(self) -> str:
         """Why there are no points."""
@@ -498,7 +546,9 @@ class Digester:
         music: Callable[[], Mapping[str, float]] | None = None,
     ) -> None:
         self.store = store
-        self.started = started  # when this run of Wavescribe started: a digest says so
+        # When this run of Wavescribe started: it has listened since, which is all a digest
+        # takes from it. What was heard before, the lines of earlier runs say (``gaps``).
+        self.started = started
         self._music = music  # when each running station last had a song dropped, when known
         self._ahead = ahead  # a job that goes first waits for the model (GIVE_WAY_BELOW)
         self._stations = stations  # read each time: the page adds and removes stations
@@ -710,6 +760,16 @@ class Digester:
             out.lines[sid] = lines
         return out
 
+    def gaps(self, request: Request, exports: Exports | None = None) -> list[tuple[float, float]]:
+        """The stretches of the window nothing was heard in (``unheard``): judged from the
+        lines of every station the asker may see, whichever the digest is about, since a line
+        from any of them shows that Wavescribe was listening."""
+        if request.until - request.since <= QUIET_S:
+            return []  # "now": too short for any stretch of it to be named
+        since = min(request.since - QUIET_MAX_S, request.until - QUIET_HISTORY_S)
+        heard = self.store.heard(since=since, until=request.until, exports=exports)
+        return unheard(heard, request.since, request.until, started=self.started)
+
     def unread(self, request: Request, said: Mapping[str, int]) -> dict[str, str]:
         """The stations of ``request`` that said nothing because nothing of them could be read,
         with why: radio whose text is never kept, or a station that isn't running."""
@@ -813,7 +873,7 @@ class Digester:
             selection.rows,
         )
         digest.unread = self.unread(request, selection.said)
-        digest.started = self.started
+        digest.gaps = self.gaps(request, exports)
         if self._music is not None and not sum(selection.said.values()):
             played = self._music()
             digest.music = [
@@ -1117,6 +1177,69 @@ def fair_shares(sizes: Mapping[str, int], total: int, cap: int) -> dict[str, int
             budget -= shares[k]
             del left[k]
     return shares
+
+
+def quiet_limits(heard: Sequence[tuple[str, float, float]]) -> dict[str, float]:
+    """How long each station can go without a line while Wavescribe listens, from ``heard``
+    (the station, start and end of every line of a time, oldest first): ``QUIET_MARGIN`` times
+    its longest pause that other stations' lines show Wavescribe listened through, between
+    ``QUIET_S`` and ``QUIET_MAX_S``. A pause without such lines may be one nobody listened in,
+    and teaches nothing; a station with fewer than ``QUIET_PAUSES`` that do (a new one, or the
+    only one) gets ``QUIET_UNKNOWN_S``."""
+    starts = [start for _, start, _ in heard]
+    last: dict[str, float] = {}
+    seen: Counter[str] = Counter()
+    longest: dict[str, float] = {}
+    for sid, start, end in heard:
+        before = last.get(sid)
+        if before is not None and start - before > PAUSE_S:
+            # The lines within a station's pause are other stations', as it has none there.
+            within = starts[bisect.bisect_right(starts, before) : bisect.bisect_left(starts, start)]
+            edges = [before, *within, start]
+            if within and max(b - a for a, b in itertools.pairwise(edges)) <= WITNESS_S:
+                seen[sid] += 1
+                longest[sid] = max(longest.get(sid, 0.0), start - before)
+        last[sid] = end if before is None else max(before, end)
+    return {
+        sid: min(QUIET_MAX_S, max(QUIET_S, QUIET_MARGIN * longest[sid]))
+        if seen[sid] >= QUIET_PAUSES
+        else QUIET_UNKNOWN_S
+        for sid in last
+    }
+
+
+def unheard(
+    heard: Sequence[tuple[str, float, float]],
+    since: float,
+    until: float,
+    *,
+    started: float | None = None,
+) -> list[tuple[float, float]]:
+    """The stretches of the window from ``since`` to ``until`` in which nothing was heard, as
+    far as ``heard`` tells (the station, start and end of every line of the window and the
+    time before it, oldest first): those with no line from any station that last longer than
+    the shortest ``quiet_limits`` of the stations heard until then (a station silent for
+    longer than its limit already says nothing more), or that no line came before at all.
+    Each is cut to the window and kept when it takes over ``QUIET_S`` of it.
+
+    ``started`` is when this run of Wavescribe started, when known. It has listened since, so
+    a stretch ends there at the latest: one without lines after it is silence, music, or a
+    station that dropped, which only the status tells apart."""
+    limits = quiet_limits(heard)
+    last: dict[str, float] = {}  # station -> the end of its last line so far
+    edge: float | None = None  # the end of the last line of any station so far
+    out = []
+    for sid, start, end in [*heard, ("", until, until)]:
+        stop = start if started is None else min(start, started)
+        a, b = (since if edge is None else max(since, edge)), min(until, stop)
+        if b - a > QUIET_S:
+            heard_then = [limits[s] for s, t in last.items() if edge - t <= limits[s]]
+            if edge is None or stop - edge > min(heard_then):
+                out.append((a, b))
+        if sid:
+            last[sid] = max(end, last.get(sid, end))
+        edge = end if edge is None else max(edge, end)
+    return out
 
 
 def spread(lines: Sequence[Line], budget: int) -> list[Line]:
