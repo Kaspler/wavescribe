@@ -287,6 +287,7 @@ refused (400), so it never replaces that one and its secret or headers:
 | `headers` | extra headers, e.g. `Authorization` for the receiving end |
 | `secret` | signs each request, see below |
 | `context` | how many utterances before an alert's to include (2) |
+| `alert_max_age_hours` | how long an alert that hasn't got there is still sent, counted from when it was raised: 24 by default, more than 0 and at most 168 (a week). The page's form has no field for it: it is read from the output's `[[output]]` in `config/ui.toml`, and stays when the output is edited on the page |
 
 **Delivery:**
 
@@ -300,13 +301,47 @@ refused (400), so it never replaces that one and its secret or headers:
   apart (about a minute), and utterances three (2 and 4 s apart).
 - If the other end is still away after those, nothing is dropped: the events wait at the head
   of the output's queue and go again after 5 s, then 10, 20, 40 and every 60 s, until it is
-  back (a central server restarting, a router rebooting). The page shows the output as waiting.
-  Any other answer (400, 401, 404, a redirect) fails the delivery and is not tried again.
+  back (a central server restarting, a router rebooting) or, for an alert, until it is too old
+  (below). The page shows the output as waiting. Any other answer (400, 401, 404, a redirect)
+  fails the delivery and is not tried again.
 - Each output has its own queue (2,000 events, waiting ones included; when it is full the
-  oldest utterances go first, alerts are kept), so a dead endpoint never slows anything else.
-  An alert goes before any utterances waiting. The queue is in memory: a restart empties it.
-- Every request is logged, with its status, attempts and time. The page shows the log; it is
-  also in the store's `deliveries` table.
+  oldest utterances go first, and the oldest alert only when nothing but alerts waits), so a
+  dead endpoint never slows anything else. An alert goes before any utterances waiting.
+- **Alerts wait through a restart, utterances don't.** An alert that hasn't got there is also
+  a row in the store (the `outbox` table of `data/wavescribe.db`), written before the first
+  try and removed once the other end answered 2xx or refused it for good. When Wavescribe is
+  restarted, or crashes, in between, the next run sends what is left: it counts on from the
+  tries so far and doesn't try sooner than the next one was planned. Utterances wait in memory
+  only: a restart empties them. With `--no-store` alerts wait in memory only as well, and
+  those that hadn't got there are lost with the run.
+- **At least once.** An alert can arrive twice: when the other end got it and its answer was
+  lost (a timeout, a crash straight after), it is sent again. Each alert delivery has an id,
+  32 hex digits, in the `X-Wavescribe-Delivery` header and, in `json` format, in the event's
+  `delivery_id`. It is the same on every try of that alert to that output, also after a
+  restart: keep the ids you have handled and ignore one you have seen. A new message has a
+  new id: every output has its own, and so has each time an alert is announced (`new`,
+  `escalated`, `reminder`, `ended`). The id is random; it says nothing about the alert or
+  this machine. A *Test* alert has one too; utterances have none.
+- **Not as news a day later.** An alert that still hasn't got there 24 hours after it was
+  raised (`alert_max_age_hours`) is given up, not sent late. The delivery log says so (`not
+  delivered within 24 h of the alert: given up`) and the output's status counts it. There is
+  no "never": with the queue's 2,000 this bounds what waits.
+- **Outputs that change.** An output that is edited goes on with the alerts that waited for
+  it, at its new URL and in its new format, when it still asks for them (rules, stations,
+  severity), without translations or context it no longer includes; its waiting utterances
+  are dropped. One that is switched off sends nothing and keeps its alerts until they are too
+  old. What waited for an output that was removed is dropped, at once or at the next start.
+- **What is on disk.** A row holds the event as it is sent and nothing more, so no words
+  from radio that isn't exported. Words the store itself doesn't keep never go there: an
+  alert quoting radio whose class keeps no text waits in memory only, and a waiting row is
+  removed when its words pass their class's days or the text retention (the output goes on
+  trying from memory). At a start, words whose station was removed or is no longer exported
+  are taken out before the alert is sent. The store commits as the rest of it does: a crash
+  of Wavescribe loses nothing, a power cut or a system crash can lose the last moments.
+- Every request is logged, with its status, attempts and time, and for an alert its delivery
+  id and whether it had waited through a restart (`after_restart`). An alert that was given
+  up or dropped is logged as a failure with the reason. The page shows the log; it is also
+  in the store's `deliveries` table.
 - A redirect (any 3xx) is never followed: it is a failed delivery, not tried again, logged
   with its status and where it pointed (`HTTP 302: redirected to …; not followed`). The
   `Authorization` header, other headers you set and the signature go only to the URL you
@@ -319,8 +354,8 @@ refused (400), so it never replaces that one and its secret or headers:
 **Headers.** Each request is a `POST` with `Content-Type` (`application/json`,
 `application/xml; charset=utf-8` for CAP, `text/plain; charset=utf-8` for text),
 `User-Agent: wavescribe/<version>`, `X-Wavescribe-Event` (`alert`, `utterance` or `batch`),
-the output's own `headers` (which can replace the three before), and the signature headers
-below when a secret is set.
+the output's own `headers` (which can replace the three before), `X-Wavescribe-Delivery` on
+an alert, and the signature headers below when a secret is set.
 
 **Signatures.** With a secret, each request carries `X-Wavescribe-Timestamp` (Unix seconds)
 and `X-Wavescribe-Signature: sha256=<hex>`, the HMAC-SHA256 of `"<timestamp>.<body>"` keyed
@@ -333,7 +368,13 @@ expected = "sha256=" + hmac.new(secret, ts.encode() + b"." + body, hashlib.sha25
 ok = hmac.compare_digest(expected, request.headers["X-Wavescribe-Signature"])
 ```
 
-Reject timestamps older than a few minutes, to stop replays.
+Reject timestamps older than a few minutes, to stop replays. A later round of tries, or one
+after a restart, is signed again with the time it is sent at.
+
+The signature covers the body, not the headers. In `json` format an alert's delivery id is
+in the body (`delivery_id`), so it is signed: dedupe on that one. In `cap` format the body's
+`<identifier>` is the same on every try and signed too. In `text` format the id is in the
+`X-Wavescribe-Delivery` header only, which the signature doesn't cover.
 
 ## Many places, one central server
 

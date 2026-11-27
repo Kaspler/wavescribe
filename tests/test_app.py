@@ -1227,6 +1227,29 @@ def test_a_new_output_with_a_name_in_use_is_refused_and_the_old_one_kept(tmp_pat
     assert app.settings.get("output")[0]["url"] == "http://hub.test/v2"
 
 
+def test_an_alert_its_webhook_has_not_got_outlives_an_edit_and_the_app(tmp_path: Path) -> None:
+    def away(url: str, body: bytes, headers: dict[str, str], timeout: float) -> int:
+        raise OSError("connection refused")
+
+    hub = {"id": "hub", "name": "Hub", "url": "http://hub.test/in", "alert_max_age_hours": 2,
+           "timeout_s": 3}  # fmt: skip
+    app = make_app(tmp_path, transport=away, page={"output": [hub]})
+    now = time.time()
+    app.outputs.on_alert({"id": 1, "rule": "water", "stations": ["a"], "first_at": now,
+                          "last_at": now, "language": "pt-PT", "quote": "Corte de água"},
+                         "high", "Corte de água", {})  # fmt: skip
+    wait_for(lambda: app.store.outbox())
+    assert app.outputs_view()["outputs"][0]["status"]["alerts_waiting"] == 1
+    # The page's form has no field for the age limit or the timeout: an edit keeps them.
+    app.save_output({"id": "hub", "name": "Hub", "url": "http://hub.test/v2"})
+    saved = app.settings.get("output")[0]
+    assert saved["alert_max_age_hours"] == 2 and saved["timeout_s"] == 3
+    assert app.outputs_view()["outputs"][0]["status"]["alerts_waiting"] == 1
+    app.close()
+    assert [r["output_id"] for r in app.store.outbox()] == ["hub"]  # for the next run
+    app.store.close()
+
+
 @pytest.mark.parametrize("batch_s", [0, 5])
 def test_a_test_push_is_answered_and_leaves_no_station_behind(central: App, batch_s: int) -> None:
     from tests.test_outputs import Recorder, outputs

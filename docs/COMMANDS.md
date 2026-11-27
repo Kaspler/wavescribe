@@ -126,7 +126,7 @@ transcribes, is refused: there is no text to print. It also takes
 | `--asr MODEL` | the speech model's id, for every station (default: the first in the chain that covers the station's language) |
 | `--translator MODEL` | the translation model's id |
 | `--no-gate` | transcribe songs too: no speech/music gate |
-| `--no-store` | keep nothing in `data/wavescribe.db`: no search, no questions, no alert history |
+| `--no-store` | keep nothing in `data/wavescribe.db`: no search, no questions, no alert history, and an alert that hasn't reached its webhook is lost at a restart |
 | `--audio-days DAYS` | keep speech audio this long (default 7; 0: never) |
 | `--audio-max-gb GB` | the cap on the speech audio kept (default 2) |
 | `--text-days DAYS` | keep text and translations this long (default 365; 0: no age limit). About 11 GB a year for four talk stations |

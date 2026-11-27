@@ -1480,6 +1480,10 @@ class App:
             headers = raw.get("headers") or {}
             raw["headers"] = {k: (existing.get("headers", {}).get(k, "") if v == "•••" else v)
                               for k, v in headers.items()}  # fmt: skip
+            # The page's form has no field for these: what the file says stays.
+            for key in ("timeout_s", "alert_max_age_hours"):
+                if key not in raw and key in existing:
+                    raw[key] = existing[key]
         try:
             config = OutputConfig.from_dict(raw)
         except (OutputError, TypeError, ValueError) as e:

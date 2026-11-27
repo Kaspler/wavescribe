@@ -49,8 +49,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
-# 5: segments.privacy; 6: the class on every row, alerts.privacy; 7: catches, segments.freq_hz
+SCHEMA_VERSION = 8  # 2: transcripts.flags; 3: alerts; 4: deliveries, alerts.kind/reason;
+# 5: segments.privacy; 6: the class on every row, alerts.privacy; 7: catches, segments.freq_hz;
+# 8: outbox, deliveries.delivery and after_restart
 # Snippet markers around matches; the page turns them into <mark>.
 HIT_START, HIT_END = "\x02", "\x03"
 
@@ -150,9 +151,27 @@ CREATE TABLE IF NOT EXISTS deliveries (
     status INTEGER,                     -- HTTP status, if a response came back
     error TEXT,
     attempts INTEGER NOT NULL DEFAULT 1,
-    ms REAL
+    ms REAL,
+    delivery TEXT,                      -- an alert's delivery id (X-Wavescribe-Delivery)
+    after_restart INTEGER NOT NULL DEFAULT 0  -- the alert had waited through a restart
 );
 CREATE INDEX IF NOT EXISTS deliveries_t ON deliveries (t);
+-- Alerts on their way to an output that haven't got there yet (outputs.py), so that a restart
+-- doesn't lose them. A row is written before the first try and deleted when the other end has
+-- the alert or refuses it for good, when the alert is too old to send, or when its output is
+-- removed. Bounded per output (outputs.QUEUE_MAX rows) and by age (alert_max_age_hours).
+CREATE TABLE IF NOT EXISTS outbox (
+    id INTEGER PRIMARY KEY,
+    output_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,   -- what the other end tells a repeat by
+    event TEXT NOT NULL,                -- JSON: the alert event as it is sent
+    raised_at REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_at REAL NOT NULL DEFAULT 0,    -- not tried before this
+    privacy TEXT,                       -- comma-separated classes of the radio its words were
+                                        -- heard on; NULL when the event carries no words
+    first_at REAL                       -- the alert's first mention: what retention counts from
+);
 CREATE TABLE IF NOT EXISTS alert_summaries (
     alert_id INTEGER NOT NULL REFERENCES alerts (id) ON DELETE CASCADE,
     lang TEXT NOT NULL,
@@ -267,6 +286,12 @@ class Store:
         columns = {r[1] for r in self._db.execute("PRAGMA table_info(alerts)")}
         if "privacy" not in columns:  # 5 -> 6: alerts carry their stations' classes too
             self._db.execute("ALTER TABLE alerts ADD COLUMN privacy TEXT")
+        columns = {r[1] for r in self._db.execute("PRAGMA table_info(deliveries)")}
+        if "delivery" not in columns:  # 7 -> 8: which delivery a request was (outbox is new)
+            self._db.execute("ALTER TABLE deliveries ADD COLUMN delivery TEXT")
+            self._db.execute(
+                "ALTER TABLE deliveries ADD COLUMN after_restart INTEGER NOT NULL DEFAULT 0"
+            )
         # Pruning by class looks rows up by (class, age). Broadcast is never pruned that way and
         # is most of the rows, so it stays out of the index. Schema 5 indexed every row with a
         # class, which was right while broadcast rows had none.
@@ -429,13 +454,17 @@ class Store:
         error: str | None,
         attempts: int,
         ms: float | None,
+        *,
+        delivery: str | None = None,
+        after_restart: bool = False,
     ) -> None:
         with self._tx() as db:
             db.execute(
                 "INSERT INTO deliveries (output_id, event, ref, t, ok, status, error, attempts, "
-                "ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (output_id, event, ref, time.time(), int(ok), status, error, attempts, ms),
-            )
+                "ms, delivery, after_restart) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (output_id, event, ref, time.time(), int(ok), status, error, attempts, ms,
+                 delivery, int(after_restart)),
+            )  # fmt: skip
             # Bounded even when text is kept forever: the newest 10,000 requests are plenty.
             db.execute(
                 "DELETE FROM deliveries WHERE id <= (SELECT MAX(id) FROM deliveries) - 10000"
@@ -447,7 +476,85 @@ class Store:
             sql, args = sql + " WHERE output_id = ?", [output_id]
         with self._lock:
             rows = self._db.execute(sql + " ORDER BY id DESC LIMIT ?", [*args, limit]).fetchall()
-        return [{**dict(r), "ok": bool(r["ok"])} for r in rows]
+        return [
+            {**dict(r), "ok": bool(r["ok"]), "after_restart": bool(r["after_restart"])}
+            for r in rows
+        ]
+
+    # -- the outbox: alerts on their way to an output ----------------------------------------
+
+    def outbox_add(
+        self,
+        output_id: str,
+        delivery_id: str,
+        event: str,
+        raised_at: float,
+        *,
+        privacy: Iterable[str] | None = None,
+        first_at: float | None = None,
+    ) -> None:
+        """Keep an alert delivery until it is over: ``event`` is the JSON that is sent.
+        ``privacy`` names the classes of radio its words were heard on (None: it carries no
+        words) and ``first_at`` the alert's first mention: the row goes when the store stops
+        keeping such words (``prune_outbox``). Adding a delivery that is already there
+        replaces what it carries and keeps its tries."""
+        classes = None if privacy is None else ",".join(sorted(privacy))
+        with self._tx() as db:
+            db.execute(
+                "INSERT INTO outbox (output_id, delivery_id, event, raised_at, privacy, first_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (delivery_id) DO UPDATE SET "
+                "event = excluded.event, privacy = excluded.privacy",
+                (output_id, delivery_id, event, raised_at, classes, first_at),
+            )
+
+    def outbox(self) -> list[dict[str, Any]]:
+        """Every delivery that is waiting, oldest first; ``privacy`` as a list, or None."""
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM outbox ORDER BY id").fetchall()
+        return [
+            {**dict(r), "privacy": None if r["privacy"] is None
+             else [c for c in r["privacy"].split(",") if c]}
+            for r in rows
+        ]  # fmt: skip
+
+    def outbox_tried(self, delivery_id: str, attempts: int, next_at: float) -> None:
+        """A delivery didn't get there: how often it was tried so far, and when it goes again."""
+        with self._tx() as db:
+            db.execute(
+                "UPDATE outbox SET attempts = ?, next_at = ? WHERE delivery_id = ?",
+                (attempts, next_at, delivery_id),
+            )
+
+    def outbox_remove(self, delivery_ids: Iterable[str]) -> None:
+        """These deliveries are over: delivered, refused for good, too old or given up."""
+        with self._tx() as db:
+            db.executemany("DELETE FROM outbox WHERE delivery_id = ?", [(d,) for d in delivery_ids])
+
+    def prune_outbox(self) -> int:
+        """Take waiting deliveries off the disk once the store would no longer keep the words
+        they carry: older than the text retention, or, for words heard on radio whose class
+        keeps text for days or not at all, past that class's age (counted from the alert's
+        first mention, as for the alert's own words). The output still has them in memory and
+        goes on trying until its own age limit. Returns how many rows went."""
+        from wavescribe.radio.bandplan import POLICIES
+
+        now, gone = time.time(), 0
+        with self._tx() as db:
+            if self.max_text_age_s is not None:
+                gone += db.execute(
+                    "DELETE FROM outbox WHERE privacy IS NOT NULL AND raised_at < ?",
+                    (now - self.max_text_age_s,),
+                ).rowcount
+            for privacy, policy in POLICIES.items():
+                if policy.text_days is not None:
+                    gone += db.execute(
+                        "DELETE FROM outbox WHERE instr(',' || privacy || ',', ?) > 0 "
+                        "AND COALESCE(first_at, raised_at) < ?",
+                        (f",{privacy},", now - policy.text_days * 86400),
+                    ).rowcount
+        if gone:
+            event(log, "outbox_pruned", rows=gone)
+        return gone
 
     def after(
         self,
@@ -631,6 +738,7 @@ class Store:
         if self.max_text_age_s is not None:
             self.prune_text(max_age_s=self.max_text_age_s)
         self.prune_short_lived()
+        self.prune_outbox()
         self.prune_catches()
         if self.archive is not None:
             self.archive.maybe_prune(self)

@@ -146,8 +146,8 @@ what is newer and less tried.
 - [Recent alerts on the page](docs/GETTING_STARTED.md#7-get-alerts), to play or to find in the
   transcript; `wavescribe alerts` lists them.
 - [Webhooks and live pushes](docs/FEED.md#push-outputs): alerts, or every line, sent to your own
-  program, a chat bot or home automation as JSON, CAP 1.2 XML or text, with filters, retries,
-  signatures and a delivery log.
+  program, a chat bot or home automation as JSON, CAP 1.2 XML or text, with filters, retries (an
+  alert that hasn't got there waits through a restart), signatures and a delivery log.
 - [A test of the notification and of each voice](docs/GETTING_STARTED.md#7-get-alerts):
   `wavescribe alerts test`.
 - [Rules tried on a sentence](docs/GETTING_STARTED.md#7-get-alerts) (`alerts check`) or on

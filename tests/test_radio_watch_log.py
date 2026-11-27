@@ -148,7 +148,7 @@ def test_opens_a_version_6_database_and_adds_the_catch_log(tmp_path: Path) -> No
     assert len(store.catches()) == 1
     store.close()
     db = sqlite3.connect(tmp_path / "w.db")
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 8
     assert db.execute("SELECT freq_hz FROM segments").fetchall() == [(None,)]
     db.close()
 
