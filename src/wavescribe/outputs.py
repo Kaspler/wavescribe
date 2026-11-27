@@ -81,29 +81,31 @@ class OutputConfig:
         oid = str(raw.get("id", ""))
         if not _ID.fullmatch(oid):  # match() with $ would let "id\n" through
             raise OutputError("an output id is lowercase letters, digits, - or _")
+        # Named as the page names it: by its name, else by its id (an [[output]] in a file).
+        who = repr(str(raw["name"]).strip()) if str(raw.get("name") or "").strip() else oid
         url = str(raw.get("url", "")).strip()
         if not re.match(r"^https?://[^\s/]+", url):
-            raise OutputError(f"output {oid}: the URL must start with http:// or https://")
+            raise OutputError(f"{who}: the URL must start with http:// or https://")
         events = tuple(raw.get("events", ("alert",)))
         if not events or any(e not in EVENTS for e in events):
-            raise OutputError(f"output {oid}: events are any of {', '.join(EVENTS)}")
+            raise OutputError(f"{who}: events are any of {', '.join(EVENTS)}")
         fmt = raw.get("format", "json")
         if fmt not in FORMATS:
-            raise OutputError(f"output {oid}: format is one of {', '.join(FORMATS)}")
+            raise OutputError(f"{who}: format is one of {', '.join(FORMATS)}")
         if fmt == "cap" and events != ("alert",):
-            raise OutputError(f"output {oid}: CAP carries alerts only")
+            raise OutputError(f"{who}: CAP carries alerts only")
         severity = raw.get("min_severity", "medium")
         if severity not in SEVERITIES:
-            raise OutputError(f"output {oid}: min_severity is one of {', '.join(SEVERITIES)}")
+            raise OutputError(f"{who}: min_severity is one of {', '.join(SEVERITIES)}")
         headers = raw.get("headers") or {}
         if not isinstance(headers, Mapping) or not all(
             isinstance(k, str) and isinstance(v, str) and "\n" not in k + v
             for k, v in headers.items()
         ):
-            raise OutputError(f"output {oid}: headers are name = value text")
+            raise OutputError(f"{who}: headers are name = value text")
         batch_s = float(raw.get("batch_s", 0))
         if not 0 <= batch_s <= 3600:
-            raise OutputError(f"output {oid}: batch_s is 0 to 3600 seconds")
+            raise OutputError(f"{who}: batch_s is 0 to 3600 seconds")
         return cls(
             id=oid,
             url=url,

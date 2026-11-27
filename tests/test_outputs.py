@@ -104,6 +104,11 @@ def test_config_validation() -> None:
     ):
         with pytest.raises(OutputError):
             OutputConfig.from_dict(bad)
+    # Named as the page names it: by its name, else by its id (an [[output]] in a file).
+    with pytest.raises(OutputError, match=r"^'Home hub': the URL must start"):
+        OutputConfig.from_dict({"id": "h", "name": " Home hub ", "url": "ftp://x"})
+    with pytest.raises(OutputError, match=r"^h: the URL must start"):
+        OutputConfig.from_dict({"id": "h", "url": "ftp://x"})
 
 
 def test_alerts_go_to_the_matching_webhooks_signed() -> None:

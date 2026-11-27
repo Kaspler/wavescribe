@@ -82,6 +82,13 @@ LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 ASK_TIMEOUT_S = 180.0  # a question waits at most this long for its answer
 REMOTE_ASK_OFF = ("asking from another machine is off: it spends this machine's model, so the "
                   "Wavescribe machine turns it on with serve --allow-remote-ask")  # fmt: skip
+ASK_NO_STORE = "asking needs the store (this run was started with --no-store)"
+ASK_NO_LLM = "asking needs an LLM translator such as qwen3.5-9b (none is loaded)"
+ASK_NOT_SET_UP = "asking isn't set up in this run"
+# Why Ask is off, as a code beside its sentence in /api/state (ask_code), so the page needn't
+# read the words; "unavailable" for a reason this list doesn't know.
+ASK_CODES = {ASK_NO_STORE: "no_store", ASK_NO_LLM: "no_llm", ASK_NOT_SET_UP: "not_set_up",
+             REMOTE_ASK_OFF: "remote_off"}  # fmt: skip
 # The page's own reads: every GET under these (what was said, alerts, catches, audio, the live
 # events), so a new one is covered without being listed. Through a proxy they need a feed token,
 # as /feed/v1 does (feed.page_grant). /api/manage/ is this machine's alone, before this.
@@ -427,7 +434,7 @@ class WebHub:
             "can_control": can_control,
             "store": self.store is not None,
             "mt_model": self.plan.mt[0].id if self.plan.mt else None,
-            "ask": self.ask_unavailable(),
+            **_ask_fields(self.ask_unavailable()),
             "noncommercial": self.plan.noncommercial(),
             "audio_rate": SAMPLE_RATE,
             "recent": recent,
@@ -440,11 +447,11 @@ class WebHub:
     def ask_unavailable(self) -> str | None:
         """Why questions can't be asked in this run, or None when they can."""
         if self.store is None:
-            return "asking needs the store (this run was started with --no-store)"
+            return ASK_NO_STORE
         if self.plan.mt is None or self.plan.mt[0].backend != "mlx-lm":
-            return "asking needs an LLM translator such as qwen3.5-9b (none is loaded)"
+            return ASK_NO_LLM
         if self.asker is None:
-            return "asking isn't set up in this run"
+            return ASK_NOT_SET_UP
         return None
 
     def history(
@@ -668,7 +675,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/state":
             hub = self.server.hub
             state = hub.state(can_control=self._is_local(), exports=self._exports())
-            state["ask"] = self._ask_unavailable()
+            state.update(_ask_fields(self._ask_unavailable()))
             self._json(state)
         elif path == "/api/events":
             self._events()
@@ -1160,6 +1167,14 @@ def _row_id(text: str) -> int | None:
     """A row id from a URL, or None when it isn't one. ASCII digits only: str.isdigit() alone
     also passes characters such as "²", which int() then refuses."""
     return int(text) if text.isascii() and text.isdigit() else None
+
+
+def _ask_fields(reason: str | None) -> dict[str, str | None]:
+    """``ask`` (why questions can't be asked here, None when they can) and its ``ask_code``."""
+    return {
+        "ask": reason,
+        "ask_code": None if reason is None else ASK_CODES.get(reason, "unavailable"),
+    }
 
 
 def _loopback(host: str) -> bool:

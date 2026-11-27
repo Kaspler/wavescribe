@@ -217,12 +217,16 @@ def test_asking_from_another_machine_is_off_unless_turned_on(tmp_path: Path, mon
     node = Running(make_app(tmp_path))
     question = {"question": "What was said about water?"}
     try:
+        state = node.call("GET", "/api/state")[1]
+        assert state["ask_code"] == "no_llm" and "needs an LLM" in state["ask"]
         node.app.hub.ask_unavailable = lambda: None  # as if an LLM were loaded
-        assert node.call("GET", "/api/state")[1]["ask"] is None
+        state = node.call("GET", "/api/state")[1]
+        assert state["ask"] is None and state["ask_code"] is None
         monkeypatch.setattr(Handler, "_is_local", lambda self: False)
         status, answer = node.call("POST", "/api/ask", question)
         assert status == 403 and "--allow-remote-ask" in answer["error"]
-        assert node.call("GET", "/api/state")[1]["ask"] == REMOTE_ASK_OFF  # the page says why
+        state = node.call("GET", "/api/state")[1]
+        assert state["ask"] == REMOTE_ASK_OFF and state["ask_code"] == "remote_off"  # and why
         assert node.call("GET", "/feed/v1/node")[1]["ask"] is False
         node.server.remote_ask = True  # serve --allow-remote-ask
         assert node.call("GET", "/api/state")[1]["ask"] is None
