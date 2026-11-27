@@ -756,6 +756,9 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
   transition: background-color var(--fast) var(--ease);
 }
 .sum-pick-list > button svg { margin-left: auto; color: var(--ink-3); }
+.sum-pick-two { display: grid; gap: 1px; padding: 7px 0; }
+.sum-pick-at { margin-left: 4px; color: var(--ink-2); }
+.sum-pick-sub { font-size: var(--t-sm); color: var(--ink-3); }
 .sum-pick-list > button:hover:not(:disabled) { background: var(--sunken); }
 .sum-pick-list > button:hover:not(:disabled) svg { color: var(--accent); }
 .sum-pick-list > button:disabled { color: var(--ink-3); }

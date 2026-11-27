@@ -2,6 +2,7 @@
 // opens beside the columns (on a phone, as a page of its own) and stays there while new lines
 // arrive and while its lines are opened in the transcript.
 import { useEffect, useId, useRef, useState } from "react";
+import { awaySince, looked } from "../lib/away";
 import { S } from "../lib/live";
 import { go, parse } from "../lib/router";
 import { useTopics } from "../lib/store";
@@ -29,7 +30,8 @@ function Elapsed({ since }: { since: number }) {
 }
 
 function choiceLabel(c: Choice): string {
-  return c.kind === "minutes" ? T.lastMinutes(c.minutes) : T.sinceLabel(whenLabel(c.at));
+  if (c.kind === "minutes") return T.lastMinutes(c.minutes);
+  return c.kind === "away" ? T.sinceLookedAt(whenLabel(c.at)) : T.sinceLabel(whenLabel(c.at));
 }
 
 /** Shows the answer: beside the columns, or on a phone as its own page. */
@@ -110,6 +112,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
     else ask({ kind: "since", at });
   };
   const list = names(stations);
+  const away = awaySince(looked(), Date.now() / 1000, longest);
   return (
     <div className="sum-pick">
       <h2 className="sum-pick-h" dir="auto">{one ? T.summaryOf(list[0] ?? "") : T.summary}</h2>
@@ -137,6 +140,15 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
         <>
           {!one && <p className="sum-pick-for" dir="auto">{T.summaryFor(list)}</p>}
           <div className="sum-pick-list" role="group" aria-label={T.summaryWindow}>
+            {away != null && (
+              <button type="button" disabled={busy} onClick={() => ask({ kind: "away", at: away })}>
+                <span className="sum-pick-two">
+                  <span>{T.sinceLooked} <span className="num sum-pick-at">{whenLabel(away)}</span></span>
+                  <span className="sum-pick-sub">{T.sinceLookedWhat}</span>
+                </span>
+                <Icon name="right" />
+              </button>
+            )}
             {SPANS.map((m) => (
               <button key={m} type="button" disabled={busy} onClick={() => ask({ kind: "minutes", minutes: m })}>
                 {T.lastMinutes(m)}<Icon name="right" />

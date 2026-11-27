@@ -68,7 +68,9 @@ export const SPANS = [15, 60] as const;
 export type Choice =
   | { kind: "minutes"; minutes: number }
   /** Since a time of day the reader gave, in seconds since 1970. */
-  | { kind: "since"; at: number };
+  | { kind: "since"; at: number }
+  /** Since the reader last looked (lib/away.ts). */
+  | { kind: "away"; at: number };
 
 /** "14:30" as the start of a window: today's, or yesterday's when it is still to come (at 00:15,
  * 23:30 is three quarters of an hour ago), as `wavescribe digest --since` reads it. Null for
