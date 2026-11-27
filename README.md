@@ -111,8 +111,8 @@ connect it.
 
 ## What it does
 
-What is implemented today, one line each, with a link to how to use it. *(experimental)* marks
-what is newer and less tried.
+What is implemented, one line each, with a link to how to use it. *(experimental)* marks what
+is less tried.
 
 **Stations and sources**
 
