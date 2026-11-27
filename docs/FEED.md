@@ -441,8 +441,7 @@ an event whose id would land on any other station here is refused. One place can
 stations and all places together 100. The answer is `{"accepted": n, "rejected": m}` with status
 200; the log says why events were refused. When the push held test events (the *Test* button),
 it is `{"accepted": 0, "rejected": m, "test": k}`, with `k` the test events that would have been
-taken. Those make no station and store nothing (an older central server takes them as real, as
-a station named `<place>-test`). An event is refused whole if a value is out of
+taken. Those make no station and store nothing. An event is refused whole if a value is out of
 bounds: `t_start` older than 7 days or more than 10 minutes ahead of this machine's clock,
 `duration` outside 0–600 s, text over 4,000 characters, a language that isn't a BCP-47 tag. A
 `t_start` up to 10 minutes ahead is taken as a clock that runs fast and stored as the time the
