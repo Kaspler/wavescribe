@@ -563,14 +563,19 @@ def test_an_incident_is_named_once_and_only_when_it_was_announced(tmp_path: Path
     incident("old", 3 * 60 * MIN, 5 * MIN, 3 * 60 * MIN, status="delivered")
     told = incident("water", 50 * MIN, 5 * MIN, 50 * MIN, status="delivered")
     worse = incident("fire", 2 * 60 * MIN, 10 * MIN, 20 * MIN, status="delivered")  # escalated
-    incident("logged", 30 * MIN, 30 * MIN, None, status="logged")  # nobody was told
-    incident("failed", 30 * MIN, 30 * MIN, None, status="failed")
+    # Announced, but its delivery reached nobody, or it was only logged: the store keeps no
+    # time for that, so its first mention stands in. Most worth a digest's mention.
+    failed = incident("failed", 30 * MIN, 25 * MIN, None, status="failed")
+    logged = incident("logged", 15 * MIN, 15 * MIN, None, status="logged")
+    incident("failed_before", 2 * 60 * MIN, 5 * MIN, None, status="failed")
     incident("silence", 40 * MIN, 40 * MIN, 40 * MIN, status="delivered", kind="silence")
     d = digester(store, FakeLlm("NONE: nothing."))
     out = d.run(d.request({"minutes": 60})).payload()
     assert [(a["rule"], a["announced_at"]) for a in out["alerts"]] == [
         ("water", told.delivered_at),
+        ("failed", failed.first_at),
         ("fire", worse.delivered_at),
+        ("logged", logged.first_at),
     ]
     store.close()
 

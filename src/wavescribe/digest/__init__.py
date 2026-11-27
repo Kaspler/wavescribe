@@ -507,10 +507,10 @@ class Digester:
     def alerts(self, request: Request, exports: Exports | None = None) -> list[dict[str, Any]]:
         """The alerts announced in the window, oldest first, as the store has them, with when
         (``announced_at``): each incident once, about what was said on one of its stations, at
-        medium severity or above. Not one announced before the window and only mentioned or
-        recalled in it, nor one nobody was told about, nor a station's own alert (no audio,
-        a traffic announcement), whose end the store doesn't keep. For another machine,
-        without the words of radio that stays here."""
+        medium severity or above, whether or not its delivery reached anybody. Not one
+        announced before the window and only mentioned or recalled in it, nor a station's own
+        alert (no audio, a traffic announcement), whose end the store doesn't keep. For another
+        machine, without the words of radio that stays here."""
         out = []
         wanted = set(request.stations)
         for a in self.store.alerts(limit=ALERT_ROWS):
@@ -997,15 +997,16 @@ def _watch(station: Station) -> bool:
 
 
 def _announced(alert: Mapping[str, Any], request: Request) -> float | None:
-    """When ``alert`` was announced in the window: its last announcement (the first, or a rise
-    in severity), else, when that came after the window, its first mention; None when it
-    wasn't announced in the window or nobody was told (the store keeps the last announcement
-    only, and only once it reached somebody)."""
-    delivered = alert.get("delivered_at")
-    if delivered is None or alert["status"] == "covered":
+    """When ``alert`` was announced in the window, as near as the store can say: its last
+    delivery that reached somebody (the first, or a rise in severity), else its first mention
+    (when that delivery came after the window, or none reached anybody: the store keeps a time
+    only for one that did); None when that is outside the window, or it wasn't announced
+    (still pending, or announced by another alert)."""
+    if alert["status"] in ("pending", "covered"):
         return None
-    for at in (delivered, alert["first_at"]):
-        if request.since <= at <= request.until and at <= delivered:
+    delivered = alert.get("delivered_at")
+    for at in (alert["first_at"],) if delivered is None else (delivered, alert["first_at"]):
+        if request.since <= at <= request.until and (delivered is None or at <= delivered):
             return float(at)
     return None
 

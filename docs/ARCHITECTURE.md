@@ -300,12 +300,14 @@ The answer says what became of the digest (`outcome`: `points`, `nothing_said`, 
 the stations and why in `unread`, `nothing_stood_out` or `unsourced`) and who wrote it from how
 much (`notice`: the local model, lines read of those said, the window). The alerts announced
 in the window come with it in the words they were announced in: each incident once, at the time
-it was announced (first, or when it got more serious), about what was said, medium and above,
-and none nobody was told about. A digest spends the model as a question does, so it passes the
-same gate (`do_POST`): from another machine only with `serve --allow-remote-ask`, and through a
-proxy with a read token unless `--public-read`. For another machine, a digest covers six hours
-at most, reads and counts only words that may leave, and names no station that may not.
-Reading it aloud is a control: this machine only, never through a proxy.
+it was announced (first, or when it got more serious; the first mention of one whose delivery
+reached nobody, which the store keeps no time for), about what was said, medium and above.
+
+A digest spends the model as a question does, so it passes the same gate (`do_POST`): from
+another machine only with `serve --allow-remote-ask`, and through a proxy with a read token
+unless `--public-read`. For another machine, a digest covers six hours at most, reads and
+counts only words that may leave, and names no station that may not. Reading it aloud is a
+control: this machine only, never through a proxy.
 
 Read aloud, a digest takes the alerts' voice for its language and never sounds like an alert:
 it opens with a fixed sentence (`summary` in `[speak.<lang>]`, built in for English) saying it
