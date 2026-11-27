@@ -37,7 +37,7 @@ from wavescribe.dsp.activity import CARRIER_S, Activity, ActivityDetector, IqHis
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import POLICIES, lookup
-from wavescribe.radio.watch import Catch, Watch, publish
+from wavescribe.radio.watch import Catch, Hearing, Watch, publish
 from wavescribe.sources import SourceHealth
 from wavescribe.sources.sdr import RtlSdrDevice, shared_device
 
@@ -155,13 +155,15 @@ class Catcher:
 
     def _say_deaf(self) -> None:
         """One line in the log when interference across the window has made the watch deaf,
-        and one when it hears again."""
+        and one when it hears again; each also published (``Hearing``) for the command line."""
         deaf, said = self.deaf_s, self._deaf
+        now = self._anchor[1]
         if deaf is not None and said is not None:
             self._deaf = (max(said[0], deaf), said[1])
         elif deaf is not None and deaf >= SAY_DEAF_S:
             self._deaf = (deaf, self.detector.relearnt)
             event(log, "watch_deaf", level=logging.WARNING, station=self.station_id)
+            publish(Hearing(self.station_id, now, self.warning))
         elif deaf is None and said is not None:
             self._deaf = None
             learnt = self.detector.relearnt > said[1]  # the floors, afresh: the noise stayed
@@ -172,6 +174,7 @@ class Catcher:
                 deaf_s=round(said[0], 1),
                 learnt=learnt,
             )
+            publish(Hearing(self.station_id, now, None, said[0], learnt))
 
     def stop(self) -> list[Catch]:
         """The catches still running, cut where the IQ ends (the dongle stopped)."""

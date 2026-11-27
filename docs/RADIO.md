@@ -230,7 +230,8 @@ How it works:
   ends as one catch and is then taken as noise.
 - Noise rising on half the channels or more at once is interference, not traffic: nothing is
   caught while it lasts. If it stays for ten seconds (a charger switched on nearby), it is taken
-  as the new floor, and the station's status says the watch was deaf while it lasted.
+  as the new floor. The station's status says the watch is deaf while it lasts, and
+  `radio watch` prints a line when that starts and when it ends.
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 

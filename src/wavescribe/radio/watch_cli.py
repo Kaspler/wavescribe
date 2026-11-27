@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
-from wavescribe.radio.watch import Catch, on_raster, with_notes
+from wavescribe.radio.watch import Catch, Hearing, on_raster, with_notes
 
 
 def _window(spec: str) -> str | tuple[float, float]:
@@ -26,7 +26,8 @@ def _window(spec: str) -> str | tuple[float, float]:
 
 
 class CatchPrinter:
-    """One line per catch as it ends: `[HH:MM:SS] MHz  band, channel  name  seconds  voice`."""
+    """One line per catch as it ends: `[HH:MM:SS] MHz  band, channel  name  seconds  voice`;
+    on stderr, one when the watch goes deaf and one when it hears again (``hearing``)."""
 
     def __init__(self, names: dict[int, dict[str, Any]] | None = None) -> None:
         self._lock = threading.Lock()
@@ -48,6 +49,16 @@ class CatchPrinter:
             self.spoken += bool(catch.voice)
             print("  ".join(parts), flush=True)
 
+    def hearing(self, h: Hearing) -> None:
+        """A line when the watch goes deaf and one when it hears again: the command line has
+        no status to show it in."""
+        stamp = time.strftime("%H:%M:%S", time.localtime(h.t))
+        said = h.warning or f"hearing again after {h.deaf_s:.0f} s"
+        if h.warning is None and h.learnt:
+            said += ", with that noise as the new floor"
+        with self._lock:
+            print(f"# [{stamp}] {said}", file=sys.stderr, flush=True)
+
 
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
@@ -55,7 +66,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     from wavescribe.config import DEFAULT_SAMPLE_RATE, build_device, build_station, radio_policy
     from wavescribe.radio.catalog import Catalog
     from wavescribe.radio.cli import _config, _old_spurs, _region, resolve_receiver
-    from wavescribe.radio.watch import plan_centre, plan_window, subscribe
+    from wavescribe.radio.watch import plan_centre, plan_window, subscribe, subscribe_hearing
 
     config = _config(args)
     region = _region(args, config)
@@ -119,6 +130,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     _old_spurs(catalog, serial, args.receiver)  # a watch doesn't use such a list
     printer = CatchPrinter(catalog.notes())
     stop_printing = subscribe(printer)
+    stop_hearing = subscribe_hearing(printer.hearing)
     args.stations, args.source, args.tuned_stations = ["watch"], None, [station]
     args.realtime = False
     args.duration = args.minutes * 60 if args.minutes else None
@@ -126,6 +138,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         return cmd_listen(args)
     finally:
         stop_printing()
+        stop_hearing()
         print(f"# {printer.count} caught, {printer.spoken} with speech", file=sys.stderr)
 
 

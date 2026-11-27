@@ -238,30 +238,52 @@ def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
     return rows
 
 
+@dataclass(frozen=True)
+class Hearing:
+    """A watch made deaf by noise across its whole window (``warning`` says so), or hearing
+    again (``warning`` None) after ``deaf_s``, with the noise learnt as the floor if it stayed."""
+
+    station_id: str
+    t: float  # when (epoch seconds)
+    warning: str | None
+    deaf_s: float = 0.0
+    learnt: bool = False
+
+
 # Who hears about catches: the store keeps them, the command line prints them. A catch is
-# published once its audio has been through the VAD and the gate, so ``voice`` is known.
-_listeners: list[Callable[[Catch], object]] = []
+# published once its audio has been through the VAD and the gate, so ``voice`` is known. The
+# command line also prints when a watch goes deaf and hears again: it has no status to show.
+_listeners: dict[type, list[Callable[..., object]]] = {Catch: [], Hearing: []}
 _lock = threading.Lock()
 
 
 def subscribe(listener: Callable[[Catch], object]) -> Callable[[], None]:
     """Call ``listener`` with every catch from now on; returns what stops it."""
+    return _subscribe(Catch, listener)
+
+
+def subscribe_hearing(listener: Callable[[Hearing], object]) -> Callable[[], None]:
+    """Call ``listener`` each time a watch goes deaf or hears again; returns what stops it."""
+    return _subscribe(Hearing, listener)
+
+
+def _subscribe(kind: type, listener: Callable[..., object]) -> Callable[[], None]:
     with _lock:
-        _listeners.append(listener)
+        _listeners[kind].append(listener)
 
     def unsubscribe() -> None:
         with _lock:
-            if listener in _listeners:
-                _listeners.remove(listener)
+            if listener in _listeners[kind]:
+                _listeners[kind].remove(listener)
 
     return unsubscribe
 
 
-def publish(catch: Catch) -> None:
+def publish(item: Catch | Hearing) -> None:
     with _lock:
-        listeners = list(_listeners)
+        listeners = list(_listeners[type(item)])
     for listener in listeners:
         try:
-            listener(catch)
+            listener(item)
         except Exception:
-            log.exception("catch listener %r failed", listener)
+            log.exception("watch listener %r failed", listener)

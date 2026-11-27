@@ -335,11 +335,21 @@ def test_a_watch_made_deaf_by_noise_says_so_in_its_health() -> None:
     station = watch_station()
     source = WatchSource(station.id, station.sdr, device=FakeDevice([]))
     warnings = []
-    for i, (iq, t_end) in enumerate(air(13.0, [], extra=louder(1.0))):
-        source._feed(iq, t_end, i == 0)
-        warnings.append(source.health.warning)
+    heard: list[watches.Hearing] = []
+    stop_listening = watches.subscribe_hearing(heard.append)
+    try:
+        for i, (iq, t_end) in enumerate(air(13.0, [], extra=louder(1.0))):
+            source._feed(iq, t_end, i == 0)
+            warnings.append(source.health.warning)
+    finally:
+        stop_listening()
     assert any(w and w.startswith("deaf") for w in warnings)
     assert warnings[-1] is None  # the noise is the floor now
+    # Said once each way, for the command line, which has no status to show it in.
+    deaf, hearing = heard
+    assert deaf.station_id == "walkies" and deaf.warning and deaf.warning.startswith("deaf")
+    assert hearing.warning is None and hearing.learnt and deaf.t < hearing.t
+    assert hearing.deaf_s == pytest.approx(10, abs=0.5)
 
 
 def test_a_watch_uses_a_spur_list_only_where_it_says_how_finely_it_was_learnt(

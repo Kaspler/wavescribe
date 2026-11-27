@@ -273,6 +273,33 @@ def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
     assert "learn them again with `wavescribe radio spurs a --learn`" in capsys.readouterr().err
 
 
+def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe import cli
+    from wavescribe.cli import build_parser
+    from wavescribe.radio import cli as radio_cli
+    from wavescribe.radio import watch as watches
+
+    def listen(_args: argparse.Namespace) -> int:  # what the watch says while it runs
+        watches.publish(watches.Hearing("watch", 1_000.0, "deaf: noise across the whole window"))
+        watches.publish(watches.Hearing("watch", 1_017.0, None, deaf_s=17.2, learnt=True))
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "cmd_listen", listen)
+    monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--acknowledge"]
+    args = build_parser().parse_args(argv)
+    assert args.func(args) == 0
+    err = capsys.readouterr().err
+    assert "] deaf: noise across the whole window\n" in err
+    assert "] hearing again after 17 s, with that noise as the new floor\n" in err
+    watches.publish(watches.Hearing("watch", 1_020.0, "deaf: again"))  # once it has stopped
+    assert "again" not in capsys.readouterr().err
+
+
 # -- the routes --------------------------------------------------------------------------------
 
 

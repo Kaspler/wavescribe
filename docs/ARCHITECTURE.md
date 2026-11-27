@@ -564,8 +564,9 @@ jump to its level. A start 20 dB under a busy channel within three channels, or 
 about the centre (a receiver shows a weaker mirror of strong signals), is suppressed. While half the
 channels (at least four) rise at once, and for 0.5 s after, nothing starts and the floors hold;
 after 10 s of that without a break the floors are learnt afresh from the median of the next 0.5 s,
-as at the start. Deafness of 3 s or more is logged once (`watch_deaf`, `watch_hearing`) and shown as
-the station's `warning` in the status. A start opens a `NarrowbandDemodulator` for its channel fed
+as at the start. Deafness of 3 s or more is logged once (`watch_deaf`, `watch_hearing`), shown as
+the station's `warning` in the status, and published as a `Hearing` each way, which `radio watch`
+prints. A start opens a `NarrowbandDemodulator` for its channel fed
 from the history 0.3 s before the first frame above the floor (but never before the previous catch's
 audio on that channel ended), at most four at once (`watch_missed` otherwise); an end gives a
 `Catch` with the audio up to 0.3 s after. The dongle's thread queues catches for the station's (16
