@@ -471,6 +471,7 @@ class WebHub:
             "recent": recent,
             "alerts": self.alerts(exports),
             "topic_languages": _topic_languages(self.app),
+            "invocation": typed(),  # how a command is typed here, for hints on the page
             "status": status,
             "node": self.app.node() if self.app else None,
             "manage": can_control and self.app is not None,

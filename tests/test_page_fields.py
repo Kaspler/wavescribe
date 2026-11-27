@@ -513,3 +513,13 @@ def test_the_models_say_which_can_tell_languages_apart(tmp_path: Path) -> None:
         assert status == 200 and ok["asr_choice"] == "whisper-x", ok
     finally:
         r.close()
+
+
+def test_the_state_says_how_a_command_is_typed_here(tmp_path: Path) -> None:
+    from wavescribe.invocation import typed
+
+    r = running(tmp_path, stations(two_metres_centre()))
+    try:
+        assert r.call("GET", "/api/state")[1]["invocation"] == typed()
+    finally:
+        r.close()
