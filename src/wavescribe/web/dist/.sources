@@ -52,7 +52,7 @@ d02e044e5d00361086d6b14eed043adc62776a2f frontend/src/manage/Stations.tsx
 7b2f5caa73f379769499bd801e8904fff96ec720 frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
 2d68a8da1eeca96d9ce6b7b34a761b21a73cdaa7 frontend/src/manage/manage.css
-0aa27931dea2f0e9efe73add88e00f81d49bdb8b frontend/src/manage/tuner.tsx
+38518413f264121ed6ddcb47cd55188df2f72040 frontend/src/manage/tuner.tsx
 30f92bb42bc128bf05810914dc9cd98c04ccf7f8 frontend/src/reading/Alerts.tsx
 2160b4cdc48aa72e2518a4ea99ad9e069fe15783 frontend/src/reading/Ask.tsx
 6a0689d3cf51da439df61e351bd4a4966b390f3c frontend/src/reading/Column.tsx

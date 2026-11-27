@@ -401,8 +401,12 @@ function pausesFine(dev: string, yes = false): boolean {
 export function Ask({ ask, onYes, onNo }: { ask: Any; onYes: (extra: Any) => Promise<void>; onNo: () => void }) {
   const [ok, setOk] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
-  // Asked for from a row of On the air here, the question can sit out of view below it.
-  useEffect(() => { panel.current?.scrollIntoView({ block: "nearest" }); }, []);
+  // Asked for from a row of On the air here, the question can sit out of view below it. Focus
+  // goes to its first control, so a keyboard answers it where it is.
+  useEffect(() => {
+    panel.current?.scrollIntoView({ block: "nearest" });
+    panel.current?.querySelector<HTMLElement>("input, button")?.focus({ preventScroll: true });
+  }, []);
   return (
     <div ref={panel} className="m-panel lv-ask" role="alertdialog" aria-labelledby="lv-ask-t">
       <p id="lv-ask-t" className="m-line">
