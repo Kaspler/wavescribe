@@ -213,7 +213,9 @@ day. The first line then says so: "yesterday 02:50 to today 02:43".
 
 With no points, the digest says why in Wavescribe's own words: nothing was said; a station
 keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines
-it read; or the model's reply cited nothing it read, or nothing that backs its points.
+it read; or the model's reply cited nothing it read, or nothing that backs its points. When the
+time asked for starts before Wavescribe was started, it says that too ("Wavescribe started at
+14:55: before then, nothing was heard unless an earlier run was listening").
 
 It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
 takes about a minute, `--now` a few seconds. When two digests are already being made, it is

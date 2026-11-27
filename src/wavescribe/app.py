@@ -300,6 +300,7 @@ class App:
                 llm,
                 running=self.running,
                 ahead=lambda: self.pipeline.llm_waiting(GIVE_WAY_BELOW),
+                started=self.started_at,
             )
             self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
         self.digests = self._digest_schedule()

@@ -235,6 +235,7 @@ class Digest:
     unread: dict[str, str] = field(default_factory=dict)  # station -> why it wasn't read
     model: str | None = None
     timings: dict[str, int] = field(default_factory=dict)
+    started: float | None = None  # when this run of Wavescribe started, when known
 
     def stations_of(self, point: Point) -> list[str]:
         """The stations a point's sources were heard on."""
@@ -273,40 +274,61 @@ class Digest:
         return f"{sample}{self.read:,} of {_lines(said)}"
 
     def notice(self) -> str | None:
-        """Who wrote the digest, from what: None when the model wasn't asked."""
+        """Who wrote the digest, from what: None when the model wasn't asked. With ``late``,
+        when the window reaches back before Wavescribe started."""
         if not self.calls:
             return None
-        return (
+        written = (
             f"Written by the local model from {self.coverage()} heard {_clock_span(self.request)}"
             "; it can miss things or get them wrong."
+        )
+        late = self.late()
+        return f"{written} {late}" if late else written
+
+    def late(self) -> str | None:
+        """That this run of Wavescribe started within the window, when it did: what was said
+        before is in the store only if an earlier run heard it, and the window's length says
+        nothing of how long anything listened."""
+        r = self.request
+        if self.started is None or self.started <= r.since:
+            return None
+        day = datetime.fromtimestamp(self.started).date() != datetime.fromtimestamp(r.until).date()
+        at = local_time(self.started, f"{'%a ' if day else ''}{TIME_FORMAT}")
+        return (
+            f"Wavescribe started at {at}: before then, nothing was heard unless an earlier run "
+            "was listening."
         )
 
     def text(self) -> str:
         """The digest as plain text: a point a line with the numbers of its sources, or the
-        sentences that say why there are none, in words of Wavescribe's own."""
+        sentences that say why there are none, in words of Wavescribe's own (and, when the
+        model wasn't asked and so there is no notice, ``late``)."""
+        if self.outcome == "points":
+            n = self.numbered()
+            return "\n".join(
+                f"- {self.heard_on(p)}{p.text} [{', '.join(str(n[i]) for i in p.ids)}]"
+                for p in self.points
+            )
+        late = None if self.calls else self.late()
+        return " ".join(s for s in (self._none(), late) if s)
+
+    def _none(self) -> str:
+        """Why there are no points."""
         outcome = self.outcome
-        if outcome != "points":
-            said = sum(self.said.values())
-            unread = ", ".join(f"{self.names.get(s, s)} ({why})" for s, why in self.unread.items())
-            unread = f"Not read: {unread}." if unread else ""
-            if outcome == "nothing_said":
-                heard = [s for s in self.request.stations if s not in self.unread]
-                where = (
-                    f"{_names(heard, self.names)} in the last {self.request.minutes:.0f} minutes"
-                )
-                return f"Nothing was said on {where}. {unread}".strip()
-            if outcome == "not_read":
-                return unread
-            if outcome == "nothing_stood_out" and not self.calls:
-                return f"Only music, station idents and repeats among the {_lines(said)} said."
-            if outcome == "nothing_stood_out":
-                return f"Nothing stood out in the {_lines(self.read)} read of {said:,} said."
-            return self.note or ""
-        n = self.numbered()
-        return "\n".join(
-            f"- {self.heard_on(p)}{p.text} [{', '.join(str(n[i]) for i in p.ids)}]"
-            for p in self.points
-        )
+        said = sum(self.said.values())
+        unread = ", ".join(f"{self.names.get(s, s)} ({why})" for s, why in self.unread.items())
+        unread = f"Not read: {unread}." if unread else ""
+        if outcome == "nothing_said":
+            heard = [s for s in self.request.stations if s not in self.unread]
+            where = f"{_names(heard, self.names)} in the last {self.request.minutes:.0f} minutes"
+            return f"Nothing was said on {where}. {unread}".strip()
+        if outcome == "not_read":
+            return unread
+        if outcome == "nothing_stood_out" and not self.calls:
+            return f"Only music, station idents and repeats among the {_lines(said)} said."
+        if outcome == "nothing_stood_out":
+            return f"Nothing stood out in the {_lines(self.read)} read of {said:,} said."
+        return self.note or ""
 
     def payload(self) -> dict[str, Any]:
         n = self.numbered()
@@ -361,8 +383,10 @@ class Digester:
         clock: Callable[[], float] = time.time,
         running: Callable[[], Collection[str]] | None = None,
         ahead: Callable[[], bool] | None = None,
+        started: float | None = None,
     ) -> None:
         self.store = store
+        self.started = started  # when this run of Wavescribe started: a digest says so
         self._ahead = ahead  # a job that goes first waits for the model (GIVE_WAY_BELOW)
         self._stations = stations  # read each time: the page adds and removes stations
         self._running_now = running  # the stations running, when known
@@ -592,6 +616,7 @@ class Digester:
             selection.rows,
         )
         digest.unread = self.unread(request, selection.said)
+        digest.started = self.started
         prompts = plan_prompts(selection.lines)
         if not prompts:
             return digest

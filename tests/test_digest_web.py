@@ -162,6 +162,7 @@ def test_the_app_queues_digests_on_the_translation_model(tmp_path: Path) -> None
     node = Running(make_app(tmp_path))
     app = node.app
     try:
+        assert app.hub.digester.started == app.started_at  # a digest says when it started
         app.store.add_transcript(result("a", "Corte de água amanhã no centro", time.time() - 60))
         entry = dataclasses.replace(app.hub.plan.mt[0], backend="mlx-lm")
         app.hub.plan = dataclasses.replace(app.hub.plan, mt=(entry, Path()))

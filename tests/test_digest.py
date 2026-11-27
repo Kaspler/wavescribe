@@ -534,6 +534,31 @@ def test_nothing_said_needs_no_model(tmp_path: Path) -> None:
     store.close()
 
 
+def test_a_window_from_before_wavescribe_started_says_so(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    llm = FakeLlm("- Water is cut tomorrow [1].")
+
+    def started(at: float) -> Digester:
+        return Digester(
+            store, lambda: STATIONS, lambda run, given_up: run(llm) or True, clock=lambda: NOW,
+            started=at,
+        )  # fmt: skip
+
+    late = "Wavescribe started at 11:55: before then, nothing was heard unless an earlier run "
+    late += "was listening."
+    d = started(NOW - 5 * MIN)
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert out["outcome"] == "points" and out["notice"].endswith(late)
+    out = d.run(d.request({"minutes": 30, "stations": ["c"]})).payload()  # c said nothing
+    assert out["notice"] is None
+    assert out["text"] == f"Nothing was said on c in the last 30 minutes. {late}"
+    # Started before the window: nothing to say about it.
+    d = started(NOW - 61 * MIN)
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert "started" not in out["notice"]
+    store.close()
+
+
 def test_a_station_that_keeps_no_text_or_isnt_running_is_not_read(tmp_path: Path) -> None:
     store = Store(tmp_path / "w.db")
     pmr = dataclasses.replace(station("pmr"), name="PMR 3", privacy="private")

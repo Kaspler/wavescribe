@@ -307,11 +307,12 @@ Steps (`digest/__init__.py`):
 
 The answer says what became of the digest (`outcome`: `points`, `nothing_said`, `not_read` with
 the stations and why in `unread`, `nothing_stood_out` or `unsourced`) and who wrote it from how
-much (`notice`: the local model, lines read of those said, the window). The alerts announced
-in the window come with it in the words they were announced in: each incident once, at the time
-it was announced (first, or when it got more serious; the first mention of one whose delivery
-reached nobody, which the store keeps no time for), about what was said, medium and above;
-never one only logged, whose severity's actions tell nobody.
+much (`notice`: the local model, lines read of those said, the window, and when Wavescribe
+started if that was within it: before then only an earlier run heard anything). The alerts
+announced in the window come with it in the words they were announced in: each incident once,
+at the time it was announced (first, or when it got more serious; the first mention of one
+whose delivery reached nobody, which the store keeps no time for), about what was said, medium
+and above; never one only logged, whose severity's actions tell nobody.
 
 A digest spends the model as a question does, so it passes the same gate (`do_POST`): from
 another machine only with `serve --allow-remote-ask`, and through a proxy with a read token
