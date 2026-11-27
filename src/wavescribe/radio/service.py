@@ -16,7 +16,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from wavescribe.config import ConfigError, radio_policy
-from wavescribe.dsp import OFF_CENTRE_HZ, check_tunable, frequency_hz, in_band, off_centre
+from wavescribe.dsp import OFF_CENTRE_HZ, check_tunable, frequency_hz, margin_hz
 from wavescribe.radio import holders
 from wavescribe.radio import scan as scanner
 from wavescribe.radio.bandplan import (
@@ -24,6 +24,7 @@ from wavescribe.radio.bandplan import (
     DEFAULT_POLICIES,
     POLICIES,
     REGIONS,
+    TUNER_RANGE_HZ,
     check_policies,
     default_region,
     lookup,
@@ -388,6 +389,17 @@ class RadioService:
     # -- tuning: a frequency becomes a station ----------------------------------------------
 
     def tune(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Make a frequency a station on a receiver, and start it, in one call.
+
+        The receiver stays where it is if it hears the frequency there. If not, it moves, to
+        where it hears the new station and every station it has now (switched-off ones and
+        those already out of reach aside). Where no place hears them all, nothing changes and
+        the answer is the question (``retune_question``): which stations would be left out,
+        and which of those stop. ``retune: true`` is the yes. A receiver tuned by hand (Find's
+        Look here, Listen's Tune by hand) is let go, and what it paused starts again where it
+        is still heard. The answer is the station as the page lists it, with where the
+        receiver is (``receiver``), what was left out (``unfit``), whether the hand tuner was
+        let go (``live_closed``), and ``start_error`` if it was made but couldn't start."""
         d = self._device(str(raw.get("device") or ""))
         region, _ = self.region()
         try:
@@ -415,10 +427,6 @@ class RadioService:
         if not language:
             raise RadioError("Which language is spoken there?", "language")
 
-        if not in_band(freq, d.center_hz, d.sample_rate, mode):
-            self._retune(d, freq, mode, bool(raw.get("retune")))
-        elif not off_centre(freq, d.center_hz, mode):
-            self._retune(d, freq, mode, bool(raw.get("retune")), on_centre=True)
         entry = next((e for e in self.catalog.entries() if abs(e["freq_hz"] - freq) <= 6_000), {})
         name = (raw.get("name") or entry.get("user_name") or entry.get("name")
                 or (band.label(freq) if band and band.privacy != "broadcast" else None)
@@ -442,42 +450,106 @@ class RadioService:
                 station[key] = False
         if POLICIES.get(privacy) and POLICIES[privacy].needs_ack:
             station["acknowledge"] = privacy  # the class confirmed: another one asks again
-        try:
-            view = self.app.add_station(station, start=True)
-        except Exception as e:
-            raise RadioError(str(e)) from e
-        return {**view, "privacy": privacy, "band": band_id}
+        channel = station.get("channel_khz")
+        extra, retune = {"privacy": privacy, "band": band_id}, bool(raw.get("retune"))
+        return self._add_on(d, station, freq, mode, channel and channel * 1e3, retune, extra)
 
-    def _retune(self, d: Any, freq: int, mode: str, force: bool, on_centre: bool = False) -> None:
-        """Move an idle receiver so ``freq`` fits, keeping it off the centre (DC) bin."""
+    def _add_on(self, d: Any, station: dict[str, Any], freq: int, mode: str,
+                channel_hz: float | None, retune: bool,
+                extra: dict[str, Any]) -> dict[str, Any]:  # fmt: skip
+        """``tune``'s second half: where the receiver goes, then the station made and started."""
         from wavescribe.admin import AdminError, update_device
 
-        rx = next(r for r in self.receivers() if r["id"] == d.id)
-        name = receiver_name(d.id)
-        if rx["scanning"]:
-            raise RadioError(f"Receiver {name} is scanning: wait for it, or stop the scan.",
-                             "scanning")  # fmt: skip
-        if rx["busy"] and not force:
-            where = (
-                f"is the very centre of what receiver {name} hears now, where the dongle's own "
-                "spike would hold the squelch open"
-                if on_centre
-                else f"is outside what receiver {name} hears now "
-                f"({d.center_hz / 1e6:.2f} MHz ± {d.sample_rate / 2e6 - 0.12:.2f})"
-            )
-            raise RadioError(
-                f"{mhz_text(freq / 1e6)} MHz {where}. Retuning the receiver stops "
-                f"{joined(rx['busy'])}.", "retune", holders=rx["busy"],
-            )  # fmt: skip
-        offset = OFF_CENTRE_HZ[mode]
-        if force:
-            for s in rx["stations"]:
-                if s["running"]:
-                    self.app.stop_station(s["id"])
+        live = getattr(self.app, "_live", None)
+        by_hand = live is not None and live.is_open(d.id)
+        running = self._running_on(d, live)
+        hand = live.centre(d.id) if by_hand else None
+        centre, unfit = self._centre_for(d, freq, mode, channel_hz, hand, running)
+        if unfit and not retune:
+            raise retune_question(d.id, centre, unfit, running, freq_hz=freq)
+        from wavescribe.app import slug
+
+        # Nothing changes until the station is known to be one that can be made there.
+        station["id"] = self.app._free_id(slug(str(station["name"])))
         try:
-            update_device(self.app, d.id, {"center_mhz": (freq - offset) / 1e6}, retune=force)
-        except AdminError as e:
-            raise RadioError(str(e)) from e
+            self.app._check_name_free(str(station["name"]))
+            self.app._check_draft(lambda draft: self._draft(draft, d, centre, station),
+                                  station["id"])  # fmt: skip
+        except ValueError as e:
+            raise RadioError(sentence(str(e))) from e
+        carried = live.close(d.id, resume=False) if by_hand else None
+        try:
+            if centre != d.center_hz:
+                update_device(self.app, d.id, {"center_mhz": centre / 1e6}, retune=True)
+            view = self.app.add_station(station)
+        except (AdminError, ValueError) as e:
+            raise RadioError(sentence(str(e))) from e
+        finally:
+            self._resume(carried)  # what the hand tuner paused, where it is still heard
+        start_error = None
+        try:
+            self.app.start_station(view["id"])
+        except ValueError as e:  # made, and listed: the page says why it didn't start
+            start_error = sentence(str(e))
+        view = next(v for v in self.app.stations_view() if v["id"] == view["id"])
+        return {
+            **view, **extra, "start_error": start_error, "live_closed": by_hand,
+            "receiver": {"id": d.id, "center_mhz": centre / 1e6, "moved": centre != d.center_hz},
+            "unfit": [{"id": s.id, "name": s.name, "running": s.id in running} for s in unfit],
+        }  # fmt: skip
+
+    @staticmethod
+    def _draft(draft: dict[str, Any], d: Any, centre: int, station: dict[str, Any]) -> None:
+        if centre != d.center_hz:
+            over = draft.setdefault("device_overrides", {}).setdefault(d.id, {})
+            over["center_mhz"] = centre / 1e6
+        kept = {k: v for k, v in station.items() if v not in (None, "", [])}  # as add_station
+        draft.setdefault("station", []).append(kept)
+
+    def _running_on(self, d: Any, live: Any) -> set[str]:
+        """The stations on a receiver that run, or would but for the hand tuner's pause."""
+        running = self.app.running()
+        here = {s.id for s in self.app.config.stations if s.sdr and s.sdr.device.id == d.id}
+        paused = set(live.paused_ids(d.id)) if live is not None else set()
+        return (here & running) | (here & paused)
+
+    def _centre_for(self, d: Any, freq: int, mode: str, channel_hz: float | None,
+                    by_hand: int | None, running: set[str]) -> tuple[int, list[Any]]:  # fmt: skip
+        """Where to tune receiver ``d`` so it hears a new station on ``freq``, and the stations
+        it has now that it wouldn't hear there (none when a place hears them all).
+
+        Places are tried in this order: where it is, where the hand tuner has it, the usual
+        place for the new station (a little below it, clear of the centre's spike), then every
+        kHz from which it hears the new station, nearest the usual place first. With no place
+        for them all, the one that keeps the most running stations, then the most stations."""
+        from dataclasses import replace
+
+        from wavescribe.config import heard_by, hears
+
+        others = [s for s in self.app.config.stations
+                  if s.sdr and s.sdr.device.id == d.id and not s.disabled
+                  and not s.out_of_reach]  # fmt: skip
+        usual = freq - OFF_CENTRE_HZ[mode]
+        reach = int(d.sample_rate / 2 - margin_hz(mode))
+        grid = sorted(range(freq - reach, freq + reach + 1, 1000), key=lambda c: abs(c - usual))
+        best: tuple[tuple[int, int], int, list[Any]] | None = None
+        for c in (d.center_hz, by_hand, usual, *grid):
+            if c is None or not TUNER_RANGE_HZ[0] <= c <= TUNER_RANGE_HZ[1]:
+                continue
+            at = replace(d, center_hz=c)
+            if not hears(at, freq, mode, channel_hz):
+                continue
+            kept = [s for s in others if heard_by(s, at)]
+            if len(kept) == len(others):
+                return c, []
+            score = (sum(s.id in running for s in kept), len(kept))
+            if best is None or score > best[0]:
+                best = (score, c, kept)
+        if best is None:
+            raise RadioError(f"Receiver {receiver_name(d.id)} can't be tuned to hear "
+                             f"{mhz_text(freq / 1e6)} MHz.")  # fmt: skip
+        _, c, kept = best
+        return c, [s for s in others if s not in kept]
 
 
 def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: set[str], *,

@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_app import Running, make_app
+from tests.test_app import Running, make_app, wait_for
+from tests.test_live import fake_rtl  # noqa: F401  (a fixture: rtl_sdr is a stand-in)
 from wavescribe.app import ChangeError
 from wavescribe.config import parse_stations
 from wavescribe.radio import service
@@ -115,6 +116,51 @@ def test_a_page_change_cant_tune_a_station_where_its_receiver_doesnt_hear_it(
 # -- what constrains a retune ------------------------------------------------------------------
 
 
+def test_a_stopped_watch_asks_before_a_retune_leaves_it_out(tmp_path: Path) -> None:
+    r = running(tmp_path, stations(two_metres_centre()))
+    try:
+        assert r.app.unavailable == {} and r.app.running() == set()
+        body = {"device": "a", "mhz": 99.5, "language": "de-DE"}
+        status, ask = r.call("POST", "/api/manage/radio/tune", body)
+        assert status == 400 and ask["code"] == "retune", ask
+        assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
+        assert ask["holders"] == [] and ask["center_mhz"] == 99.2
+        assert ask["error"] == (
+            "To hear 99.5 MHz, Receiver A moves to 99.2 MHz, where it no longer hears Two "
+            "metres. It stays in your stations, unavailable until the receiver hears it again."
+        )
+        assert r.app.config.devices[0].center_hz == round(two_metres_centre() * 1e6)
+        assert len(r.app.config.stations) == 2  # nothing was added
+
+        status, st = r.call("POST", "/api/manage/radio/tune", {**body, "retune": True})
+        assert status == 200, st
+        assert st["receiver"] == {"id": "a", "center_mhz": 99.2, "moved": True}
+        assert st["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False}]
+        assert r.app.config.devices[0].center_hz == 99_200_000
+        assert "Receiver A doesn't hear all of Amateur 2 m" in r.app.unavailable["ham2m"]
+        assert r.app.config_errors == {}
+    finally:
+        r.close()
+
+
+def test_a_switched_off_watch_constrains_nothing(tmp_path: Path) -> None:
+    r = running(tmp_path, stations(two_metres_centre()))
+    try:
+        assert r.call("POST", "/api/manage/stations/ham2m", {"disabled": True})[0] == 200
+        body = {"device": "a", "mhz": 99.5, "language": "de-DE"}
+        status, st = r.call("POST", "/api/manage/radio/tune", body)
+        assert status == 200, st
+        assert st["unfit"] == [] and r.app.config.devices[0].center_hz == 99_200_000
+        assert r.app.unavailable["ham2m"] == "switched off on the page"
+        # Back to 2 m from the receivers page: only the station just added is asked about.
+        status, ask = r.call("POST", "/api/manage/receivers/a", {"center_mhz": 145.0})
+        assert status == 400 and ask["unfit"] == [
+            {"id": st["id"], "name": "99.5 MHz", "running": st["id"] in r.app.running()}
+        ]
+    finally:
+        r.close()
+
+
 def test_the_receivers_page_asks_the_same_question(tmp_path: Path) -> None:
     rpt = {"id": "rpt", "name": "Repeater", "device": "a", "mhz": 145.1}
     r = running(tmp_path, stations(two_metres_centre(), rpt), start=["rpt"])
@@ -182,3 +228,92 @@ watch = "2m"
     assert status(found, "page changes") == "ok", found["page changes"]
     assert status(found, "out of reach") == "warn"
     assert "Receiver A doesn't hear all of Amateur 2 m" in found["out of reach"][0].summary
+
+
+# -- adding what a receiver tuned by hand hears -------------------------------------------------
+
+
+def hand_tuned(tmp_path: Path) -> Running:
+    """A receiver ``x`` on 445.85 MHz. Its stations' test audio ends at once: they are held as
+    running from their start until they are stopped, as a live channel would be."""
+    raw = {"defaults": {"language": "fr-FR", "translate_to": ["en"]},
+           "station": [{"id": "s", "stream": "http://example.test/s"}]}  # fmt: skip
+    r = running(tmp_path, raw)
+    r.app.settings.update(lambda d: d.setdefault("radio", {}).update(region="cept"))
+    dongle = {"id": "x", "serial": "SN0042", "center_mhz": 445.85, "gain_db": 30}
+    assert r.call("POST", "/api/manage/receivers", dongle)[0] == 200
+    held: set[str] = set()
+    real = r.app.running
+    r.app.running = lambda: real() | held  # type: ignore[method-assign]
+    r.app.pipeline.add_station = lambda s, asr=None: held.add(s.id)  # type: ignore[method-assign]
+    r.app.pipeline.remove_station = lambda sid, wait=0: held.discard(sid)  # type: ignore[method-assign]
+    return r
+
+
+@pytest.mark.usefixtures("fake_rtl")
+def test_add_from_a_receiver_tuned_by_hand_on_find_is_one_call(tmp_path: Path) -> None:
+    r = hand_tuned(tmp_path)
+    try:
+        st = r.call("POST", "/api/manage/live/x", {"mhz": 99.5, "from": "find"})[1]
+        assert st["open"] and st["center_mhz"] == pytest.approx(99.2)
+        body = {"device": "x", "mhz": 99.5, "language": "fr-FR"}
+        status, added = r.call("POST", "/api/manage/radio/tune", body)
+        assert status == 200, added
+        assert added["running"] is True and added.get("start_error") is None
+        assert added["live_closed"] is True and added["unfit"] == []
+        assert added["receiver"] == {"id": "x", "center_mhz": 99.2, "moved": True}
+        assert not r.app.live.is_open("x")
+        assert r.app.config.get(added["id"]).sdr.freq_hz == 99_500_000
+        assert added["id"] in r.app.running()
+        assert added["id"] in r.app.settings.get("run")["stations"]
+    finally:
+        r.app.live.close_all()
+        r.close()
+
+
+@pytest.mark.usefixtures("fake_rtl")
+def test_add_from_a_receiver_tuned_by_hand_asks_for_stations_it_leaves_out(tmp_path: Path) -> None:
+    r = hand_tuned(tmp_path)
+    try:
+        pmr = {"device": "x", "mhz": 446.00625, "language": "es-ES", "acknowledge": True}
+        walkies = r.call("POST", "/api/manage/radio/tune", pmr)[1]
+        r.call("POST", f"/api/manage/stations/{walkies['id']}/stop")
+        r.call("POST", "/api/manage/live/x", {"mhz": 99.5, "from": "find"})
+        status, held = r.call("POST", f"/api/manage/stations/{walkies['id']}/start")
+        assert status == 400 and held["error"] == (
+            "Receiver X is tuned by hand to 99.5 MHz under Find: let it go there first."
+        )
+
+        body = {"device": "x", "mhz": 99.5, "language": "fr-FR"}
+        status, ask = r.call("POST", "/api/manage/radio/tune", body)
+        assert status == 400 and ask["code"] == "retune"
+        assert ask["unfit"] == [{"id": walkies["id"], "name": walkies["name"], "running": False}]
+        assert r.app.live.is_open("x")  # nothing changed while it asks
+        assert "445.85" not in ask["error"]  # never the centre it was set to before
+
+        status, added = r.call("POST", "/api/manage/radio/tune", {**body, "retune": True})
+        assert status == 200 and added["running"] is True and added["live_closed"] is True
+        assert r.app.unavailable[walkies["id"]].startswith("Receiver X doesn't hear")
+    finally:
+        r.app.live.close_all()
+        r.close()
+
+
+@pytest.mark.usefixtures("fake_rtl")
+def test_keep_it_as_a_station_under_listen_asks_without_letting_go(tmp_path: Path) -> None:
+    r = hand_tuned(tmp_path)
+    try:
+        pmr = {"device": "x", "mhz": 446.00625, "language": "es-ES", "acknowledge": True}
+        r.call("POST", "/api/manage/radio/tune", pmr)
+        r.call("POST", "/api/manage/live/x", {"mhz": 99.5, "from": "listen", "pause": True})
+        status, ask = r.call("POST", "/api/manage/live/x/station",
+                             {"does": "listen", "language": "fr-FR"})  # fmt: skip
+        assert status == 400 and ask["code"] == "retune", ask
+        assert r.app.live.is_open("x")
+        status, added = r.call("POST", "/api/manage/live/x/station",
+                               {"does": "listen", "language": "fr-FR", "retune": True})  # fmt: skip
+        assert status == 200 and added["live_closed"] is True and added["transcribe"] is False
+        wait_for(lambda: not r.app.live.is_open("x"))
+    finally:
+        r.app.live.close_all()
+        r.close()

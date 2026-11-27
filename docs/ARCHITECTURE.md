@@ -640,10 +640,15 @@ device they list). A holder whose parent is this process is one of its own rtl t
 parent's command line names wavescribe is another Wavescribe (`ps`). `lsof` can't see it: libusb
 on macOS goes through IOKit, not a file. Elsewhere than macOS it is always null. Every 15 s, a page FM station still named after its frequency takes its RDS name
 (`adopt_rds_names()`). `tune` makes a page
-station from a frequency: mode from the band plan, the class's acknowledgement, a name from the
-catalogue or the band, and an idle receiver retuned so the frequency fits (250 or 300 kHz off
-its centre, away from DC). Retuning a busy one needs `retune: true` and stops its stations;
-page stations it can no longer hear stay, with their reason.
+station from a frequency and starts it, in one call: mode from the band plan, the class's
+acknowledgement, a name from the catalogue or the band. The receiver stays where it is if it
+hears the frequency there; otherwise `_centre_for` picks a centre that hears the new station and
+every station the receiver has (where the hand tuner has it, else 250 or 300 kHz below the
+frequency, away from DC, else the nearest kHz that keeps them all). With no such centre nothing
+changes and the answer is a 400 with code `retune` (`retune_question`: `unfit`, `holders`,
+`center_mhz`); `retune: true` goes ahead, and `/api/manage/receivers/<id>` asks the same before a
+hand-set centre leaves stations out. A receiver tuned by hand is let go first, and what it paused
+starts again where it is still heard.
 
 **Stations a receiver doesn't hear.** Whether a receiver hears a station is one rule for every
 kind (`config.heard_by`): one of its frequencies inside the window and, for a narrow channel,
@@ -672,8 +677,10 @@ the DC spike, and the receiver's settings are not touched. Stations on that dong
 only when the page sends `pause: true`, and start again when listening ends; a background scan
 takes the dongle back the same way. The privacy classes apply as for stations: utility, private
 and digital need the acknowledgement once per receiver. A receiver nobody polls or listens to
-closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`), listen-only
-or transcribed.
+closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`, as above),
+listen-only or transcribed. A tune may say which view it comes from (`from`: `find` or
+`listen`), so that a station refused because the receiver is tuned by hand says where to let it
+go.
 
 **Watches** (experimental; `dsp/activity.py`, `sources/watch.py`, `radio/watch.py`; not the station
 alerts' `StationWatch`, below). A station whose `SdrTuning` carries a `Watch` (the channels of one

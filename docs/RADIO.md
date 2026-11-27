@@ -38,11 +38,17 @@ Choose a band to read what it is, when it is busy and the antenna it wants. Then
 - **Find stations here** sweeps the band with the receiver chosen under *Receiver*: once for
   broadcast, again and again for a few minutes where channels talk now and then. What it finds
   is listed under the dial, strongest first, and kept under *Heard here*.
-- **Look here with Receiver A** tunes the receiver to the band and shows its spectrum and
-  waterfall live, with what was heard marked by name. Click a signal, or **Listen** in the list,
-  to hear it there; **Add as a station** keeps it. You can also drag a receiver's letter along
-  the dial. A receiver that is following stations asks first, says which would pause, and offers
-  a free receiver instead.
+- **Look here with Receiver A** tunes the receiver by hand to a slice of the band about 2.4 MHz
+  wide (what one receiver hears at once; a wider band takes several looks) and shows that slice's
+  spectrum and waterfall live, with what was heard marked by name. Click a signal, or **Listen**
+  in the list, to hear it there. You can also drag a receiver's letter along the dial. A receiver
+  that is following stations asks first, says which would pause, and offers a free receiver
+  instead.
+- **Add as a station** makes what you are hearing a station that runs all the time, in one step:
+  the receiver is let go from tuning by hand and stays where it hears the new station and the
+  stations it already has, moving if it must; then the station starts. If no place hears them
+  all, nothing changes until you answer: the page names the stations that would be left out
+  (see [Keeping a frequency as a station](#keeping-a-frequency-as-a-station)).
 
 One receiver is live at a time. For a band without it, the page shows the band from the newest
 scan that covered it, with how long ago that was. With nothing found yet, the page offers one
@@ -128,7 +134,8 @@ press a band (FM, airband, marine, amateur, PMR446...) or **Listen** beside anyt
   or every step in view) and stops on the strongest that comes alive, then moves on a moment after
   it goes quiet. **Skip** locks out a channel that is always busy (interference, a beacon).
 - **Keep it as a station** makes what you hear a station that runs all the time: listen-only,
-  transcribed, or transcribed and translated.
+  transcribed, or transcribed and translated. As with Add as a station on Find, the receiver is
+  let go once the station is made, and what it paused starts again where it is still heard.
 
 A frequency the dongle can't hear from where it is tuned moves the dongle, if it is idle. If it
 is running stations, the page asks first and pauses them while you listen; they start again when
@@ -152,10 +159,21 @@ installed model that fits its language, and the shared translator. In a stations
 
 On the page: **Add as a station** beside a scan result or a heard station, or click anywhere on
 the scan's spectrum (the nearest channel of the band there). For a frequency you type, tune it
-under **Listen** → **Tune by hand** and press **Keep it as a station**. The receiver is
-retuned if the frequency is outside what it hears; if it is running other stations, the page asks
-first. An FM station tuned by its frequency alone takes its RDS name once RDS has it. From a
-terminal:
+under **Listen** → **Tune by hand** and press **Keep it as a station**. An FM station tuned by
+its frequency alone takes its RDS name once RDS has it.
+
+**When the receiver has to move.** A receiver stays where it is if it hears the new frequency
+there. If not, it moves to where it hears the new station and every station it already has
+(running ones restart within seconds). If no place hears them all, nothing changes until you
+answer: the page names the stations that would be left out, running or not, and says which
+would stop. A station left out isn't deleted: it stays in your stations, unavailable, with a
+reason that says where to tune the receiver to hear it again. The same question comes from
+Settings → **Receivers** when you change a receiver's centre by hand. A station that is switched
+off is never in the way. A receiver can't hear a station when the frequency is outside the
+2.4 MHz or so it hears, or (narrowband) on its very centre, where every dongle has a spike of its
+own; for a watch, when any channel of its window is outside.
+
+From a terminal:
 
 ```sh
 uv run wavescribe radio tune a 446.00625 --language es-ES --acknowledge
@@ -226,7 +244,8 @@ acknowledge = true
 A watch doesn't hold its receiver where it is. If the receiver is tuned where it doesn't hear
 the whole window, from the stations file or because it was moved on the page later, Wavescribe
 starts as usual and lists the watch as unavailable, with where to centre the receiver (as
-`wavescribe serve` prints and `wavescribe doctor` warns).
+`wavescribe serve` prints and `wavescribe doctor` warns). A move on the page that would leave a
+watch out asks first, as for any station ([When the receiver has to move](#keeping-a-frequency-as-a-station)).
 
 How it works:
 

@@ -331,11 +331,22 @@ class LiveService:
         self._rx: dict[str, LiveReceiver] = {}
         self._paused: dict[str, dict[str, Any]] = {}  # device id -> what was paused for it
         self._acks: dict[str, set[str]] = {}  # device id -> privacy classes acknowledged
+        # device id -> the page view it was last tuned from ("find" or "listen"), when it said
+        self._views: dict[str, str] = {}
         self._lock = threading.RLock()
         self._reaper: threading.Thread | None = None
 
     def is_open(self, device_id: str) -> bool:
         return device_id in self._rx
+
+    def centre(self, device_id: str) -> int | None:
+        """Where the dongle is tuned for its hand-tuned receiver, if one is open."""
+        rx = self._rx.get(device_id)
+        return rx.device.config.center_hz if rx is not None else None
+
+    def paused_ids(self, device_id: str) -> list[str]:
+        """The stations paused while the receiver is tuned by hand, which start again after."""
+        return list((self._paused.get(device_id) or {}).get("stations", []))
 
     def holds(self, device_id: str) -> str | None:
         """Why a station can't start on this dongle now, or None."""
@@ -343,13 +354,24 @@ class LiveService:
         d = self._config(device_id, missing_ok=True)
         if rx is None or d is None or rx.device.config == d:
             return None
-        mhz = mhz_text(rx.tuning.freq_hz / 1e6)
-        return (f"Receiver {receiver_name(device_id)} is tuned by hand under Listen ({mhz} MHz): "
-                "stop listening there first.")  # fmt: skip
+        mhz, name = mhz_text(rx.tuning.freq_hz / 1e6), receiver_name(device_id)
+        view = self._views.get(device_id)
+        if view == "find":
+            return (f"Receiver {name} is tuned by hand to {mhz} MHz under Find: let it go there "
+                    "first.")  # fmt: skip
+        if view == "listen":
+            return (f"Receiver {name} is tuned by hand to {mhz} MHz under Listen: stop listening "
+                    "there first.")  # fmt: skip
+        return (f"Receiver {name} is tuned by hand to {mhz} MHz (under Find or Listen): let it go "
+                "there first.")  # fmt: skip
 
     def tune(self, device_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-        """Open the dongle's live receiver, or retune it."""
+        """Open the dongle's live receiver, or retune it. ``from`` says which page view tunes
+        it ("find" or "listen"), for messages that tell the user where to let it go."""
         d = self._config(device_id)
+        view = raw.get("from")
+        if view not in (None, "find", "listen"):
+            raise LiveError("'from' is the view that tunes the receiver: find or listen.")
         region, _ = self.app.radio.region()
         try:
             freq = frequency_hz(raw.get("mhz"))
@@ -396,6 +418,8 @@ class LiveService:
                     self._open(d, dev_cfg, tuning)
             else:
                 self._move(d, cfg, tuning, bool(raw.get("pause")))
+            if view is not None:
+                self._views[d.id] = view
         self._start_reaper()
         return self.state(d.id)
 
@@ -408,6 +432,7 @@ class LiveService:
             rx = self._rx.pop(device_id, None)
             paused = self._paused.pop(device_id, None)
             self._acks.pop(device_id, None)
+            self._views.pop(device_id, None)
             if rx is None:
                 return paused
             rx.close()
@@ -524,7 +549,9 @@ class LiveService:
         return self.state(device_id)
 
     def make_station(self, device_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-        """Keep what is tuned as a station (listened to, transcribed, or also translated)."""
+        """Keep what is tuned as a station (listened to, transcribed, or also translated), as
+        Find's Add as a station does (``RadioService.tune``): the receiver is let go once the
+        station is made, and stays tuned by hand while the page asks about a retune."""
         rx = self._rx.get(device_id)
         if rx is None:
             raise LiveError(f"Nothing is tuned on receiver {receiver_name(device_id)}.", "closed")
@@ -542,7 +569,6 @@ class LiveService:
             tune["transcribe"] = False
         elif does == "transcribe":
             tune["translate"] = False
-        self.close(device_id)
         return self.app.radio.tune(tune)
 
     # -- internals ------------------------------------------------------------------------
