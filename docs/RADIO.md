@@ -232,10 +232,10 @@ transmissions can be missed (see Limits, below). Each transmission is caught on 
 first syllable, with the channel it was on.
 
 On the page: choose the band on the dial and press **Watch this band with Receiver A**. It asks
-for the confirmation the band's kind of radio needs and names the stations the receiver would
-stop. A receiver that doesn't hear the band is moved where it does, and if that leaves stations
-out the page asks first, as when adding a station. A band wider than one receiver hears is
-refused with a slice that fits, offered as a button. The receiver's line under the dial then
+for the confirmation the band's kind of radio needs. A receiver that hears the band keeps its
+stations running beside the watch; one that doesn't is moved where it does, and if that leaves
+stations out the page asks first, as when adding a station. A band wider than one receiver hears
+is refused with a slice that fits, offered as a button. The receiver's line under the dial then
 says what it watches, and **Stop watching** frees it. What is caught and kept is listed under
 **Caught here**, by frequency, newest first: when, how long, how far above the noise, and
 whether anyone spoke, with the words underneath. Give a frequency a name, tags and a note there,
