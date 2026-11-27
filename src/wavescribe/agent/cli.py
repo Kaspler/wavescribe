@@ -141,7 +141,8 @@ def add_parser(sub: Any) -> None:
     p.add_argument(
         "--speak",
         action="store_true",
-        help="also read it aloud on the Wavescribe machine, in the alerts' voice for the language",
+        help="also read its points aloud on the Wavescribe machine, in the alerts' voice for the "
+        "language; an alert stops it at once",
     )
     p.add_argument("--json", action="store_true", help="the server's answer, as one line of JSON")
     p.set_defaults(func=cmd_digest)

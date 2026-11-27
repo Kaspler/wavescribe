@@ -113,8 +113,9 @@ DIGEST = (
 )
 SPEAK = {
     "type": "boolean",
-    "description": "Also read it aloud on the Wavescribe machine, in the voice its alerts use "
-    "for the language (false). Only when the user asked to hear it: it speaks in their room.",
+    "description": "Also read its points aloud on the Wavescribe machine, in the voice its "
+    "alerts use for the language (false). Only when the user asked to hear it: it speaks in "
+    "their room.",
 }
 NO_ARGUMENTS = {"type": "object", "properties": {}, "additionalProperties": False}
 

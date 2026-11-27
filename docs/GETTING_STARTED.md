@@ -168,8 +168,8 @@ Type in the field at the top (**Search or ask**):
 The answers come only from what your stations said. If they didn't cover something, Ask says
 so rather than guessing, but check the quoted moments before acting on an answer.
 
-**What did I miss?** When you've been away, a digest gives the few things that mattered, the
-most important first, each with the station that said it and the moments it rests on. With
+**What did I miss?** When you've been away, a digest gives a few points the local model picked
+out of what was said, each with the station that said it and the moments it rests on. With
 Wavescribe running, in another Terminal window:
 
 ```sh
@@ -179,7 +179,8 @@ uv run wavescribe digest --now --stations tsf               # what is TSF on abo
 ```
 
 ```
-TSF Rádio Notícias, RTP Antena 1, 14:30-16:00: 512 said, 140 read
+TSF Rádio Notícias, RTP Antena 1, 14:30-16:00
+Written by the local model from 140 of 512 lines heard between 14:30 and 16:00; it can miss things or get them wrong.
 
 ! high 15:12 TSF Rádio Notícias: Water cut tomorrow between nine and one o'clock
 
@@ -191,16 +192,25 @@ TSF Rádio Notícias, RTP Antena 1, 14:30-16:00: 512 said, 140 read
 ```
 
 The local model writes it in the language you ask for (by default, the one your stations are
-translated into) from what was said, leaving out songs, station idents and repeats; *read* is
-how much of it the model read, an even sample when there is more than it can take. Alerts of
-the time come first, as they were announced. It needs the Qwen3.5 model and waits behind live
-translation: an hour of two busy stations takes about a minute, `--now` a few seconds.
-`--speak` also reads it aloud, in the voice your spoken alerts use for that language
-([section 7](#7-get-alerts)).
+translated into) from what was said, leaving out songs, station idents and repeats. When there
+is more than it can take it reads an even sample, and the second line says so ("a sample: 252
+of 259,200 lines"). Alerts of the time come first, in the words they were announced in. A point
+the model gave without the moments it rests on isn't shown.
 
-A digest comes from a small model reading speech recognition, so it can get a name or a number
-wrong: the numbers in brackets are the moments listed under it, worth reading before you act
-on a point.
+With no points, the digest says why in Wavescribe's own words: nothing was said; a station
+keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines
+it read; or the model's reply cited nothing it read. None of these means that nothing happened:
+a digest is no warning, and no all-clear.
+
+It needs the Qwen3.5 model and waits behind live translation: an hour of two busy stations
+takes about a minute, `--now` a few seconds. When two digests are already being made, it is
+refused at once; try again in a minute. `--speak` also reads its points aloud, in the voice
+your spoken alerts use for that language ([section 7](#7-get-alerts)): it opens by saying that
+this is a Wavescribe summary written by the local model, and an alert stops it at once.
+
+A digest comes from a small model reading speech recognition, so it can miss things or get a
+name or a number wrong: the numbers in brackets are the moments listed under it, worth reading
+before you act on a point.
 
 ## 7. Get alerts
 
@@ -261,25 +271,32 @@ Check that notifications and voices work: `uv run wavescribe alerts test`. Spoke
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.
 
-**A digest every hour:** a `[digest]` table in `config/alerts.toml` brings a digest of what was
-said since the last one ([section 6](#6-search-and-ask)) on the hour, as a notification, read
-aloud or both:
+**A digest every hour:** a `[digest]` table in `config/alerts.toml` brings, on the hour, a
+digest of what was said since the one before ([section 6](#6-search-and-ask)), as a quiet
+notification titled "Wavescribe summary", and read aloud too if you like:
 
 ```toml
 [digest]
 every_minutes = 60                # 30 is on the hour and half past; 15, 120 and 180 work too
 stations = ["tsf", "antena1"]     # leave out for every station
 language = "en"                   # default: notify_language
-speak = true                      # in the [speak.en] voice
-notify = true
+speak = true                      # also read its points aloud, in the [speak.en] voice
 quiet_hours = ["22:00", "07:00"]
 ```
 
-When nothing was said there is no digest, and when nothing of substance was, nothing is shown
-or said. A scheduled digest covers only radio that may leave the Mac
+Every digest is shown, whatever became of it: its points, with who wrote them from how much;
+that nothing stood out, or that nothing was said; or why none could be made (the model was
+busy, say: the next one then covers that time too). A quiet notification centre would
+otherwise look like a quiet radio. A digest can miss things or get them wrong: it is no
+warning. It covers only radio that may leave the Mac
 ([section 10](#10-what-wavescribe-keeps-and-why)): nobody chose to hear it at that moment, and
-anyone in the room does. An alert is never held back by a digest: it waits at most for the
-sentence being read, and the digest stops there. Restart Wavescribe after changing the table.
+anyone in the room does.
+
+Read aloud, a digest opens by saying what it is, names the earlier alerts only by time and
+rule, then reads its points; an alert stops it at once. For a language other than English,
+give its `[speak.<lang>]` a `summary` and an `earlier` sentence, as `alerts.example.toml`
+shows. Digests keep to the clock on the days it changes too. Restart Wavescribe after changing
+the table.
 
 **Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
 home-automation system ([FEED.md](FEED.md)).
