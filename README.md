@@ -102,7 +102,7 @@ what is newer and less tried.
   `wavescribe serve`: the live transcript of one station, or of all side by side.
 - [Transcribes speech](docs/MODELS.md#speech-recognition-chain-default-order) in 25 European
   languages with the default model; about 100 with Whisper, a second download.
-- [Skips most music](docs/MODELS.md#speech-vs-music), so songs aren't written down.
+- [Skips most music](docs/MODELS.md#speech-vs-music), so most songs aren't written down.
 - [Plays any station live](docs/GETTING_STARTED.md#5-read-along-listen-translate), and any line
   again from its time.
 - [Text size, light or dark theme](docs/GETTING_STARTED.md#5-read-along-listen-translate) and which
