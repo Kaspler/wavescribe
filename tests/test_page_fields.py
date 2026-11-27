@@ -12,6 +12,8 @@ import pytest
 from tests.test_radio_watch_log import TWO_M, catch, words
 from tests.test_retune import running, stations, two_metres_centre
 from tests.test_store import result
+from wavescribe import admin
+from wavescribe.radio import service
 from wavescribe.radio.bandplan import apply_policies, channel_label
 from wavescribe.radio.watch import WatchError, plan_window
 from wavescribe.segment import Utterance
@@ -247,4 +249,62 @@ def test_other_refusals_of_a_watch_or_a_tune_have_a_code(tmp_path: Path) -> None
             assert status == 400 and err["code"] == code and words in err["error"], (body, err)
         assert [s.id for s in r.app.config.stations] == ["stream", "ham2m", "rpt"]
     finally:
+        r.close()
+
+
+def test_the_radio_view_says_the_country_where_a_region_is_one(tmp_path: Path) -> None:
+    r = running(tmp_path, stations(98.0))
+    try:
+        view = r.call("GET", "/api/manage/radio")[1]
+        assert (view["region"], view["region_source"], view["country"]) == ("cept", "config", None)
+        view = r.call("POST", "/api/manage/radio/region", {"region": "jp"})[1]
+        assert (view["region"], view["country"]) == ("jp", "JP")
+        view = r.call("POST", "/api/manage/radio/region", {"region": "2"})[1]
+        assert (view["region"], view["country"]) == ("2", None)  # the Americas: no one country
+    finally:
+        r.close()
+
+
+def test_each_receiver_says_in_a_word_what_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service.holders, "held_elsewhere", dict)  # never this Mac's dongles
+    r = running(tmp_path, stations(two_metres_centre(), RPT))
+    radio = r.app.radio
+    held: set[str] = set()
+    real = r.app.running
+    r.app.running = lambda: real() | held  # type: ignore[method-assign]
+
+    def code() -> str | None:
+        radio._held = None  # read who holds the dongles afresh
+        [rx] = r.call("GET", "/api/manage/radio")[1]["receivers"]
+        assert rx["serial"] == "SN0042"  # in full here: Settings matches a stick to a letter
+        return rx["busy_code"]
+
+    class ByHand:
+        def is_open(self, device_id: str) -> bool:
+            return device_id == "a"
+
+    try:
+        assert code() is None
+        held.add("rpt")
+        assert code() == "station"
+        held.add("ham2m")
+        assert code() == "watch"
+        held.clear()
+        monkeypatch.setitem(admin._monitors, "a", object())
+        assert code() == "monitor"
+        monkeypatch.delitem(admin._monitors, "a")
+        r.app._live = ByHand()
+        held.add("rpt")
+        assert code() == "live"
+        radio._job = {"device": "a", "phase": "sweep"}
+        assert code() == "scan"
+        r.app._live, radio._job = None, None
+        held.clear()
+        other = {"pid": 1234, "program": "rtl_tcp", "other_wavescribe": False}
+        monkeypatch.setattr(service.holders, "held_elsewhere", lambda: {"SN0042": other})
+        assert code() == "other_program"
+    finally:
+        r.app._live = None
         r.close()

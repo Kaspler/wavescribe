@@ -661,7 +661,12 @@ page sends `pause: true`: they stop for the scan and start again when it ends. D
 that no receiver uses are listed with `rtl_test -d no-such-dongle`, which prints the list and
 opens none. `busy` names what Wavescribe itself holds a receiver for; `held_elsewhere` (on each
 receiver, and on each of those dongles) says when another program holds it: `{pid, program,
-other_wavescribe, reason}`, else null. It comes from macOS's USB registry (`radio/holders.py`:
+other_wavescribe, reason}`, else null. `busy_code` says it in one word for the page, the first
+that applies: `scan`, `live` (the hand tuner), `watch` (a running watch, even beside stations),
+`station`, `monitor` (the antenna test's spectrum monitor), `other_program` (`held_elsewhere`),
+else null. `country` is the ISO 3166 code of the chosen region where that region is one country's
+band plan (`jp` → `"JP"`), else null: the CEPT countries and ITU Regions 1 to 3 are many
+countries, and a region left to the computer's setting is not one chosen. It comes from macOS's USB registry (`radio/holders.py`:
 `ioreg -r -c IOUSBHostDevice -l`, read at most every 3 s, nothing opened): a `UsbExclusiveOwner`
 of `pid N, name` on the dongle or one of its interfaces, or an interface user client's
 `IOUserClientCreator`. Device user clients alone don't count (browsers make one for every USB

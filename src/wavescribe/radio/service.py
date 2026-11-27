@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from wavescribe.app import App
 
 HELD_TTL_S = 3.0  # how long a reading of which programs hold the dongles is reused
+# The country a band plan region is, where it is one (``view``'s ``country``); the others are
+# many countries' (the CEPT countries, ITU Regions 1 to 3).
+REGION_COUNTRY = {"jp": "JP"}
 
 
 class RadioError(Refusal):
@@ -83,14 +86,22 @@ class RadioService:
             if d.id in _monitors:
                 busy.append("the spectrum monitor")
             live = getattr(self.app, "_live", None)
-            if live is not None and live.is_open(d.id):
+            by_hand = live is not None and live.is_open(d.id)
+            if by_hand:
                 busy.append("the live receiver")
             job = self._job
             scanning = bool(job and job["device"] == d.id and job["phase"] not in ("done", "error"))
+            watching = any(s.id in running and s.sdr and s.sdr.watch for s in on)
+            # What holds it, as one word for the page (``busy`` names it; ``view`` adds another
+            # program's hold): a scan or the hand tuner has the dongle to itself, a watch's
+            # receiver is watching even with stations of its own beside it.
+            code = ("scan" if scanning else "live" if by_hand else "watch" if watching
+                    else "station" if any(s.id in running for s in on)
+                    else "monitor" if d.id in _monitors else None)  # fmt: skip
             out.append({
                 "id": d.id, "serial": d.serial, "gain_db": d.gain_db,
                 "center_mhz": d.center_hz / 1e6, "span_mhz": d.sample_rate / 1e6,
-                "busy": busy, "scanning": scanning,
+                "busy": busy, "busy_code": code, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
                               "running": s.id in running, "out_of_reach": s.out_of_reach}
                              for s in on if s.sdr],
@@ -112,9 +123,13 @@ class RadioService:
         return {
             # Not chosen: the list shows the locale's region; the strictest class applies.
             "region": default_region() if region == AUTO else region, "region_source": source,
+            # Regions are band plans, most of them many countries': only Japan's is one country.
+            "country": REGION_COUNTRY.get(region),
             "regions": list(REGIONS),
             "bands": [b.to_dict() for b in region_bands(region)],
-            "receivers": [{**r, "held_elsewhere": held.get(r["serial"])}
+            "receivers": [{**r, "held_elsewhere": held.get(r["serial"]),
+                           "busy_code": r["busy_code"] or (
+                               "other_program" if held.get(r["serial"]) else None)}
                           for r in self.receivers()],
             "spurs": self.catalog.spur_info(),
             "heard": heard,
