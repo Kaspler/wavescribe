@@ -1010,6 +1010,9 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
   .col-empty { padding-left: 0; }
   .col-note { grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; }
   .firstrun { flex-wrap: wrap; padding: var(--s5) var(--s6); }
+  /* The text takes the row and the button goes under it: beside it, a banner that names the
+     stations and the model would be a narrow column of short lines. */
+  .firstrun-text { flex-basis: calc(100% - 16px - var(--s6)); }
   .firstrun .btn { margin-left: calc(16px + var(--s6)); }
   .panel-head { padding: var(--s5) var(--s6) var(--s4); }
   .panel-body { padding: var(--s4) var(--s6) var(--s9); }

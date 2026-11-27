@@ -89,7 +89,7 @@ cd13e6e1e44a731d3c09934f19f40af51a25e138 frontend/src/reading/channels.ts
 ec577ee16ba49abe4ed61b980cd80b2c229a6d56 frontend/src/reading/colNote.ts
 9d57fde0d3be4a9729f1600949b6e294bcaba0d2 frontend/src/reading/digest.ts
 9cb05e074e89362e29959129713c58ce23f76a3d frontend/src/reading/held.ts
-8ed5397c04e7c94058556339dc76bde540ba3619 frontend/src/reading/reading.css
+d7dccf2f1987ff7e6903b4834722e6dc6c4168e9 frontend/src/reading/reading.css
 06f63790b2abf799932d1835103ae44b256ae7d0 frontend/src/reading/rulesNote.ts
 3fab667487fff4632e4fcdefd2b19859fd320de9 frontend/src/reading/strings.ts
 c4e6fb591a2d83f663ef2465067a345bf5a983e3 frontend/src/reading/summaries.ts
