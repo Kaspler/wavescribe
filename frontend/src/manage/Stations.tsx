@@ -1,6 +1,6 @@
 // Stations: what is listened to, in which language, translated into which.
 import { useEffect, useState } from "react";
-import { langName, langNameEn } from "../lib/lang";
+import { langNameEn, sameLang } from "../lib/lang";
 import { Icon } from "../components/Icon";
 import {
   ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LangPicker, LinkButton, Section, Segmented, Select, Tag, act, cx,
@@ -18,7 +18,7 @@ export function Stations() {
   return (
     <>
       <Section id="stations-h" title={`Your stations · ${stations.length}`}
-               description="What each station does: its language, its translations, its place in the list. Start or stop one from the station list under Read. Stations added from the page can be deleted; those from stations.toml can be switched off, and changes to them are kept in config/ui.toml."
+               description="What each station does: its language, its translations, its place in the list. Start or stop one from the station list under Read. Stations added here can be deleted; those from your stations file can be switched off. Changes made here are kept by Wavescribe; your own stations file is never changed."
                actions={<LinkButton variant="primary" icon="plus" href="#/add">Add a station</LinkButton>}>
         {waiting > 0 && (
           <div className="m-note" role="status">
@@ -78,10 +78,10 @@ function StationRow({ s, devices, reload }: { s: Any; devices: string[]; reload:
         {s.origin === "page" ? <Tag tone="accent">added here</Tag> : s.overridden.length > 0 && <Tag tone="accent" title={s.overridden.join(", ")}>changed here</Tag>}
       </div>
       <p className="m-item-sub">
-        {s.language_name || langNameEn(s.language)}
+        {langNameEn(s.language)}
         {s.transcribe === false ? " · listening only, not written down" : (
           <>
-            {" → "}{s.translate !== false && (s.translate_to || []).length ? (s.translate_to || []).map(langNameEn).join(", ") : "not translated"}
+            {intoOthers(s).length ? ` → ${intoOthers(s).map(langNameEn).join(", ")}` : (s.translate_to || []).length ? "" : " · not translated"}
             {" · "}speech {s.asr_model || (s.remote ? "at the source" : "no model installed")}
             {s.translate !== false && translated(s) && s.mt_model ? ` · translation ${s.mt_model}` : ""}
           </>
@@ -259,6 +259,10 @@ export const MODE_HINT: Record<string, string> = {
   translate: "Written down, checked for alerts, and translated as it speaks into the languages below.",
 };
 
+/** The languages a station is translated into, without its own: an English station translated
+ * "into English" just keeps its words. */
+const intoOthers = (s: Any): string[] => (s.translate === false ? [] : (s.translate_to || []).filter((t: string) => !sameLang(t, s.language)));
+
 /** The languages most stations are translated into, the most common first. */
 export function primaryTargets(stations: Any[]): string[] {
   const counts: Record<string, number> = {};
@@ -278,7 +282,7 @@ function Languages({ stations, reload }: { stations: Any[]; reload: () => Promis
       <ul className="m-langs">
         {targets.map((t) => (
           <li key={t}>
-            <span className="m-lang-name">{langName(t)}</span>
+            <span className="m-lang-name">{langNameEn(t)}</span>
             <span className="m-muted num">{count(t)} of {stations.length} stations</span>
             {drop === t ? (
               <span className="confirm">

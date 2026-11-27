@@ -1154,6 +1154,7 @@ function Kept({ v, reload }: { v: Any; reload: () => Promise<void> }) {
                  Defaults
                </ConfirmButton>
              )}>
+      <div className="rd-kept-table">
       <Table caption="What's kept of each kind of radio"
              cols={[{ label: "Kind of radio" }, { label: "Text kept" }, { label: "Audio kept" }, { label: "Leaves this machine" }, { label: "Words in alerts" }]}>
         <tr>
@@ -1175,17 +1176,18 @@ function Kept({ v, reload }: { v: Any; reload: () => Promise<void> }) {
                 </span>
                 <span className="rd-sub">{CLASSES[cls]?.examples}</span>
               </td>
-              <td>
+              <td data-label="Text kept">
                 <Select aria-label={`${label}: text kept`} value={value} options={options}
                         onChange={(e) => set(cls, { text_days: e.target.value === "keep" ? "keep" : +e.target.value })} />
               </td>
-              <td><Switch label={`${label}: keep audio`} hideLabel checked={p.audio} onChange={(on) => set(cls, { audio: on })} /></td>
-              <td><Switch label={`${label}: may leave this machine`} hideLabel checked={p.export} onChange={(on) => set(cls, { export: on })} /></td>
-              <td><Switch label={`${label}: words in alerts`} hideLabel checked={p.quote_in_alerts} onChange={(on) => set(cls, { quote_in_alerts: on })} /></td>
+              <td data-label="Audio kept"><Switch label={`${label}: keep audio`} hideLabel checked={p.audio} onChange={(on) => set(cls, { audio: on })} /></td>
+              <td data-label="Leaves this machine"><Switch label={`${label}: may leave this machine`} hideLabel checked={p.export} onChange={(on) => set(cls, { export: on })} /></td>
+              <td data-label="Words in alerts"><Switch label={`${label}: words in alerts`} hideLabel checked={p.quote_in_alerts} onChange={(on) => set(cls, { quote_in_alerts: on })} /></td>
             </tr>
           );
         })}
       </Table>
+      </div>
       <p className="m-hint">
         Changes apply at once, also to what's already kept: a shorter time removes older text within a minute.
         "Leaves this machine" covers the text feed, webhooks and other Wavescribes following this one. Without

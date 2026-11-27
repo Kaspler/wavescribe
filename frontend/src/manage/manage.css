@@ -486,3 +486,17 @@ tr.is-off td { color: var(--ink-3); }
 .cg-more { margin-top: 8px; font-size: var(--t-sm); }
 .cg-note { margin: var(--s4) 0 0; }
 .m-lang-filter { width: 16ch; flex: none; }
+/* The raw reason under a plain one, for whoever wants it. */
+.m-why { margin-top: 4px; color: var(--ink-2); }
+.m-why summary { cursor: pointer; width: fit-content; }
+.m-why p { margin-top: 4px; font-size: var(--t-sm); overflow-wrap: anywhere; }
+/* On a phone each kind of radio is a short list of its settings, named, rather than five columns. */
+@media (max-width: 719px) {
+  .rd-kept-table thead { display: none; }
+  .rd-kept-table table, .rd-kept-table tbody, .rd-kept-table tr, .rd-kept-table td { display: block; width: auto; }
+  .rd-kept-table tr { padding: var(--s3) 0; border-bottom: 1px solid var(--rule); }
+  .rd-kept-table td { padding: 4px 0; border: 0; }
+  .rd-kept-table td[data-label] { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .rd-kept-table td[data-label]::before { content: attr(data-label); color: var(--ink-2); font-size: var(--t-sm); white-space: nowrap; }
+  .rd-kept-table td[data-label] .select { flex: 0 1 auto; min-width: 0; }
+}

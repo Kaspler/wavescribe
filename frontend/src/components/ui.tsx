@@ -133,14 +133,18 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...rest }, ref) {
   return <textarea ref={ref} className={cx("input", "textarea", className)} {...rest} />;
 });
-export function Select({ options, className, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { options: (string | [string, string])[] }) {
+type Option = string | [string, string];
+const optionOf = (o: Option) => {
+  const [v, l] = Array.isArray(o) ? o : [o, o];
+  return <option key={v} value={v}>{l}</option>;
+};
+/** `groups`: further options under a heading each, after the plain ones. */
+export function Select({ options, groups = [], className, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { options: Option[]; groups?: [string, Option[]][] }) {
   return (
     <span className={cx("select", className)}>
       <select {...rest}>
-        {options.map((o) => {
-          const [v, l] = Array.isArray(o) ? o : [o, o];
-          return <option key={v} value={v}>{l}</option>;
-        })}
+        {options.map(optionOf)}
+        {groups.filter(([, opts]) => opts.length).map(([label, opts]) => <optgroup key={label} label={label}>{opts.map(optionOf)}</optgroup>)}
       </select>
       <Icon name="down" size={14} />
     </span>

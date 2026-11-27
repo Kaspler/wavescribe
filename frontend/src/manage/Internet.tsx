@@ -1,7 +1,7 @@
 // Find stations, On the internet: the station directory and a stream's own address, with a
 // playlist and another Wavescribe as the rarer ways in. Each opens the same form for the new station.
 import { useEffect, useRef, useState } from "react";
-import { langName } from "../lib/lang";
+import { langNameEn } from "../lib/lang";
 import { day } from "../lib/time";
 import { ActButton, Advanced, Button, Check, Field, Input, LangChips, LangPicker, Section, Segmented, Table, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
@@ -123,19 +123,32 @@ function UrlMode({ use }: { use: (url: string, extra?: Any) => void }) {
       return;
     }
     const p = r.probe;
-    if (!p.ok) { setRes(<p className="m-trouble">Not a playable stream: {p.error}</p>); return; }
+    if (!p.ok) {
+      setRes(
+        <div className="m-trouble">
+          <p>Couldn't play this address. Check it's a stream link (often ending .mp3, .aac or .m3u8), or search the directory instead.</p>
+          {p.error && (
+            <details className="m-why">
+              <summary>Details</summary>
+              <p className="mono">{p.error}</p>
+            </details>
+          )}
+        </div>,
+      );
+      return;
+    }
     const d = r.detected || {};
     setRes(
       <>
         <p className="m-line">
           <Tag tone="good">plays</Tag> {p.codec || "audio"}{p.bitrate_kbps ? ` ${p.bitrate_kbps} kbit/s` : ""}{p.title ? ` · “${p.title}”` : ""}
-          {d.language ? ` · sounds like ${d.language_name || d.language}` : ""}{d.music_skipped_s ? ` (ignoring ${Math.round(d.music_skipped_s)} s of music)` : ""}
+          {d.language ? ` · sounds like ${langNameEn(d.language)}` : ""}{d.music_skipped_s ? ` (ignoring ${Math.round(d.music_skipped_s)} s of music)` : ""}
           {d.error ? ` · ${d.error}` : ""}
         </p>
         {d.text && <p className="m-hint">Heard: {d.text}</p>}
       </>,
     );
-    use(url.trim(), { name: p.title, hls: p.is_hls, language: d.language, detected: d.language_name });
+    use(url.trim(), { name: p.title, hls: p.is_hls, language: d.language, detected: d.language ? langNameEn(d.language) : undefined });
   };
   return (
     <>
@@ -267,7 +280,7 @@ function RemoteMode({ setPre }: { setPre: (p: Pre) => void }) {
           <Table caption="Its stations" cols={[{ label: "Station" }, { label: "Language" }, { label: "Running" }, { label: "", width: "1%" }]}>
             {r.stations.map((st: Any) => (
               <tr key={st.id}>
-                <td dir="auto">{st.name}</td><td>{langName(st.language)}</td><td>{st.running ? "yes" : "no"}</td>
+                <td dir="auto">{st.name}</td><td>{langNameEn(st.language)}</td><td>{st.running ? "yes" : "no"}</td>
                 <td>
                   <Button size="sm" onClick={() => setPre({
                     name: `${st.name} (${r.node.name})`, language: st.language, translate_to: st.translate_to,

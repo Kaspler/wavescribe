@@ -1,7 +1,7 @@
 // Alerts: the rules that listen for what matters, and what happens when one fires.
 import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
-import { langName, langNameEn } from "../lib/lang";
+import { langNameEn } from "../lib/lang";
 import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangPicker, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
@@ -39,7 +39,7 @@ function RulesPage() {
   return (
     <>
       <Section id="al-rules" title="Rules"
-               description={`From ${v.file || "this page only"} and this page. Words to listen for match in each station's own language. A situation described in your words is checked by the model against what each station said, about every 45 s.`}
+               description={`${v.file ? `From ${v.file.split(/[\\/]/).pop()} and this page.` : "Made on this page."} Words to listen for match in each station's own language. A situation described in your words is checked by the model against what each station said, about every 45 s.`}
                actions={<>
                  <Button icon="plus" onClick={() => setEditing({ kind: "keyword" })}>Words to listen for</Button>
                  <Button icon="plus" onClick={() => setEditing({ kind: "llm" })}>Describe it in your words</Button>
@@ -78,6 +78,14 @@ function SevMark({ sev }: { sev: string }) {
 const listsFor = (packs: Any, topic: string) => Object.keys(packs || {}).filter((l) => packs[l].topics?.[topic]);
 
 /** "5 minutes", "30 seconds": how long a silence rule waits. */
+/** macOS's sound-effect voices (singing, bells, robots): offered last, as they don't suit an
+ * alert read aloud. */
+const NOVELTY = new Set(["Albert", "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Good News", "Jester",
+  "Organ", "Superstar", "Trinoids", "Whisper", "Wobble", "Zarvox"]);
+
+/** A rule's id as words: "ring-road" → "Ring road", as the alerts list names it. */
+const ruleTitle = (id: string) => id.replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
+
 const span = (min: number) => (min < 1 ? `${Math.round(min * 60)} seconds` : min === 1 ? "1 minute" : `${+min.toFixed(1)} minutes`);
 
 /** The kinds of rule this page writes, in its own words; a rule of another kind is listed as it
@@ -106,7 +114,7 @@ function RuleRow({ r, packs, redraw, onEdit }: { r: Any; packs: Any; redraw: (v:
   return (
     <li className={`m-item${r.enabled ? "" : " is-off"}`}>
       <div className="m-item-head">
-        <Switch checked={r.enabled} label={`Rule ${r.id}`} hideLabel
+        <Switch checked={r.enabled} label={ruleTitle(r.id)} hideLabel
                 onChange={(on) => act(async () => redraw(await post(`/rules/${r.id}/enable`, { on })), on ? "Rule on" : "Rule off")} />
         <strong className="mono">{r.id}</strong>
         <SevMark sev={r.severity} />
@@ -248,7 +256,7 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
               <p className="field-hint">The model proposes how broadcasters say it in each station's language. Check them before saving; matching itself never translates.</p>
             </div>
             {langs.map((l) => (
-              <Field key={l} id={`ru-t-${l}`} label={`In ${langName(l)}`} hint="As the radio says it, one per line.">
+              <Field key={l} id={`ru-t-${l}`} label={`In ${langNameEn(l)}`} hint="As the radio says it, one per line.">
                 <Textarea id={`ru-t-${l}`} rows={3} lang={l} value={terms[l] || ""} placeholder="One word or phrase per line"
                           onChange={(e) => setTerms({ ...terms, [l]: e.target.value })} />
               </Field>
@@ -355,9 +363,11 @@ function Delivery({ v, reload }: { v: Any; reload: () => Promise<void> }) {
     await post("/alerts/settings", { delivery: { notify_language: notifyLang.trim(), translation_wait_s: +wait, cooldown_minutes: +cool }, actions: matrix, speak });
     await reload();
   };
+  const plain = inst.filter((x) => !NOVELTY.has(x)), odd = inst.filter((x) => NOVELTY.has(x));
   const voiceInput = (value: string, onChange: (v: string) => void, name: string) =>
     inst.length ? (
-      <Select value={value} aria-label={name} onChange={(e) => onChange(e.target.value)} options={["", ...(inst.includes(value) || !value ? inst : [value, ...inst])]} />
+      <Select value={value} aria-label={name} onChange={(e) => onChange(e.target.value)}
+              options={["", ...(inst.includes(value) || !value ? [] : [value]), ...plain]} groups={[["More voices", odd]]} />
     ) : (
       <Input value={value} aria-label={name} placeholder="Voice name" onChange={(e) => onChange(e.target.value)} />
     );
@@ -395,7 +405,7 @@ function Delivery({ v, reload }: { v: Any; reload: () => Promise<void> }) {
         <Table caption="Voices" cols={[{ label: "Language", width: "18%" }, { label: "Voice", width: "160px" }, { label: "Intro", width: "28%" }, { label: "Fallback phrase" }]}>
           {voices.map((l) => (
             <tr key={l}>
-              <td>{langName(l)}</td>
+              <td>{langNameEn(l)}</td>
               <td>{voiceInput(cur(l).voice, (x) => setVc({ ...vc, [l]: { ...cur(l), voice: x } }), `Voice for ${langNameEn(l)}`)}</td>
               <td><Input value={cur(l).intro || ""} lang={l} aria-label={`Intro in ${langNameEn(l)}`} onChange={(e) => setVc({ ...vc, [l]: { ...cur(l), intro: e.target.value } })} /></td>
               <td><Input value={cur(l).fallback || ""} lang={l} aria-label={`Fallback in ${langNameEn(l)}`} className="m-grow" onChange={(e) => setVc({ ...vc, [l]: { ...cur(l), fallback: e.target.value } })} /></td>
