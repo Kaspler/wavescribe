@@ -18,7 +18,8 @@ TIME_OF_DAY = re.compile(r"(\d{1,2}):(\d{2})")
 
 def since(text: str, *, now: datetime | None = None) -> float:
     """``--since``: seconds since 1970, or a time of day, today or, when that is still to come,
-    yesterday."""
+    yesterday (at 00:15, 23:30 is three quarters of an hour ago; at 02:43, 02:50 is nearly a
+    day ago, and the digest's first line says "yesterday")."""
     try:
         return float(text)
     except ValueError:
@@ -47,15 +48,23 @@ def body(args: argparse.Namespace) -> dict[str, Any]:
     return out
 
 
+def span(window: Mapping[str, Any]) -> str:
+    """A digest's window as its first line shows it: "14:30-16:00", or "yesterday 02:50 to
+    today 02:43" when it starts the day before (a time of day still to come, given to
+    ``--since``, is yesterday's)."""
+    start, end = (datetime.fromtimestamp(window[k]) for k in ("since", "until"))
+    if start.date() == end.date():
+        return f"{start:%H:%M}-{end:%H:%M}"
+    return f"yesterday {start:%H:%M} to today {end:%H:%M}"
+
+
 def render(out: Mapping[str, Any]) -> str:
     """A digest for a terminal: what it covers and who wrote it from how much, the alerts of the
     window, the points, then the moments they rest on."""
     names = out.get("names") or {}
     shown = ", ".join(names.get(s, s) for s in out["stations"])
-    window = out["window"]
-    span = f"{local_time(window['since'], '%H:%M')}-{local_time(window['until'], '%H:%M')}"
     head = f"Now on {shown}" if out["kind"] == "now" else shown
-    lines = [f"{head}, {span}", *([out["notice"]] if out.get("notice") else [])]
+    lines = [f"{head}, {span(out['window'])}", *([out["notice"]] if out.get("notice") else [])]
     if out["outcome"] == "points" and out["unread"]:
         unread = ", ".join(f"{names.get(s, s)} ({why})" for s, why in out["unread"].items())
         lines.append(f"Not read: {unread}.")

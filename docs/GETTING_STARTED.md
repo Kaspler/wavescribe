@@ -199,12 +199,17 @@ The local model writes it in the language you ask for (by default, the one your 
 translated into) from what was said, leaving out songs, station idents and repeats. When there
 is more than it can take it reads an even sample, and the second line says so ("a sample: 252
 of 259,200 lines"). The alerts announced in that time (notified or spoken, not only logged)
-come first, each once, in the words they were announced in. A point the model gave without the moments it rests on isn't shown, nor one
-that shares no word with the moments it cites (a cheap check: it catches a point that cites
-another story, not one that gets a detail wrong). A point shows three of its moments at most,
-those that share words with it first, spread over all it cited. A watch
-([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a digest only when
-you name it with `--stations`: its lines are short, from many speakers on many channels.
+come first, each once, in the words they were announced in. A point the model gave without the
+moments it rests on isn't shown, nor one that shares no word with the moments it cites (a cheap
+check: it catches a point that cites another story, not one that gets a detail wrong). A point
+shows three of its moments at most, those that share words with it first, spread over all it
+cited. A watch ([RADIO.md](RADIO.md), *Catching radio that only talks now and then*) is in a
+digest only when you name it with `--stations`: its lines are short, from many speakers on many
+channels.
+
+`--since` takes a time of day, today's, or yesterday's when it is still to come: at 00:15,
+`--since 23:30` is the last three quarters of an hour, and at 02:43, `--since 02:50` is nearly a
+day. The first line then says so: "yesterday 02:50 to today 02:43".
 
 With no points, the digest says why in Wavescribe's own words: nothing was said; a station
 keeps no text (walkie-talkies, digital voice) or isn't running; nothing stood out in the lines

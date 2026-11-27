@@ -24,7 +24,7 @@ from tests.test_digest_web import Serving
 from wavescribe.agent.mcp import NOT_A_WARNING
 from wavescribe.alerts import Alert
 from wavescribe.cli import main
-from wavescribe.digest.cli import since
+from wavescribe.digest.cli import render, since
 
 
 def test_since_takes_a_time_of_day_or_seconds() -> None:
@@ -35,6 +35,28 @@ def test_since_takes_a_time_of_day_or_seconds() -> None:
     for bad in ("9pm", "24:00", "21:75"):
         with pytest.raises(argparse.ArgumentTypeError, match="like 21:30"):
             since(bad, now=evening)
+
+
+def test_a_time_still_to_come_is_yesterdays_and_the_digest_says_so() -> None:
+    early = datetime(2026, 3, 4, 2, 43)
+    start = since("02:50", now=early)
+    assert start == datetime(2026, 3, 3, 2, 50).timestamp()
+    out = {
+        "kind": "digest",
+        "stations": ["rfi"],
+        "names": {"rfi": "RFI Monde"},
+        "window": {"since": start, "until": early.timestamp(), "minutes": 1433.0},
+        "language": "en",
+        "notice": None,
+        "outcome": "not_read",
+        "unread": {"rfi": "isn't running"},
+        "alerts": [],
+        "text": "Not read: RFI Monde (isn't running).",
+        "sources": [],
+    }
+    assert render(out).splitlines()[0] == "RFI Monde, yesterday 02:50 to today 02:43"
+    out["window"]["since"] = datetime(2026, 3, 4, 1, 43).timestamp()
+    assert render(out).splitlines()[0] == "RFI Monde, 01:43-02:43"
 
 
 def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -> None:
