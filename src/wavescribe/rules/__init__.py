@@ -37,7 +37,7 @@ SEVERITIES = ("low", "medium", "high", "critical")
 MAX_REGEX_CHARS = 200
 MAX_REGEXES = 20  # per rule
 REGEX_TEXT_CHARS = 2000  # more than any utterance the ASR checks keep (35 chars/s, ~30 s)
-SLOW_REGEX_MS = 50  # a pattern this slow on one utterance is named in the log, once
+SLOW_REGEX_MS = 50  # a pattern taking this much CPU on one utterance is named in the log, once
 STATION_KINDS = ("silence", "traffic")  # rules about a station, not about what it says
 
 
@@ -353,11 +353,14 @@ class RuleSet:
         return hits
 
     def _search(self, rule_id: str, pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
-        """Spans where a rule's regex matches one utterance (its first REGEX_TEXT_CHARS)."""
-        t0 = time.perf_counter()
+        """Spans where a rule's regex matches one utterance (its first REGEX_TEXT_CHARS).
+
+        Its cost is the CPU time this thread spent matching: on a loaded machine the clock
+        also counts the time it waited for a CPU, which named ordinary patterns as slow."""
+        t0 = time.thread_time()
         matches = pattern.finditer(text, 0, REGEX_TEXT_CHARS)
         found = [m.span() for m in matches if m.end() > m.start()]  # zero-width says nothing
-        ms = (time.perf_counter() - t0) * 1000
+        ms = (time.thread_time() - t0) * 1000
         if ms > SLOW_REGEX_MS and (rule_id, pattern.pattern) not in self._slow:
             self._slow.add((rule_id, pattern.pattern))
             log.warning("rule %s: regex %r took %.0f ms on one utterance; it runs on every "

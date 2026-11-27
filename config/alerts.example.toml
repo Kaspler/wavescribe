@@ -107,10 +107,11 @@ severity = "low"
 # so backslashes stay as they are. \b is the edge of a word; scripts written without spaces
 # (Chinese, Japanese, Thai) have none, so leave it out for them. Refused at load: invalid
 # patterns, over 200 characters, and repeats inside repeats such as (a+)+.
-# Here: a motorway named by its number, then closed, within a few words ("A1 cortada").
+# Here: a motorway named by its number, then closed, a few words later in the same sentence
+# ("A1 cortada"). [^.]{0,30}? looks at most 30 characters ahead and stops at a full stop.
 [[rule]]
 id = "motorway-closed"
-regex = ['\bA\s?\d{1,2}\b.{0,30}\b(cortada|fechada|encerrada)\b']
+regex = ['\bA ?\d{1,2}\b[^.]{0,30}?\b(?:cortada|fechada|encerrada)\b']
 severity = "low"
 
 # A station gone silent: no audio (its stream or receiver is down or reconnecting), or only dead

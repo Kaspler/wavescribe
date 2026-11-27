@@ -143,6 +143,7 @@ def test_tracked_examples_load_and_match(tmp_path: Path) -> None:
     [hit] = config.rules.evaluate(text, "pt-PT")
     assert (hit.rule_id, hit.severity) == ("motorway-closed", "low")
     assert hit.terms == ["A1 continua cortada"]
+    assert config.rules.evaluate("A A1 está aberta. A ponte foi cortada.", "pt-PT") == []
     assert config.languages_for("critical", "pt-PT") == ["en"]
     assert config.languages_for("low", "pt-PT") == []
     [silent] = config.rules.station_rules
@@ -216,6 +217,54 @@ def test_regex_rules_keep_to_their_stations_and_one_utterance(tmp_path: Path) ->
     assert rules.evaluate("Sturm über Hamburg", "de-DE", station="b")
     late = "x" * REGEX_TEXT_CHARS + " Sturm"
     assert rules.evaluate(late, "de-DE", station="b") == []  # only an utterance's worth is read
+
+
+class Working:
+    """A regex that spends ``cpu_s`` matching after waiting ``wait_s``, as a thread waits for
+    the CPU on a loaded machine: time passes on the clock while it does nothing."""
+
+    pattern = "slow"
+
+    def __init__(self, *, cpu_s: float = 0.0, wait_s: float = 0.0) -> None:
+        self.cpu_s, self.wait_s = cpu_s, wait_s
+
+    def finditer(self, text: str, pos: int, endpos: int):
+        import time
+
+        time.sleep(self.wait_s)
+        end = time.thread_time() + self.cpu_s
+        while time.thread_time() < end:
+            pass
+        return iter(())
+
+
+def test_a_regex_is_named_as_slow_for_the_cpu_it_takes_not_for_waiting(tmp_path, caplog):
+    # Seen in testing: the example regex was named as slow (139 ms) on a loaded machine. Its
+    # thread was waiting for the CPU; matching took a few microseconds.
+    rules = regex_rules(tmp_path, "x")
+    with caplog.at_level("WARNING", logger="wavescribe.rules"):
+        rules._search("roads", Working(wait_s=0.2), "A1 cortada")
+        assert caplog.records == []
+        rules._search("roads", Working(cpu_s=0.08), "A1 cortada")
+    [warning] = caplog.records
+    assert "rule roads: regex 'slow' took" in warning.getMessage()
+
+
+def test_the_example_regexes_cost_next_to_nothing(tmp_path: Path) -> None:
+    import time
+
+    from wavescribe.rules import REGEX_TEXT_CHARS, SLOW_REGEX_MS
+
+    alerts = load_alerts(Path("config/alerts.example.toml"), keywords_dir=pack(tmp_path))
+    patterns = [p for r in alerts.rules.rules for p in r.regex]
+    assert patterns
+    # Long utterances that nearly match all along: motorway names, no closure word after them.
+    near = ("Na A1, na A 25 e na A3 o trânsito segue. " * 40)[:REGEX_TEXT_CHARS]
+    for pattern in patterns:
+        t0 = time.thread_time()
+        for _ in range(10):
+            list(pattern.finditer(near, 0, REGEX_TEXT_CHARS))
+        assert (time.thread_time() - t0) / 10 * 1000 < SLOW_REGEX_MS / 50, pattern.pattern
 
 
 @pytest.mark.parametrize(

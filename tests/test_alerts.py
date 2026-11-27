@@ -626,6 +626,16 @@ def test_a_story_that_goes_on_is_recalled_now_and_then_and_never_spoken(tmp_path
     assert pushed == ["new"] and [c[0] for c in actions.calls] == ["notify", "speak"]
 
 
+def test_an_alert_is_logged_as_information_not_as_a_warning(tmp_path: Path, caplog) -> None:
+    # An alert is Wavescribe working as meant; warnings are for what needs fixing.
+    alerter, _, clock, _, pushed, _ = quiet(tmp_path, remind=30)
+    with caplog.at_level("INFO", logger="wavescribe.alerts"):
+        mention_every(alerter, clock, 10 * 60, 40 * 60)  # announced, then a reminder
+    assert pushed == ["new", "reminder"]
+    logged = [r for r in caplog.records if r.getMessage() == "alert"]
+    assert [r.levelname for r in logged] == ["INFO", "INFO"]
+
+
 def test_an_escalation_is_announced_and_marked_so(tmp_path: Path) -> None:
     alerter, actions, clock, seen, pushed, _ = quiet(tmp_path)
     mention_every(alerter, clock, 60, 120)

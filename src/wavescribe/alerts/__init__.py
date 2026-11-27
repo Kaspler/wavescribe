@@ -842,7 +842,7 @@ class Alerter:
                 elif kind == "log":
                     # The log is kept longer than such radio's text: its words stay out.
                     words = "(not logged: kept only for days)" if alert.short_lived else text
-                    event(log, "alert", level=logging.WARNING, alert=alert.id,
+                    event(log, "alert", alert=alert.id,
                           rule=alert.rule_id, severity=severity,
                           covers=",".join(covers), stations=",".join(alert.station_ids),
                           text=words[:200])  # fmt: skip
@@ -912,7 +912,7 @@ class Alerter:
                     self.actions.notify(title, body)
                 elif action == "log":
                     words = "(not logged: kept only for days)" if alert.short_lived else said
-                    event(log, "alert", level=logging.WARNING, alert=alert.id,
+                    event(log, "alert", alert=alert.id,
                           rule=alert.rule_id, severity=severity, change="reminder",
                           mentions=alert.mentions, stations=",".join(alert.station_ids),
                           text=words[:200])  # fmt: skip
