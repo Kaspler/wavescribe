@@ -158,7 +158,7 @@ def test_what_each_class_may_do() -> None:
 def test_out_of_range_frequencies_say_which_way() -> None:
     from wavescribe.dsp import check_tunable
 
-    with pytest.raises(ValueError, match="medium wave and shortwave aren't supported yet"):
+    with pytest.raises(ValueError, match="medium wave and shortwave aren't received"):
         check_tunable(1_000_000)
     with pytest.raises(ValueError, match="1766 MHz, no higher") as above:
         check_tunable(2_400_000_000)
@@ -170,7 +170,7 @@ def test_out_of_range_frequencies_say_which_way() -> None:
     [
         ("1e303", "the receiver tunes 24 to 1766 MHz, no higher"),  # was an OverflowError
         ("9999", "the receiver tunes 24 to 1766 MHz, no higher"),
-        ("5", "the receiver tunes 24 to 1766 MHz; medium wave and shortwave aren't supported yet"),
+        ("5", "the receiver tunes 24 to 1766 MHz; medium wave and shortwave aren't received"),
         ("99999", "99999 looks like kHz; frequencies are in MHz: 99.999"),
         ("x", "'x' isn't one: give a frequency in MHz, e.g. 99.5 or 446.00625"),
     ],

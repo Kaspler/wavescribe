@@ -178,7 +178,7 @@ def fit_range(start_hz: float, stop_hz: float) -> tuple[int, int, str]:
     asked, not a clamped one, which could read "24 to 1.611 MHz"."""
     lo, hi = SWEEP_LIMITS_HZ
     asked = f"{_mhz(start_hz)} to {_mhz(stop_hz)} MHz"
-    below = f"below {_mhz(lo)} MHz isn't supported yet"
+    below = f"below {_mhz(lo)} MHz isn't received"
     above = f"above {_mhz(hi)} MHz is out of the tuner's reach"
     if start_hz >= stop_hz:
         raise ScanError(f"scan {asked}: give the lower frequency first")

@@ -107,7 +107,8 @@ In place:
   (`check --base <rev>`), so a commit made without the hook is caught there.
 - **Third-party telemetry off:** `HF_HUB_DISABLE_TELEMETRY=1` in every process.
 
-Planned: SPDX headers in the page's sources.
+Not in place: the page's sources (`frontend/`) carry no SPDX headers. The repository's
+`LICENSE` covers them.
 
 ## Findings that changed the design
 
@@ -300,10 +301,10 @@ Font License 1.1); outlines carry no font software, so no font is bundled.
 
 - The inaSpeechSegmenter weights have no explicit licence.
 - Some older Argos packages have no licence.
-- OpenMDW-1.1 isn't on the SPDX list yet.
+- OpenMDW-1.1 isn't on the SPDX list.
 - How well Nemotron 3.5, Omnilingual ASR and Canary run on Apple Silicon is unverified.
 - The FFmpeg licence inside PyAV wheels is unchecked.
-- The macOS 27 licence wording should be re-checked against the Tahoe text quoted here.
+- The macOS 27 licence wording wasn't compared with the Tahoe text quoted here.
 
 ## Key sources
 

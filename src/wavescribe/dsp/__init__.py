@@ -59,7 +59,7 @@ def check_tunable(hz: float) -> None:
     """ValueError unless an RTL-SDR's tuner reaches ``hz``."""
     lo, hi = TUNER_RANGE_HZ
     if not lo <= hz <= hi:
-        below = "; medium wave and shortwave aren't supported yet" if hz < lo else ", no higher"
+        below = "; medium wave and shortwave aren't received" if hz < lo else ", no higher"
         raise ValueError(f"the receiver tunes {lo / 1e6:g} to {hi / 1e6:g} MHz{below}")
 
 

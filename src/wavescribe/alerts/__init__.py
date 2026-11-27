@@ -6,7 +6,8 @@ Translation is only for the people reading or hearing the alert: delivery asks f
 the station backlog and waits at most ``translation_wait_s``, then goes out with whatever it has.
 A translation that comes back in the wrong language is discarded, and a spoken alert without a
 checked translation says the language's fixed fallback phrase instead, so nothing invented is
-ever spoken and no alert is silent.
+ever spoken and a voice always has words to say (one that isn't installed speaks nothing: its
+action fails, and the delivery is marked partial or failed).
 
 Alert fatigue: an alert is one incident. Repeats of its rule (on any station) fold into it as
 mentions and are not announced again, unless the severity rises; once nobody has mentioned it for

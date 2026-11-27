@@ -280,6 +280,9 @@ alert. Both are in [FEED.md](FEED.md). `follow` and the MCP tools use the same r
 - Control requests carry the same header the page sends, which a form on another website
   can't send.
 
-## What's next
+## Limits
 
-These tools are a first, experimental step; a fuller API is planned.
+These tools are experimental: their names, arguments and results can change from one version
+to the next. They, the feed ([FEED.md](FEED.md)) and the commands' `--json` output are what
+other programs can use. The routes behind the page's controls (`/api/manage/…`) have no
+reference: they change with the page.

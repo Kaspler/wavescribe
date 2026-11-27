@@ -264,7 +264,7 @@ check that an approved dongle reconnects with no prompt after a replug or a rebo
    identifies itself as an R820T) and `RTL-SDR Blog V4 Lite Detected`. `-t` is a benchmark for an
    older tuner, so it ends with `No E4000 tuner found, aborting.`: that's expected.
 
-   SoapySDR (`brew install soapysdr soapyrtlsdr`) can wait. Homebrew builds its Python bindings
+   SoapySDR (`brew install soapysdr soapyrtlsdr`) isn't needed. Homebrew builds its Python bindings
    for Homebrew's own Python, not for Wavescribe's 3.12 environment, so using it means building
    the bindings yourself. Wavescribe uses an `rtl_sdr` pipe instead: it needs nothing but
    librtlsdr, and a subprocess is the cleanest licence boundary (librtlsdr is GPL).

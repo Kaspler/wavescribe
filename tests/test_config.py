@@ -24,8 +24,17 @@ def test_example_config_loads() -> None:
     assert antena1.priority == 1
     assert antena1.stream and antena1.stream.startswith("https://")
     assert antena1.fm_mhz == (99.0,)
-    assert antena1.mw_khz == 666.0
     assert {s.id for s in cfg.stations} >= {"antena1", "tsf"}
+
+
+def test_a_medium_wave_frequency_is_still_read_from_files_that_have_one() -> None:
+    """``mw_khz`` isn't in the example any more (medium wave isn't received, so it does
+    nothing), but a stations file written from the old example still loads."""
+    station = {"id": "a", "language": "es-ES", "stream": "https://example.org/a.mp3"}
+    cfg = parse_stations({"station": [{**station, "mw_khz": 585}]}, P)
+    assert cfg.get("a").mw_khz == 585.0 and cfg.get("a").sdr is None
+    with pytest.raises(ConfigError, match="'mw_khz' must be a frequency in kHz"):
+        parse_stations({"station": [{**station, "mw_khz": "585 kHz"}]}, P)
 
 
 def test_station_overrides_defaults() -> None:

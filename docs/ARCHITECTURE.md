@@ -1064,8 +1064,8 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   announces it. One whose actions ran but reached nobody (every notify and speak failed: a
   notification that times out, a voice that isn't installed) is tried again at a mention 5
   minutes later, then 10, 20, 40 and 60, as `change: update`, without sending its webhooks
-  again. Until 0.1.0a1 it was tried at every mention: in testing, notifications that timed out
-  announced one story 19 times in ten minutes, webhooks included.
+  again. Tried at every mention, as it first was, notifications that timed out announced one
+  story 19 times in ten minutes in testing, webhooks included.
 - **Delivery:** the severity's actions come from `[actions]` in `config/alerts.toml`. Translations
   for the notification language and each `speak:<lang>` are requested ahead of the station
   backlog (`Pipeline.request_translation`, queue priority 0), and delivery waits at most
@@ -1074,8 +1074,11 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   inventing content for in `unsafe_targets` (MADLAD: `uk`), and those are never requested. A
   spoken alert says `intro` plus the checked translation (or the words as said, when they are in
   the voice's language), or the language's fixed `fallback` phrase, so nothing unchecked is
-  spoken and no alert is silent. The voice must be installed
-  (`say -v Unknown` silently uses the default voice, which would read Ukrainian in English).
+  spoken and a voice always has words to say. The voice must be installed
+  (`say -v Unknown` silently uses the default voice, which would read one language as
+  another): with a voice that isn't, that `speak` action fails, nothing is spoken in that
+  language, and the alert shows as partly delivered, or as failed when nothing else reached
+  anyone (a warning at start, `alerts test` and `doctor` name the missing voice).
   Actions run one at a time on one thread, so speech never overlaps. Once an alert is above
   low, its quote is also translated into its stations' `alert_languages` (`stations.toml`),
   asked for after the delivery's own translations and never waited for, so the page, CAP and
@@ -1189,7 +1192,7 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout; an overlay keeps both, and a broken change can be skipped without losing the file's station | — |
 | **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams. LAN viewers can't make the machine reach out | — |
 | **The feed is text and metadata only; audio stays where it was recorded** | Broadcast audio is copyrighted, and text is ~1,000× smaller over a constrained uplink | — |
-| **LLM rules batch per station every ~45 s, on source text** | One prompt per batch rather than per utterance keeps the LLM's share of the GPU small (not yet measured on a soak), and the alert path stays independent of translation | Missed or late events in the soak |
+| **LLM rules batch per station every ~45 s, on source text** | One prompt per batch rather than per utterance keeps the LLM's share of the GPU small (not measured on a long run), and the alert path stays independent of translation | Missed or late events in the soak |
 | **Overload is shown and shed, never hidden: urgent work displaces station backlog, translations over 5 minutes late are skipped** | Seen in testing with five translated stations on a loaded machine: the translation queue stayed full of station lines, LLM rule checks were turned away and logged once each, and nothing on the page said so. Displacing the least urgent station entry keeps rule checks and alert translations running whatever the backlog; skipping stale translations stops one slow model from pushing every line later; `behind_s`, `dropped` and `load` say what is happening, counted per station over ten minutes and logged once a minute | Pausing translation while text is behind, if displacement and skipping aren't enough on a soak |
 | **The page is React + TypeScript + Vite, and the built page is committed** | A framework with a build was chosen over keeping plain JS or vendoring Preact + htm, and React because most contributors already know it; at this size its overhead doesn't matter if the transcript list is virtualised. Committing `src/wavescribe/web/dist/` keeps Node off the running machine. The build works offline from `package-lock.json` and a cache, bundles every asset (no CDN or web fonts), and every dependency is in LICENSING.md first. `scripts/commit_checks.py` enforces the built page and the licence entries on every commit | — |
 | **Own NFM/AM demodulators and RDS decoder** (`dsp/`), not rtl_airband and redsea | A dongle opens in one process at a time: rtl_airband would own a whole dongle, while our channels share one `rtl_sdr` pipe with the FM stations. redsea has no Homebrew formula and pulls in liquid-dsp and LGPL libsndfile. Each part is a few hundred lines of numpy/scipy, tested on synthetic IQ; broadcast FM and RDS also on air, NFM and AM not yet | A band needs a demodulator we don't have (digital voice is out of scope) |

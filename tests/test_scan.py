@@ -337,7 +337,7 @@ def test_cancel_kills_a_running_sweep_at_once(
 
 
 def test_a_range_outside_the_tuner_is_refused() -> None:
-    with pytest.raises(S.ScanError, match=r"isn't supported"):
+    with pytest.raises(S.ScanError, match=r"isn't received"):
         S.sweep("000001", 1e6, 2e6)
 
 
@@ -346,7 +346,7 @@ def test_a_band_the_tuner_cant_reach_is_refused_in_its_own_numbers() -> None:
         S.band_range("mw", "cept")
     assert str(e.value) == (
         "0.531 to 1.611 MHz is outside what this receiver tunes "
-        "(24 to 1766 MHz); below 24 MHz isn't supported yet"
+        "(24 to 1766 MHz); below 24 MHz isn't received"
     )
     with pytest.raises(S.ScanError, match=r"^1800 to 1900 MHz is outside .*\(24 to 1766 MHz\)$"):
         S.fit_range(1800e6, 1900e6)
@@ -366,7 +366,7 @@ def test_a_range_partly_outside_the_tuner_scans_the_part_it_reaches(
     S.scan("000001", 20e6, 30e6, "cept", rds=False, on_progress=lambda p: notes.append(p.note))
     assert asked == [(24_000_000, 30_000_000)]
     assert notes[0] == (
-        "scanning 24 to 30 MHz of the 20 to 30 MHz asked for: below 24 MHz isn't supported yet"
+        "scanning 24 to 30 MHz of the 20 to 30 MHz asked for: below 24 MHz isn't received"
     )
     assert S.fit_range(1700e6, 1800e6) == (
         1_700_000_000,

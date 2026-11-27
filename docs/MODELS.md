@@ -26,11 +26,11 @@ Whisper large-v3 (Apache-2.0), Nemotron 3.5 ASR streaming 0.6B (OpenMDW-1.1), Qw
 through mlx-audio. Omnilingual ASR (Apache-2.0, 1,600+ languages) would cover the long tail; it
 isn't registered (PyTorch, untested on macOS).
 
-The pt-PT bake-off measured speed and failure modes ([MEASUREMENTS.md](MEASUREMENTS.md)); WER
-waits for reference transcripts. Whisper large-v3-turbo is the chain's fallback for languages
-Parakeet doesn't cover (Hebrew in the world stations).
-The order for other languages should be decided by their own bake-offs, recorded here.
-To run one: `uv run wavescribe record <station id> --minutes 15` saves a clip of an internet
+The pt-PT bake-off measured speed and failure modes ([MEASUREMENTS.md](MEASUREMENTS.md)), not
+word error rate: there are no reference transcripts. Whisper large-v3-turbo is the chain's
+fallback for languages Parakeet doesn't cover (Hebrew in the world stations).
+The order rests on that one language; the models weren't compared on any other.
+To compare them on another: `uv run wavescribe record <station id> --minutes 15` saves a clip of an internet
 station under `data/bakeoff/` (broadcast audio is copyrighted: keep it to yourself), and
 `uv run wavescribe bakeoff data/bakeoff/*.wav --models parakeet-tdt-0.6b-v3,whisper-large-v3-turbo
 --language es-ES` runs each model over the same utterances and reports their speed and how far
@@ -47,8 +47,8 @@ line again; if it hears the station's language, Whisper transcribes it with that
 given and its text replaces the flagged one when it passes the checks. Any installed Whisper
 that covers the station's language does it, the ASR chain's first (large-v3-turbo by default);
 none is downloaded for it, and without one a log line at start names the model to fetch. The
-Whisper stays loaded while the stations it serves run (about 1.6 GB). Cost: see
-[MEASUREMENTS.md](MEASUREMENTS.md) (to be measured).
+Whisper stays loaded while the stations it serves run (about 1.6 GB). What a re-check costs in
+time and GPU wasn't measured ([MEASUREMENTS.md](MEASUREMENTS.md)).
 
 ## Translation
 
@@ -57,7 +57,7 @@ Whisper stays loaded while the stations it serves run (about 1.6 GB). Cost: see
 | **Continuous, alerts, secondary languages, LLM rules and questions** | **Qwen3.5 9B** 4-bit | Apache-2.0 | 201 | mlx-lm (GPU). Beat MADLAD on speed and quality ([MEASUREMENTS.md](MEASUREMENTS.md)) |
 | **CPU fallback** | **MADLAD-400 3B** int8 | Apache-2.0 | 419 | CTranslate2 (CPU). Unsafe for Ukrainian: it invented content |
 
-Not registered, but candidates: TranslateGemma 4B/12B/27B (opt-in: Gemma Terms of Use), Opus-MT / Tatoeba (CC-BY-4.0 or Apache-2.0, small per-pair
+Not registered and not tried here: TranslateGemma 4B/12B/27B (opt-in: Gemma Terms of Use), Opus-MT / Tatoeba (CC-BY-4.0 or Apache-2.0, small per-pair
 models for CTranslate2) and EuroLLM-9B-Instruct (Apache-2.0, 35 languages, mlx-lm).
 
 NLLB-200 and SeamlessM4T are **restricted** (non-commercial; see below). Hunyuan-MT is not listed (its licence excludes the EU).
@@ -76,7 +76,7 @@ invented text (one funk track came back partly as made-up Cyrillic).
 |---|---|
 | **YAMNet** (Google, Apache-2.0), MediaPipe's LiteRT build | **Chosen.** 4 MB model, ~60 MB install with LiteRT, 0.16 s of one CPU core for 3 minutes of audio, 80 MB RAM |
 | inaSpeechSegmenter (MIT) | Dropped: 0.7.6 breaks on NumPy 2 (twice) and its Keras 2 model won't load in Keras 3; TensorFlow is a 1.6 GB install |
-| Apple SoundAnalysis | Not needed so far; it could take over on battery if power measurements call for it |
+| Apple SoundAnalysis | Not used: YAMNet does the job at a small cost. Not tried |
 | PANNs (CC-BY-4.0 weights) | Heavier (torch); not tried |
 
 **Measurements** on 14 minutes from four Portuguese stations (news, a documentary over a music
@@ -123,11 +123,11 @@ prompt stays as it is.
 
 ## Opt-in and restricted models
 
-None is registered today; the tiers and the licence gate are there for when one earns a place. Such models are never the default. The user unlocks them per model with `wavescribe models fetch <id> --accept-license <license-id>` (or `wavescribe models accept <id> --license <license-id>` for weights already on disk); restricted models also need `--non-commercial`. Until then, chains skip them. `wavescribe models list` shows which are accepted.
+None is registered: the tiers and the licence gate exist, and no model uses them. Such models are never the default. The user unlocks them per model with `wavescribe models fetch <id> --accept-license <license-id>` (or `wavescribe models accept <id> --license <license-id>` for weights already on disk); restricted models also need `--non-commercial`. Until then, chains skip them. `wavescribe models list` shows which are accepted.
 
 | Model | Tier | Licence | Why someone might want it |
 |---|---|---|---|
-| TranslateGemma 4B/12B/27B | opt-in | Gemma Terms of Use | Possibly better MT quality (to be measured against MADLAD/Qwen3.5) |
+| TranslateGemma 4B/12B/27B | opt-in | Gemma Terms of Use | Possibly better MT quality (not compared with MADLAD or Qwen3.5 here) |
 | Gemma 3 / 3n | opt-in | Gemma Terms of Use | 140+ languages, small sizes |
 | NLLB-200 (600M–3.3B) | **restricted ⚠ NC** | CC-BY-NC-4.0 | Direct translation between 200 languages, no pivot |
 | SeamlessM4T v2 | **restricted ⚠ NC** | CC-BY-NC-4.0 | Speech → text translation for ~100 languages |

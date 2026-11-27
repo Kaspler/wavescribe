@@ -23,8 +23,9 @@ remind_minutes = 60            # still mentioned this long after it was announce
                                # reminder, notified but never spoken (0: never)
 
 # Spoken alerts: a voice and a fixed phrase per language. The phrase is spoken when no checked
-# translation is available, so the alert is never silent. Voices come from macOS (System
-# Settings → Accessibility → Spoken Content → System voice → Manage voices).
+# translation is available, so the voice always has something to say. Voices come from macOS
+# (System Settings → Accessibility → Spoken Content → System voice → Manage voices). A voice
+# that isn't installed speaks nothing: `uv run wavescribe alerts test` says which are missing.
 # intro is spoken before what was said: its checked translation, or the words as said when
 # they are in the voice's language already. summary and earlier open a digest read aloud
 # ([digest] below), so that it never sounds like an alert; English has its own by default,

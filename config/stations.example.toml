@@ -14,7 +14,6 @@ id = "antena1"
 name = "RTP Antena 1"
 priority = 1                   # public broadcaster; carries official emergency info
 fm_mhz = [99.0]                # replace with your local frequencies
-mw_khz = 666                   # read, not used yet (medium wave isn't received)
 stream = "https://radiocast.rtp.pt/antena180a.mp3"
 stream_hls = "https://streaming-live.rtp.pt/liveradio/antena180a/playlist.m3u8"
 

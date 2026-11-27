@@ -48,7 +48,7 @@ def test_a_scan_says_which_part_of_the_range_it_left_out(
     err = capsys.readouterr().err
     assert asked == [(24_000_000, 30_000_000)]
     assert "scanning 24 to 30 MHz of the 20 to 30 MHz asked for" in err
-    assert "below 24 MHz isn't supported" in err
+    assert "below 24 MHz isn't received" in err
 
 
 def test_a_scan_from_the_command_line_is_saved_with_its_receiver_and_what_was_scanned(

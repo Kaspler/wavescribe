@@ -5,14 +5,11 @@ Dated results behind the decisions in [ARCHITECTURE.md](ARCHITECTURE.md) and the
 M1 Max and 64 GB of memory. Logs come from `data/logs/wavescribe.jsonl`. Reception on air is in
 [HARDWARE.md](HARDWARE.md#what-a-first-scan-finds).
 
-**TODO (to be measured), Whisper re-check of lines heard in another language**
-(`asr/recheck.py`): on this Mac with Parakeet-TDT-0.6B-v3 and Whisper large-v3-turbo, on
-synthetic `say` speech in several languages (never recorded broadcast audio): the time per
-re-check when Whisper hears another language (language ID only) and when it hears the
-station's language (language ID plus a transcription), the time to load Whisper at start, its
-memory, and its share of the GPU at the rate lines are flagged (12 of 101 transcripts on talk
-radio, lyrics included) as `asr_busy` with and without re-checks. Not measured yet: the GPU was
-busy with a long end-to-end run when this was built.
+**Not measured: the Whisper re-check of lines heard in another language** (`asr/recheck.py`).
+There are no figures here for the time one re-check takes (language ID only when Whisper hears
+another language, language ID plus a transcription when it hears the station's), the time to
+load Whisper at start, its memory in use, or its share of the GPU (`asr_busy`) at the rate
+lines are flagged, which was 12 of 101 transcripts on talk radio, lyrics included.
 
 **2026-11-26, Ask on the real store** (Qwen3.5-9B 4-bit, M1 Max; ~20k utterances): the plan
 takes 4–6 s (≈1,100 prompt tokens at ~380 tokens/s, ≈90 output tokens at ~60 tokens/s), the
@@ -70,8 +67,8 @@ live VAD settings. All models on MLX on the M1 Max.
 | Qwen3-ASR 1.7B (8-bit) | 10× (0.097) | auto | 4 | **1** (78 s, 24k chars) | 2 | 15.4% apart (excluding the loop) |
 | Voxtral Mini 4B Realtime (fp16) | **0.9× (slower than real time)** | auto | — | — | — | stopped after 50 utterances |
 
-- **No WER yet.** That needs reference transcripts corrected by a Portuguese speaker (`*.ref-template.txt` from the bake-off). Agreement between models is not accuracy.
-- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet stays the default for speed and power (GPU 5% busy for two stations) until WER says otherwise. The ASR checks now flag text that isn't in the station's language, and flagged text never raises an alert above `low`. Since 2026-11-26 a flagged line is re-checked by Whisper large-v3-turbo, which accepts a hint and drifted least, when it is installed (`asr/recheck.py`; its cost is below).
+- **No word error rate.** That needs reference transcripts corrected by a Portuguese speaker (`*.ref-template.txt` from the bake-off). Agreement between models is not accuracy.
+- **Parakeet's failure mode is the dangerous one.** On 5 of 156 utterances it answers in English, producing garbage such as "nuclear sabotage" for a sentence about cured ham, and *sabotagem* is in the Portuguese keyword pack. It can't be given a language hint. Parakeet is the default for speed and power (GPU 5% busy for two stations); how its accuracy compares with the others' wasn't measured. The ASR checks now flag text that isn't in the station's language, and flagged text never raises an alert above `low`. Since 2026-11-26 a flagged line is re-checked by Whisper large-v3-turbo, which accepts a hint and drifted least, when it is installed (`asr/recheck.py`; its cost wasn't measured, as the top of this page says).
 - **LLM-style ASR decoders can loop.** Qwen3-ASR repeated "há há há…" for 78 s on one utterance. Any such model needs an output cap tied to the audio length, plus the repeated-n-gram filter.
 - **Nemotron is conservative.** Its 14 empty outputs are mostly jingles and fragments that the others turned into junk ("Yeah.", "Wolf."), plus a few short real phrases.
 - **Voxtral is out on speed** through mlx-audio at fp16.
@@ -94,7 +91,7 @@ slips too: one duplicated word, an untranslated *duende*, and "at the bottom" fo
 where MADLAD's "deep down" was right. **The prompt must name languages.** Asked for "uk", Qwen
 answered in English (UK as in United Kingdom), so `language_name()` takes English names from
 CLDR via Babel. **Decision:** Qwen3.5-9B is the default translator; MADLAD stays in the chain as
-the CPU fallback. Power on battery is still to be measured.
+the CPU fallback. Power on battery wasn't measured.
 
 **ASR language confusion.** Parakeet v3 picks the language itself and can't be told which one to
 use. On TSF it occasionally emitted English for Portuguese speech, and MADLAD then paraphrased

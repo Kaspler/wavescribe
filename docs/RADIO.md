@@ -219,8 +219,8 @@ The demodulators are Wavescribe's own (numpy and scipy, `dsp/`):
 - **NFM** for walkie-talkies, marine and amateur radio: a 12.5 or 25 kHz channel, de-emphasis,
   CTCSS tones removed, a noise squelch that opens when someone transmits whatever their level
   and shuts with the carrier.
-- **AM** for aircraft (and for medium wave once it can be tuned): an envelope detector with automatic gain, and a carrier
-  squelch.
+- **AM** for aircraft: an envelope detector with automatic gain, and a carrier squelch. Medium
+  wave, which is AM too, is below what the receiver tunes ([Known limits](#known-limits)).
 
 When a channel's squelch is closed the page shows "channel quiet" instead of silence.
 
@@ -371,7 +371,7 @@ Limits:
   the receiver's centre (on none of the channels), was caught on a channel its products landed
   on, and a second key-up a minute later was in no log line; it is now said and not caught, as
   tried on synthetic signals. Speech from a walkie-talkie at a sensible distance hasn't been
-  tried yet.
+  tried.
 
 ### Testing with a walkie-talkie
 
