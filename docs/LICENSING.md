@@ -1,10 +1,35 @@
-# Licensing policy and third-party audit
+# Licences
 
-This project's own code is **Apache-2.0**. It **does not redistribute** third-party binaries
-or model weights: users install tools with Homebrew/pip and download models during setup.
-**Every library, tool and model gets an entry here before it's used.** Audited on 2026-11-09
-against licence files, file headers, PyPI and Homebrew metadata, and Hugging Face model cards.
-This is not legal advice.
+Wavescribe's own code and documentation are licensed under Apache-2.0 ([LICENSE](../LICENSE)).
+This file lists every third-party library, program, model and data source Wavescribe uses: what
+it is, its licence (an SPDX identifier where one exists, as its source states it), how
+Wavescribe uses it, and whether Wavescribe ships it. It is not legal advice.
+
+## What Wavescribe ships
+
+A clone of the repository holds Wavescribe's own work under Apache-2.0: the source, the
+documentation, the configuration examples in `config/`, the model registry
+(`src/wavescribe/models.toml`: ids, sources, pinned revisions and licences, no weights), the
+radio band plans (`src/wavescribe/radio/bands.toml`) and the other data files
+(`src/wavescribe/asr/junk.toml`, `src/wavescribe/translate/remarks.toml`). The example station
+files name public internet stations and their stream addresses; the streams belong to their
+broadcasters. The Wavescribe name and logo are covered under [Logo and icons](#logo-and-icons).
+
+The only third-party code in the repository is in the built page, `src/wavescribe/web/dist/`:
+
+| Third-party part | Licence | What is included for it |
+|---|---|---|
+| React (`react`, `react-dom`, `scheduler`) | MIT | Each package's copyright and licence text in [`dist/licenses.txt`](../src/wavescribe/web/dist/licenses.txt) |
+| Lucide icons (`lucide-react`; only the icons the page uses) | ISC; the icons derived from Feather: MIT | Both licence texts and the list of Feather-derived icons, in `licenses.txt` |
+| Vite's module-preload helper (a few lines Vite writes into the bundle) | MIT | Vite's licence text, in `licenses.txt` |
+
+`frontend/scripts/notices.mjs` writes `licenses.txt` from the packages' own licence files at
+every build, and the page links it ("Licences of the page's parts").
+
+Nothing else third-party ships. Each user fetches the rest from its publisher:
+`wavescribe models fetch` downloads models from the rights holders' repositories, uv installs
+Python and the Python packages from PyPI, and Homebrew installs ffmpeg and librtlsdr. There is
+no binary bundle (installer, `.app` or Docker image).
 
 ## Policy
 
@@ -12,56 +37,56 @@ This is not legal advice.
 
 | Tier | Licences | Rule |
 |---|---|---|
-| **A: may be imported or linked** | MIT, MIT-0, BSD-2/3-Clause, 0BSD, ISC, Apache-2.0, BSL-1.0, Zlib, PSF-2.0, CC0-1.0, Unlicense, MPL-2.0 (unmodified) | Allowed as required dependencies |
-| **A−: in-process with conditions** | LGPL-2.1+/3.0+ | Dynamic linking only. Unmodified, never vendored, replaceable by the user. |
-| **B: process boundary only** | GPL-2.0(-or-later), GPL-3.0(-or-later), AGPL-3.0 (unmodified external service only) | Talk to the tool only through subprocess/exec, stdin/stdout, files, TCP/UDP, HTTP or WebSocket. **No `import`, no `dlopen`/ctypes, no vendored source or headers.** It must be optional and detected at runtime, installed by the user, and documented as an "external GPL tool". |
-| **C: never** | No licence, BUSL, SSPL, Commons Clause, PolyForm-Noncommercial, research-only | Not allowed |
+| **A: may be imported or linked** | MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, Apache-2.0, BSL-1.0, Zlib, PSF-2.0, CC0-1.0, Unlicense, MPL-2.0 (unmodified) | Allowed as required dependencies |
+| **A−: in-process with conditions** | LGPL-2.1-or-later, LGPL-3.0-or-later | Dynamic linking only. Unmodified, never vendored, replaceable by the user. |
+| **B: process boundary only** | GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later; AGPL-3.0-only, AGPL-3.0-or-later (an unmodified external service only) | Talk to the tool only through subprocess/exec, stdin/stdout, files, TCP/UDP, HTTP or WebSocket. **No `import`, no `dlopen`/ctypes, no vendored source or headers.** It must be optional and detected at runtime, installed by the user, and documented as an external GPL tool ([External programs](#external-programs)). |
+| **C: never** | No licence, BUSL, SSPL, Commons Clause, PolyForm Noncommercial, research-only | Not allowed |
 
-**Binary bundles.** Today users install the GPL tools themselves (Homebrew). **Any binary
-bundle** (Docker image, `.app`, Homebrew bottle) that *contains* GPL parts needs a licence
-review, an SBOM and GPL source compliance. All the GPL parts found so far are "-or-later", so a
-combined bundle could be shipped as GPL-3.0.
+Every direct dependency has an entry in this file. A transitive package needs one when its
+licence isn't tier A.
 
-### Models and data
+**Binary bundles.** A binary bundle (Docker image, `.app`, Homebrew bottle) that contains GPL
+parts needs a licence review, an SBOM and GPL source compliance.
 
-**How this works.** Copyright means "all rights reserved" unless a licence grants permission.
-- Our **Apache-2.0 licence covers our code only.** Model weights are separate works with their own licences.
-- We **never redistribute weights**. Each user downloads them from the rights holder (e.g. Hugging Face) and accepts the terms there. A model's conditions (attribution, non-commercial, use policy, territory) bind **whoever downloads and uses it**.
-- Supporting a model in code (a model ID, a loader, a download command) is not redistribution, so we believe it needs no licence from the rights holder. Using it lawfully is the user's responsibility.
-- Our only duties: be honest about each licence, make restricted models clearly opt-in, and never ship restricted weights ourselves.
+### Model tiers
 
-| Tier | Licences | How the app treats it |
+Model weights are separate works under their own licences, which Wavescribe's licence doesn't
+cover. Wavescribe never redistributes weights: each user downloads them from the rights holder
+(for example from Hugging Face) and accepts the terms there.
+
+| Tier | Licences | What the app does |
 |---|---|---|
-| **Default** | Apache-2.0, MIT, BSD, CC0-1.0, CC-BY-3.0/4.0, OpenMDW-1.0/1.1, CDLA-Permissive-2.0 | Listed. Setup may download without asking. Attribution goes in the generated `THIRD_PARTY_MODELS.md`. |
-| **Opt-in** (custom open-weights terms) | Gemma Terms of Use, NVIDIA Open Model License, text-only Llama community licences, OpenRAIL-M | Listed. Download needs `--accept-license <id>` (the licence name and link are shown first). The acceptance is recorded locally. Never part of the default preset. |
-| **Restricted** (non-commercial or research-only) | CC-BY-NC*, research-only | Listed with a **⚠ NC** flag. Needs `--accept-license <id>` **and** an explicit non-commercial acknowledgement. The app shows "non-commercial models active". Never in default presets. |
-| **Bring your own** (not listed by us) | No licence, territory exclusions (e.g. EU-excluded), anything else | **Not in the registry or presets** (named in this audit only to say why). The engine still loads any compatible model a user names in their **private** `config/models.local.toml` (a Hugging Face ID or a local path). The app requires a `license` field there and warns if it's `unknown`. Responsibility is entirely the user's. |
+| **Default** | Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, CC0-1.0, CC-BY-3.0, CC-BY-4.0, OpenMDW-1.0, OpenMDW-1.1, CDLA-Permissive-2.0 | Lists it. Setup may download it without asking. Its attribution goes in the generated `THIRD_PARTY_MODELS.md`. |
+| **Opt-in** (custom open-weights terms) | Gemma Terms of Use, NVIDIA Open Model License, text-only Llama community licences, OpenRAIL-M | Lists it with its licence name and link. A download needs the licence accepted: `wavescribe models fetch <id> --accept-license <licence id>`, `wavescribe models accept <id> --license <licence id>`, or the page's Accept button. The acceptance is recorded locally (`data/licenses-accepted.json`), and a changed licence voids it. Never part of the default preset. |
+| **Restricted** (non-commercial or research-only) | CC-BY-NC-*, research-only | Lists it marked non-commercial. Needs the same acceptance **and** an explicit non-commercial acknowledgement (`--non-commercial`). While one is in use, `listen` and `serve` print "⚠ non-commercial models active" and the page's Settings name it. Never in default presets. |
+| **Bring your own** (not listed) | No licence, territory exclusions (for example EU-excluded), anything else | Not in the registry or presets. The engine still loads any compatible model a user names in their **private** `config/models.local.toml` (a Hugging Face ID or a local path). That file requires a `license` field, and the app warns at start when it is `unknown`. Responsibility is entirely the user's. |
 
-**Never do these, in any tier:**
+**Never, in any tier:**
 - commit, mirror or attach weights;
 - upload conversions (MLX, GGUF, Core ML) of opt-in or restricted models under the project's org;
-- bundle them in installers or Docker images;
+- bundle weights in installers or Docker images;
 - make a non-default model the default;
 - strip licence notices;
-- ship our own Hugging Face tokens. Gated models use the user's own `huggingface-cli login`.
+- ship the project's own Hugging Face tokens: gated models use the user's own login
+  (`hf auth login`).
 
 ### Model registry rules (`models.toml`)
 
-- **Every entry has:** id, upstream URL, **pinned revision SHA**, SPDX id or `LicenseRef-*`, licence URL, tier, attribution text, gated yes/no, languages, data notes.
-- An entry needs a licence that fits one of the listed tiers; anything else is bring-your-own. The commit checks block a new or re-pinned model unless this file changes in the same commit.
-- **Conversions inherit the upstream licence** (mlx-community, GGUF, Core ML). Don't trust a converter's metadata.
-- **Re-check the licence on every version bump.** Drift seen in this audit alone:
-  - SimulStreaming: PolyForm-NC → MIT
-  - Sortformer: CC-BY → NVIDIA licence
-  - Nemotron: NVIDIA licence → OpenMDW
-  - Piper: MIT → GPL
-  - Gemma: Terms of Use → Apache (Gemma 4)
+- **Every entry has:** id, upstream URL, **pinned revision SHA** (a sha256 for a direct
+  download), SPDX id or `LicenseRef-*`, licence URL, tier, attribution text, gated yes/no,
+  languages, data notes.
+- An entry needs a licence that fits one of the tiers above; anything else is bring-your-own.
+  The commit checks block a new or re-pinned model unless this file changes in the same commit.
+- **Conversions inherit the upstream licence** (mlx-community, GGUF, Core ML). Don't trust a
+  converter's metadata.
+- **Re-check the licence on every version bump.**
 
-### Online model catalogue (Settings → Languages and models, 2026-11-26)
+### Online model catalogue
 
-The page can search Hugging Face for MLX models to add (`catalog/models.py`). Searching takes a
-click on the machine itself; LAN viewers can't trigger it. It sends anonymous GETs to the
-public API, with no token and a generic User-Agent. The rules match the registry's:
+The page (Settings → Languages and models) can search Hugging Face for MLX models to add
+(`catalog/models.py`). Searching takes a click on the machine itself; LAN viewers can't trigger
+it. It sends anonymous GETs to the public API, with no token and a generic User-Agent. The rules
+match the registry's:
 
 - **The tier comes from the licence**, through one table in `catalog/models.py`:
 
@@ -83,236 +108,212 @@ public API, with no token and a generic User-Agent. The rules match the registry
   Opt-in and restricted entries need the same licence acceptance as registry models before a
   download.
 - **Weights still come only from the rights holder's repository**, through
-  `wavescribe models fetch`. We never mirror or re-host them.
+  `wavescribe models fetch`. Nothing is mirrored or re-hosted.
 
 ### Disclosure to users
 
-- `wavescribe models list` prints every model with its licence, tier, install state and acceptance; external tools are listed in this file.
-- `wavescribe models fetch` writes `data/THIRD_PARTY_MODELS.md` (CC-BY credits for the installed models), and `wavescribe models credits` prints it.
-- Settings → Languages and models shows every model's licence, tier, caveats and attribution.
-- Explicit warnings:
-  - macOS `say` voices are for **local personal playback only**.
-  - Piper voices are licensed **per voice**.
+- `wavescribe models list` prints every model with its licence and install state, and notes a
+  licence that needs acceptance (and whether it is accepted), a restricted one ("non-commercial
+  use only") and the user's own models; `--json` gives every model's tier and licence URL too.
+  External programs are listed in this file.
+- `wavescribe models fetch` writes `data/THIRD_PARTY_MODELS.md`, the attribution, licence and
+  source of every installed model, and `wavescribe models credits` prints it.
+- Settings → Languages and models shows every model's licence (linked to its text), tier,
+  caveats and attribution, and asks for an opt-in or restricted licence to be accepted before a
+  download.
+- While a restricted model is in use, `listen` and `serve` print "⚠ non-commercial models
+  active" and the page's Settings say "Non-commercial use only" with its name.
+- The page links the notices of the packages it bundles ("Licences of the page's parts").
+- This file and [MODELS.md](MODELS.md) say that macOS `say` voices are for **local personal
+  playback only**.
 
 ### Hygiene
 
-In place:
-
-- PEP 639 `license = "Apache-2.0"` in `pyproject.toml`, and SPDX headers in the Python sources and scripts.
+- PEP 639 `license = "Apache-2.0"` in `pyproject.toml`, and SPDX headers in the Python sources
+  and scripts. The page's sources (`frontend/`) carry no SPDX headers; the repository's
+  `LICENSE` covers them.
 - **Every commit is checked** by `scripts/commit_checks.py` (git hooks, installed with
   `python3 scripts/commit_checks.py install`; see CONTRIBUTING.md). It blocks a commit that adds
   a direct dependency with no entry here, a transitive package whose licence isn't tier A and
   isn't recorded here, or a new or re-pinned model without this file updated in the same commit.
   CI runs the same licence check over everything a push or pull request brings
   (`check --base <rev>`), so a commit made without the hook is caught there.
-- **Third-party telemetry off:** `HF_HUB_DISABLE_TELEMETRY=1` in every process.
+- **Third-party telemetry off.** Importing Wavescribe sets two switches before any library
+  loads, so every process has them (`src/wavescribe/__init__.py`; `tests/test_no_telemetry.py`
+  holds it):
+  - **huggingface-hub** (and transformers, which uses it) can send usage telemetry;
+    `HF_HUB_DISABLE_TELEMETRY=1` switches it off.
+  - **onnxruntime**'s macOS build contains Microsoft's 1DS telemetry SDK (endpoint
+    `mobile.events.data.microsoft.com/OneCollector`), which creates a store under
+    `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` on its first session.
+    Every process sets `ORT_DISABLE_TELEMETRY=1`, which onnxruntime reads when it loads;
+    `onnxruntime.disable_telemetry_events()` alone doesn't stop the store from being created.
 
-Not in place: the page's sources (`frontend/`) carry no SPDX headers. The repository's
-`LICENSE` covers them.
+## Python dependencies
 
-## Findings that changed the design
+uv installs these from PyPI, in the versions `uv.lock` pins. None ships with Wavescribe.
 
-1. **Homebrew `ffmpeg` is GPL-3.0-or-later** (`--enable-gpl --enable-version3`). Use it only as a subprocess with pipes. Never load libav* in-process (e.g. through torchaudio's FFmpeg backends).
-2. **TranslateGemma, Gemma 3 and Gemma 3n are under the Gemma Terms of Use** (non-OSI; use restrictions pass on to recipients; Google may restrict use remotely), so they're **opt-in only**. **Gemma 4 is plain Apache-2.0.**
-3. **`inesc-id/WhisperLv3-EP-X-CPP` has no licence**, so it's all rights reserved. It's **bring-your-own only** until the authors add a licence.
-4. **pyrtlsdr is GPL-3.0-or-later**, so it isn't imported. Wavescribe runs `rtl_sdr` as a subprocess instead.
-5. **Non-commercial models are restricted opt-in:** Meta MMS, NLLB-200 and SeamlessM4T are CC-BY-NC. Permissive models do their jobs: **Qwen3.5** (Apache-2.0, 201 languages) and **MADLAD-400** (Apache-2.0, 419) translate, and **Omnilingual ASR** (Apache-2.0, 1,600+ languages) would cover the long tail of speech recognition (not registered yet).
-6. **Hunyuan-MT's licence excludes the EU, UK and South Korea**, so it's bring-your-own only, and it grants no rights to users in those territories.
-7. **macOS `say` voices** (macOS licence §2F): personal, non-commercial, local use. No recording, publishing or redistribution. Our reading: **fine for spoken alerts in the room; not for anything recorded or rebroadcast.**
-8. **WhisperLiveKit** (not used): if it ever is, disable its NLLB backend. Pin **SimulStreaming** to a version after 2025-10-22, when it was relicensed to MIT.
-9. **pyannote.audio 4.x sends telemetry by default.** Not used; avoid it, or disable that.
-10. **Nemotron 3.5 ASR streaming uses OpenMDW-1.1**, a permissive licence, not NVIDIA's Open Model License. Older Nemotron and Sortformer releases differ.
-
-## Audit: libraries and tools
-
-| Component | Licence | Verdict | Notes |
+| Package | What it is | Licence | How Wavescribe uses it |
 |---|---|---|---|
-| librtlsdr (osmocom) | GPL-2.0-or-later | ⚠️ | Fine at runtime; never bundle |
-| `rtl_sdr` / `rtl_power` / `rtl_test` | GPL-2.0-or-later | ⚠️ B | Subprocesses, the cleanest boundary. `rtl_sdr` feeds the demodulators; `rtl_power` sweeps bands for scans (`radio/scan.py`), read as CSV |
-| numpy, scipy | BSD-3-Clause (+ permissive) | ✅ | |
-| ffmpeg (Homebrew) | GPL-3.0-or-later | ⚠️ B | Subprocess + pipes |
-| libopus (inside the ffmpeg subprocess) | BSD-3-Clause; Opus is royalty-free (RFC 6716) | ✅ | Speech audio archive |
-| Silero VAD | MIT | ✅ | We run its ONNX model with onnxruntime. The `silero-vad` pip package isn't used, because it pulls in torch. |
-| onnxruntime | MIT | ✅ | CPU inference for Silero VAD |
-| ai-edge-litert (LiteRT) | Apache-2.0 | ✅ | Runs YAMNet for the speech/music gate; CPU, no TensorFlow |
-| py3langid (with its bundled langid.py model) | BSD-3-Clause | ✅ | Text language ID for the ASR checks and alert translations |
-| snowballstemmer | BSD-3-Clause | ✅ | Per-language stemming for keyword rules (pure Python) |
-| parakeet-mlx | Apache-2.0 | ✅ | Pulls in librosa, typer and dacite (see transitive dependencies) |
-| MLX, mlx-lm | MIT | ✅ | Speech and translation models on the GPU |
-| mlx-audio | MIT | ✅ | Whisper (the ASR chain's fallback), plus Voxtral, Qwen3-ASR and Nemotron for bake-offs, on MLX. Pulls in miniaudio (MIT), sounddevice (MIT, bundles PortAudio, MIT) and zstandard (BSD-3-Clause). |
-| CTranslate2 | MIT | ✅ | |
-| sentencepiece | Apache-2.0 | ✅ | Tokeniser for MADLAD-400 |
-| huggingface-hub (+ hf-xet) | Apache-2.0 | ✅ | Used only by `models fetch`. At runtime we set `HF_HUB_OFFLINE=1` and `HF_HUB_DISABLE_TELEMETRY=1`. |
-| truststore | MIT | ✅ | The downloads Wavescribe makes itself (URL models, the station and model catalogues, playlists) check the server's certificate against the operating system's trust store, as huggingface-hub's HTTP client does for its own. Pure Python; it calls the system's certificate verification and bundles no certificates |
-| transformers | Apache-2.0 | ✅ | Pulled in by mlx-lm |
-| Babel | BSD-3-Clause | ✅ | CLDR language names for LLM prompts; ships its data, works offline |
-| SQLite (+ FTS5, via Python's `sqlite3`) | Public domain | ✅ | The store; the trigram tokenizer needs SQLite ≥ 3.34 (`remove_diacritics` ≥ 3.45) |
-| macOS `say` | Apple macOS licence §2F | ⚠️ | Local personal playback only |
-| hatchling | MIT | ✅ | Build backend |
-| pytest, ruff | MIT / MIT | ✅ | Dev only |
-| Radio Browser station directory (service + data, [radio-browser.info](https://www.radio-browser.info)) | Data: public domain (the site: "Data license: public domain"; submissions are released to the public domain); server software AGPL-3.0 | ✅ | HTTP API only, and only from explicit user actions (catalogue refresh, online search) with a generic User-Agent. A local copy is allowed: the FAQ offers full daily exports. Station names, logos, homepages and streams belong to the stations; we store links only (`catalog/stations.py`). Checked 2026-11-26 |
-
-### Evaluated, not used
-
-Kept so the reasons aren't lost: each was considered for a part of Wavescribe, and none is
-installed or called by it. GQRX and SDR++ appear in HARDWARE.md as tools you may use alongside.
-
-| Component | Licence | Verdict | Notes |
-|---|---|---|---|
-| SoapySDR (+ Python bindings) | BSL-1.0 | ✅ | Device-neutral API |
-| SoapyAirspy + libairspy | MIT + BSD-3-Clause | ✅ | Permissive all the way down |
-| SoapyRTLSDR | MIT (links GPL librtlsdr) | ⚠️ | User-installed plugin only; never bundle |
-| `airspy_rx` | GPL-2.0-or-later | ⚠️ B | Subprocess |
-| pyrtlsdr | GPL-3.0-or-later | ❌ in-process | Not imported: `rtl_sdr` runs as a subprocess |
-| liquid-dsp | MIT | ✅ | |
-| redsea (RDS) | MIT | ✅ | CLI. Not used (2026-11-26): no Homebrew formula, and building it pulls in liquid-dsp and LGPL libsndfile. RDS is our own decoder (`dsp/rds.py`), written from the public standard |
-| RTLSDR-Airband | GPL-2.0-or-later | ⚠️ B | Separate process; UDP/Icecast/files |
-| SDRangel | GPL-3.0 | ⚠️ B | REST/UDP |
-| SDR++ | GPL-3.0 | ⚠️ B | Survey tool only |
-| GQRX | GPL-3.0 | ⚠️ B | Survey tool only (user-installed; with the V4L, via `rtl_tcp`) |
-| inaSpeechSegmenter | MIT (model weights: no separate licence, assumed MIT) | ✅ (not used) | Dropped: doesn't run on current TensorFlow/Keras/NumPy (MODELS.md) |
-| pyannote.audio | MIT, gated models, telemetry on | ⚠️ | Avoid unless needed |
-| Apple SoundAnalysis | Apple platform | ✅ macOS | Via PyObjC (MIT) or a Swift helper |
-| whisper.cpp | MIT | ✅ | |
-| WhisperKit | MIT | ✅ | Swift, via a CLI/server bridge |
-| WhisperLiveKit | Apache-2.0 | ⚠️ | Disable NLLB; check each backend's model licence |
-| SimulStreaming | MIT (since 2025-10-22) | ⚠️ | Pin a version after the relicence |
-| FluidAudio | Apache-2.0 | ✅ | Each model keeps its upstream licence |
-| Ollama, llama.cpp | MIT | ✅ | Check each model (`ollama show --license`) |
-| Argos Translate | MIT OR CC0-1.0 | ✅ | Model packages are licensed per package (see below) |
-| sentence-transformers | Apache-2.0 | ✅ | |
-| sqlite-vec | MIT OR Apache-2.0 | ✅ | |
-| Apprise | BSD-2-Clause | ✅ | |
-| meshtastic-python CLI | GPL-3.0 | ⚠️ B | Run the CLI as a subprocess; don't import |
-| Piper (piper1-gpl) | GPL-3.0 | ⚠️ B | CLI/HTTP only; check each voice's licence |
-| FastAPI / Starlette / uvicorn | MIT / BSD-3 / BSD-3 | ✅ | |
-| Textual, Typer, Click, Pydantic, tomli | MIT / MIT / BSD-3 / MIT / MIT | ✅ | |
-| mlx-whisper | MIT | ✅ | Not used: it hard-requires torch (mlx-audio runs Whisper) |
-| `rtl_fm` / `rtl_tcp` | GPL-2.0-or-later | ⚠️ B | Not used by Wavescribe; `rtl_tcp` serves GQRX in HARDWARE.md |
+| CPython 3.12 (python-build-standalone) | The Python interpreter | Python-2.0, with the licences of the libraries it includes (OpenSSL: Apache-2.0; SQLite: public domain) | Runs Wavescribe; installed by uv |
+| SQLite (+ FTS5, Python's `sqlite3`) | Embedded database | Public domain (SPDX `blessing`) | Imported, as part of Python: the store. The trigram tokenizer needs SQLite ≥ 3.34 (`remove_diacritics` ≥ 3.45) |
+| numpy | Arrays and maths | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Imported |
+| scipy | Scientific computing | BSD-3-Clause; the macOS wheel also contains the GCC runtime libraries (GPL-3.0-or-later WITH GCC-exception-3.1) and libquadmath (LGPL-2.1-or-later), which only `scipy.odr` loads | Imported: `scipy.signal` (the SDR demodulators' filters and resampling) and `scipy.ndimage`. `scipy.odr` is never loaded (`tests/test_in_process_licences.py`) |
+| onnxruntime | ONNX model runtime | MIT | Imported: runs Silero VAD on the CPU, with its telemetry switched off ([Hygiene](#hygiene)) |
+| ai-edge-litert (LiteRT) | TensorFlow Lite runtime | Apache-2.0 | Imported: runs YAMNet for the speech/music gate on the CPU |
+| parakeet-mlx | Parakeet speech recognition on MLX | Apache-2.0 | Imported: runs Parakeet. Pulls in librosa, typer and dacite |
+| mlx-audio | Speech models on MLX | MIT | Imported: runs Whisper, Voxtral, Qwen3-ASR and Nemotron. Pulls in miniaudio, sounddevice and zstandard |
+| MLX, mlx-lm | Apple's array framework, and its language-model runner | MIT | Imported: speech and translation models on the GPU |
+| CTranslate2 | Inference engine for translation models | MIT | Imported: runs MADLAD-400 on the CPU |
+| sentencepiece | Tokeniser | Apache-2.0 | Imported: MADLAD-400's tokeniser |
+| huggingface-hub (+ hf-xet) | Hugging Face client | Apache-2.0 | Imported: `wavescribe models fetch` downloads models with it. Every other command runs it offline (`HF_HUB_OFFLINE=1`), to find downloaded models in its cache and, in `wavescribe models remove`, to delete them. Its telemetry is switched off ([Hygiene](#hygiene)) |
+| truststore | The operating system's certificate store for TLS | MIT | Imported: the downloads Wavescribe makes itself (URL models, the station and model catalogues, playlists) check the server's certificate against the system's trust store. It bundles no certificates |
+| Babel | CLDR locale data | BSD-3-Clause | Imported: language names for LLM prompts, from the data in the package |
+| py3langid (with its bundled langid.py model) | Text language identification | BSD-3-Clause | Imported: the ASR checks and alert translations |
+| snowballstemmer | Stemmers | BSD-3-Clause | Imported: per-language stemming for keyword rules |
+| hatchling | Python build backend | MIT | Builds the package; not used at runtime |
+| pytest, ruff | Test runner; linter and formatter | MIT / MIT | Development only |
 
 ### Transitive Python dependencies
 
-First checked with `pip-licenses` against `uv.lock` on 2026-11-09; since then the commit checks
-read the licence of every package a commit adds to the lock (81 packages on 2026-11-26). **None is tier
-B or C.** The ones worth knowing about:
+Every other package in `uv.lock` has a tier-A licence. These are the ones to know about:
 
-| Package | Pulled in by | Licence | Verdict |
+| Package | Pulled in by | Licence | How Wavescribe uses it |
 |---|---|---|---|
-| librosa | parakeet-mlx (mel filterbank) | ISC | ✅ |
-| soundfile (bundles libsndfile) | librosa | BSD-3-Clause; libsndfile is LGPL-2.1-or-later | ⚠️ A−: a dynamically loaded, unmodified library the user installs; we never vendor it |
-| soxr (python-soxr, bundles libsoxr) | librosa | LGPL-2.1-or-later | ⚠️ A−: same rule as above |
-| numba, llvmlite | librosa | BSD-2-Clause; LLVM is Apache-2.0 WITH LLVM-exception | ✅ |
-| scikit-learn, scipy, joblib, pooch | librosa | BSD-3-Clause | ✅ |
-| certifi, tqdm | requests / huggingface-hub | MPL-2.0 (tqdm: MPL-2.0 AND MIT) | ✅ unmodified |
-| colorama | tqdm, typer, pytest (Windows only) | BSD-3-Clause | ✅ not installed on macOS |
-| httpx2-jsfetch | httpx2 (Python in the browser only) | BSD-3-Clause | ✅ not installed on macOS |
-| regex | transformers | Apache-2.0 AND CNRI-Python | ✅ |
-| protobuf, flatbuffers | onnxruntime, ai-edge-litert | BSD-3-Clause / Apache-2.0 | ✅ |
-| ml-dtypes | ai-edge-litert | Apache-2.0 (bundles Eigen headers, MPL-2.0) | ✅ unmodified |
-| backports.strenum | ai-edge-litert | MIT | ✅ |
+| librosa | parakeet-mlx | ISC | Imported by parakeet-mlx for its mel filterbank |
+| soundfile (bundles libsndfile) | librosa | BSD-3-Clause; the bundled libsndfile is LGPL-2.1-or-later | Installed, never loaded (`tests/test_in_process_licences.py`) |
+| soxr (python-soxr, bundles libsoxr) | librosa | LGPL-2.1-or-later | Installed, never loaded (the same test) |
+| numba, llvmlite | librosa | numba: BSD-2-Clause; llvmlite: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception | Imported by librosa |
+| scikit-learn (bundles libomp), joblib, pooch | librosa | BSD-3-Clause; libomp: Apache-2.0 WITH LLVM-exception | Installed with librosa |
+| transformers | mlx-lm, mlx-audio | Apache-2.0 | Imported by mlx-lm and mlx-audio |
+| regex | transformers | Apache-2.0 AND CNRI-Python | Imported by transformers |
+| certifi, tqdm | requests (through pooch), huggingface-hub | certifi: MPL-2.0; tqdm: MPL-2.0 AND MIT | Installed unmodified |
+| protobuf, flatbuffers | onnxruntime, ai-edge-litert, mlx-lm | BSD-3-Clause / Apache-2.0 | Imported by those packages |
+| ml-dtypes | ai-edge-litert | Apache-2.0 (bundles Eigen headers, MPL-2.0) | Imported by ai-edge-litert, unmodified |
+| backports.strenum | ai-edge-litert | MIT | Imported by ai-edge-litert |
+| miniaudio, zstandard | mlx-audio | MIT / BSD-3-Clause | Installed with mlx-audio |
+| sounddevice | mlx-audio | MIT; bundles PortAudio (MIT), and Windows DLLs built with Steinberg's ASIO SDK, whose licence the package doesn't state | Installed, never loaded (`tests/test_in_process_licences.py`); macOS can't load the Windows DLLs |
+| colorama | tqdm, typer, pytest (Windows only) | BSD-3-Clause | Not installed on macOS |
+| httpx2-jsfetch | httpx2 (Python in a browser only) | BSD-3-Clause | Not installed on macOS |
 
-Re-run the check whenever `uv.lock` changes:
+To list every installed package with its licence:
 `uv run --with pip-licenses pip-licenses --order=license`.
 
-### Page dependencies (npm)
+## External programs
 
-The page is React + TypeScript + Vite (decided 2026-11-26), built into
-`src/wavescribe/web/dist/` and committed. Only what the bundle contains ships; the build tools
-run on the developer's machine. Checked on the npm registry on 2026-11-26.
+Wavescribe runs these as separate programs, through pipes and files; it doesn't import, link or
+ship them. The user installs them. ffmpeg and the rtl-sdr programs are the external GPL tools:
+each is optional and detected at runtime.
 
-| Package | Licence | Ships in the bundle | Verdict |
+| Program | What it is | Licence | How Wavescribe uses it |
 |---|---|---|---|
-| react, react-dom | MIT | Yes | ✅ keep the notice |
-| scheduler | MIT | Yes (pulled in by react-dom) | ✅ keep the notice |
-| lucide-react (1.72.0) | ISC (some icons derived from Feather, MIT) | Yes (only the icons used) | ✅ keep the notice; `frontend/scripts/notices.mjs` copies it into `licenses.txt` |
-| vite | MIT | No (build tool) | ✅ |
-| @vitejs/plugin-react | MIT | No (build tool) | ✅ |
-| typescript | Apache-2.0 | No (compiler) | ✅ |
-| @types/react, @types/react-dom | MIT | No (type definitions) | ✅ |
-| lightningcss (+ its platform binary) | MPL-2.0 | No (Vite's CSS minifier, a build tool) | ✅ unmodified and run as a tool; MPL is file-level copyleft and nothing of it ends up in the page |
-| the rest of Vite's toolchain (rolldown, postcss, tinyglobby, …) | MIT, ISC, BSD-3-Clause, Apache-2.0 | No (build tools) | ✅ |
+| ffmpeg, ffprobe (Homebrew `ffmpeg`) | Audio and video converter | GPL-3.0-or-later (Homebrew builds it with `--enable-gpl --enable-version3`) | Run as a separate program: decodes internet streams (`sources/stream.py`), writes and cuts the speech archive (`store.py`), checks a pasted stream address (`catalog/stations.py`). Without it, internet stations, the speech archive and replay don't work |
+| libopus (inside ffmpeg) | Opus audio codec | BSD-3-Clause | Encodes the speech archive, inside the ffmpeg process |
+| `rtl_sdr`, `rtl_power`, `rtl_test` (Homebrew `librtlsdr`, Osmocom rtl-sdr) | RTL-SDR driver library and its tools | GPL-2.0-or-later | Run as separate programs: `rtl_sdr` streams samples to the demodulators over a pipe, `rtl_power` sweeps bands for scans (`radio/scan.py`, read as CSV), `rtl_test` lists the dongles. The library itself is never loaded by Wavescribe. Without it, radio receivers don't work |
+| macOS `say` | macOS text to speech | Apple's macOS Software License Agreement (section 2F in macOS Tahoe's covers the system voices) | Run as a separate program: spoken alerts on the Mac's own speakers. The voices are for local personal playback only |
+| macOS tools: `osascript`, `ioreg`, `sysctl`, `system_profiler`, `pmset`, `vm_stat`, `defaults`, `launchctl`, `lsof`, `ps` | Part of macOS | Apple's macOS Software License Agreement | Run as separate programs: notifications, USB devices and battery, memory, the locale, the background service, `wavescribe doctor` |
+
+## Build and install tools
+
+| Tool | What it is | Licence | How Wavescribe uses it |
+|---|---|---|---|
+| uv | Python installer and project manager | Apache-2.0 OR MIT | Installed by the user; installs Python and the Python packages |
+| Homebrew | macOS package manager | BSD-2-Clause | Installed by the user; installs ffmpeg, librtlsdr, uv and Node.js |
+| Node.js, npm | JavaScript runtime and package manager | Node.js: MIT; npm: Artistic-2.0 | Build the page only; running Wavescribe doesn't need them |
+| GitHub Actions: `actions/checkout`, `actions/setup-node`, `astral-sh/setup-uv` | CI steps | MIT | Run the checks on GitHub |
+
+## Page dependencies (npm)
+
+The page is React + TypeScript + Vite, built into `src/wavescribe/web/dist/` and committed. Only
+what the bundle contains ships; the build tools run on the developer's machine.
+
+| Package | What it is | Licence | How Wavescribe uses it | Ships |
+|---|---|---|---|---|
+| react, react-dom | UI library | MIT | Bundled in the built page | Yes, with its notice in `licenses.txt` |
+| scheduler | React's scheduler (pulled in by react-dom) | MIT | Bundled in the built page | Yes, with its notice in `licenses.txt` |
+| lucide-react | Icon set | ISC (some icons derived from Feather: MIT) | Bundled in the built page: only the icons used | Yes, with both notices in `licenses.txt` |
+| vite | Build tool | MIT | Builds the page, and writes its module-preload helper into the bundle | The helper, with Vite's notice in `licenses.txt` |
+| @vitejs/plugin-react | Vite's React plugin | MIT | Build tool | No |
+| typescript | Compiler | Apache-2.0 | Type-checks the page | No |
+| @types/react, @types/react-dom | Type definitions | MIT | Type-checking | No |
+| lightningcss (+ its platform binary) | CSS minifier | MPL-2.0 | Vite's CSS minifier, run unmodified as a build tool | No |
+| the rest of Vite's toolchain (rolldown, postcss, tinyglobby, tslib, …) | Build tools | MIT, ISC, BSD-3-Clause, Apache-2.0, 0BSD | Build tools | No |
 
 `scripts/commit_checks.py` checks every new package in `frontend/package-lock.json`: tier-A
 licences pass, anything else needs a row here first.
 
-**The logo** (`assets/`, the page's icons in `frontend/public/`) is the project's own work under
-the project's licence. The wordmark and tagline are outlines of the Inter typeface (SIL Open
-Font License 1.1); outlines carry no font software, so no font is bundled.
+## Logo and icons
 
-### Radio data
+The logo, the wordmark and the page's icons (`assets/`, `frontend/public/`, copied into
+`dist/`) are Wavescribe's own work, as are the other files in `assets/` (the README's demo,
+made from synthetic test broadcasts, and the social preview). The wordmark and tagline are
+outlines drawn from the Inter typeface (OFL-1.1); no font file is included. As the README's
+License section says, Wavescribe's licence covers the code and documentation, not the
+Wavescribe name or logo.
 
-- **Band plans** (`src/wavescribe/radio/bands.toml`) are written by us from public facts:
-  band edges, channel rasters and channel lists from the ITU Radio Regulations and CEPT
-  decisions. No third-party list is copied.
-- **Station lists are not shipped or downloaded.** National frequency registers are often
-  published for non-commercial use without derivatives, community lists such as FMLIST are for
-  private use, and open data (Wikidata) holds frequencies for very few stations. Wavescribe's list
-  is built from the user's own scans (`data/radio/heard.json`). An import of an openly licensed
-  register (for example one under an open government licence) would be a user-started download,
-  with its licence recorded here first.
+## Radio data
+
+- **Band plans** (`src/wavescribe/radio/bands.toml`) are written for Wavescribe from public
+  allocation facts: band edges, channel rasters and channel lists from the ITU Radio
+  Regulations, CEPT decisions, IARU band plans and national rules. No third-party text or table
+  is copied.
+- **No station list or frequency register is shipped or downloaded.** Wavescribe's list of
+  radio stations is built from the user's own scans (`data/radio/heard.json`).
 - **RDS** names and texts come from the stations' own broadcasts as received; they are kept
   locally like the transcripts.
 
-## Audit: models
+## Internet station directory
 
-| Model | Licence | Verdict | Languages |
+| Source | What it is | Licence | How Wavescribe uses it |
 |---|---|---|---|
-| Whisper large-v3-turbo | MIT | ✅ | 99 |
-| Whisper large-v3 | Apache-2.0 (its model card; OpenAI's code is MIT) | ✅ | 99 |
-| Parakeet-TDT-0.6B-v3 | CC-BY-4.0 | ✅ (attribution) | 25 European |
-| Canary-1B-v2 | CC-BY-4.0 | ✅ (attribution) | 25 European ASR; translation between EN and 24 others, both directions |
-| Nemotron 3.5 ASR streaming 0.6B | OpenMDW-1.1 (`LicenseRef-OpenMDW-1.1`) | ✅ (keep notices) | 40 locales (19 production-grade) |
-| nemotron-speech-streaming-en-0.6b (older) | NVIDIA Open Model License | ⚠️ opt-in | English |
-| Voxtral Mini 3B / Mini 4B Realtime | Apache-2.0 | ✅ | 8 / 13 |
-| Qwen3-ASR 0.6B / 1.7B | Apache-2.0 | ✅ | 30 + 22 Chinese dialects |
-| Omnilingual ASR (Meta) | Apache-2.0 | ✅ | 1,600+ |
-| Meta MMS | CC-BY-NC-4.0 | ⚠️ restricted (NC) | 1,100+ ASR + language ID |
-| inesc-id/WhisperLv3-EP-X-CPP | none | bring-your-own only (ask the authors for a licence) | pt-PT |
-| Qwen3 / Qwen3.5 (incl. 35B-A3B, checked 2026-11-22) | Apache-2.0 | ✅ | 119 / 201 |
-| Gemma 4 | Apache-2.0 | ✅ | 140+ (35+ strong) |
-| Gemma 3 / 3n / TranslateGemma | Gemma Terms of Use | ⚠️ opt-in | 140+ / 55 |
-| MADLAD-400 3B/7B/10B | Apache-2.0 | ✅ | 419 |
-| Opus-MT (Helsinki-NLP) | CC-BY-4.0 or Apache-2.0, per model | ✅ (attribution) | Hundreds of languages |
-| EuroLLM-9B-Instruct | Apache-2.0 | ✅ | 35 |
-| Argos model packages | Per package (newer: CC-BY-4.0; some older: none) | ⚠️ | ~50 |
-| NLLB-200, SeamlessM4T v2 | CC-BY-NC-4.0 | ⚠️ restricted (NC) | 200 / ~100 |
-| Hunyuan-MT | Tencent licence, excludes EU/UK/KR | bring-your-own only | 33 |
-| bge-m3 | MIT | ✅ | 100+ |
-| multilingual-e5 | MIT | ✅ | ~100 |
-| LaBSE | Apache-2.0 | ✅ | 109 |
-| YAMNet | Apache-2.0 (class map CC-BY-SA-4.0) | ✅ | 521 classes |
-| PANNs | Code MIT, weights CC-BY-4.0 | ✅ (attribution) | 527 classes |
-| Silero VAD v6 (`silero_vad.onnx`, from the snakers4/silero-vad GitHub tag) | MIT | ✅ | Language-independent |
+| [Radio Browser](https://www.radio-browser.info) | Community directory of internet radio stations, with an HTTP API | Data: public domain (the site: "Data license: public domain"; submissions are released to the public domain) | Queried over HTTP only on the user's explicit actions (catalogue refresh, online search), with a generic User-Agent. A refresh keeps a compact local copy of the directory, which search then reads offline (`catalog/stations.py`). Station names, logos, homepages and streams belong to the stations; Wavescribe stores links only |
 
-**Conversions we load** (each inherits its upstream licence; the registry pins the revision):
+## Models
 
-| Conversion | Upstream | Licence | Notes |
-|---|---|---|---|
-| `mlx-community/parakeet-tdt-0.6b-v3` (MLX) | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 | Attribution in `THIRD_PARTY_MODELS.md` |
-| `yamnet.tflite` from MediaPipe's model storage (Google's own LiteRT build, pinned by sha256) | YAMNet (tensorflow/models) | Apache-2.0; embedded AudioSet class names CC-BY-SA-4.0 | Speech/music gate |
-| `mlx-community/whisper-large-v3-turbo-asr-fp16` (MLX, with the processor files mlx-audio needs) | `openai/whisper-large-v3-turbo` | MIT | ASR fallback (languages Parakeet lacks, e.g. Hebrew); bake-off |
-| `mlx-community/whisper-large-v3-asr-fp16` (MLX, with processor files) | `openai/whisper-large-v3` | Apache-2.0 on the card (the openai/whisper repo says MIT) | Bake-off |
-| `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` (MLX) | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Bake-off |
-| `mlx-community/Qwen3-ASR-1.7B-8bit` (MLX) | `Qwen/Qwen3-ASR-1.7B` | Apache-2.0 | Bake-off |
-| `mlx-community/nemotron-3.5-asr-streaming-0.6b` (MLX) | `nvidia/nemotron-3.5-asr-streaming-0.6b` | OpenMDW-1.1 | Bake-off; keep the notices |
-| `mlx-community/Qwen3.5-9B-MLX-4bit` (MLX) | `Qwen/Qwen3.5-9B` | Apache-2.0 | `LlmTranslator` |
-| `Nextcloud-AI/madlad400-3b-mt-ct2-int8` (CTranslate2 int8) | `google/madlad400-3b-mt` | Apache-2.0 | Nextcloud runs this conversion in its own translate app. To convert locally instead: `ct2-transformers-converter --model google/madlad400-3b-mt --quantization int8` (needs torch; setup only). |
+The registry's models (`src/wavescribe/models.toml`). The page shows the default tier as
+"permissive".
 
-## Open uncertainties
+| Model | Used for | Licence | Tier the app shows | Languages |
+|---|---|---|---|---|
+| Silero VAD v6 (`silero_vad.onnx`, from the snakers4/silero-vad GitHub tag v6.2.3) | Speech detection | MIT | default | Language-independent |
+| YAMNet | Music gate | Apache-2.0 (its embedded AudioSet class names: CC-BY-SA-4.0) | default | Language-independent (521 sound classes) |
+| Parakeet-TDT-0.6B-v3 | Speech to text, first in the chain | CC-BY-4.0 | default | 25 European |
+| Whisper large-v3-turbo | Speech to text, the chain's fallback | MIT | default | 99 |
+| Whisper large-v3 | Speech to text, selectable | Apache-2.0 (its model card; OpenAI's code is MIT) | default | 99 |
+| Voxtral Mini 4B Realtime | Speech to text, selectable | Apache-2.0 | default | 13 |
+| Qwen3-ASR 1.7B | Speech to text, selectable | Apache-2.0 | default | 30, and 22 Chinese dialects |
+| Nemotron 3.5 ASR streaming 0.6B | Speech to text, selectable | OpenMDW-1.1 (`LicenseRef-OpenMDW-1.1`) | default | 34 (40 locales) |
+| Qwen3.5-9B | Translation, first in the chain | Apache-2.0 | default | 201 languages and dialects |
+| MADLAD-400 3B MT | Translation, second in the chain | Apache-2.0 | default | 419 |
 
-- The inaSpeechSegmenter weights have no explicit licence.
-- Some older Argos packages have no licence.
-- OpenMDW-1.1 isn't on the SPDX list.
-- How well Nemotron 3.5, Omnilingual ASR and Canary run on Apple Silicon is unverified.
-- The FFmpeg licence inside PyAV wheels is unchecked.
-- The macOS 27 licence wording wasn't compared with the Tahoe text quoted here.
+### Conversions
 
-## Key sources
+What `wavescribe models fetch` downloads. Each conversion inherits its upstream licence, and the
+registry pins its revision. Each entry's attribution text is in `models.toml` and goes into
+`THIRD_PARTY_MODELS.md`.
 
-- Licence files and model cards linked from each project's repo or Hugging Face page
-- [Homebrew ffmpeg formula](https://formulae.brew.sh/formula/ffmpeg)
-- [Gemma Terms of Use](https://ai.google.dev/gemma/terms) and the [Gemma 4 licence](https://ai.google.dev/gemma/docs/gemma_4_license)
-- [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/)
-- [OpenMDW-1.1](https://openmdw.ai/license/1-1)
-- [SimulStreaming licence history](https://github.com/ufal/SimulStreaming)
-- [macOS SLA §2F](https://www.apple.com/legal/sla/docs/macOSTahoe.pdf)
+| Conversion | Upstream | Licence |
+|---|---|---|
+| `mlx-community/parakeet-tdt-0.6b-v3` (MLX) | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 |
+| `yamnet.tflite` from MediaPipe's model storage (Google's own LiteRT build, pinned by sha256) | YAMNet (tensorflow/models) | Apache-2.0; embedded AudioSet class names CC-BY-SA-4.0 |
+| `mlx-community/whisper-large-v3-turbo-asr-fp16` (MLX, with the processor files mlx-audio needs) | `openai/whisper-large-v3-turbo` | MIT |
+| `mlx-community/whisper-large-v3-asr-fp16` (MLX, with processor files) | `openai/whisper-large-v3` | Apache-2.0 on the card (the openai/whisper repository says MIT) |
+| `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` (MLX) | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 |
+| `mlx-community/Qwen3-ASR-1.7B-8bit` (MLX) | `Qwen/Qwen3-ASR-1.7B` | Apache-2.0 |
+| `mlx-community/nemotron-3.5-asr-streaming-0.6b` (MLX) | `nvidia/nemotron-3.5-asr-streaming-0.6b` | OpenMDW-1.1; its notices are kept |
+| `mlx-community/Qwen3.5-9B-MLX-4bit` (MLX) | `Qwen/Qwen3.5-9B` | Apache-2.0 |
+| `Nextcloud-AI/madlad400-3b-mt-ct2-int8` (CTranslate2 int8) | `google/madlad400-3b-mt` | Apache-2.0 |
+
+## Where the licences are read
+
+- Python packages: the metadata (`License-Expression`, `License`, classifiers) and licence files
+  of the locked versions.
+- npm packages: the `license` fields in `frontend/package-lock.json` and each package's licence
+  file.
+- Homebrew programs: the formula's licence and, for ffmpeg, its build configuration
+  ([Homebrew ffmpeg formula](https://formulae.brew.sh/formula/ffmpeg)).
+- Models: the model card and licence at the pinned revision (`license_url` in `models.toml`).
+- Licences named in the tiers: [Gemma Terms of Use](https://ai.google.dev/gemma/terms),
+  [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/),
+  [OpenMDW-1.1](https://openmdw.ai/license/1-1),
+  [macOS Software License Agreements](https://www.apple.com/legal/sla/).

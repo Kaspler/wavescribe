@@ -27,11 +27,13 @@ radio, and the radio code is tested on synthetic signals.
 
 1. **Offline at runtime.** No cloud APIs and no telemetry. The network is used only by explicit
    setup actions that download models and assets.
-2. **Licences are checked before use.** Every library, tool and model gets a
-   [docs/LICENSING.md](docs/LICENSING.md) entry first, following its tiers. Permissive code can be
-   imported; GPL tools run only as separate processes. We never commit, mirror, convert-and-upload
-   or bundle model weights: users download them from the rights holder. Every dependency must be
-   installable offline from a cache. Say which licence it has in the pull request.
+2. **Licences are checked before use.** Every direct dependency, tool and model gets a
+   [docs/LICENSING.md](docs/LICENSING.md) entry first, following its tiers; a transitive package
+   needs one when its licence isn't in tier A. Permissive code can be imported; LGPL libraries
+   only dynamically linked, unmodified; GPL tools run only as separate processes. We never
+   commit, mirror, convert-and-upload or bundle model weights: users download them from the
+   rights holder. Every dependency must be installable offline from a cache. Say which licence
+   it has in the pull request.
 3. **Nothing private or copyrighted in the repo:** no secrets, personal data, model weights or
    recorded broadcast audio. Test fixtures are synthetic (e.g. TTS-generated) or clearly licensed.
 4. **Language-agnostic.** Languages are BCP-47 codes in config. The speech and translation

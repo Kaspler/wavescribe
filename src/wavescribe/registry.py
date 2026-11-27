@@ -115,7 +115,7 @@ class Licenses:
         if entry.tier in ("default", "byo"):
             return True
         record = self._read().get(entry.id)
-        # A licence change upstream (it happens: see LICENSING.md) voids the old acceptance.
+        # A licence change upstream voids the old acceptance.
         if not record or record.get("license") != entry.license:
             return False
         return entry.tier != "restricted" or bool(record.get("non_commercial"))

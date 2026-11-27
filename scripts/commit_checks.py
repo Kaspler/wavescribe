@@ -396,16 +396,17 @@ def check_licences(repo: Repo) -> list[str]:
         problems.append(
             "No docs/LICENSING.md entry for these dependencies: " + ", ".join(missing) + ". "
             "Check each licence at its source (the package page and the LICENSE file in its "
-            "repository), sort it into the tiers in LICENSING.md's Policy, add a row to 'Audit: "
-            "libraries and tools' (page packages: 'Page dependencies (npm)') and stage "
-            "docs/LICENSING.md. A tier B or C licence can't be a dependency: remove it and tell "
-            "the maintainers."
+            "repository), sort it into the tiers under 'Policy' in LICENSING.md, add a row to "
+            "'Python dependencies' (page packages: 'Page dependencies (npm)') saying what it is, "
+            "its licence and how Wavescribe uses it, and stage docs/LICENSING.md. A tier B or C "
+            "licence can't be a dependency: remove it and tell the maintainers."
         )
     if risky:
         problems.append(
             "New transitive packages without a tier-A licence: " + ", ".join(risky) + ". "
             "Check each licence at its source; if it is allowed, record it in LICENSING.md "
-            "('Transitive Python dependencies' or 'Page dependencies (npm)') with its verdict, "
+            "('Transitive Python dependencies' or 'Page dependencies (npm)') with its licence "
+            "and how Wavescribe uses it, "
             "otherwise find another way and tell the maintainers. For an unknown Python licence, "
             "`uv sync --offline` first so its metadata is installed."
         )
@@ -444,7 +445,7 @@ def check_models(repo: Repo, changed: set[str]) -> list[str]:
             "Models added or re-pinned in models.toml: " + ", ".join(touched) + ". LICENSING.md "
             "says to re-check a model's licence on every version bump: read it upstream (the "
             "model card and its licence at that revision), then add or update the model's row "
-            "in 'Audit: models' with the date checked, and stage docs/LICENSING.md."
+            "in 'Models' (and in 'Conversions' for a conversion), and stage docs/LICENSING.md."
         )
     return problems
 

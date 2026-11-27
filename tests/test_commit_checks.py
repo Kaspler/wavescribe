@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -133,6 +134,30 @@ def test_models_need_licensing_updated_in_the_same_commit(repo):
     git(repo.root, "commit", "-qm", "model")
     stage(repo, {"src/wavescribe/models.toml": model + 'revision = "abc"\n'})
     assert "m" in cc.check_licences(repo)[0]
+
+
+def test_the_sections_a_licence_message_names_are_headings_of_licensing_md(repo):
+    """A blocked commit sends people to sections of the real docs/LICENSING.md by name."""
+    package = {"dependencies": {"left-pad": "1"}}
+    lock = {"packages": {"": {}, "node_modules/odd": {"license": "GPL-3.0-only"}}}
+    model = '[[model]]\nid = "m"\nlicense = "MIT"\nlicense_url = "u"\ntier = "default"\n'
+    stage(
+        repo,
+        {
+            "frontend/package.json": json.dumps(package),
+            "frontend/package-lock.json": json.dumps(lock),
+            "src/wavescribe/models.toml": model,
+        },
+    )
+    problems = cc.check_licences(repo)
+    assert len(problems) == 3
+    named = set(re.findall(r"(?<!\w)'([A-Z][^']*)'(?!\w)", " ".join(problems)))
+    text = (SCRIPT.parent.parent / cc.LICENSING).read_text(encoding="utf-8")
+    headings = {
+        re.sub(r"^#+\s*", "", line).strip() for line in text.splitlines() if line.startswith("#")
+    }
+    assert {"Policy", "Python dependencies", "Models"} <= named
+    assert named <= headings, named - headings
 
 
 def test_ci_checks_the_licences_of_everything_since_a_base_commit(repo):
