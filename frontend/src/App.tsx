@@ -72,12 +72,12 @@ function skipToMain(e: React.MouseEvent) {
 
 function Notice() {
   useTopics("notice", "conn");
-  const lost = S.conn === "reconnecting";
-  const text = lost ? T.connectionLost : S.notice;
+  const lost = S.conn === "reconnecting" || S.conn === "blocked";
+  const text = S.conn === "blocked" ? T.tooManyTabs : lost ? T.connectionLost : S.notice;
   if (!text) return null;
   return (
     <div className={`notice${lost ? " is-lost" : ""}`} role="status">
-      <Icon name={lost ? "refresh" : "info"} />
+      <Icon name={S.conn === "reconnecting" ? "refresh" : "info"} />
       <span>{text}</span>
       {!lost && <Button size="sm" variant="ghost" icon="close" aria-label="Dismiss" onClick={() => setNotice("")} />}
     </div>

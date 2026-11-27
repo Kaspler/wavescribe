@@ -55,11 +55,14 @@ export function Header({ area }: { area: Area | null }) {
 
 function Conn() {
   useTopics("conn", "state", "status");
-  // "Live" only while the machine keeps up: text that arrives minutes late isn't live.
-  const lag = S.conn === "live" ? headerLag(S.status) : null;
+  // "Live" only once this tab has its stations, and while the machine keeps up: text that arrives
+  // minutes late isn't live.
+  const conn = S.conn === "live" && !S.loaded ? "connecting" : S.conn;
+  const lag = conn === "live" ? headerLag(S.status) : null;
   const behind = !!lag?.behind;
-  const label = S.conn === "live" ? (behind ? T.behindBy(lag.minutes) : T.connected) : S.conn === "connecting" ? T.connecting : T.reconnecting;
-  const title = S.conn === "live" && !behind ? "Receiving live text from this Wavescribe" : undefined;
+  const label = conn === "live" ? (behind ? T.behindBy(lag.minutes) : T.connected)
+    : conn === "connecting" ? T.connecting : conn === "blocked" ? T.cantConnect : T.reconnecting;
+  const title = conn === "live" && !behind ? "Receiving live text from this Wavescribe" : undefined;
   const tip = behind ? [T.behindWhat(lag.minutes), S.status?.load?.reason, T.behindDo].filter(Boolean) : null;
   const body = (
     <>
@@ -70,7 +73,7 @@ function Conn() {
   const described = tip ? { "aria-describedby": "conn-tip" } : {};
   // On the Wavescribe machine the lamp opens Health, where each part says how it is doing.
   return (
-    <span className={cx("conn", `conn-${behind ? "behind" : S.conn}`)} role="status">
+    <span className={cx("conn", `conn-${behind ? "behind" : conn}`)} role="status">
       {S.manage
         ? <a className="conn-link" href="#/settings/health" {...described} title={tip ? undefined : `${title ? `${title}. ` : ""}${T.healthHint}`}
              aria-label={`${label}. ${T.healthHint}`}>{body}</a>

@@ -102,6 +102,8 @@ export const T = {
   checksSkipped: "Some alert checks were skipped in the last 10 minutes to keep up, so an alert from that time may be missing.",
   reconnecting: "Reconnecting…",
   connectionLost: "Connection to Wavescribe lost. Reconnecting; the lamps show the last known state.",
+  cantConnect: "Can't connect",
+  tooManyTabs: "This tab can't connect: too many Wavescribe tabs are open in this browser. Close one.",
   read: "Read",
   find: "Find",
   findHint: "Find stations on the air or on the internet, and add them",

@@ -1,7 +1,9 @@
-// The page's live data: /api/state once per connection, then /api/events.
+// The page's live data: /api/state once per connection, then /api/events, shared by the tabs
+// open in this browser (tabs.ts).
 import { sameLang } from "./lang";
 import { P, setPrefs } from "./prefs";
 import { emit } from "./store";
+import { type Conn, type Env, type Shared, type Sink, share } from "./tabs";
 import type { Alert, Live, PageState, Station, Status, Utterance } from "./types";
 
 const MAX_ALERTS = 500;
@@ -10,7 +12,7 @@ const MAX_PER_STATION = 600; // utterances kept per station, so a page left open
 const HARD_MAX_PER_STATION = 3000; // even while someone reads old text, never more than this
 const FRESH_MS = 2400;
 
-export type Conn = "connecting" | "live" | "reconnecting";
+export type { Conn };
 
 export const S = {
   loaded: false,
@@ -96,15 +98,31 @@ export async function loadState() {
     (S.utts[u.station] ||= []).push(u);
   }
   S.loaded = true;
+  heldBack = false;
+  showConn();
   applyStatus(state.status);
   emit("state", "alerts", ...state.stations.map((s) => `utt:${s.id}`));
 }
 
 const LOADING = "Loading models… stations start once they're ready.";
 let lastReady: boolean | null = null;
+let seenRev: unknown = undefined;
+const lookedUp = new Set<string>();
 function applyStatus(status: Status) {
   S.status = status;
   S.live = status.stations || {};
+  // Stations added or removed elsewhere (another tab, a phone, the command line) reach the page
+  // without a reload: by the server's count of station changes where it sends one, else by a
+  // running station this page doesn't know, looked up once.
+  if (S.loaded) {
+    const rev = status.stations_rev;
+    const unknown = Object.keys(S.live).filter((id) => !Object.hasOwn(S.byId, id) && !lookedUp.has(id));
+    if ((rev !== undefined && seenRev !== undefined && rev !== seenRev) || unknown.length) {
+      unknown.forEach((id) => lookedUp.add(id));
+      loadState().catch(() => {});
+    }
+    seenRev = rev;
+  }
   if (status.ready !== lastReady) {
     lastReady = status.ready;
     if (!status.ready) setNotice(LOADING);
@@ -159,33 +177,117 @@ export async function loadEarlier(id: string): Promise<number> {
   return older.length;
 }
 
-export function connect() {
+// A browser holds back a request it has no free connection for, without an error; this long
+// without an answer means that is what happened.
+const STUCK_MS = 10000;
+
+/** The events stream, reopened after the browser gives up on it. */
+function openStream(sink: Sink) {
   const es = new EventSource("/api/events");
+  let stuck = 0;
+  const arm = () => {
+    clearTimeout(stuck);
+    stuck = window.setTimeout(() => { if (es.readyState === EventSource.CONNECTING) sink.conn("blocked"); }, STUCK_MS);
+  };
+  arm();
   es.onopen = () => {
-    S.conn = "live";
-    emit("conn");
-    loadState().catch((e) => setNotice(`Couldn't load the stations: ${e.message}`));
+    clearTimeout(stuck);
+    sink.conn("live");
+    sink.opened();
   };
   es.onerror = () => {
-    S.conn = "reconnecting";
-    emit("conn");
+    sink.conn("reconnecting");
     if (es.readyState === EventSource.CLOSED) {
       // the browser gave up (e.g. the server answered with an error): try again ourselves
+      clearTimeout(stuck);
       es.close();
-      setTimeout(connect, 3000);
-    }
+      setTimeout(() => openStream(sink), 3000);
+    } else arm();
   };
-  const on = (name: string, f: (data: never) => void) =>
-    es.addEventListener(name, (e) => {
-      let data;
+  for (const name of ["utterance", "status", "alert"])
+    es.addEventListener(name, (e) => sink.event(name, (e as MessageEvent).data));
+}
+
+const LOCK = "wavescribe-events";
+
+/** Locks exist only where the page is served securely (localhost counts); elsewhere, every tab
+ * keeps its own stream. */
+function browserEnv(): Env {
+  const locks = navigator.locks;
+  let bc: BroadcastChannel | null = null;
+  try {
+    bc = new BroadcastChannel(LOCK);
+  } catch {
+    bc = null;
+  }
+  const holdForGood = () => new Promise<void>(() => {});
+  return {
+    acquire: locks
+      ? (lead, follow) => {
+          locks.request(LOCK, { ifAvailable: true }, (lock) => {
+            if (lock) {
+              lead();
+              return holdForGood();
+            }
+            follow();
+            locks.request(LOCK, () => { lead(); return holdForGood(); });
+            return undefined;
+          });
+        }
+      : null,
+    channel: bc && {
+      post: (m) => bc.postMessage(m),
+      listen: (f) => { bc.onmessage = (e) => f(e.data); },
+    },
+    open: openStream,
+  };
+}
+
+// What the header shows: the stream's state, unless this tab's own requests are held back.
+let streamConn: Conn = "connecting";
+let heldBack = false;
+function showConn() {
+  const c = heldBack ? "blocked" : streamConn;
+  if (c !== S.conn) {
+    S.conn = c;
+    emit("conn");
+  }
+}
+
+let shared: Shared | null = null;
+
+export function connect() {
+  const reload = () => loadState().catch((e) => setNotice(`Couldn't load the stations: ${e.message}`));
+  shared = share(browserEnv(), {
+    event(name, data) {
+      let parsed;
       try {
-        data = JSON.parse((e as MessageEvent).data);
+        parsed = JSON.parse(data);
       } catch {
         return; // a malformed event: skip it, keep the stream
       }
-      f(data as never);
-    });
-  on("utterance", upsert);
-  on("status", applyStatus);
-  on("alert", upsertAlert);
+      if (name === "utterance") upsert(parsed);
+      else if (name === "status") applyStatus(parsed);
+      else if (name === "alert") upsertAlert(parsed);
+    },
+    conn(c) {
+      streamConn = c;
+      showConn();
+    },
+    opened: reload,
+    stations: reload,
+  });
+  addEventListener("pagehide", () => shared?.leave());
+  setTimeout(() => {
+    if (!S.loaded && streamConn !== "reconnecting") {
+      heldBack = true;
+      showConn();
+    }
+  }, STUCK_MS);
+}
+
+/** After this tab changed the stations: reloads them here and in the other tabs. */
+export function stationsChanged() {
+  shared?.changed();
+  return loadState();
 }

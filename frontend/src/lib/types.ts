@@ -108,6 +108,8 @@ export interface Status {
   dropped?: Record<string, number>;
   /** Whether this machine keeps up with every running station. */
   load?: Load | null;
+  /** Changes whenever a station is added, changed or removed. */
+  stations_rev?: number | string;
   stations: Record<string, Live>;
 }
 

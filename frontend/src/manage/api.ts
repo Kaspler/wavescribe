@@ -1,7 +1,7 @@
 // Radio's and Settings' calls. /api/manage answers only the Wavescribe machine itself, and every
 // change carries the X-Wavescribe header.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { S, loadState } from "../lib/live";
+import { S, stationsChanged } from "../lib/live";
 
 export type Any = any;
 
@@ -75,8 +75,8 @@ export function listenTo(mhz: number, mode?: string | null, device?: string) {
   location.hash = "#/listen";
 }
 
-/** After a station change, the reading view reloads its stations too. */
-export const refreshPage = () => loadState().catch(() => {});
+/** After a station change, the reading view reloads its stations too, in every tab. */
+export const refreshPage = () => stationsChanged().catch(() => {});
 
 // -- formatting ------------------------------------------------------------------------------
 export const num = (v: number | null | undefined, d = 1) => (v == null || Number.isNaN(v) ? "–" : Number(v).toFixed(d));
