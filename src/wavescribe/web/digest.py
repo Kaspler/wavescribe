@@ -5,16 +5,18 @@ about now, as JSON (``wavescribe/digest`` makes it).
     {"stations": ["tsf", "rr"], "minutes": 60, "language": "en"}     what did I miss?
     {"kind": "now", "stations": ["tsf"], "language": "en"}          what are they on about?
 
-It reads only, so other machines (``serve --lan``) may ask too, and get a digest of only what
-may leave this machine, over a few hours at most; like asking, it needs the ``X-Wavescribe``
-header, so that another website can't spend the model, and once the feed asks other machines
-for a token, a digest asks for one too (``feed.authorised``). The answer comes once the model
-is done, which can take a few minutes while live translation goes first; when two digests are
-being made, it is refused at once with ``Retry-After``.
+It spends the model as a question does, so it passes the gate a question does (server.py,
+``do_POST``): the ``X-Wavescribe`` header, so that another website can't spend the model;
+from another machine only with ``serve --allow-remote-ask``; through a proxy, a read token
+unless ``--public-read``. Another machine gets a digest of only what may leave this one, over
+a few hours at most. The answer comes once the model is done, which can take a few minutes
+while live translation goes first; when two digests are being made, it is refused at once
+with ``Retry-After``.
 
 ``"speak": true`` also reads it aloud here, in the alerts' voice for its language; the answer
-then carries ``speech``: ``{"started": true}``, or ``{"started": false, "error": why}``. Only
-this machine may ask for that: the speakers are in the room of whoever runs Wavescribe.
+then carries ``speech``: ``{"started": true}``, or ``{"started": false, "error": why}``. That
+is a control, as starting a station is: this machine only, and never through a proxy (the
+speakers are in the room of whoever runs Wavescribe).
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ from typing import TYPE_CHECKING
 
 from wavescribe.digest import Busy, Failed, RequestError, Unavailable
 from wavescribe.events import to_json
-from wavescribe.web import feed
 
 if TYPE_CHECKING:
     from wavescribe.web.server import Handler, WebHub
@@ -45,7 +46,7 @@ def unavailable(hub: WebHub) -> str | None:
 
 
 def handle(h: Handler) -> None:
-    """A request in, the digest out (the header has been checked)."""
+    """A request in, the digest out (past the gate a question passes)."""
     hub = h.server.hub
     reason = unavailable(hub)
     if reason:
@@ -62,17 +63,12 @@ def handle(h: Handler) -> None:
             HTTPStatus.BAD_REQUEST,
         )
         return
-    exports = h._exports()
-    if exports is not None and not feed.authorised(h, {}, "read"):
-        h._json(
-            {"error": "a feed token is needed (Authorization: Bearer …)"}, HTTPStatus.UNAUTHORIZED
-        )
-        return
+    exports = h._exports()  # None: this machine, not through a proxy
     speak = body.get("speak", False)
     if not isinstance(speak, bool):
         h._json({"error": "speak is true or false"}, HTTPStatus.BAD_REQUEST)
         return
-    if speak and exports is not None:
+    if speak and not h._is_local():
         h._json(
             {"error": "only the Wavescribe machine itself can have a digest read aloud"},
             HTTPStatus.FORBIDDEN,

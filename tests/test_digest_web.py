@@ -16,6 +16,7 @@ from tests.test_web import start_server
 from wavescribe.config import StationsConfig
 from wavescribe.digest import MAX_RUNNING, Digester
 from wavescribe.store import Store
+from wavescribe.web.server import REMOTE_ASK_OFF, Handler
 
 LOCAL = {"X-Wavescribe": "1", "Content-Type": "application/json"}
 FROM_LAN = {**LOCAL, "X-Forwarded-For": "192.168.1.20"}  # every proxied request is another's
@@ -41,6 +42,9 @@ class Serving:
 
     def __init__(self, store: Store, llm=None, *, submit=None) -> None:
         self.server, self.hub, self.pipeline = llm_server(store)
+        # Other machines get past the gate (as with --allow-remote-ask --public-read): these
+        # tests are about what they get. The gate has its own test.
+        self.server.remote_ask = self.server.public_read = True
         self.llm = llm or FakeLlm("- Water is cut tomorrow [1].")
         self.hub.digester = Digester(
             store, lambda: self.hub.config.stations, submit or at_once(self.llm), clock=lambda: NOW
@@ -168,24 +172,54 @@ def test_the_app_queues_digests_on_the_translation_model(tmp_path: Path) -> None
         node.close()
 
 
-def test_another_machine_needs_a_feed_token_once_there_are_tokens(tmp_path: Path) -> None:
+def test_a_digest_passes_the_gate_a_question_does(tmp_path: Path, monkeypatch) -> None:
     store = stocked(tmp_path)
     web = Serving(store)
+    web.server.remote_ask = web.server.public_read = False
 
     class Tokens:
-        def tokens_required(self) -> bool:
-            return True
-
-        def check_token(self, token, scope) -> bool:
-            return token == "secret"
+        def token_id(self, token, scope) -> str | None:
+            return "viewer" if (token, scope) == ("secret", "read") else None
 
     web.hub.app = Tokens()
+    with_token = {**FROM_LAN, "Authorization": "Bearer secret"}
     try:
+        # This machine: no flag and no token.
+        assert post(web.server, {"language": "en"})[0] == 200
+        # Another machine: it spends the model, so not without serve --allow-remote-ask.
+        status, out = post(web.server, {"language": "en"}, with_token)
+        assert (status, out["error"]) == (403, REMOTE_ASK_OFF)
+        with monkeypatch.context() as m:
+            m.setattr(Handler, "_is_local", lambda self: False)  # on the LAN, no proxy
+            assert post(web.server, {"language": "en"})[0] == 403
+            web.server.remote_ask = True
+            assert post(web.server, {"language": "en"})[0] == 200  # the LAN reads freely
+        # Through a proxy (a proxy's header even from here), a read token as for a question.
         status, out = post(web.server, {"language": "en"}, FROM_LAN)
-        assert status == 401 and "feed token" in out["error"]
-        with_token = {**FROM_LAN, "Authorization": "Bearer secret"}
+        assert status == 401 and out["token_required"] is True
         assert post(web.server, {"language": "en"}, with_token)[0] == 200
-        assert post(web.server, {"language": "en"})[0] == 200  # this machine needs none
+        web.server.public_read = True
+        assert post(web.server, {"language": "en"}, FROM_LAN)[0] == 200
+        # Reading aloud is a control: this machine only, never through a proxy.
+        status, out = post(web.server, {"language": "en", "speak": True}, with_token)
+        assert status == 403 and "only the Wavescribe machine" in out["error"]
+        web.server.behind_proxy = True
+        status, out = post(web.server, {"language": "en", "speak": True}, LOCAL)
+        assert status == 403 and "only the Wavescribe machine" in out["error"]
+    finally:
+        web.close()
+        store.close()
+
+
+def test_another_machine_is_told_why_it_cant_have_a_digest(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    web.server.remote_ask = False
+    try:
+        conn = http.client.HTTPConnection(*web.server.server_address, timeout=10)
+        conn.request("GET", "/api/state", headers=FROM_LAN)
+        state = json.loads(conn.getresponse().read())
+        assert state["digest"] == REMOTE_ASK_OFF  # the page and agents say why
     finally:
         web.close()
         store.close()

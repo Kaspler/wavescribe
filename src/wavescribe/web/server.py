@@ -681,6 +681,7 @@ class Handler(BaseHTTPRequestHandler):
             hub = self.server.hub
             state = hub.state(can_control=self._is_local(), exports=self._exports())
             state.update(_ask_fields(self._ask_unavailable()))
+            state["digest"] = self._model_unavailable(state["digest"])
             self._json(state)
         elif path == "/api/events":
             self._events()
@@ -831,7 +832,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _ask_unavailable(self) -> str | None:
         """Why this request can't ask questions, or None when it can."""
-        reason = self.server.hub.ask_unavailable()
+        return self._model_unavailable(self.server.hub.ask_unavailable())
+
+    def _model_unavailable(self, reason: str | None) -> str | None:
+        """Why this request can't have the model work for it (a question, a digest), given why
+        that can't be done in this run (``reason``), or None when it can."""
         allowed = self._is_local() or getattr(self.server, "remote_ask", False)
         return reason if reason is not None or allowed else REMOTE_ASK_OFF
 
