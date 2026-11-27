@@ -1,6 +1,7 @@
 // One station's transcript: paragraphs split at pauses, times in the margin, newest at the bottom.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
+import { columnLag } from "../lib/behind";
 import { dirOf, langName, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
 import { S, loadEarlier, post, running, setNotice } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -79,6 +80,9 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
   const last = on ? lastTextAgo(st.id) : null;
   const canListen = on && st.kind !== "remote" && !!S.live[st.id]?.connected && !stale; // remote: text only
   const speech = !stale && state.lamp === "speech";
+  // Translation lag matters only to someone reading the translation.
+  const lag = on && !stale ? columnLag(S.live[st.id]) : null;
+  const translated = !sameLang(shownLang(st, P.lang), st.language);
   return (
     <header className="col-head">
       <div className="col-title">
@@ -113,6 +117,8 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
       </div>
       <p className="col-meta">
         <span>{langPair(st)}</span>
+        {lag?.text && <span className="is-trouble num">{T.colBehind(lag.text)}</span>}
+        {lag?.translation && translated && <span className="num">{T.colTranslationBehind(lag.translation)}</span>}
         {(stale || !speech) && (
           <span className={cx("col-state", state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>
             {stale ? T.reconnecting : state.why || state.label}

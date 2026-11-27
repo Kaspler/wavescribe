@@ -2,6 +2,7 @@
 // screens and lead the station list on phones.
 import { useEffect, useRef, useState } from "react";
 import { playReplay } from "../lib/audio";
+import { skippedChecks } from "../lib/behind";
 import { langNameEn, sameLang } from "../lib/lang";
 import { S } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -35,7 +36,7 @@ const recent = (a: Alert) => a.severity !== "low" && a.last_at >= Date.now() / 1
 export const recentAlerts = () => alertList().list.filter(recent);
 
 export function AlertList({ max, compact }: { max?: number; compact?: boolean }) {
-  useTopics("alerts", "prefs", "state");
+  useTopics("alerts", "prefs", "state", "status");
   const [all, setAll] = useState(false);
   const { list, also } = alertList();
   const rec = list.filter(recent);
@@ -64,6 +65,7 @@ export function AlertList({ max, compact }: { max?: number; compact?: boolean })
           {rec.length - shown.length} more
         </button>
       )}
+      {skippedChecks(S.status) > 0 && <p className="alerts-foot is-trouble">{T.checksSkipped}</p>}
       <p className="alerts-foot">{T.alertsCanFail}</p>
     </div>
   );

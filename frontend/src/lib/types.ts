@@ -1,4 +1,5 @@
 // The shapes /api/state and /api/events send (src/wavescribe/web/server.py, events.py).
+import type { Drops, Lag, Load } from "./behind";
 
 export type Severity = "low" | "medium" | "high" | "critical";
 export const SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
@@ -87,6 +88,10 @@ export interface Live {
   /** Why its capture failed, while it is down, and how soon it is tried again. */
   error?: string;
   retry_in_s?: number;
+  /** How far its text and translation are behind the radio, and what was skipped in the last
+   * 10 minutes to keep up (lib/behind.ts). */
+  behind_s?: Partial<Lag> | null;
+  dropped?: Partial<Drops> | null;
 }
 
 export interface Status {
@@ -96,6 +101,8 @@ export interface Status {
   asr_busy?: number;
   mt_busy?: number;
   dropped?: Record<string, number>;
+  /** Whether this machine keeps up with every running station. */
+  load?: Load | null;
   stations: Record<string, Live>;
 }
 

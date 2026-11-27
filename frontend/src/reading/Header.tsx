@@ -2,6 +2,7 @@
 // search or ask, the connection, what's playing, display settings and the gear for Settings.
 import { useEffect, useRef, useState } from "react";
 import { A, stopAudio } from "../lib/audio";
+import { headerLag } from "../lib/behind";
 import { S } from "../lib/live";
 import { type Area, go, isReading, parse, useHash } from "../lib/router";
 import { useTopics } from "../lib/store";
@@ -53,21 +54,32 @@ export function Header({ area }: { area: Area | null }) {
 }
 
 function Conn() {
-  useTopics("conn", "state");
-  const label = S.conn === "live" ? T.connected : S.conn === "connecting" ? T.connecting : T.reconnecting;
-  const title = S.conn === "live" ? "Receiving live text from this Wavescribe" : undefined;
+  useTopics("conn", "state", "status");
+  // "Live" only while the machine keeps up: text that arrives minutes late isn't live.
+  const lag = S.conn === "live" ? headerLag(S.status) : null;
+  const behind = !!lag?.behind;
+  const label = S.conn === "live" ? (behind ? T.behindBy(lag.minutes) : T.connected) : S.conn === "connecting" ? T.connecting : T.reconnecting;
+  const title = S.conn === "live" && !behind ? "Receiving live text from this Wavescribe" : undefined;
+  const tip = behind ? [T.behindWhat(lag.minutes), S.status?.load?.reason, T.behindDo].filter(Boolean) : null;
   const body = (
     <>
       <span className="conn-dot" aria-hidden="true" />
       <span className="conn-label">{label}</span>
     </>
   );
+  const described = tip ? { "aria-describedby": "conn-tip" } : {};
   // On the Wavescribe machine the lamp opens Health, where each part says how it is doing.
   return (
-    <span className={cx("conn", `conn-${S.conn}`)} role="status">
+    <span className={cx("conn", `conn-${behind ? "behind" : S.conn}`)} role="status">
       {S.manage
-        ? <a className="conn-link" href="#/settings/health" title={`${title ? `${title}. ` : ""}${T.healthHint}`} aria-label={`${label}. ${T.healthHint}`}>{body}</a>
-        : <span className="conn-link" title={title}>{body}</span>}
+        ? <a className="conn-link" href="#/settings/health" {...described} title={tip ? undefined : `${title ? `${title}. ` : ""}${T.healthHint}`}
+             aria-label={`${label}. ${T.healthHint}`}>{body}</a>
+        : <span className="conn-link" title={title} tabIndex={tip ? 0 : undefined} {...described}>{body}</span>}
+      {tip && (
+        <span className="pop conn-tip" id="conn-tip" role="tooltip">
+          {tip.map((line) => <span key={line}>{line}</span>)}
+        </span>
+      )}
     </span>
   );
 }

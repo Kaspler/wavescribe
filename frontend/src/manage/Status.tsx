@@ -1,10 +1,13 @@
 // Health: is every station heard and keeping up, and is this machine coping? Storage: how much
 // is kept, and for how long.
 import { useRef, useState } from "react";
+import { columnLag, headerLag, skippedChecks } from "../lib/behind";
 import { S } from "../lib/live";
 import { type Lamp as LampState } from "../lib/station";
+import { useTopics } from "../lib/store";
 import { ago, day, hm } from "../lib/time";
 import { ActButton, Advanced, Field, Input, Lamp, LinkButton, Section, Table, Tag, cx } from "../components/ui";
+import { T } from "../reading/strings";
 import { type Any, bytes, get, mb, num, post, secs, useEvery, useLoad } from "./api";
 
 const kept = (v: string, old: number | null) => (v.trim() === "" ? old : +v);
@@ -44,13 +47,33 @@ function stationLamp(st: Any): [LampState, string] {
   return ["on", `quiet ${ago(st.quiet_s || 0)}`];
 }
 
+/** Whether the machine keeps up, live from the status the page already receives. */
+function KeepingUp() {
+  useTopics("status");
+  const lag = headerLag(S.status);
+  const skipped = skippedChecks(S.status);
+  if (!lag.behind && !skipped) return null;
+  return (
+    <div className="m-note" role="status">
+      {lag.behind && (
+        <p>
+          <strong>{T.behindBy(lag.minutes)}.</strong> {T.behindWhat(lag.minutes)}{S.status?.load?.reason ? ` ${S.status.load.reason}` : ""} {T.behindDo}
+        </p>
+      )}
+      {skipped > 0 && <p className="is-trouble">{T.checksSkipped}</p>}
+    </div>
+  );
+}
+
 function StationHealth({ s }: { s: Any }) {
+  useTopics("status");
   const pl = s.pipeline || {};
   const rows = Object.entries(pl.stations || {}) as [string, Any][];
   const signal = rows.some(([, st]) => st.signal_db != null); // only radios report one
   return (
     <Section id="st-health" title="Stations"
              description="Lag runs from the end of an utterance to its text and to its translation, over the last 10 minutes. A stream's own delay behind the broadcast, often 5–30 s, comes on top.">
+      <KeepingUp />
       <div className="m-lag">
       <Table caption="Running stations" empty="No station is running."
              cols={[{ label: "Station" }, { label: "State" }, ...(signal ? [{ label: "Signal" }] : []), { label: "Text p50", num: true }, { label: "p95", num: true },
@@ -58,11 +81,16 @@ function StationHealth({ s }: { s: Any }) {
         {rows.map(([id, st]) => {
           const [lamp, state] = stationLamp(st);
           const lag = (pl.lag || {})[id] || {};
+          const late = columnLag(S.live[id]);
           const over = st.clipped > 0.001;
           return (
             <tr key={id}>
               <td><span className="m-station"><Lamp state={lamp} />{S.byId[id]?.name || id}</span></td>
-              <td className={cx(lamp === "trouble" && "is-trouble")}>{state}{st.reconnects ? ` · ${st.reconnects} reconnects` : ""}</td>
+              <td className={cx(lamp === "trouble" && "is-trouble")}>
+                {state}{st.reconnects ? ` · ${st.reconnects} reconnects` : ""}
+                {late.text && <span className="is-trouble"> · {T.colBehind(late.text)}</span>}
+                {late.translation && ` · ${T.colTranslationBehind(late.translation)}`}
+              </td>
               {signal && (
                 <td className="num-cell">
                   {st.signal_db != null ? <>{st.signal_db} dBFS{over && <Tag tone="warn">overload</Tag>}</> : "–"}
