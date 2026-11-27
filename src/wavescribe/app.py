@@ -40,7 +40,7 @@ from wavescribe.pipeline import (
 )
 from wavescribe.refusal import Refusal, said
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
-from wavescribe.rules import LlmRule, parse_rule
+from wavescribe.rules import VIEW_KEYS, LlmRule, parse_rule
 from wavescribe.settings import (
     OVERRIDE_KEYS,
     Settings,
@@ -1369,6 +1369,9 @@ class App:
         self.alerter.reconfigure(config)
 
     def save_rule(self, raw: dict[str, Any]) -> None:
+        # What rules_view added for the page isn't the rule's: a rule sent back whole is kept
+        # without it. Any other key the rule doesn't take is refused, as in alerts.toml.
+        raw = {k: v for k, v in raw.items() if k not in VIEW_KEYS}
         try:
             parse_rule(raw, "page")
         except ValueError as e:

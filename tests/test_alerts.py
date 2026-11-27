@@ -445,6 +445,111 @@ def test_a_wrongly_shaped_alerts_file_says_what_is_wrong(tmp_path: Path, change,
         parse_alerts({**CONFIG, **change}, Path("alerts.toml"), pack(tmp_path))
 
 
+VOICE = {"voice": "Lesya", "fallback": "Увага. Радіо."}
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"delivry": {}}, r"^alerts\.toml: unknown top-level keys \['delivry'\]$"),
+        ({"delivery": {"notfy_language": "en", "cooldown_minuts": 5}},
+         r"^alerts\.toml \[delivery\]: unknown keys \['cooldown_minuts', 'notfy_language'\]; "
+         r"it takes \['cooldown_minutes', 'notify_language', 'notify_sound', 'remind_minutes', "
+         r"'translation_wait_s'\]$"),
+        ({"speak": {"uk": {**VOICE, "intros": "Увага."}}},
+         r"^alerts\.toml \[speak\.uk\]: unknown keys \['intros'\]; it takes \['earlier', "
+         r"'fallback', 'intro', 'summary', 'voice'\]$"),
+        ({"actions": {"hihg": ["notify"]}}, r"^alerts\.toml \[actions\]: unknown severity 'hihg'$"),
+        ({"rule": [{"id": "water", "topics": ["water"], "min_mention": 3, "severty": "high"}]},
+         r"^alerts\.toml: rule water: unknown keys \['min_mention', 'severty'\]; a keyword rule "
+         r"takes \['id', 'kind', 'min_mentions', 'near', 'regex', 'severity', 'stations', "
+         r"'terms', 'topics', 'verify'\]$"),
+        # A key of another kind of rule would be ignored just the same.
+        ({"rule": [{"id": "leave", "kind": "llm", "prompt": "told to leave", "verify": True}]},
+         r"rule leave: unknown keys \['verify'\]; an llm rule takes \['id', 'kind', "
+         r"'min_mentions', 'prompt', 'severity', 'stations'\]$"),
+        ({"rule": [{"id": "quiet", "kind": "silence", "after_minuts": 5}]},
+         r"rule quiet: unknown keys \['after_minuts'\]; a silence rule takes \['after_minutes', "
+         r"'id', 'kind', 'level_db', 'severity', 'stations'\]$"),
+        ({"rule": [{"id": "jam", "kind": "traffic", "min_mentions": 2}]},
+         r"rule jam: unknown keys \['min_mentions'\]; a traffic rule takes \['id', 'kind', "
+         r"'severity', 'stations'\]$"),
+        # A misspelt kind was skipped, and the station it watched went silent unnoticed.
+        ({"rule": [{"id": "quiet", "kind": "silense"}]},
+         r"^alerts\.toml: rule quiet: kind is keyword, llm, silence or traffic, not 'silense'$"),
+        ({"rule": [{"id": "origin", "topics": ["water"], "origin": "file", "enabled": True}]},
+         r"rule origin: unknown keys \['enabled', 'origin'\]"),  # the page's, not the file's
+    ],
+)  # fmt: skip
+def test_a_key_the_alerts_file_does_not_take_is_refused_by_name(
+    tmp_path: Path, change, message
+) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse_alerts({**CONFIG, **change}, Path("alerts.toml"), pack(tmp_path))
+
+
+def test_every_key_the_alerts_file_takes_loads(tmp_path: Path) -> None:
+    from wavescribe.alerts import DELIVERY_KEYS, VOICE_KEYS, load_alerts, merge_page, read_alerts
+    from wavescribe.digest.schedule import KEYS
+    from wavescribe.rules import RULE_KEYS
+
+    path = tmp_path / "alerts.toml"
+    path.write_text(
+        '[delivery]\nnotify_language = "en"\nnotify_sound = ""\ntranslation_wait_s = 5\n'
+        "cooldown_minutes = 10\nremind_minutes = 0\n"
+        '[speak.uk]\nvoice = "Lesya"\nfallback = "Увага."\nintro = "Увага:"\n'
+        'summary = "Огляд {stations}."\nearlier = "Раніше: {alerts}."\n'
+        '[[rule]]\nid = "water"\nkind = "keyword"\ntopics = ["water"]\nnear = ["local"]\n'
+        'severity = "high"\nmin_mentions = 2\nstations = ["a"]\nverify = true\n'
+        "regex = ['\\bsem água\\b']\nterms = { es = [\"sin agua\"] }\n"
+        '[[rule]]\nid = "leave"\nkind = "llm"\nprompt = "people are told to leave"\n'
+        'severity = "high"\nmin_mentions = 2\nstations = ["a"]\n'
+        '[[rule]]\nid = "quiet"\nkind = "silence"\nafter_minutes = 5\nlevel_db = -50\n'
+        'severity = "medium"\nstations = ["a"]\n'
+        '[[rule]]\nid = "jam"\nkind = "traffic"\nseverity = "low"\nstations = ["a"]\n'
+        '[actions]\ncritical = ["notify", "speak:uk", "log"]\nhigh = ["notify"]\n'
+        'medium = ["log"]\nlow = []\n'
+        '[digest]\nevery_minutes = 30\nstations = ["a"]\nlanguage = "uk"\nspeak = true\n'
+        'quiet_hours = ["22:00", "07:00"]\n',
+        encoding="utf-8",
+    )
+    raw = read_alerts(path)
+    # The file above has every key there is: one added to the program is added here.
+    assert set(raw["delivery"]) == DELIVERY_KEYS and set(raw["speak"]["uk"]) == VOICE_KEYS
+    assert {r["kind"]: set(r) for r in raw["rule"]} == RULE_KEYS and set(raw["digest"]) == KEYS
+    words = pack(tmp_path)
+    config = load_alerts(path, words)
+    assert len(config.rules.rules + config.rules.llm_rules + config.rules.station_rules) == 4
+    # What the page keeps in config/ui.toml lays over it: its delivery settings and voices,
+    # its rules, the file rules it switched off and its digest schedule, off or not.
+    page = {
+        "delivery": {"notify_language": "uk", "translation_wait_s": 3, "cooldown_minutes": 20},
+        "actions": {"high": ["notify", "log"]},
+        "speak": {"en": {"voice": "Daniel", "intro": "Attention:", "fallback": "Attention."}},
+        "rule": [{"id": "bridge", "severity": "high", "terms": {"es": ["puente cerrado"]},
+                  "kind": "keyword"}],
+        "disabled_rules": ["jam"],
+        "digest": {"every_minutes": 60, "off": True},
+    }  # fmt: skip
+    merged, rules, disabled = merge_page(raw, page)
+    config = parse_alerts(merged, path, words, rules, disabled)
+    assert config.notify_language == "uk" and set(config.voices) == {"uk", "en"}
+    assert [r.id for r in config.rules.rules] == ["water", "bridge"]
+    assert config.rules.station_rules[0].id == "quiet" and len(config.rules.station_rules) == 1
+    assert "digest" not in merged
+
+
+def test_a_misspelt_digest_key_is_refused_when_the_file_is_read(tmp_path: Path) -> None:
+    from wavescribe.alerts import read_alerts
+
+    path = tmp_path / "alerts.toml"
+    path.write_text("[digest]\nevery_minuts = 30\nspeak = true\n", encoding="utf-8")
+    message = (r"alerts\.toml \[digest\]: unknown keys \['every_minuts'\]; it takes "
+               r"\['every_minutes', 'language', 'quiet_hours', 'speak', 'stations'\]$")  # fmt: skip
+    with pytest.raises(ConfigError, match=message):
+        read_alerts(path)
+
+
 def test_actions_written_as_one_string_are_refused(tmp_path: Path) -> None:
     raw = {**CONFIG, "actions": {"critical": "notify"}}  # read as a list: "n", "o", "t", ...
     with pytest.raises(ConfigError, match=r"\[actions\]: critical must be a list of actions"):

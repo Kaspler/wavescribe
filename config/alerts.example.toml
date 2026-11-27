@@ -1,7 +1,8 @@
 # Example alert rules. Rules run on SOURCE-LANGUAGE text, so they never depend on translation.
 # Alerts can be missed or wrong: never the only warning where life, health or property is at stake.
 # Keyword rules reference topics from config/keywords/<lang>.toml, picked by each station's language.
-# Copy to config/alerts.toml (gitignored) and adapt.
+# Copy to config/alerts.toml (gitignored) and adapt. A key this file doesn't take (a misspelt
+# one, say) is refused by name when Wavescribe starts; `uv run wavescribe alerts check` says it too.
 #
 # Severity: low (stored and highlighted only), medium, high, critical. What each level does is
 # set in [actions]. `near` raises the severity one level when a place from that group is named in

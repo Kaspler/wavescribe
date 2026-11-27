@@ -245,6 +245,45 @@ def test_rules_from_the_page(node: Running) -> None:
     assert node.call("POST", "/api/manage/rules", {"id": "x", "kind": "llm"})[0] == 400
 
 
+def test_the_page_keeps_no_key_a_rule_or_a_setting_does_not_take(node: Running) -> None:
+    def kept() -> dict:
+        return node.app.settings.get("alerts") or {}
+
+    misspelt = {"id": "bridge", "terms": {"pt": ["ponte"]}, "min_mention": 2}
+    status, err = node.call("POST", "/api/manage/rules", misspelt)
+    assert status == 400
+    assert err["error"].startswith("rule bridge: unknown keys ['min_mention']; a keyword rule")
+    status, err = node.call("POST", "/api/manage/rules", {"id": "quiet", "kind": "silense"})
+    assert status == 400 and "kind is keyword, llm, silence or traffic" in err["error"]
+    assert not kept().get("rule")
+    # A rule sent back as the page was given it: what the page was told about it isn't kept.
+    rule = {"id": "bridge", "terms": {"pt": ["ponte fechada"]}}
+    status, view = node.call("POST", "/api/manage/rules", rule)
+    shown = next(r for r in view["rules"] if r["id"] == "bridge")
+    assert (shown["origin"], shown["enabled"], shown["kind"]) == ("page", True, "keyword")
+    status, view = node.call("POST", "/api/manage/rules", {**shown, "severity": "high"})
+    assert status == 200
+    assert kept()["rule"] == [
+        {"id": "bridge", "terms": {"pt": ["ponte fechada"]}, "kind": "keyword", "severity": "high"}
+    ]
+    for body, said in (
+        ({"delivery": {"cooldown_minuts": 5}}, "[delivery]: unknown keys ['cooldown_minuts']"),
+        ({"speak": {"en": {"voice": "Daniel", "fallback": "Attention.", "intros": "Hear:"}}},
+         "[speak.en]: unknown keys ['intros']"),
+    ):  # fmt: skip
+        status, err = node.call("POST", "/api/manage/alerts/settings", body)
+        assert status == 400 and said in err["error"], err
+    assert "delivery" not in kept() and "speak" not in kept()
+    # What the page's own form sends is taken.
+    sent = {
+        "delivery": {"notify_language": "en", "translation_wait_s": 5, "cooldown_minutes": 20},
+        "actions": {"critical": ["notify", "log"], "high": ["log"], "medium": [], "low": []},
+        "speak": {"en": {"voice": "Daniel", "intro": "Hear this:", "fallback": "Attention."}},
+    }
+    status, view = node.call("POST", "/api/manage/alerts/settings", sent)
+    assert status == 200 and view["delivery"]["cooldown_minutes"] == 20
+
+
 def test_regex_rules_from_the_page(node: Running, tmp_path: Path) -> None:
     rule = {"id": "lines", "severity": "medium", "regex": [r"\blinha \d+\b"]}
     status, view = node.call("POST", "/api/manage/rules", rule)

@@ -580,6 +580,15 @@ station's config gives it), so it is stored, searched, asked about and checked b
 are added only for languages it didn't arrive with. The feed carries no audio: `audio_url`
 (`/api/segments/<id>/audio.wav`) points back to the machine that recorded it.
 
+**Unknown keys are refused.** `alerts.toml` takes `[delivery]`, `[speak.<lang>]`, `[[rule]]`,
+`[actions]` and `[digest]`, and each takes only its own keys; a rule takes those of its `kind`
+(`RULE_KEYS` in `rules/__init__.py`). Anything else, a misspelt `kind` included, stops the load
+with the key and where it is ("rule water: unknown keys ['min_mention']; a keyword rule takes
+[…]"), as the stations file does: a misspelt key would otherwise run as its default without a
+word. `serve`, `listen`, `doctor` and `alerts check` all say it. Rules and settings saved from
+the page are checked the same way (a 400 that names the key); what the server adds to a rule
+for the page (`origin`, `enabled`) is dropped when the rule comes back.
+
 **Rules from the page.** A keyword rule is the same as in `alerts.toml`, with terms per
 language. A rule with `verify = true` has each hit held at low severity until the LLM confirms
 it in context. If the LLM can't judge it (none loaded, its queue full, a failure, an unreadable

@@ -117,13 +117,36 @@ def resolve_alerts_path(explicit: Path | None = None) -> Path | None:
     return None
 
 
+DELIVERY_KEYS = {
+    "notify_language", "notify_sound", "translation_wait_s", "cooldown_minutes", "remind_minutes",
+}  # fmt: skip
+VOICE_KEYS = {"voice", "fallback", "intro", "summary", "earlier"}
+
+
+def _check_keys(table: dict[str, Any], allowed: set[str], where: str) -> None:
+    """Refuses a key the table doesn't take, naming it: a misspelt setting is otherwise read
+    as one left out, and its default runs without a word."""
+    unknown = set(table) - allowed
+    if unknown:
+        raise ConfigError(f"{where}: unknown keys {sorted(unknown)}; it takes {sorted(allowed)}")
+
+
 def read_alerts(path: Path) -> dict[str, Any]:
+    """alerts.toml as written. Its ``[digest]`` keys are checked here, not in ``parse_alerts``:
+    by then the page's schedule may stand in its place, and only a serve session with a model
+    reads the table (``digest/schedule.py``), so ``alerts check`` would pass a misspelt key."""
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as e:
         raise ConfigError(f"{path}: not found") from e
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
+    digest = raw.get("digest")
+    if isinstance(digest, dict):
+        from wavescribe.digest.schedule import KEYS
+
+        _check_keys(digest, KEYS, f"{path} [digest]")
+    return raw
 
 
 _SAID_MISSING: set[tuple[str, str, str]] = set()  # missing-pack warnings already logged
@@ -179,6 +202,7 @@ def parse_alerts(
     for key in ("delivery", "speak", "actions"):
         if not isinstance(raw.get(key, {}), dict):
             raise ConfigError(f"{where}: [{key}] must be a table")
+    _check_keys(raw.get("delivery", {}), DELIVERY_KEYS, f"{where} [delivery]")
     looked = _packs_dirs(path, keywords_dir)
     keywords_dir = next((d for d in looked if d.is_dir()), looked[-1])
     try:
@@ -189,6 +213,7 @@ def parse_alerts(
     for lang, v in raw.get("speak", {}).items():
         if not isinstance(v, dict) or "voice" not in v or "fallback" not in v:
             raise ConfigError(f"{where} [speak.{lang}]: needs 'voice' and 'fallback'")
+        _check_keys(v, VOICE_KEYS, f"{where} [speak.{lang}]")
         voices[lang] = Voice(
             v["voice"],
             v["fallback"],

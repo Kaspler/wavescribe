@@ -171,6 +171,16 @@ class Hit:
 
 
 _RULE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+# What a [[rule]] may hold, by its kind. Any other key is refused rather than ignored: a
+# misspelt one (min_mention, severty) would leave the rule reading stricter than it runs.
+_EVERY_RULE = {"id", "kind", "severity", "stations"}
+RULE_KEYS = {
+    "keyword": _EVERY_RULE | {"topics", "terms", "regex", "near", "verify", "min_mentions"},
+    "llm": _EVERY_RULE | {"prompt", "min_mentions"},
+    "silence": _EVERY_RULE | {"after_minutes", "level_db"},
+    "traffic": _EVERY_RULE,
+}
+VIEW_KEYS = {"origin", "enabled"}  # what the page is told about each rule (App.rules_view)
 
 
 def _regexes(value: Any, rid: str) -> tuple[re.Pattern[str], ...]:
@@ -205,6 +215,16 @@ def parse_rule(
     rid = str(raw.get("id", ""))
     if not _RULE_ID.fullmatch(rid):
         raise ValueError(f"rule {rid!r}: ids are lowercase letters, digits, - or _")
+    kind = raw.get("kind", "keyword")
+    if not isinstance(kind, str) or kind not in RULE_KEYS:
+        raise ValueError(f"rule {rid}: kind is keyword, llm, silence or traffic, not {kind!r}")
+    # A rule sent back as the page was given it still has what the page was told about it.
+    unknown = set(raw) - RULE_KEYS[kind] - (VIEW_KEYS if origin == "page" else set())
+    if unknown:
+        raise ValueError(
+            f"rule {rid}: unknown keys {sorted(unknown)}; {'an' if kind == 'llm' else 'a'} "
+            f"{kind} rule takes {sorted(RULE_KEYS[kind])}"
+        )
     severity = raw.get("severity", "medium")
     if severity not in SEVERITIES:
         raise ValueError(f"rule {rid}: severity must be one of {SEVERITIES}")
@@ -214,7 +234,6 @@ def parse_rule(
     if min_mentions < 1:
         raise ValueError(f"rule {rid}: min_mentions must be at least 1")
     stations = _strings(raw.get("stations"), f"rule {rid}: stations")
-    kind = raw.get("kind", "keyword")
     if kind == "llm":
         prompt = raw.get("prompt", "")
         if not isinstance(prompt, str):
@@ -228,8 +247,6 @@ def parse_rule(
         return SilenceRule(rid, severity, stations, after * 60, level, origin)
     if kind == "traffic":
         return TrafficRule(rid, severity, stations, origin)
-    if kind != "keyword":
-        raise ValueError(f"rule {rid}: kind is keyword, llm, silence or traffic")
     own = _groups(raw.get("terms") or {}, f"rule {rid}: terms", '{ pt = ["fogo", "incêndio"] }')
     terms: dict[str, tuple[str, ...]] = {}
     for lang, words in own.items():
@@ -272,10 +289,6 @@ class RuleSet:
         page_ids = {str(r.get("id")) for r in page_rules}
         tables = [(r, "file") for r in alerts.get("rule", []) if r.get("id") not in page_ids]
         for raw, origin in [*tables, *((r, "page") for r in page_rules)]:
-            if raw.get("kind", "keyword") not in ("keyword", "llm", *STATION_KINDS):
-                log.info("rule %s: kind %r isn't implemented yet; skipped", raw.get("id"),
-                         raw.get("kind"))  # fmt: skip
-                continue
             rule = parse_rule(raw, origin)
             if rule.id in disabled:
                 continue

@@ -98,3 +98,29 @@ def test_replay_says_what_its_rate_counts() -> None:
     said = _announced_per_day(actions, by_severity, 24 / 6)
     assert said == "announced: 12.0 alerts a day (high, medium); only logged: low"
     assert "[" not in said
+
+
+def test_alerts_check_refuses_a_key_the_file_does_not_take(project: Path, capsys) -> None:
+    alerts = project / "config" / "alerts.toml"
+    rule = '[[rule]]\nid = "water"\ntopics = ["water"]\n'
+    for text, said in (
+        (rule + "min_mention = 3\n", "rule water: unknown keys ['min_mention']; a keyword rule"),
+        (rule + '[delivery]\nnotfy_language = "en"\n', "[delivery]: unknown keys ['notfy_"),
+        (rule + '[speak.en]\nvoice = "Daniel"\nfallback = "Attention."\nintros = "Hear:"\n',
+         "[speak.en]: unknown keys ['intros']"),
+        (rule + "[digest]\nevery_minuts = 30\n", "[digest]: unknown keys ['every_minuts']"),
+        (rule + '[[rule]]\nid = "quiet"\nkind = "silense"\n', "rule quiet: kind is keyword, llm"),
+    ):  # fmt: skip
+        alerts.write_text(text, encoding="utf-8")
+        assert main(["alerts", "check", "--language", "pt", "Corte de água amanhã"]) == 1
+        out = capsys.readouterr()
+        assert out.out == "" and out.err.startswith("wavescribe: config/alerts.toml"), out.err
+        assert said in out.err
+    # A rule the page keeps is checked the same way, whoever wrote it there.
+    alerts.write_text(rule, encoding="utf-8")
+    (project / "config" / "ui.toml").write_text(
+        '[[alerts.rule]]\nid = "bridge"\nterms = { es = ["puente cerrado"] }\nseverty = "high"\n',
+        encoding="utf-8",
+    )
+    assert main(["alerts", "check", "--language", "pt", "Corte de água amanhã"]) == 1
+    assert "rule bridge: unknown keys ['severty']" in capsys.readouterr().err
