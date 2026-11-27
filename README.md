@@ -7,8 +7,8 @@
 
 **Wavescribe listens to the radio for you.** It follows several stations at once, writes down
 what is said, translates it into your language, and **alerts you when something you care about
-comes up**: a road closure, a strike, a water cut, a wildfire. It works with FM and other radio
-through an inexpensive RTL-SDR receiver, and with internet radio. Everything runs on your Mac,
+comes up**: a road closure, a strike, a water cut, a wildfire. It works with internet radio, and
+with FM and other radio through an inexpensive RTL-SDR receiver. Everything runs on your Mac,
 with no cloud and no account.
 
 ![The Wavescribe page following three synthetic test broadcasts (text-to-speech, not real stations) in French, German and Spanish, each sentence shown with its machine translation into English, and a "Road closed" alert raised by the German traffic report](assets/demo.gif)
@@ -29,6 +29,8 @@ property is at stake: follow official warnings and the emergency services.
 Radio is live, in one language, one station at a time, and gone once it's said. Wavescribe
 writes it down, translates it and keeps it, so it can be read, searched and acted on.
 
+**To understand it**
+
 - **Where you don't speak the language.** Read local news and official announcements in your own
   language, and get an alert for what matters to you: a wildfire, a flood warning, a strike, a
   road closure, a power or water cut.
@@ -37,11 +39,14 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 - **Radio you can read.** For deaf and hard-of-hearing people, radio as text, sentence by
   sentence, a few seconds behind the broadcast, on the Mac or on a phone. Speech recognition
   makes mistakes; this is not a certified captioning service.
-- **Many stations, one reader.** Journalists, researchers and media monitors follow several
-  stations in several languages, search everything that was said, and ask questions that are
-  answered with the quoted moments.
 - **Out of curiosity.** Plug in a receiver and see what is on the air around you: one scan lists
   the stations it hears, with their names where they send one.
+
+**To keep track and act**
+
+- **Many stations, one reader.** Journalists, researchers, OSINT analysts and media monitors
+  follow several stations in several languages, search everything that was said, and ask
+  questions that are answered with the quoted moments.
 - **Automations.** An alert can call a webhook, so a home-automation system or a chat bot can act
   on it: flash a lamp, post a message.
 - **Give your AI agent a radio.** An AI agent can search what was said, ask about it, and wait for
@@ -49,6 +54,9 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
   [Agent tools](docs/AGENT_TOOLS.md).
 - **One listener, many readers.** One Mac follows the radio and everyone on the same Wi-Fi reads
   along on a phone: a household, a club, a community centre.
+
+**Where there's no internet**
+
 - **Off the grid.** On a boat, in a campervan or a cabin: with a receiver it needs no internet.
 - **When the power and the networks go down.** Broadcast radio keeps working. During the power
   cut of 28 April 2025 in Spain and Portugal, radio was how people learned what was going on, in
@@ -56,10 +64,6 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 
 ## What it does
 
-- **Several stations at once**, from internet streams or from one or more RTL-SDR receivers: FM
-  broadcast, and (experimental) walkie-talkie, amateur, marine and aviation channels.
-- **Finds stations**: scans a band, names FM stations from their RDS, and turns any frequency
-  into a station.
 - **Transcribes live** in about 100 languages, and skips the music.
 - **Translates** into your language as it is said, and into other languages for alerts or on
   demand.
@@ -68,6 +72,10 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
   announcement, as a notification, a spoken alert in your language, or a webhook.
 - **Search and Ask**: everything heard is kept and searchable, and a question is answered with
   the moments it was said.
+- **Several stations at once**, from internet streams or from one or more RTL-SDR receivers: FM
+  broadcast, and (experimental) walkie-talkie, amateur, marine and aviation channels.
+- **Finds stations**: scans a band, names FM stations from their RDS, and turns any frequency
+  into a station.
 - **Phones read along** on the same Wi-Fi, read-only.
 - **A text feed and webhooks** for other programs ([docs/FEED.md](docs/FEED.md)).
 - **Local by design**: every model runs on your Mac, and nothing is sent anywhere you didn't set
