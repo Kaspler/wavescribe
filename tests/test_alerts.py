@@ -355,6 +355,14 @@ def test_cap_document(tmp_path: Path) -> None:
     assert "machine_translation" not in {
         q(p, "valueName") for p in src.findall(f"{{{NS}}}parameter")
     }
+    assert q(root, "msgType") == "Alert" and q(root, "identifier") == "wavescribe-7-1790000000"
+    assert q(root, "incidents") == "wavescribe-7-1790000000"
+    # Sent again as more serious or still mentioned, it is an update in the same incident, with
+    # an identifier of its own: CAP consumers drop a message whose identifier they have seen.
+    again = ET.fromstring(to_cap({**alert, "change": "reminder", "last_at": 1_790_003_600.0}))
+    assert q(again, "msgType") == "Update"
+    assert q(again, "identifier") == "wavescribe-7-1790000000-reminder-1790003600"
+    assert q(again, "incidents") == "wavescribe-7-1790000000"
 
 
 def test_one_sentence_tripping_several_rules_is_announced_once(tmp_path: Path) -> None:
@@ -540,3 +548,88 @@ def test_an_alert_joined_by_radio_kept_only_days_stays_out_of_the_log(tmp_path: 
     r.station = dataclasses.replace(r.station, privacy="amateur")  # text kept 7 days
     alerter.on_transcript(r)
     assert alerter._open["water"].short_lived
+
+
+# -- one announcement per incident ------------------------------------------------------------
+
+
+def quiet(tmp_path: Path, *, fail=frozenset(), remind=None, severity="high"):
+    """An Alerter without a translator, so each delivery is queued at once (``drain`` waits for
+    it), with the webhooks' calls and the feed's events recorded."""
+    tmp_path.mkdir(exist_ok=True)
+    rule = {"id": "water", "topics": ["water"], "near": ["local"], "severity": severity}
+    delivery = {**CONFIG["delivery"]} | ({} if remind is None else {"remind_minutes": remind})
+    config = parse_alerts({**CONFIG, "rule": [rule], "delivery": delivery}, None, pack(tmp_path))
+    actions, clock, seen, pushed, tries = FakeActions(fail), Clock(), [], [], []
+    alerter = Alerter(config, actions=actions, clock=clock, on_alert=seen.append)
+    alerter.on_delivered = lambda payload, severity, _text, _c: pushed.append(payload["change"])
+    deliver = alerter._deliver
+    alerter._deliver = lambda *a: (tries.append(a[1]), deliver(*a))
+    return alerter, actions, clock, seen, pushed, tries
+
+
+def mention_every(alerter: Alerter, clock: Clock, seconds: float, for_s: float,
+                  text: str = "Corte de água em Lisboa.") -> None:  # fmt: skip
+    t = 0.0
+    while t <= for_s:
+        alerter.on_transcript(result("a", text, 1000.0 + t))
+        alerter.drain()
+        clock.now += seconds
+        t += seconds
+
+
+def test_a_story_repeated_while_notifications_fail_is_not_announced_at_every_mention(
+    tmp_path: Path,
+) -> None:
+    # Seen in testing: notifications that timed out made each later mention announce the alert
+    # again, webhooks included, 19 times in ten minutes. A delivery that reached nobody is tried
+    # again after five minutes, then ten, and its webhooks go out once.
+    alerter, _, clock, _, pushed, tries = quiet(tmp_path, fail={"notify"})
+    mention_every(alerter, clock, 10, 10 * 60)
+    [alert] = alerter._open.values()
+    assert alert.mentions == 61 and alert.status == "failed"
+    assert tries == ["high", "high"]  # at 0 s and at 5 minutes; the next one is due at 15
+    assert pushed == ["new"]
+    mention_every(alerter, clock, 10, 5 * 60)
+    assert len(tries) == 3 and pushed == ["new"]
+
+
+def test_mentions_are_updates_and_a_quiet_period_ends_the_incident(tmp_path: Path) -> None:
+    alerter, actions, clock, seen, pushed, _ = quiet(tmp_path)
+    mention_every(alerter, clock, 60, 10 * 60)
+    first = alerter._open["water"]
+    assert first.mentions == 11 and [c[0] for c in actions.calls] == ["notify"]
+    changes = [e["change"] for e in seen]
+    assert changes.count("new") == 1 and set(changes) == {"new", "update"}
+    assert pushed == ["new"]  # webhooks get the announcement, not each mention
+
+    clock.now += 15 * 60 + 1  # no mention for the cooldown: the incident is over
+    mention_every(alerter, clock, 60, 0)
+    assert alerter._open["water"] is not first
+    assert [e["change"] for e in seen].count("new") == 2 and pushed == ["new", "new"]
+    assert [c[0] for c in actions.calls] == ["notify", "notify"]
+
+
+def test_a_story_that_goes_on_is_recalled_now_and_then_and_never_spoken(tmp_path: Path) -> None:
+    alerter, actions, clock, seen, pushed, _ = quiet(tmp_path, remind=30, severity="critical")
+    mention_every(alerter, clock, 5 * 60, 2 * 3600)  # every five minutes for two hours
+    assert pushed == ["new", "reminder", "reminder", "reminder", "reminder"]
+    assert [c[0] for c in actions.calls] == ["notify", "speak"] + ["notify"] * 4
+    title, body = actions.calls[-1][1:]
+    assert title == "STILL CRITICAL · water · a"
+    assert body.startswith("Mentioned 25 times since ")
+    assert body.endswith("Corte de água em Lisboa.")
+    assert [e["change"] for e in seen].count("reminder") == 4
+
+    off, actions, clock, _, pushed, _ = quiet(tmp_path / "off", remind=0, severity="critical")
+    mention_every(off, clock, 5 * 60, 2 * 3600)
+    assert pushed == ["new"] and [c[0] for c in actions.calls] == ["notify", "speak"]
+
+
+def test_an_escalation_is_announced_and_marked_so(tmp_path: Path) -> None:
+    alerter, actions, clock, seen, pushed, _ = quiet(tmp_path)
+    mention_every(alerter, clock, 60, 120)
+    mention_every(alerter, clock, 60, 0, "Corte de água também em Vila Nova.")
+    assert pushed == ["new", "escalated"]
+    assert [c[0] for c in actions.calls] == ["notify", "notify", "speak"]
+    assert seen[-1]["change"] == "escalated" and seen[-1]["severity"] == "critical"

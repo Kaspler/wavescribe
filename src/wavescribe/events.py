@@ -10,7 +10,8 @@ Version 1 shapes (docs/FEED.md is the reference):
     alert      {type, id, node, rule, kind, severity, status, time, first_at, last_at, mentions,
                 terms[], reason?, station{…}, stations[{…}], language, text, translations{…},
                 context[{id, time, station, text, translations}], segment_id, audio_url?,
-                cap_url?}
+                cap_url?, change?}  change (live events and pushes): new, escalated,
+                reminder or ended when it was announced; update for anything else
     batch      {type: "batch", node, events[…]}
 """
 
@@ -170,6 +171,8 @@ def alert_event(
         out["audio_url"] = f"{base}/api/segments/{seg}/audio.wav"
     if base and alert.get("id") is not None:
         out["cap_url"] = f"{base}/api/alerts/{alert['id']}.cap"
+    if "change" in alert:  # live events say what changed; stored rows don't
+        out["change"] = alert["change"]
     return out
 
 
@@ -181,6 +184,8 @@ def as_text(ev: Mapping[str, Any], languages: Iterable[str] = ()) -> str:
     station = (ev.get("station") or {}).get("name") or "?"
     if ev["type"] == "alert":
         head = f"[{str(ev.get('severity', '')).upper()}] {ev.get('rule')} · {station}"
+        head += {"escalated": " (more serious now)", "reminder": " (still being mentioned)",
+                 "ended": " (over)"}.get(ev.get("change") or "", "")  # fmt: skip
         body = shown or ev.get("text", "")
         if shown and ev.get("text"):
             body += f"\n({ev['text']})"

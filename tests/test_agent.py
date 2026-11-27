@@ -473,13 +473,16 @@ def test_mcp_waits_for_the_next_announced_alert(tmp_path: Path) -> None:
         )
         wait_for(lambda: len(hub._clients) > before)
         assert mcp.request("ping")["result"] == {}  # answered while the tool waits
-        hub.on_alert({**payload, "severity": "low", "status": "delivered"})  # not severe enough
+        hub.on_alert({**payload, "severity": "low", "status": "delivered", "change": "new"})
         hub.on_alert({**payload, "status": "pending"})  # not announced yet
-        hub.on_alert({**payload, "status": "delivered"})
+        # Another mention of an alert already announced: an update, not news.
+        hub.on_alert({**payload, "status": "delivered", "change": "update", "mentions": 7})
+        hub.on_alert({**payload, "status": "delivered", "change": "new"})
         res = mcp.answer(waiting)["result"]
         alert = json.loads(res["content"][0]["text"])["alert"]
         assert not res["isError"] and alert["severity"] == "high"
         assert alert["status"] == "delivered" and alert["text"] == "Corte de água"
+        assert alert["change"] == "new" and alert["mentions"] == 1
 
         # A call the client gives up on gets no answer.
         given_up = mcp.start(

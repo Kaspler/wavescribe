@@ -10,7 +10,10 @@
 [delivery]
 notify_language = "en"         # notifications use this translation when it arrives in time
 translation_wait_s = 10        # wait this long for translations before delivering without them
-cooldown_minutes = 15          # repeats of a rule within this window add to one alert
+cooldown_minutes = 15          # repeats of a rule within this window add to one alert; this
+                               # long without a mention ends it, and the next one is new
+remind_minutes = 60            # still mentioned this long after it was announced: one
+                               # reminder, notified but never spoken (0: never)
 
 # Spoken alerts: a voice and a fixed phrase per language. The phrase is spoken when no checked
 # translation is available, so the alert is never silent. Voices come from macOS (System

@@ -50,11 +50,18 @@ def to_cap(alert: dict[str, Any], *, station_names: dict[str, str] | None = None
         el.text = text
         return el
 
-    sub(root, "identifier", f"wavescribe-{alert['id']}-{_seconds(alert['first_at'])}")
+    # Each message about one alert is its own CAP message: the first one (or the stored alert)
+    # is an Alert, and one sent again because it rose, goes on being mentioned or is over is an
+    # Update of it, with its own identifier, in the same incident.
+    incident = f"wavescribe-{alert['id']}-{_seconds(alert['first_at'])}"
+    change = alert.get("change")
+    update = change in ("escalated", "reminder", "ended")
+    sub(root, "identifier",
+        f"{incident}-{change}-{_seconds(alert['last_at'])}" if update else incident)  # fmt: skip
     sub(root, "sender", sender)
     sub(root, "sent", _time(alert["last_at"]))
     sub(root, "status", "Actual")
-    sub(root, "msgType", "Alert")
+    sub(root, "msgType", "Update" if update else "Alert")
     sub(root, "scope", "Public")  # derived from public broadcasts
     kind = alert.get("kind") or "keyword"
     if kind in CATEGORY:
@@ -65,6 +72,7 @@ def to_cap(alert: dict[str, Any], *, station_names: dict[str, str] | None = None
             "Keyword match on speech recognition output: verify before acting."
         )
     sub(root, "note", note)
+    sub(root, "incidents", incident)
 
     def info(lang: str, description: str, machine_translation: str | None) -> None:
         el = ET.SubElement(root, "info")

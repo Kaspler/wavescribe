@@ -82,6 +82,10 @@ def test_events_carry_text_station_time_and_links() -> None:
         as_text(al, ["en"])
         == "[HIGH] water · a\nWater cut in Vila Nova\n(Corte de água em Vila Nova)"
     )
+    assert "change" not in al  # a stored alert; live events and pushes say what changed
+    again = alert_event({**ALERT, "change": "reminder"}, STATIONS, NODE)
+    assert again["change"] == "reminder"
+    assert as_text(again).startswith("[HIGH] water · a (still being mentioned)\n")
     no_url = utterance_event(UTTERANCE, STATIONS, {"name": "x"})
     assert "audio_url" not in no_url
 

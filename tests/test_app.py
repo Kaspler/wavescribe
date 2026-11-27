@@ -265,6 +265,7 @@ def test_webhooks_get_alerts_and_the_feed_streams_utterances(tmp_path: Path) -> 
         wait_for(lambda: rec.requests)
         body = rec.json(0)
         assert body["type"] == "alert" and body["station"]["id"] == "a"
+        assert body["change"] == "new" and alert["change"] in ("new", "update")
         assert (
             body["text"] == "Corte de água amanhã"
             and "X-Wavescribe-Signature" in rec.requests[0][2]

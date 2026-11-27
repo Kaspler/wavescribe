@@ -57,6 +57,9 @@ MAX_CALLS = 8  # tool calls at once; each one waiting for an alert holds a conne
 MAX_WAIT_S = 300.0
 GRACE_S = 5.0  # once the input ends, how long calls under way may still finish
 UNANNOUNCED = ("pending", "covered")  # still being checked or translated; announced by another
+# An alert event's change when it was announced: a new alert, a rise in severity, still being
+# mentioned, over. Anything else ("update": a mention, a translation) isn't news.
+ANNOUNCED = ("new", "escalated", "reminder", "ended")
 
 ABOUT = (
     "Wavescribe listens to radio stations on the user's computer (internet streams and radio "
@@ -217,7 +220,9 @@ TOOLS = (
         "Returns {alert}, in the shape the alerts tool gives, or {alert: null, waited_s} when "
         "none came; call it again to keep listening. Alerts from before the call aren't "
         "returned (the alerts tool has those), nor ones still being checked (pending) or "
-        "announced by another alert (covered). " + NOT_A_WARNING + UNTRUSTED,
+        "announced by another alert (covered), nor further mentions of an alert already "
+        "announced. alert.change says why it came: new, escalated (more serious now), "
+        "reminder (still being mentioned) or ended. " + NOT_A_WARNING + UNTRUSTED,
         _arguments(
             timeout_s={
                 "type": "number",
@@ -404,7 +409,11 @@ class Tools:
                     raise ToolError(f"lost the connection to Wavescribe while waiting ({item})")
                 severity = item.get("severity")
                 rank = SEVERITIES.index(severity) if severity in SEVERITIES else 0
-                if item.get("status") not in UNANNOUNCED and rank >= floor:
+                # Each mention of an alert is an event too; a server older than `change`
+                # is judged by the status alone.
+                change = item.get("change")
+                news = change in ANNOUNCED if change else item.get("status") not in UNANNOUNCED
+                if news and item.get("status") not in UNANNOUNCED and rank >= floor:
                     return {"alert": item}
         finally:
             done.set()

@@ -656,13 +656,28 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
   announced) until N mentions within the cooldown, or one that names a `near` place. Mentions
   heard as another language don't count. Reaching N raises the alert, which is then announced
   through the usual "severity rose" path.
-- **Grouping:** repeats of a rule within `cooldown_minutes` (default 15, on any station, sliding)
-  fold into the open alert as mentions. They are announced again only if the severity rises. One
+- **Grouping: one alert per incident.** Repeats of a rule (on any station) fold into its open
+  alert as mentions and are not announced again, unless the severity rises. Once nobody has
+  mentioned it for `cooldown_minutes` (default 15, sliding) the incident is over and the next
+  mention is a new alert. While it goes on, a mention `remind_minutes` (default 60; 0 for never)
+  after the last announcement brings one "still being mentioned" reminder ("STILL HIGH · water
+  · …", "Mentioned 25 times since 09:40: …" with the translation already made): notification,
+  log and webhooks, never spoken, and the alert's delivery state is left as it was. One
   utterance that trips several rules is announced once, by its most severe alert; the others are
   marked `covered` (the page shows them as "+ water, hazards" on the lead card). This also holds
-  when an alert escalates while its previous delivery is still in flight.
-- **Robustness:** alerts are delivered even when the database can't be written; a delivery that
-  couldn't run shows as `failed`, and the rule's next mention announces it.
+  when an alert escalates while its previous delivery is still in flight, and for reminders.
+  Every alert event handed on (the page, `/feed/v1/events`, webhooks, the agent tools) carries
+  `change`: `new` (its first announcement), `escalated` (announced again, more serious),
+  `reminder`, `ended` (a station alert is over), or `update` (a mention folded in, a
+  translation, a delivery outcome: nothing announced). Webhooks only ever get the first four;
+  CAP sends the last three as an `Update` with its own identifier in the alert's `incidents`.
+- **Robustness:** alerts are delivered even when the database can't be written. A delivery that
+  couldn't run at all (its queue full, an error) shows as `failed`, and the rule's next mention
+  announces it. One whose actions ran but reached nobody (every notify and speak failed: a
+  notification that times out, a voice that isn't installed) is tried again at a mention 5
+  minutes later, then 10, 20, 40 and 60, as `change: update`, without sending its webhooks
+  again. Until 0.1.0a1 it was tried at every mention: in testing, notifications that timed out
+  announced one story 19 times in ten minutes, webhooks included.
 - **Delivery:** the severity's actions come from `[actions]` in `config/alerts.toml`. Translations
   for the notification language and each `speak:<lang>` are requested ahead of the station
   backlog (`Pipeline.request_translation`, queue priority 0), and delivery waits at most
@@ -774,7 +789,7 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Live streams paced in the source**, not by ffmpeg's `-re` | An HLS stream arrives a whole segment (6–10 s) at a time, and HLS and Icecast servers send 10–20 s at once on connect. Passed on as it came, the page's player dropped most of each burst and utterances shared one time. `StreamSource` reads ffmpeg as fast as it writes and releases 0.512 s chunks at real time: audio that comes late moves the schedule on, and audio held longer than needed (at least 6 s in hand all through a 30 s window, or over 60 s at all) is let go at once, so a burst adds no lasting delay and nothing is dropped. With `-re` the backlog would sit in the socket, where it can't be bounded or logged and a server with a faster clock eventually drops the reader. On the example stations the hold settles at 2–3 s for Icecast and one segment for HLS (`source_pace` logs each let-go) | The delay matters more than smooth listening, or a stream needs more than 6 s of slack |
 | **GPL tools only as separate processes** (ffmpeg's Homebrew build, `rtl_sdr`, `rtl_power`, `rtl_test`) | Keeps the code Apache-2.0. They run as subprocesses over pipes; never link or vendor them. | — |
 | **Alerts as CAP 1.2** (Common Alerting Protocol) events | The standard emergency-alert format, so Wavescribe plugs into alert hubs, dashboards and any other CAP consumer | — |
-| **One announcement per sentence; a sliding cooldown per rule** | A real bulletin sentence tripped four rules and would have spoken four times. Repeats of a story fold into one alert; only a rise in severity speaks again | The soak shows missed escalations or too much noise |
+| **One announcement per sentence; one alert per incident** | A real bulletin sentence tripped four rules and would have spoken four times. Repeats of a story fold into one alert; only a rise in severity speaks again, an hourly reminder notifies without speaking, and a quiet `cooldown_minutes` ends the incident. A delivery that reached nobody is retried with a growing wait, not at every mention (2026-11-27: 19 announcements of one story in ten minutes while notifications timed out) | The soak shows missed escalations or too much noise |
 | **Confirm before announcing: `min_mentions`, weak topics, `=` terms** | From the soak: the first rules would have spoken 17 false critical alerts a day. A real event is repeated on every bulletin and names places; a passing reference is said once. Tuned with `alerts replay` on 35.6 h of four stations: 0 spoken, ~4 notifications a day, and synthetic emergencies still escalate | A real event is announced late or missed (replay it) |
 | **Speak only checked translations, else a fixed phrase** | A translator that answers in the wrong language, or invents content (MADLAD into Ukrainian), must never be read aloud | — |
 | **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout; an overlay keeps both, and a broken change can be skipped without losing the file's station | — |

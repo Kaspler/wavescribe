@@ -8,17 +8,25 @@ A translation that comes back in the wrong language is discarded, and a spoken a
 checked translation says the language's fixed fallback phrase instead, so nothing invented is
 ever spoken and no alert is silent.
 
-Alert fatigue: repeats of a rule within ``cooldown_minutes`` (on any station) fold into the open
-alert as mentions and are not announced again, unless the severity rises. One utterance that
-trips several rules is announced once, by its most severe alert; the others are marked
-``covered``.
+Alert fatigue: an alert is one incident. Repeats of its rule (on any station) fold into it as
+mentions and are not announced again, unless the severity rises; once nobody has mentioned it for
+``cooldown_minutes`` the incident is over, and the next mention is a new alert. While it goes on,
+``remind_minutes`` (60 by default, 0 for never) after it was last announced a mention brings one
+"still being mentioned" reminder: notified, logged and sent to webhooks, never spoken. One
+utterance that trips several rules is announced once, by its most severe alert; the others are
+marked ``covered``. Every event handed on (``on_alert``, ``on_delivered``) says what it is in
+``change``: ``new``, ``escalated``, ``reminder`` and ``ended`` were announced; ``update`` is
+anything else (a mention, a translation, a delivery outcome).
 
 Delivery state follows bandwatch's lesson: an alert is marked delivered only once an action
 confirmed it, and each action's outcome is stored next to it.
 
 Delivery never depends on the database: every write to the store is best effort (``_keep``),
 and an alert whose delivery could not run is marked failed rather than left pending, so the
-rule's next mention announces it.
+rule's next mention announces it. One whose actions ran but reached nobody (notifications
+switched off, a missing voice) is tried again at a mention ``RETRY_S`` later, then twice as
+long each time, without sending its webhooks again: retrying at every mention announced one
+story dozens of times.
 
 Station alerts (a station gone silent, a traffic announcement; ``alerts/watch.py``) take the
 same path with text worded by Wavescribe instead of words heard (``on_station``); a silence
@@ -51,6 +59,12 @@ DEFAULT_ALERTS_PATH = Path("config/alerts.toml")
 EXAMPLE_ALERTS_PATH = Path("config/alerts.example.toml")
 DEFAULT_KEYWORDS_DIR = Path("config/keywords")
 DELIVERY_QUEUE_MAX = 50
+# A delivery whose actions ran but reached nobody is tried again at a mention this long after,
+# then twice as long each time, up to RETRY_MAX_S.
+RETRY_S = 300.0
+RETRY_MAX_S = 3600.0
+# What an event about an alert is (``change``): announced (the first four) or not.
+ANNOUNCED = ("new", "escalated", "reminder", "ended")
 # Station alerts are worded by Wavescribe, in the language of its page; delivery translates
 # them like a quote, for the notification and the voices.
 STATION_TEXT_LANGUAGE = "en"
@@ -73,7 +87,8 @@ class AlertConfig:
     voices: dict[str, Voice]  # language -> voice
     notify_language: str | None = None
     translation_wait_s: float = 10.0
-    cooldown_s: float = 900.0
+    cooldown_s: float = 900.0  # a quiet period this long ends an incident
+    remind_s: float = 3600.0  # "still being mentioned" at most this often; 0: never
     path: Path | None = None
 
     def languages_for(self, severity: str, source: str, spoken: bool = True) -> list[str]:
@@ -178,6 +193,7 @@ def parse_alerts(
         notify_language=delivery.get("notify_language"),
         translation_wait_s=_amount(delivery, "translation_wait_s", 10, where),
         cooldown_s=_amount(delivery, "cooldown_minutes", 15, where) * 60,
+        remind_s=_amount(delivery, "remind_minutes", 60, where) * 60,
         path=path,
     )
 
@@ -223,9 +239,19 @@ class Alert:
     reason: str | None = None  # the LLM's reason, when an LLM rule or check was involved
     ended: bool = False  # a station alert whose cause is over (the station is back)
     languages: list[str] = field(default_factory=list)  # its stations' alert_languages
+    # Deliveries (kept in memory only): the highest severity one ran at, whether or not it
+    # reached anybody, and when; how many in a row reached nobody; and when it was last
+    # announced, for reminders.
+    tried_severity: str | None = None
+    tried_at: float = 0.0
+    unreached: int = 0
+    announced_at: float | None = None
 
-    def payload(self) -> dict[str, Any]:
+    def payload(self, change: str = "update") -> dict[str, Any]:
+        """The alert as observers get it; ``change`` says what this event is (``ANNOUNCED``,
+        or ``update``)."""
         return {
+            "change": change,
             "id": self.id,
             "rule": self.rule_id,
             "severity": self.severity,
@@ -414,13 +440,18 @@ class Alerter:
 
         now: list[Alert] = []  # to announce
         later: list[Alert] = []  # got more serious while a delivery is in flight
+        remind: list[Alert] = []  # still being mentioned, long after it was announced
         for hit in hits:
             event(log, "rule_hit", station=result.station.id, rule=hit.rule_id,
                   severity=hit.severity, terms=",".join(hit.terms), capped=hit.capped,
                   text=logged_text(result.station, text))  # fmt: skip
             alert, wants = self._add(hit, result)
-            {"now": now, "later": later}.get(wants, []).append(alert)
+            {"now": now, "later": later, "remind": remind}.get(wants, []).append(alert)
         if not now and not later:
+            # One reminder for a sentence, by its most severe alert; with an announcement, none.
+            if remind:
+                lead = max(remind, key=lambda a: _rank(a.severity))
+                self._dispatch(lead, lead.severity, text, kind="reminder")
             return
         # One sentence, one announcement: the most severe alert speaks for the others.
         lead = max(now + later, key=lambda a: _rank(a.severity))
@@ -434,6 +465,7 @@ class Alerter:
                     continue
                 other.status = "covered"
                 other.delivered_severity = other.severity
+                other.announced_at = self._clock()
                 other.actions = {"covered_by": covered_by}
             self._keep("update_delivery", other)
             self._publish(other)
@@ -444,7 +476,8 @@ class Alerter:
         """Fold a hit into its rule's open alert or open a new one.
 
         Returns the alert and whether it wants announcing: "now", "later" (it got more serious
-        while a delivery is in flight, which re-announces it when done), or None.
+        while a delivery is in flight, which re-announces it when done), "remind" (still being
+        mentioned ``remind_s`` after it was announced), or None.
         """
         from wavescribe.radio.bandplan import class_of
 
@@ -479,12 +512,16 @@ class Alerter:
                 target = alert.wanted if alert.confirmed else "low"
                 if _rank(target) > _rank(alert.severity):
                     alert.severity = target
-                # Announce again only when it got more serious than what was announced.
+                # Announce again only when it got more serious than what was announced, or
+                # when nobody was reached and it is time to try again.
                 if _rank(alert.severity) > _rank(alert.delivered_severity):
                     if alert.status == "pending":
                         wants = "later"
-                    else:
+                    elif self._may_try(alert, now):
                         deliver = True
+                elif self._reminder_due(alert, now):
+                    alert.announced_at = now  # one reminder, whatever else is said meanwhile
+                    wants = "remind"
                 self._keep("add_mention", alert, result.segment_id, hit)
             else:
                 alert = Alert(
@@ -514,6 +551,28 @@ class Alerter:
                 wants = "now"
         self._publish(alert)
         return alert, wants
+
+    def _may_try(self, alert: Alert, now: float) -> bool:
+        """Whether a mention may announce an alert nobody was told about at its severity (caller
+        holds the lock). At once when no delivery ran at that severity (it couldn't run, or the
+        severity rose); after a delivery that reached nobody, only ``RETRY_S`` later, then twice
+        as long each time: a notification that times out must not make every mention a new
+        announcement."""
+        if _rank(alert.severity) > _rank(alert.tried_severity):
+            return True
+        wait = min(RETRY_MAX_S, RETRY_S * 2 ** max(0, alert.unreached - 1))
+        return now - alert.tried_at >= wait
+
+    def _reminder_due(self, alert: Alert, now: float) -> bool:
+        """An announced alert (above low) still being mentioned ``remind_s`` after it was last
+        announced (caller holds the lock)."""
+        return (
+            self.config.remind_s > 0
+            and alert.status != "pending"
+            and alert.announced_at is not None
+            and _rank(alert.delivered_severity) > 0
+            and now - alert.announced_at >= self.config.remind_s
+        )
 
     # -- station alerts (alerts/watch.py) -----------------------------------------------------
 
@@ -590,7 +649,7 @@ class Alerter:
             self._keep("add_mention", alert, None, hit)
         event(log, "station_back", rule=alert.rule_id, alert=alert.id, text=text)
         self._publish(alert)
-        self._dispatch(alert, alert.severity, text, back=True)
+        self._dispatch(alert, alert.severity, text, kind="back")
 
     def _keep(self, write: str, alert: Alert, *args: Any) -> None:
         """Call the store's ``write(alert, *args)``, best effort. A full disk or a locked
@@ -623,11 +682,14 @@ class Alerter:
         severity: str,
         text: str,
         covers: list[str] | None = None,
-        back: bool = False,
+        kind: str = "announce",
     ) -> None:
         """Ask for translations of ``text``, then queue delivery when they arrive or the wait
-        runs out. ``back``: a station alert saying it is over."""
-        langs = self.config.languages_for(severity, alert.language, spoken=not back)
+        runs out. ``kind``: ``announce``; ``back``, a station alert saying it is over; or
+        ``reminder``, still being mentioned (it says what was translated already, at once)."""
+        back = kind == "back"
+        langs = [] if kind == "reminder" else self.config.languages_for(
+            severity, alert.language, spoken=not back)  # fmt: skip
         fired = threading.Event()
         lock = threading.Lock()
 
@@ -641,11 +703,12 @@ class Alerter:
                 return
             timer.cancel()
             try:
-                item = (alert, severity, text, covers or [], translations, model, back)
+                item = (alert, severity, text, covers or [], translations, model, kind)
                 self._deliveries.put_nowait(item)
             except queue.Full:
                 event(log, "alert_dropped", level=logging.WARNING, alert=alert.id)
-                self._undelivered(alert)
+                if kind == "announce":
+                    self._undelivered(alert)
 
         timer = threading.Timer(self.config.translation_wait_s, finish, args=({}, None))
         timer.daemon = True
@@ -658,7 +721,7 @@ class Alerter:
             except Exception:
                 log.exception("alert translation request failed")
                 finish({}, None)
-        if not back:  # queued behind the delivery's own translations
+        if kind == "announce":  # queued behind the delivery's own translations
             self._translate_quote(alert, severity, skip=langs if text == alert.quote else [])
 
     def _translate_quote(self, alert: Alert, severity: str, skip: list[str]) -> None:
@@ -746,8 +809,19 @@ class Alerter:
         covers: list[str],
         translations: dict[str, str],
         model: str | None,
-        back: bool = False,
+        what: str = "announce",
     ) -> None:
+        if what == "reminder":
+            self._remind(alert, severity)
+            return
+        back = what == "back"
+        with self._lock:
+            if back:
+                change = "ended"
+            elif _rank(severity) > _rank(alert.tried_severity):
+                change = "new" if alert.tried_severity is None else "escalated"
+            else:
+                change = "update"  # tried again: the last delivery reached nobody
         checked = self._keep_summaries(alert, translations, model, keep=text == alert.quote)
         names = [self.station_names.get(s, s) for s in alert.station_ids]
         outcomes: dict[str, str] = {}
@@ -789,27 +863,72 @@ class Alerter:
                 alert.status = "partial"
             else:
                 alert.status = "failed"
+            now = self._clock()
             if reaching:
-                alert.delivered_at = self._clock()
+                alert.delivered_at = now
                 alert.delivered_severity = severity
             elif alert.status == "logged":
                 alert.delivered_severity = severity
+            if not back:
+                if _rank(severity) > _rank(alert.tried_severity):
+                    alert.tried_severity = severity
+                alert.tried_at = now
+                told = bool(reaching) or alert.status == "logged"
+                alert.unreached = 0 if told else alert.unreached + 1
+                if told:
+                    alert.announced_at = now
         self._keep("update_delivery", alert)
         event(log, "alert_delivered", alert=alert.id, rule=alert.rule_id, severity=severity,
-              status=alert.status, translated=",".join(checked))  # fmt: skip
-        self._publish(alert)
-        if self.on_delivered is not None:
+              status=alert.status, change=change, translated=",".join(checked))  # fmt: skip
+        self._publish(alert, change)
+        # Webhooks get each announcement once: not a try again of one that reached nobody here.
+        if self.on_delivered is not None and change != "update":
             try:
-                self.on_delivered(alert.payload(), severity, text, checked)
+                self.on_delivered(alert.payload(change), severity, text, checked)
             except Exception:
                 log.exception("alert outputs failed")
         with self._lock:  # it got more serious while this delivery was in flight
             done = max(_rank(severity), _rank(alert.covered_severity))
-            again = _rank(alert.severity) > done
+            again = not back and _rank(alert.severity) > done
             if again:
                 alert.status = "pending"
         if again:
             self._dispatch(alert, alert.severity, alert.last_text or alert.quote)
+
+    def _remind(self, alert: Alert, severity: str) -> None:
+        """Still being mentioned, long after it was announced: one notification, a log line
+        and the webhooks, saying how often and since when, with what was translated already.
+        Never spoken, and the alert's delivery state stays as its announcement left it."""
+        names = [self.station_names.get(s, s) for s in alert.station_ids]
+        lang = self.config.notify_language
+        said = (alert.summaries.get(lang) if lang else None) or alert.quote
+        since = time.strftime("%H:%M", time.localtime(alert.first_at))
+        body = f"Mentioned {alert.mentions} times since {since}: {said}"
+        failed = []
+        for action in self.config.actions.get(severity, ()):
+            try:
+                if action == "notify":
+                    title = f"STILL {severity.upper()} · {alert.rule_id} · {', '.join(names)}"
+                    self.actions.notify(title, body)
+                elif action == "log":
+                    words = "(not logged: kept only for days)" if alert.short_lived else said
+                    event(log, "alert", level=logging.WARNING, alert=alert.id,
+                          rule=alert.rule_id, severity=severity, change="reminder",
+                          mentions=alert.mentions, stations=",".join(alert.station_ids),
+                          text=words[:200])  # fmt: skip
+            except Exception as e:  # as for an announcement: a failed action is logged
+                failed.append(action)
+                event(log, "alert_action_failed", level=logging.ERROR, alert=alert.id,
+                      action=action, error=str(e)[:200])  # fmt: skip
+        event(log, "alert_reminded", alert=alert.id, rule=alert.rule_id, severity=severity,
+              mentions=alert.mentions, failed=",".join(failed))  # fmt: skip
+        self._publish(alert, "reminder")
+        if self.on_delivered is not None:
+            try:
+                self.on_delivered(alert.payload("reminder"), severity, alert.quote,
+                                  dict(alert.summaries))  # fmt: skip
+            except Exception:
+                log.exception("alert outputs failed")
 
     def _speak(self, lang: str, alert: Alert, text: str, checked: dict[str, str]) -> None:
         voice = self.config.voices[lang]
@@ -825,9 +944,9 @@ class Alerter:
             said = voice.fallback
         self.actions.speak(voice.voice, said)
 
-    def _publish(self, alert: Alert) -> None:
+    def _publish(self, alert: Alert, change: str = "update") -> None:
         if self.on_alert is not None:
             try:
-                self.on_alert(alert.payload())
+                self.on_alert(alert.payload(change))
             except Exception:
                 log.exception("alert observer failed")

@@ -62,11 +62,27 @@ Utterance fields:
   "language": "pt-PT", "text": "…what was said…", "translations": {"en": "…"},
   "context": [{"id": 4180, "time": "…", "station": "antena1", "text": "…", "translations": {}}],
   "segment_id": 4181,
-  "audio_url": "…/api/segments/4181/audio.wav", "cap_url": "…/api/alerts/77.cap"
+  "audio_url": "…/api/segments/4181/audio.wav", "cap_url": "…/api/alerts/77.cap",
+  "change": "new"
 }
 ```
 
 Alert fields:
+
+- `change` (live events and pushes; not in `/feed/v1/alerts`): what this event is about. An
+  alert is one incident: a story repeated on the air is one alert whose `mentions` grow, and it
+  ends once nobody mentioned it for the cooldown (15 minutes by default); the next mention is a
+  new alert with a new `id`.
+  - `new`: the alert was announced for the first time.
+  - `escalated`: announced again because it got more serious (`severity` rose).
+  - `reminder`: still being mentioned, at most once per `remind_minutes` (an hour by default).
+  - `ended`: a station alert is over (the station's audio is back).
+  - `update`: nothing was announced: another mention folded in, a translation added, a
+    delivery outcome recorded, or an alert opened while it is still being checked (`pending`).
+
+  `/feed/v1/events` sends every change, so a program that reacts to alerts should act on
+  `change != "update"` (or only on `new`) and treat `update` as fresh numbers for an alert it
+  has seen. Pushes to outputs only ever carry `new`, `escalated`, `reminder` and `ended`.
 
 - `kind`: `keyword` or `llm` (a rule written in plain language and checked by the LLM), or a
   station alert: `silence` (a station gone silent) or `traffic` (an FM station's RDS traffic
@@ -174,6 +190,12 @@ An output is a URL plus filters, set on the page (*Settings → Connections*) an
 
 **Delivery:**
 
+- An alert goes out when it is announced (`change`: `new`), again only when it gets more
+  serious (`escalated`), is still being mentioned an hour later (`reminder`) or, for a station
+  alert, is over (`ended`); never for each mention. In `cap` format the first is a CAP `Alert`
+  and the others are an `Update` with an identifier of their own, all in the same `incidents`.
+  In `text` format the first line says "(more serious now)", "(still being mentioned)" or
+  "(over)".
 - Alerts get six tries over about two minutes on network errors, 408, 425, 429 and 5xx.
   Utterances get three.
 - Each output has its own queue (2,000 events; the oldest utterances go first when it is

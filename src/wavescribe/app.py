@@ -1072,6 +1072,7 @@ class App:
                 "notify_language": config.notify_language if config else None,
                 "translation_wait_s": config.translation_wait_s if config else None,
                 "cooldown_minutes": round(config.cooldown_s / 60, 1) if config else None,
+                "remind_minutes": round(config.remind_s / 60, 1) if config else None,
             },
             "actions": {k: list(v) for k, v in (config.actions if config else {}).items()},
             "voices": {

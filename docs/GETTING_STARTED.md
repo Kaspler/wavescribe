@@ -200,6 +200,12 @@ each station's language. Read them, fix any that are wrong, and save.
   don't have, so leave it out there. A pattern that could take very long (a repeated group that
   repeats inside, like `(\w+ )+`) is refused when the file loads, with the rule's name.
 
+**A story told again and again is one alert.** Further mentions add to it (the page counts
+them) and are not announced again, unless it gets more serious. After 15 minutes without a
+mention (`cooldown_minutes`) it is over, and the next mention is a new alert. While it goes on,
+you get a "still being mentioned" notification at most once an hour (`remind_minutes` under
+`[delivery]`; 0 turns it off). Reminders are never spoken.
+
 **When a station goes silent:** the example rules (`config/alerts.example.toml`) have one
 (`kind = "silence"`): a station that sends no audio, or only silence, for 5 minutes raises an
 alert, and you get a notification when its audio is back. It's how you find out that the

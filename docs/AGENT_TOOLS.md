@@ -90,7 +90,7 @@ an error instead.
 | `recent` | What was said, oldest first: from `minutes` ago (60), or after the last utterance it saw (`after_id`), so the agent can follow along without reading anything twice. | `{utterances, next_after_id, more}`: `limit` utterances at most (100, up to 500); `more` is true when the limit cut them short; `next_after_id` is the `after_id` for the next call (the one given, or null, when nothing came). |
 | `search` | Full-text search of everything kept, in the original words and the translations. Each word is found at the start of a word (*flood* finds *floods*); `*word` finds it inside words too. | `{utterances}`, newest first: 20, or `limit` up to 60. |
 | `alerts` | Recent alerts, newest first, with their status and what was said; `minutes` keeps those mentioned in the last that many minutes. | `{alerts}`: 10, or `limit` up to 30. |
-| `wait_for_alert` | Waits for the next announced alert, `timeout_s` seconds (60, up to 300), optionally only from some `stations` or from a `min_severity` up. | `{alert}`, or `{alert: null, waited_s}` when none came. |
+| `wait_for_alert` | Waits for the next announced alert, `timeout_s` seconds (60, up to 300), optionally only from some `stations` or from a `min_severity` up. Further mentions of an alert already announced don't count. | `{alert}`, or `{alert: null, waited_s}` when none came. The alert's `change` says why it came: `new`, `escalated` (more serious now), `reminder` (still being mentioned, at most hourly) or `ended`. |
 | `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It takes from a few seconds to about a minute, and needs a language model as the translator; otherwise it fails with the reason. | `{answer, sources, plan}`: `sources` are the cited utterances, each with the `n` the answer cites it by; `plan` is where it looked (`stations`, `since`, `until`, `terms`, and whether it read an `overview`, `widened` the search or `sampled`). |
 | `status` | What Wavescribe is doing, and why a station isn't. | `{node, stations, status, ask, mt_model, noncommercial, store}`: `node` is this machine (`name`, `url`, `version`, `feed_version`, `translation_languages`); `stations` every station set up, with `available` and `reason` (why it can't run); `status` the running part (`ready`, `models`, each running station's `connected`, `error` and `retry_in_s`, queue depths, `lag`); `ask` is null when ask works, else why not; `mt_model` the translation model; `noncommercial` the restricted models in use; `store` whether history is kept. |
 | `start_station`, `stop_station` | Only with `--allow-control`. A start right after a stop waits for the stop to finish, up to 10 s, or fails saying so. | `{ok: true}`. |
@@ -157,13 +157,16 @@ each time, and it resumes after the last utterance it printed.
 | `--url URL` | another Wavescribe (default `http://localhost:8765`) |
 | `--token TOKEN` | a feed token, which a Wavescribe on another machine asks for once it has one ([FEED.md](FEED.md), *Who may read*); `WAVESCRIBE_TOKEN` in the environment does the same and doesn't show in the list of running processes |
 
-An alert is sent again each time its status changes: `pending` while it is checked or
-translated; `delivered`, `partial`, `failed` or `logged` once it is announced; `covered` when
-another alert announced it. To hand each announced alert to another program, as JSON on its
-stdin:
+An alert is sent again each time it changes, and `change` says how: `new` when it is announced,
+`escalated` when it is announced again because it got more serious, `reminder` when it is still
+being mentioned an hour later, `ended` when a station alert is over, and `update` for anything
+else (another mention, a translation, a delivery outcome). Its `status` is `pending` while it
+is checked or translated; `delivered`, `partial`, `failed` or `logged` once it is announced;
+`covered` when another alert announced it. To hand each announced alert to another program, as
+JSON on its stdin:
 
 ```sh
-uv run wavescribe follow --alerts-only | jq --unbuffered -c 'select(.status != "pending" and .status != "covered")' | while read -r alert; do printf '%s\n' "$alert" | ./notify; done
+uv run wavescribe follow --alerts-only | jq --unbuffered -c 'select(.change != "update" and .status != "covered")' | while read -r alert; do printf '%s\n' "$alert" | ./notify; done
 ```
 
 Here `./notify` stands for your program. With one that prints a line per alert:
