@@ -126,6 +126,17 @@ def read_alerts(path: Path) -> dict[str, Any]:
         raise ConfigError(f"{path}: {e}") from e
 
 
+def _packs_dirs(path: Path | None, keywords_dir: Path) -> list[Path]:
+    """Where keyword packs are looked for, in order: keywords/ beside the alerts file, so a
+    config folder kept elsewhere (``--alerts``) brings its own, then config/keywords. A folder
+    given on purpose is the only one."""
+    if path is None or keywords_dir != DEFAULT_KEYWORDS_DIR:
+        return [keywords_dir]
+    beside = Path(path).parent / "keywords"
+    same = beside.absolute() == keywords_dir.absolute()
+    return [keywords_dir] if same else [beside, keywords_dir]
+
+
 def load_alerts(path: Path, keywords_dir: Path = DEFAULT_KEYWORDS_DIR) -> AlertConfig:
     return parse_alerts(read_alerts(path), path, keywords_dir)
 
@@ -159,6 +170,8 @@ def parse_alerts(
     for key in ("delivery", "speak", "actions"):
         if not isinstance(raw.get(key, {}), dict):
             raise ConfigError(f"{where}: [{key}] must be a table")
+    looked = _packs_dirs(path, keywords_dir)
+    keywords_dir = next((d for d in looked if d.is_dir()), looked[-1])
     try:
         rules = RuleSet.load(raw, keywords_dir, page_rules or [], disabled)
     except (KeyError, ValueError) as e:
@@ -193,12 +206,19 @@ def parse_alerts(
     if sound is not None and not isinstance(sound, str):
         raise ConfigError(f"{where} [delivery]: notify_sound must be a sound's name, e.g. "
                           '"Glass", or "" for silent notifications')  # fmt: skip
+    missing: dict[str, list[str]] = {}  # rule id: its topics that no pack has
     for r in rules.rules:
         if r.origin == "page":
             continue
         for topic in r.topics:
             if not any(topic in p.topics for p in rules.packs.values()):
-                log.warning("rule %s: topic %r is in no keyword pack", r.id, topic)
+                missing.setdefault(r.id, []).append(topic)
+    if missing:  # one line, not one per topic: most often the packs aren't where looked
+        topics = list(dict.fromkeys(t for ts in missing.values() for t in ts))
+        rules_n = f"{len(missing)} alert rule" + ("s, so they match" if len(missing) > 1 else
+                                                  ", so it matches")  # fmt: skip
+        log.warning("no keyword pack in %s has the topics of %s nothing: %s",
+                    " or ".join(str(d) for d in looked), rules_n, ", ".join(topics))  # fmt: skip
     return AlertConfig(
         rules=rules,
         actions=actions,

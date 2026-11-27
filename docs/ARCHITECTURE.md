@@ -741,7 +741,8 @@ transcript (source language) ─► RuleSet.evaluate ─► hits ─► Alerter 
 ```
 
 - **Keyword rules** (`rules/`) run on the source text the moment ASR finishes, on the ASR thread.
-  Topics live in per-language packs (`config/keywords/<lang>.toml`); a rule names topics, so one
+  Topics live in per-language packs (`config/keywords/<lang>.toml`, or `keywords/` beside an
+  alerts file kept elsewhere, looked for first); a rule names topics, so one
   rule serves every language that has a pack. Matching (`rules/text.py`) folds case, and accents
   where they are optional (Latin, Greek, Cyrillic, Hebrew and Arabic points; a Thai tone mark,
   a Devanagari vowel sign or a Japanese voicing mark stays part of its word), stems with Snowball when it has the language (pack terms are base forms; plurals match), keeps

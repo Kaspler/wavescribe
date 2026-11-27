@@ -250,6 +250,37 @@ def test_a_regex_is_named_as_slow_for_the_cpu_it_takes_not_for_waiting(tmp_path,
     assert "rule roads: regex 'slow' took" in warning.getMessage()
 
 
+def test_keyword_packs_are_found_beside_an_alerts_file_kept_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Run outside the repo folder with --alerts, every topic was "in no keyword pack": the
+    packs were looked for in config/keywords under the working folder, not beside the file."""
+    cfg, elsewhere = tmp_path / "cfg", tmp_path / "elsewhere"
+    (cfg / "keywords").mkdir(parents=True)
+    elsewhere.mkdir()
+    shutil.copy("config/alerts.example.toml", cfg / "alerts.toml")
+    shutil.copy("config/keywords/pt.example.toml", cfg / "keywords" / "pt.toml")
+    monkeypatch.chdir(elsewhere)
+    with caplog.at_level("WARNING", logger="wavescribe.alerts"):
+        alerts = load_alerts(cfg / "alerts.toml")
+    assert set(alerts.rules.packs) == {"pt"} and caplog.records == []
+
+
+def test_topics_in_no_pack_are_said_once_with_where_the_packs_were_looked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    shutil.copy("config/alerts.example.toml", tmp_path / "alerts.toml")
+    monkeypatch.chdir(tmp_path)  # no config/keywords here either
+    with caplog.at_level("WARNING", logger="wavescribe.alerts"):
+        alerts = load_alerts(tmp_path / "alerts.toml")
+    assert alerts.rules.packs == {}
+    [said] = [r.getMessage() for r in caplog.records]
+    assert said.startswith(
+        f"no keyword pack in {tmp_path / 'keywords'} or config/keywords has the topics of 10 "
+        "alert rules, so they match nothing: civil_protection, "
+    )
+
+
 def test_the_example_regexes_cost_next_to_nothing(tmp_path: Path) -> None:
     import time
 
