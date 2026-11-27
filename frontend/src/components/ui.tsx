@@ -185,7 +185,9 @@ export function LangPicker({ id, value, onChange, options, label, placeholder = 
   const [active, setActive] = useState(0);
   const listId = useId();
   const open = text !== null;
-  const hits = open ? findLangs(text, value ? options.filter((t) => t !== value) : options) : [];
+  // The list opened empty offers the other languages; typed text finds the chosen one too, so
+  // typing its name again and pressing Enter keeps it rather than picking a cousin.
+  const hits = open ? findLangs(text, value && !text.trim() ? options.filter((t) => t !== value) : options) : [];
   const choose = (tag: string) => {
     setText(null);
     if (tag !== value) onChange(tag);

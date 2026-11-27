@@ -14,7 +14,7 @@ c480ad0ffc8c3b901806751b47c26cefbde27006 frontend/public/manifest.webmanifest
 938af0ba42364a8a08d3570f8ef90132e7f44165 frontend/src/components/ErrorBoundary.tsx
 4ab42ccffcf3b4213a254db5534cd4eec8ab917d frontend/src/components/Icon.tsx
 852dd08acc3e316d5b69957ce66c3dcc7a219058 frontend/src/components/ui.css
-7cb40327394cc15754b587fbb42a01e3bde5ba9d frontend/src/components/ui.tsx
+9e41bd9a7c139422d4aab88ed9983f0412936fcb frontend/src/components/ui.tsx
 4a3d400b065d135d842753dbd21c8cefcdfd75ed frontend/src/lib/alerts.ts
 fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 6393956f39e5c9bf33fd16582ee192e7e97e6bf6 frontend/src/lib/auth.ts
