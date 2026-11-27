@@ -3,7 +3,8 @@
 
     IQ at the device rate (e.g. 2.4 MS/s)
       ─► 4096-point FFTs (586 Hz apart at 2.4 MS/s), averaged over about 50 ms: one frame
-      ─► each channel of the band's raster: its power against its own noise floor
+      ─► the power over a channel's measured width against the floors of the same bins,
+         for every bin at once (two running sums): each channel reads it at its own place
       ─► a start after two frames above the threshold, an end after a hang time below it
 
 Every FFT bin has a noise floor of its own. It follows the bin only while the bin's channel is
@@ -185,18 +186,25 @@ class ActivityDetector:
         spur_guard = GUARD_HZ + spur_bin_hz / 2
         for s in spurs:
             excluded |= np.abs(offsets - (s - center_hz)) <= spur_guard
-        self._weights = np.zeros((len(self.freqs), fft), dtype=np.float64)
-        self._mirror = np.zeros_like(self._weights)
+        # The bins left out of every measurement count for nothing in the running sums, so
+        # a channel's power is a difference of two of them, however many channels there are.
+        self._keep = ~excluded
         self._owner = np.full(fft, -1)  # the channel each bin is measured for
+        # Each channel's bins, and the same bins mirrored about the centre: where the
+        # receiver's mirror of this channel lies, and where the signal this channel would be
+        # a mirror of is.
+        self._bins = np.zeros((2, len(self.freqs)), dtype=np.intp)  # first, and last + 1
+        self._mirror_bins = np.zeros_like(self._bins)
         for i, f in enumerate(self.freqs):
-            near = (np.abs(offsets - (f - center_hz)) <= half) & ~excluded
-            self._weights[i, near] = 1.0
-            self._owner[near] = i
-            # The same bins mirrored about the centre: where the receiver's mirror of this
-            # channel lies, and where the signal this channel would be a mirror of is.
-            mirrored = np.abs(offsets + (f - center_hz)) <= half
-            self._mirror[i, mirrored & ~excluded] = 1.0
-        self._measured = self._weights.sum(axis=1) > 0
+            near = np.flatnonzero(np.abs(offsets - (f - center_hz)) <= half)
+            mirrored = np.flatnonzero(np.abs(offsets + (f - center_hz)) <= half)
+            if len(near):
+                self._bins[:, i] = near[0], near[-1] + 1
+                self._owner[near[self._keep[near]]] = i
+            if len(mirrored):
+                self._mirror_bins[:, i] = mirrored[0], mirrored[-1] + 1
+        kept = np.concatenate([[0], np.cumsum(self._keep)])
+        self._measured = kept[self._bins[1]] > kept[self._bins[0]]
         # Channels close enough for one to be the other's splatter, and those that overlap.
         apart = np.abs(np.subtract.outer(self.freqs, self.freqs)).astype(float)
         self._nearby = (apart > 0) & (apart <= SHADOW_CHANNELS * max(step, channel_hz))
@@ -222,7 +230,10 @@ class ActivityDetector:
         self._frame_clipped = 0.0  # their share, in the frame being looked at
         self._samples = 0  # samples fed so far
         self._frame_start = 0
+        self._sums: tuple[np.ndarray, np.ndarray] | None = None  # the last frame's running sums
         self._channels = [_Channel() for _ in self.freqs]
+        self._live = np.zeros(len(self.freqs), dtype=bool)  # rising or busy
+        self._is_busy = np.zeros(len(self.freqs), dtype=bool)
         self._deaf_since: int | None = None  # where interference across the window began
         self._blind_since: int | None = None  # and where it last began with no channel on top
         self._interfered = 0  # the end of the last frame with interference
@@ -252,7 +263,7 @@ class ActivityDetector:
 
     @property
     def busy(self) -> list[int]:
-        return [i for i, c in enumerate(self._channels) if c.state == "busy"]
+        return np.flatnonzero(self._is_busy).tolist()
 
     @property
     def samples(self) -> int:
@@ -313,15 +324,19 @@ class ActivityDetector:
                 self._first_frames = []
             return []
         floor = self._floor
-        signal = self._weights @ power
-        floor_signal = self._weights @ floor
+        power_sums, floor_sums = self._running(power), self._running(floor)
+        self._sums = (power_sums, floor_sums)
+        signal = _over(power_sums, self._bins)
+        floor_signal = _over(floor_sums, self._bins)
         self.snr_db = 10 * np.log10((signal + 1e-20) / (floor_signal + 1e-20))
         self.power_db = 10 * np.log10(signal + 1e-20)
-        mirror_db = 10 * np.log10((self._mirror @ power + 1e-20) / (self._mirror @ floor + 1e-20))
+        mirror_db = 10 * np.log10(
+            (_over(power_sums, self._mirror_bins) + 1e-20)
+            / (_over(floor_sums, self._mirror_bins) + 1e-20)
+        )
         above = (self.snr_db >= self.threshold_db) & self._measured
         holding = self.snr_db >= self.threshold_db - STAY_DB
-        states = [c.state for c in self._channels]
-        rising_now = sum(1 for i in np.flatnonzero(above) if states[i] != "busy")
+        rising_now = np.count_nonzero(above & ~self._is_busy)
         risen = rising_now >= max(4, BROADBAND * len(self.freqs))
         # The channel on top of an overload: it may start, and nothing else.
         clipping = self._frame_clipped >= CLIPPING
@@ -387,7 +402,7 @@ class ActivityDetector:
         deaf = self._deaf_since is not None
 
         out: list[Activity] = []
-        for i in np.flatnonzero(above | np.array([s != "quiet" for s in states])):
+        for i in np.flatnonzero(above | self._live):
             c = self._channels[i]
             if c.state == "busy":
                 c.overload |= overloaded
@@ -397,16 +412,19 @@ class ActivityDetector:
                     c.power_db = max(c.power_db, float(self.power_db[i]))
                     if end - c.first >= self._carrier:
                         out.append(self._end(i, "carrier"))
-                        floor[self._weights[i] > 0] = power[self._weights[i] > 0]
+                        mine = slice(*self._bins[:, i])
+                        np.copyto(floor[mine], power[mine], where=self._keep[mine])
                 elif end - c.last >= self._hang:
                     out.append(self._end(i))
                 continue
             if not above[i] or (deaf and i != top):
                 c.state, c.frames, c.overload = "quiet", 0, False
+                self._live[i] = False
                 continue
             if c.state == "quiet":
                 c.state, c.frames, c.first = "rising", 0, start
                 c.snr_db, c.power_db = -200.0, -200.0
+                self._live[i] = True
             c.overload |= overloaded
             c.frames += 1
             c.snr_db = max(c.snr_db, float(self.snr_db[i]))
@@ -418,6 +436,7 @@ class ActivityDetector:
                 c.first = end
                 continue
             c.state, c.last = "busy", end
+            self._is_busy[i] = True
             if overloaded and self._culprit is None:
                 self._culprit, self._overload_seen = int(i), True
                 self.overload_hz, self.overload_on_channel = self.freqs[i], True
@@ -435,12 +454,28 @@ class ActivityDetector:
 
         if not deaf:
             # Only bins whose channel is quiet learn: a transmission must not lift its own floor.
-            hot = np.array([False] + [c.state != "quiet" for c in self._channels])
+            hot = np.concatenate([[False], self._live])
             learn = ~hot[self._owner + 1]
             rate = np.where(power < floor, self._down, self._up)
             floor[learn] += rate[learn] * (power[learn] - floor[learn])
             np.maximum(floor, 1e-20, out=floor)
         return out
+
+    def _running(self, per_bin: np.ndarray) -> np.ndarray:
+        """The running sum of ``per_bin`` over the bins that are measured: what a run of
+        bins holds is the difference between its two ends."""
+        return np.concatenate([[0.0], np.cumsum(np.where(self._keep, per_bin, 0.0))])
+
+    def sliding_db(self) -> np.ndarray:
+        """How far the last frame's power stood over the floor, in dB, over a channel's
+        measured width about every bin: what a channel centred on that bin reads."""
+        if self._sums is None:
+            return np.zeros(self._n)
+        at = np.arange(self._n)
+        h = self._half_bins
+        ends = np.array([np.maximum(at - h, 0), np.minimum(at + h + 1, self._n)])
+        power, floor = (_over(sums, ends) for sums in self._sums)
+        return 10 * np.log10((power + 1e-20) / (floor + 1e-20))
 
     def _relearn(self, clipping: bool = False) -> list[Activity]:
         """The floors learnt afresh from the next frames, as at the start: the noise rose and
@@ -451,9 +486,9 @@ class ActivityDetector:
         self._clip_learnt = clipping
         self.relearnt += 1
         self._floor = None
-        for c in self._channels:
-            if c.state == "rising":
-                c.state, c.frames = "quiet", 0
+        for i in np.flatnonzero(self._live & ~self._is_busy):
+            self._channels[i].state, self._channels[i].frames = "quiet", 0
+        self._live &= self._is_busy
         return []
 
     def _hearing(self) -> None:
@@ -536,7 +571,7 @@ class ActivityDetector:
         snr = self.snr_db[i]
         if mirror_db[i] - snr >= SHADOW_DB:
             return True
-        live = above | np.array([c.state == "busy" for c in self._channels])
+        live = above | self._is_busy
         rivals = np.flatnonzero(live & (self._nearby[i] | self._overlapping[i]))
         for j in rivals:
             if self.snr_db[j] - snr >= SHADOW_DB:
@@ -552,11 +587,18 @@ class ActivityDetector:
             kind, i, self.freqs[i], c.first, c.last, c.snr_db, c.power_db, reason, c.overload
         )
         self._channels[i] = _Channel()
+        self._live[i] = self._is_busy[i] = False
         return out
 
     def flush(self) -> list[Activity]:
         """End every transmission still running (the dongle stopped, or the watch did)."""
         return [self._end(i, "stopped") for i in self.busy]
+
+
+def _over(sums: np.ndarray, bins: np.ndarray) -> np.ndarray:
+    """What each run of bins holds (``bins``: their first, and their last + 1), from the
+    running sums."""
+    return sums[bins[1]] - sums[bins[0]]
 
 
 class IqHistory:
