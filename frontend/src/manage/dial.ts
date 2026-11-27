@@ -219,6 +219,8 @@ export type Span = [number, number];
 export interface RxStation {
   id: string;
   name: string;
+  /** Where it is tuned; a watch's is the middle of its window, where nothing need be heard (what
+   * it listens on is bands.ts, watchListensWords). */
   mhz: number;
   running: boolean;
   /** Why the receiver, tuned as it is, doesn't hear it; null when it does. */

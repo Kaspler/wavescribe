@@ -9,12 +9,13 @@ import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
-import { type Band, and, bandLabel, bandLine, bandWords, fmtMhz, placeWords } from "./bands";
+import { type Band, and, bandLabel, bandLine, bandWords, fmtMhz, listeningWords, placeWords, watchListening, watchListensWords } from "./bands";
+import { forgetBandPlan } from "./bandplan";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
 import { type Receiver, bandAt as narrowestAt, bandOfWindow, hears, kindOf, lookAt, lookTune, onDial, onRaster } from "./dial";
-import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName } from "./Receivers";
+import { Receivers, RxSwitch, UseDongle, makeReceiver, rxName, watchOf } from "./Receivers";
 import { MODE_HINT } from "./Stations";
 import { addedToast } from "./added";
 import { type AddResult, addOnAir } from "./onair";
@@ -190,8 +191,8 @@ export function ReceiversPage() {
   const held = ((st?.stations || []) as Any[]).filter((s) => s.privacy_region && s.privacy && s.privacy_region !== s.privacy);
   return (
     <>
-      <Receivers onChange={reload} />
-      <Region v={v} reload={async () => { await reload(); await reloadStations(); }} held={held.length} />
+      <Receivers onChange={reload} bands={v.bands} />
+      <Region v={v} reload={async () => { forgetBandPlan(); await reload(); await reloadStations(); }} held={held.length} />
       {v.receivers.length > 0 && (
         <Advanced id="rd-spurs" label="Each receiver's own signals">
           <Spurs v={v} job={job} running={running} onJob={setJob} />
@@ -300,7 +301,12 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const rxs: RxStatus[] = v.receivers.map((r: Any) => {
     const s = rxStatus(r, tuner.receivers.find((l) => l.id === r.id), scanJob);
     const w = watchOn(r.id);
-    const t = w && s.state === "stations" ? { ...s, words: `watching ${watchWords(w, v.bands)}`, watch: w.id } : s;
+    // A watch hears its channels, not where the receiver is tuned: its window is those, drawn and
+    // said, and the tuning is left to Settings, Receivers.
+    const heard = w && s.state === "stations" ? watchListening(w.watch, v.bands) : null;
+    const t = w && s.state === "stations"
+      ? { ...s, ...(heard ? { lo: heard.lo, hi: heard.hi, on: listeningWords(heard) } : {}), words: `watching ${watchListensWords(w.watch, v.bands)}`, watch: w.id }
+      : s;
     // Its stations it doesn't hear where it is tuned now are counted here, and named with what
     // fixes it on their band's card.
     const lost = unheard.filter((x) => x.rx.id === r.id);
@@ -512,7 +518,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
                  <p className="dl-outside">
                    Outside the bands:
                    {rxs.filter((r) => !bandOfWindow(v.bands, r.lo, r.hi)).map((r) => (
-                     <span key={r.id}><ReceiverChip r={r} chosen={r.id === device} onChoose={setDevice} /> {mhzText((r.lo + r.hi) / 2)}</span>
+                     <span key={r.id}><ReceiverChip r={r} chosen={r.id === device} onChoose={setDevice} /> {r.on ?? mhzText((r.lo + r.hi) / 2)}</span>
                    ))}
                  </p>
                )}
@@ -1022,7 +1028,9 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: RadioView; pre: Any; tuner: 
                       options={v.receivers.map((r) => {
                         const by = tuner.receivers.find((l) => l.id === r.id);
                         const doing = by?.open ? ["tuned by hand"] : (by?.holders || []);
-                        return [r.id, `${rxName(r.id)} · ${tunedNow(r).center_mhz.toFixed(2)} MHz${doing.length ? ` · ${doing.join(", ")}` : ""}`];
+                        const w = by?.open ? null : watchOf(r);
+                        return [r.id, w != null ? `${rxName(r.id)} · watching ${watchListensWords(w, v.bands)}`
+                          : `${rxName(r.id)} · ${tunedNow(r).center_mhz.toFixed(2)} MHz${doing.length ? ` · ${doing.join(", ")}` : ""}`];
                       })} />
             </Field>
           )}

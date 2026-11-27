@@ -8,7 +8,7 @@ import {
 import { spoken } from "../reading/Column";
 import { type Any, docUrl, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { changedFields } from "./drafts";
-import { watchWords } from "./Caught";
+import { watchListensWords } from "./bands";
 import MoveThere from "./MoveThere";
 import { SpokenField } from "./SpokenField";
 
@@ -68,8 +68,8 @@ function StationRow({ s, devices, bands, reload }: { s: Any; devices: string[]; 
   // Its receiver is tuned where it doesn't hear it, and a centre hears it: the move back.
   const movable = !!s.out_of_reach && s.reach_center_mhz != null && !!s.device;
   const kind = s.kind === "remote" && s.remote === "push" ? "pushed" : KIND[s.kind] || s.kind;
-  // A watch has a band or a range, not a frequency.
-  const tuned = s.watch != null ? `watching ${watchWords(s, bands)}`
+  // A watch has a band or a range, not a frequency: it is said by the channels it listens on.
+  const tuned = s.watch != null ? `watching ${watchListensWords(s.watch, bands.length ? bands : null)}`
     : `${(s.mhz || s.fm_mhz || []).join(", ")} MHz`;
   const src = s.stream || s.stream_hls || (s.device ? `receiver ${s.device} · ${tuned}${s.mode ? ` ${s.mode.toUpperCase()}` : ""}`
     : s.remote ? `${s.remote}${s.remote_station ? ` → ${s.remote_station}` : ""}` : "no source");

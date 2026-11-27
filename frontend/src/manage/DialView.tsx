@@ -254,9 +254,13 @@ export interface RxStatus {
   id: string;
   /** What it takes in, where it is tuned now. */
   span: Span;
-  /** Its window as drawn: its span, or, while it scans, the range it sweeps. */
+  /** Its window as drawn: its span; while it scans, the range it sweeps; while it watches, the
+   * first and last channel it listens on. */
   lo: number;
   hi: number;
+  /** While it watches: the channels it listens on, in words ("channels 1–16, 446.006 to 446.194
+   * MHz"), said in place of a frequency. */
+  on?: string;
   state: "idle" | "hand" | "stations" | "testing" | "scanning" | "trouble";
   lamp: "off" | "dim" | "on" | "wait" | "trouble";
   /** "following Valley and City News", "idle", … */
@@ -344,7 +348,8 @@ export function ReceiverMarks({ width, scale, rxs, chosen, bands, onChoose, onDr
                            top: rows * TAB_ROW + TO_TRACK - 3, height: TRACK + 6 }} />
             <button type="button" className="dl-rx-tab" style={{ left, top: m.row * TAB_ROW }}
                     aria-pressed={m.id === chosen}
-                    aria-label={`Receiver ${rxName(m.id)}, ${r.words}, ${r.state === "scanning" ? "over" : "taking in"} ${+r.lo.toFixed(2)} to ${+r.hi.toFixed(2)} MHz${band ? ` in ${bandWords(band).name}` : ""}`}
+                    aria-label={r.on ? `Receiver ${rxName(m.id)}, ${r.words}`
+                      : `Receiver ${rxName(m.id)}, ${r.words}, ${r.state === "scanning" ? "over" : "taking in"} ${+r.lo.toFixed(2)} to ${+r.hi.toFixed(2)} MHz${band ? ` in ${bandWords(band).name}` : ""}`}
                     title={centre != null ? `Look at ${mhzText(centre)} with Receiver ${rxName(m.id)}` : `Receiver ${rxName(m.id)}: ${r.words}. Drag along the dial to move it.`}
                     onClick={() => { if (!dragging) onChoose(m.id); }}
                     onPointerDown={(e) => {

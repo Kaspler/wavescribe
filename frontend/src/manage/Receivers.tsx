@@ -4,7 +4,7 @@ import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
 import { ActButton, Advanced, Button, ConfirmButton, Field, Fold, Input, LinkButton, Section, Segmented, Select, Table, Tag, act, toast } from "../components/ui";
 import { type Any, ApiError, del, docUrl, get, post, useLoad } from "./api";
-import { and } from "./bands";
+import { type Band, type Listening, and, listeningWords, watchListening, watchListensWords } from "./bands";
 import { type Receiver, type RxStation, type Span, usable } from "./dial";
 
 // The reading view loads it on its own when a column offers the move: it stays its own piece.
@@ -12,6 +12,11 @@ const MoveThere = lazy(() => import("./MoveStation"));
 
 /** A receiver as the page names it: receiver "c" is Receiver C, as on a front panel. */
 export const rxName = (id: string) => (id.length === 1 ? id.toUpperCase() : id);
+
+/** The watch receiver `r` runs, as its band id or range, from what the page is told of each
+ * station; null when it runs none. A watch hears its channels, not where the receiver is tuned. */
+export const watchOf = (r: { stations: { id: string; running: boolean }[] }) =>
+  r.stations.filter((s) => s.running).map((s) => S.byId[s.id]?.watch).find((w) => w != null) ?? null;
 
 /** The first free short id for a new receiver: a, b, c… */
 export const nextId = (taken: string[]) => "abcdefghijklmnopqrstuvwxyz".split("").find((c) => !taken.includes(c)) || `rx${taken.length + 1}`;
@@ -132,7 +137,7 @@ export function FirstReceiver({ dongles, tools, taken, look, onAdded }: { dongle
   );
 }
 
-export function Receivers({ onChange }: { onChange?: () => Promise<void> }) {
+export function Receivers({ onChange, bands }: { onChange?: () => Promise<void>; bands: Band[] }) {
   const { data: v, error, reload: load } = useLoad(() => get("/receivers"));
   const [scan, setScan] = useState<Any[] | null>(null);
   const [form, setForm] = useState<Any | null>(null);
@@ -161,7 +166,7 @@ export function Receivers({ onChange }: { onChange?: () => Promise<void> }) {
   }
   return (
     <>
-      {v.devices.map((d: Any) => <Device key={d.id} d={d} reload={reload} />)}
+      {v.devices.map((d: Any) => <Device key={d.id} d={d} bands={bands} reload={reload} />)}
       <Section id="rx-add-h" title="Add a receiver" description="Plug in another dongle, then look for it.">
         {scan ? (
           fresh.length ? <FirstReceiver dongles={fresh} tools={!!v.rtl_sdr} taken={ids} look={look} onAdded={reload} />
@@ -195,7 +200,7 @@ function DeviceForm({ pre, onDone, onCancel }: { pre: Any; onDone: () => Promise
       <div className="m-form m-form-4">
         <Field id="dv-id" label="Id" hint="Short: a, b, c…"><Input id="dv-id" value={id} placeholder="a" onChange={(e) => setId(e.target.value)} /></Field>
         <Field id="dv-serial" label="Serial" hint="Unique per dongle (rtl_eeprom sets it)."><Input id="dv-serial" value={serial} className="mono" onChange={(e) => setSerial(e.target.value)} /></Field>
-        <Field id="dv-center" label="Centre (MHz)" hint="Between the stations you want, so all lie within ±1 MHz.">
+        <Field id="dv-center" label="Tuned to (MHz)" hint="Its centre: between the stations you want, so all lie within ±1 MHz.">
           <Input id="dv-center" type="number" step={0.1} value={center} placeholder="e.g. 95.0" onChange={(e) => setCenter(e.target.value)} />
         </Field>
         <Field id="dv-gain" label="Gain (dB)" hint="Start at 30; lower it if overload shows."><Input id="dv-gain" type="number" step={0.1} value={gain} onChange={(e) => setGain(e.target.value)} /></Field>
@@ -216,7 +221,7 @@ const RATES: [string, string][] = [["960000", "0.96 MS/s"], ["1200000", "1.2 MS/
 /** How far either side of its centre a receiver hears a channel, in MHz, for saying so. */
 const reach = ([lo, hi]: Span) => +((hi - lo) / 2).toFixed(2);
 
-function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
+function Device({ d, bands, reload }: { d: Receiver; bands: Band[]; reload: () => Promise<void> }) {
   const [center, setCenter] = useState(String(d.center_mhz));
   const [gain, setGain] = useState(String(d.gain_db));
   const [rate, setRate] = useState(String(d.sample_rate));
@@ -266,9 +271,11 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
     setPpm(String(d.ppm ?? 0));
   };
   const over = d.clipped > 0.001;
+  // A watch hears its channels, not where the receiver is tuned: said beside what it takes in.
+  const watch = watchOf(d);
   return (
     <Section id={`dv-${d.id}`} title={`Receiver ${rxName(d.id)}`}
-             description={`Takes in ${+d.span_mhz[0].toFixed(3)}–${+d.span_mhz[1].toFixed(3)} MHz around its centre.`}
+             description={`Takes in ${+d.span_mhz[0].toFixed(3)}–${+d.span_mhz[1].toFixed(3)} MHz around its centre.${watch != null ? ` Watching ${watchListensWords(watch, bands)}.` : ""}`}
              actions={<>
                {d.running ? <Tag tone="good">running</Tag> : <Tag tone="muted">idle</Tag>}
                {over && <Tag tone="warn">overload {(d.clipped * 100).toFixed(2)}%</Tag>}
@@ -276,8 +283,8 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
                {d.origin === "page" && <Tag tone="accent">added here</Tag>}
              </>}>
       <div className="m-form m-form-4">
-        <Field id={`c-${d.id}`} label="Centre (MHz)"
-               hint={`The middle of what it takes in: FM stations up to ${reach(usable(d.span_mhz, "wfm"))} MHz either side are heard, narrow channels up to ${reach(usable(d.span_mhz, "nfm"))} MHz.`}>
+        <Field id={`c-${d.id}`} label="Tuned to (MHz)"
+               hint={`Its centre, the middle of what it takes in. The dongle's own spike sits there, so nothing is heard exactly there; FM stations up to ${reach(usable(d.span_mhz, "wfm"))} MHz either side are, and narrow channels up to ${reach(usable(d.span_mhz, "nfm"))} MHz.`}>
           <Input id={`c-${d.id}`} type="number" step={0.05} value={center} onChange={(e) => setCenter(e.target.value)} />
         </Field>
         <Field id={`g-${d.id}`} label="Gain (dB)" hint="How much it amplifies, 0–49.6. Too much overloads it and adds false signals; too little loses weak stations.">
@@ -309,15 +316,22 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
                 </ConfirmButton>
               )}
             </div>
-            {open && <Spectrum d={d} />}
+            {open && <Spectrum d={d} bands={bands} />}
             <Table caption={`Stations on receiver ${d.id}`} empty="No station uses this receiver yet."
                    cols={[{ label: "Station" }, { label: "MHz", num: true }, { label: "Running" }, { label: "Signal" }]}>
-              {d.stations.map((s: Any) => (
-                <tr key={s.name}>
-                  <td dir="auto">{s.name}</td><td className="num">{s.mhz.toFixed(2)}</td><td>{s.running ? "yes" : "no"}</td>
-                  <td className="num-cell">{s.signal_db != null ? <>{s.signal_db} dBFS{s.clipped > 0.001 && <Tag tone="warn">overload</Tag>}</> : "–"}</td>
-                </tr>
-              ))}
+              {d.stations.map((s: Any) => {
+                // A watch's frequency is the middle of its window: its channels are said instead.
+                const w = S.byId[s.id]?.watch;
+                const l = w != null ? watchListening(w, bands) : null;
+                return (
+                  <tr key={s.name}>
+                    <td dir="auto">{s.name}</td>
+                    <td className="num">{w != null ? (l ? listeningWords(l) : watchListensWords(w, bands)) : s.mhz.toFixed(2)}</td>
+                    <td>{s.running ? "yes" : "no"}</td>
+                    <td className="num-cell">{s.signal_db != null ? <>{s.signal_db} dBFS{s.clipped > 0.001 && <Tag tone="warn">overload</Tag>}</> : "–"}</td>
+                  </tr>
+                );
+              })}
             </Table>
           </>
         )}
@@ -344,8 +358,12 @@ function Device({ d, reload }: { d: Receiver; reload: () => Promise<void> }) {
   );
 }
 
+/** What a watch on the receiver listens on, for the spectrum to shade: its first and last channel,
+ * by station id. */
+type Watched = Record<string, Listening>;
+
 /** The live spectrum and its waterfall. Both sit on the instrument's dark surface in either theme. */
-function Spectrum({ d }: { d: Any }) {
+function Spectrum({ d, bands }: { d: Any; bands: Band[] }) {
   const spec = useRef<HTMLCanvasElement>(null);
   const fall = useRef<HTMLCanvasElement>(null);
   const [note, setNote] = useState("The spectrum shows while the receiver runs: start one of its stations, or test the antenna.");
@@ -359,8 +377,16 @@ function Spectrum({ d }: { d: Any }) {
       try {
         const { spectrum: s } = await get(`/receivers/${d.id}/spectrum`);
         if (!s) { setNote("No spectrum: the receiver isn't running. Start one of its stations, or test the antenna."); return; }
-        setNote(`Centre ${(s.center_hz / 1e6).toFixed(3)} MHz · gain ${s.gain_db} dB. Peaks are stations; a flat floor with no peaks means no antenna, or too little gain.`);
-        drawSpectrum(spec.current!, s, d, tok);
+        const watched: Watched = {};
+        for (const st of d.stations) {
+          const w = S.byId[st.id]?.watch;
+          const l = w != null ? watchListening(w, bands) : null;
+          if (l) watched[st.id] = l;
+        }
+        const shaded = d.stations.filter((st: Any) => watched[st.id])
+          .map((st: Any) => ` Shaded: what ${st.name} listens on, ${listeningWords(watched[st.id])}.`).join("");
+        setNote(`Tuned to ${(s.center_hz / 1e6).toFixed(3)} MHz, in the middle: a spike there is the dongle's own, and nothing is heard exactly there · gain ${s.gain_db} dB. Peaks are stations; a flat floor with no peaks means no antenna, or too little gain.${shaded}`);
+        drawSpectrum(spec.current!, s, d, watched, tok);
         drawFall(fall.current!, s);
       } catch {
         /* the next poll tries again */
@@ -369,7 +395,7 @@ function Spectrum({ d }: { d: Any }) {
       }
     }, 450);
     return () => clearInterval(id);
-  }, [d]);
+  }, [d, bands]);
   return (
     <figure className="m-scope">
       <canvas ref={spec} className="m-spectrum" width={1024} height={180} role="img" aria-label={`Spectrum of dongle ${d.id}`} />
@@ -379,7 +405,7 @@ function Spectrum({ d }: { d: Any }) {
   );
 }
 
-function drawSpectrum(canvas: HTMLCanvasElement, s: Any, d: Any, tok: (n: string) => string) {
+function drawSpectrum(canvas: HTMLCanvasElement, s: Any, d: Any, watched: Watched, tok: (n: string) => string) {
   const ctx = canvas.getContext("2d")!;
   const W = canvas.width, H = canvas.height, lo = -100, hi = -10;
   ctx.clearRect(0, 0, W, H);
@@ -393,9 +419,22 @@ function drawSpectrum(canvas: HTMLCanvasElement, s: Any, d: Any, tok: (n: string
     ctx.fillText(`${db} dB`, 6, y - 6);
   }
   const start = s.center_hz - s.sample_rate / 2;
+  const at = (mhz: number) => ((mhz * 1e6 - start) / s.sample_rate) * W;
   for (const st of d.stations) {
-    const x = ((st.mhz * 1e6 - start) / s.sample_rate) * W;
     ctx.fillStyle = tok("--accent");
+    const l = watched[st.id];
+    if (l) {
+      // A watch's frequency is the middle of its window, where nothing need be heard: its channels
+      // are shaded instead, half a channel past the first and last.
+      const half = l.step_khz / 2e3;
+      const x0 = at(l.lo - half), x1 = at(l.hi + half);
+      ctx.globalAlpha = 0.22;
+      ctx.fillRect(x0, 0, Math.max(2, x1 - x0), H);
+      ctx.globalAlpha = 1;
+      ctx.fillText(st.name, Math.min(W - 180, x1 + 6), 24);
+      continue;
+    }
+    const x = at(st.mhz);
     ctx.fillRect(x - 1, 0, 2, H);
     ctx.fillText(`${st.name} ${st.mhz.toFixed(1)}`, Math.min(W - 180, x + 6), 24);
   }

@@ -187,3 +187,72 @@ export const fmtMhz = (mhz: number, mode?: string | null) =>
 
 /** "A", "A and B", "A, B and C". */
 export const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "");
+
+/** The channels a watch listens on: how many, their numbers in a band that numbers them (else
+ * null), and the first and last in MHz. */
+export interface Listening {
+  channels: number;
+  first: number | null;
+  last: number | null;
+  lo: number;
+  hi: number;
+  step_khz: number;
+}
+
+/** A narrowband channel's raster where no band gives one (DEFAULT_CHANNEL_HZ for nfm). */
+const DEFAULT_STEP_KHZ = 12.5;
+
+/** The band a watch is planned with: its own, or the narrowest one at the middle of its range. */
+function watchBand(watch: string | number[], bands: Band[]): Band | undefined {
+  if (typeof watch === "string") return bands.find((b) => b.id === watch);
+  const mid = (watch[0] + watch[1]) / 2;
+  return bands.filter((b) => b.start_mhz <= mid && mid <= b.stop_mhz)
+    .sort((a, b) => (a.stop_mhz - a.start_mhz) - (b.stop_mhz - b.start_mhz))[0];
+}
+
+/** What a watch listens on, as the server plans it (radio/watch.py, _plan): the band's own
+ * channels where it lists them, numbered from 1, else the channels of its raster from the band's
+ * start, inside the band or the range [lo, hi] MHz. Null for a band the plan lacks, or a range
+ * with no channel. */
+export function watchListening(watch: string | number[], bands: Band[]): Listening | null {
+  const band = watchBand(watch, bands);
+  let lo: number, hi: number;
+  if (typeof watch !== "string") [lo, hi] = [watch[0], watch[1]];
+  else if (band) [lo, hi] = [band.start_mhz, band.stop_mhz];
+  else return null;
+  const step = band?.step_khz || DEFAULT_STEP_KHZ;
+  if (band?.channels_mhz.length) {
+    const nums = band.channels_mhz.map((c, i) => [c, i + 1] as const).filter(([c]) => lo - 1e-9 <= c && c <= hi + 1e-9);
+    if (!nums.length) return null;
+    return { channels: nums.length, first: nums[0][1], last: nums[nums.length - 1][1], lo: nums[0][0], hi: nums[nums.length - 1][0], step_khz: step };
+  }
+  const start = band ? band.start_mhz : 0;
+  const s = step / 1000;
+  const first = Math.ceil((lo - start) / s - 1e-9), last = Math.floor((hi - start) / s + 1e-9);
+  if (last < first) return null;
+  return { channels: last - first + 1, first: null, last: null, lo: start + first * s, hi: start + last * s, step_khz: step };
+}
+
+/** A frequency in MHz to the nearest kHz, by way of whole hertz: 433.0125 is 433.013, whatever
+ * the float holds. */
+const kHzText = (mhz: number) => (Math.round(Math.round(mhz * 1e6) / 1e3) / 1e3).toFixed(3);
+
+/** "channels 1–16, 446.006 to 446.194 MHz"; "channel 8, 446.094 MHz"; "161 channels 12.5 kHz
+ * apart, 430.000 to 432.000 MHz". The frequencies to a kHz. */
+export function listeningWords(l: Listening): string {
+  if (l.channels === 1) return `${l.first != null ? `channel ${l.first}` : "one channel"}, ${kHzText(l.lo)} MHz`;
+  const which = l.first != null ? `channels ${l.first}–${l.last}` : `${l.channels} channels ${+l.step_khz.toFixed(4)} kHz apart`;
+  return `${which}, ${kHzText(l.lo)} to ${kHzText(l.hi)} MHz`;
+}
+
+/** What a watch listens on, where a receiver's tuning would otherwise be the only frequency shown:
+ * "Walkie-talkies, listening on channels 1–16, 446.006 to 446.194 MHz". A range names the band
+ * it lies in, or else itself. Without the band plan (or a band it lacks) only the band's name or
+ * the range is said: the channels can't be told. */
+export function watchListensWords(watch: string | number[], bands: Band[] | null): string {
+  const band = bands ? watchBand(watch, bands) : undefined;
+  const range = typeof watch === "string" ? null : `${kHzText(watch[0])}–${kHzText(watch[1])} MHz`;
+  const name = band ? bandWords(band).name : range ?? bandWords({ id: watch as string, name: watch as string }).name;
+  const l = bands ? watchListening(watch, bands) : null;
+  return l ? `${name}, listening on ${listeningWords(l)}` : name;
+}

@@ -14,7 +14,8 @@ import { Icon } from "../components/Icon";
 import { WatchNotes } from "../components/Overload";
 import { Button, Lamp, cx } from "../components/ui";
 import { V } from "../lib/view";
-import { bandWords, placeWords } from "../manage/bands";
+import { placeWords, watchListensWords } from "../manage/bands";
+import { useBandPlan } from "../manage/bandplan";
 
 const FLASH_MS = 2400; // how long a line asked for by a link stays marked
 const PAGES_BACK = 20; // how far "Load earlier" may page back to reach such a line
@@ -54,10 +55,6 @@ function group(list: Utterance[]): Para[] {
   return paras;
 }
 
-/** "watching Walkie-talkies", "watching 446.000–446.100 MHz": what a watch listens to, a band
- * by the name the dial gives it. */
-const watching = (w: string | [number, number]) =>
-  T.watching(typeof w === "string" ? bandWords({ id: w, name: w }).name : `${w[0].toFixed(3)}–${w[1].toFixed(3)} MHz`);
 
 /** The language a station speaks, in words: its own, or where the speech model tells each line's
  * (language "auto"), the ones it expects, if it was told any. */
@@ -105,6 +102,8 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
   // Translation lag matters only to someone reading the translation.
   const lag = on && !stale ? columnLag(S.live[st.id]) : null;
   const translated = !sameLang(shownLang(st, P.lang), st.language);
+  // A watch's head says the channels it listens on, which the band plan tells.
+  const bands = useBandPlan(st.watch != null);
   // Its receiver is tuned where it doesn't hear it: the reason, and on this machine the move back
   // where a centre hears it (not for a station switched off, which the move would start).
   const away = !on && !st.disabled && st.out_of_reach;
@@ -152,7 +151,7 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
       </div>
       <p className="col-meta">
         <span>{langPair(st)}</span>
-        {st.watch && <span>{watching(st.watch)}</span>}
+        {st.watch && <span>{T.watching(watchListensWords(st.watch, bands))}</span>}
         {lag?.text && <span className="is-trouble num">{T.colBehind(lag.text)}</span>}
         {lag?.translation && translated && <span className="num">{T.colTranslationBehind(lag.translation)}</span>}
         {away || cant ? (
