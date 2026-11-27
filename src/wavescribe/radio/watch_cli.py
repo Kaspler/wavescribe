@@ -5,6 +5,7 @@ that only talks now and then, the log of what was caught, and notes on frequenci
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import threading
 import time
@@ -132,6 +133,36 @@ def _masked(text: str) -> str:
     return _SN.sub(lambda m: m[1] + masked_serial(m[2]), text)
 
 
+def check_models(station: Any, args: argparse.Namespace) -> None:
+    """What `listen` will refuse for want of a model (the speech detector, a speech model for
+    the language, a translator asked for), said before the receiver is opened."""
+    from wavescribe.pipeline import NO_VAD, plan_station
+    from wavescribe.registry import ModelError, ModelRegistry
+
+    registry = ModelRegistry.load()
+    try:
+        registry.resolve("vad")
+    except ModelError:
+        raise ModelError(NO_VAD) from None
+    plan_station(registry, station, args.asr)
+    if station.translation_targets and not args.no_translate:
+        if args.translator:
+            registry.installed(args.translator)
+        else:
+            registry.resolve("translate")
+
+
+def minutes(text: str) -> float:
+    """An argparse type: how long a watch runs, 0 for until Ctrl-C."""
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError(f"give minutes from 0 up (0: until Ctrl-C), not {text!r}")
+    return value
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
     from wavescribe.cli import cmd_listen
@@ -185,6 +216,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         "acknowledge": args.acknowledge,
     }
     station = build_station(d, "radio watch", {dev_id: device}, region)
+    check_models(station, args)
     held = holder(rx)  # read without opening it, so a held receiver is refused at once
     if held is not None:
         raise busy(rx, None, held)
@@ -360,7 +392,8 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
         action="store_true",
         help="confirm you may listen to this radio here (docs/RADIO.md)",
     )
-    p.add_argument("--minutes", type=float, help="stop after this long (default: Ctrl-C)")
+    p.add_argument("--minutes", type=minutes, help="stop after this long (default, or 0: until "
+                   "Ctrl-C)")  # fmt: skip
     p.add_argument("-v", "--verbose", action="store_true", help="log pipeline events to stderr")
     p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--no-gate", action="store_true", help="transcribe music too")

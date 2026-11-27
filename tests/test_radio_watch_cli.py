@@ -17,7 +17,7 @@ import pytest
 
 from wavescribe import cli
 from wavescribe.cli import main
-from wavescribe.radio import holders
+from wavescribe.radio import holders, watch_cli
 from wavescribe.sources.sdr import forget_device
 
 SERIAL = "00001234"
@@ -28,6 +28,7 @@ STATIONS = (
 SERVE_HOLDS = {"pid": 4001, "program": "rtl_sdr", "other_wavescribe": True,
                "wavescribe_pid": 4000, "serve": True}  # fmt: skip
 HALF_A_SECOND = 2 * 2_400_000 // 2  # bytes of IQ
+CHECK_MODELS = watch_cli.check_models  # the fixture puts a stand-in in its place
 
 
 def listen(args) -> int:
@@ -62,6 +63,7 @@ def watch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "stations.toml").write_text(STATIONS)
     monkeypatch.setattr(holders, "held_elsewhere", dict)  # the registry tells nothing
+    monkeypatch.setattr(watch_cli, "check_models", lambda *_a: None)
     monkeypatch.setattr(cli, "cmd_listen", listen)
     root = logging.getLogger("wavescribe")
     kept = root.handlers[:], root.propagate, root.level
@@ -150,6 +152,72 @@ def test_a_receiver_that_stops_sending_for_a_while_is_said_and_fails(
     assert "] receiver A stopped sending; trying again" in err
     assert "] receiver A is sending again, after 1 s" in err
     assert err.splitlines()[-1] == "# 0 caught, 0 with speech; receiver A wasn't heard for 1 s"
+
+
+@pytest.mark.parametrize("value", ["-3", "nan", "inf", "soon"])
+def test_minutes_are_checked_before_anything_else(
+    value: str, watch, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv, spawns = watch
+    monkeypatch.setattr(holders, "held_elsewhere", lambda: pytest.fail("looked at the receiver"))
+    with pytest.raises(SystemExit) as e:
+        main([*argv, "--minutes", value])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert f"argument --minutes: give minutes from 0 up (0: until Ctrl-C), not '{value}'" in err
+    assert "# watching" not in err and starts(spawns) == 0
+
+
+def test_zero_minutes_is_until_ctrl_c_as_the_help_says(
+    watch, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tests.test_radio_watch_log import heard
+
+    argv, _ = watch
+    asked: list[float | None] = []
+    monkeypatch.setattr(cli, "cmd_listen", lambda a: asked.append(a.duration) or heard(a))
+    assert main([*argv, "--minutes", "0"]) == 0
+    assert asked == [None]  # no deadline
+    with pytest.raises(SystemExit):
+        main(["radio", "watch", "--help"])
+    assert "0: until Ctrl-C" in " ".join(capsys.readouterr().out.split())
+
+
+class NoSpeechModel:
+    """A registry with a speech detector and no speech model for the language asked for."""
+
+    def resolve(self, capability: str, language: str | None = None) -> None:
+        from wavescribe.registry import ModelError
+
+        if capability == "asr":
+            raise ModelError(f"no asr model in the registry supports {language!r}")
+
+
+def test_a_language_no_model_knows_is_refused_before_the_receiver_is_looked_at(
+    watch, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe.registry import ModelRegistry
+
+    argv, spawns = watch
+    monkeypatch.setattr(watch_cli, "check_models", CHECK_MODELS)  # the real one
+    monkeypatch.setattr(ModelRegistry, "load", classmethod(lambda *_a, **_k: NoSpeechModel()))
+    monkeypatch.setattr(holders, "held_elsewhere", lambda: pytest.fail("looked at the receiver"))
+    assert main([*argv, "--language", "xx-notalang"]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "wavescribe: no asr model in the registry supports 'xx-notalang'"
+    ]
+    assert starts(spawns) == 0
+
+
+def test_a_missing_speech_detector_is_said_before_the_watch_starts(
+    watch, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv, spawns = watch
+    monkeypatch.setattr(watch_cli, "check_models", CHECK_MODELS)  # no models in this folder
+    assert main([*argv, "--language", "es-ES"]) == 1
+    [line] = capsys.readouterr().err.splitlines()
+    assert line.startswith("wavescribe: transcribing needs the speech detector (Silero VAD)")
+    assert starts(spawns) == 0
 
 
 def test_the_terminal_names_a_receiver_by_its_id_never_by_its_serial() -> None:

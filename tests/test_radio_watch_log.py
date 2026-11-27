@@ -233,9 +233,10 @@ def test_radio_catches_prints_the_log_and_its_json(
 def no_dongle(monkeypatch: pytest.MonkeyPatch) -> None:
     """`radio watch` with no model and no dongle: nothing holds the receiver as far as the USB
     registry tells (tests/test_radio_watch_cli.py runs one with a stand-in rtl_sdr)."""
-    from wavescribe.radio import holders
+    from wavescribe.radio import holders, watch_cli
 
     monkeypatch.setattr(holders, "held_elsewhere", dict)
+    monkeypatch.setattr(watch_cli, "check_models", lambda *_a: None)
 
 
 def heard(args: argparse.Namespace) -> int:
