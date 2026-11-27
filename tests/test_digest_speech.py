@@ -14,7 +14,7 @@ from tests.test_agent import Mcp, url_of
 from tests.test_alerts import FakeActions
 from tests.test_app import make_app, wait_for
 from tests.test_digest import MIN, NOW, FakeLlm, digester, kept, stocked
-from tests.test_digest_web import FROM_LAN, Serving, post
+from tests.test_digest_web import FROM_LAN, Serving, call, post
 from wavescribe.alerts import Alert, Voice
 from wavescribe.alerts.actions import ActionError, LogOnlyActions, MacActions
 from wavescribe.cli import main
@@ -262,6 +262,47 @@ def test_closing_stops_a_digest_mid_sentence() -> None:
     assert speech.claim() and speech.read("Lesya", ["again"], threading.Event()) == 0
 
 
+def test_stop_ends_a_digest_being_read_at_once_and_only_that_one(caplog) -> None:
+    actions = LongSay()
+    speech = Speech(actions)
+    assert speech.stop() is False  # nothing being read
+    assert speech.claim()
+    count: list[int] = []
+    reader = in_background(
+        lambda: count.append(speech.read("Lesya", ["first", "second"], threading.Event()))
+    )
+    assert actions.speaking.wait(5)
+    t0 = time.monotonic()
+    with caplog.at_level("INFO", logger="wavescribe.digest.speech"):
+        assert speech.stop() is True
+        reader.join(5)
+    assert time.monotonic() - t0 < 1 and count == [0]
+    assert actions.calls == [("cut", "Lesya", "first")]
+    assert "(0 of 2): it was stopped" in caplog.text
+    # The next digest is read: a Stop was for the one before.
+    quiet = FakeActions()
+    speech.actions = quiet
+    assert speech.claim() and speech.read("Lesya", ["again"], threading.Event()) == 1
+    assert said(quiet) == ["again"]
+
+
+def test_stop_reaches_a_digest_still_waiting_for_an_alert_to_end() -> None:
+    actions = HeldActions("Evacuate")
+    speech = Speech(actions)
+    alert = in_background(lambda: speech.speak("Lesya", "Evacuate the riverside"))
+    assert actions.speaking.wait(5)
+    assert speech.claim()
+    count: list[int] = []
+    reader = in_background(lambda: count.append(speech.read("Lesya", ["first"], threading.Event())))
+    time.sleep(0.1)
+    assert speech.stop() is True
+    reader.join(5)
+    assert count == [0] and not reader.is_alive()
+    actions.go.set()
+    alert.join(5)
+    assert said(actions) == ["Evacuate the riverside"]
+
+
 def fake_say(tmp_path: Path, monkeypatch, script: str) -> Path:
     """A `say` that makes no sound, first on the PATH; it writes its process id to a file."""
     bin_dir = tmp_path / "bin"
@@ -315,6 +356,7 @@ def test_the_speaker_reads_in_the_alerts_voice_or_says_why_not(tmp_path: Path) -
     assert speaker.start(digest) == {
         "started": False,
         "error": "another digest is being read aloud; try again when it ends",
+        "code": "speaking",
     }
     speaker.speech.read("Lesya", [], threading.Event())
 
@@ -328,6 +370,7 @@ def test_the_speaker_reads_in_the_alerts_voice_or_says_why_not(tmp_path: Path) -
     assert no_say.start(digest) == {
         "started": False,
         "error": "this machine has no speech to read it with (macOS `say`)",
+        "code": "no_speech",
     }
     store.close()
 
@@ -340,6 +383,7 @@ def test_a_digest_with_nothing_to_say_is_not_read(tmp_path: Path) -> None:
     assert speaker.start(digest) == {
         "started": False,
         "error": "there is nothing to read aloud: Nothing was said on b in the last 5 minutes.",
+        "code": "nothing_to_read",
     }
     store.close()
 
@@ -376,9 +420,60 @@ def test_this_machine_can_have_a_digest_read_aloud(tmp_path: Path) -> None:
         assert out["speech"] == {
             "started": False,
             "error": "reading aloud isn't set up in this run",
+            "code": "no_speech",
         }
         status, out = post(web.server, {"language": "en"})
         assert "speech" not in out
+    finally:
+        web.close()
+        store.close()
+
+
+def test_a_digest_made_is_read_aloud_again_by_its_id_without_the_model(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web, actions = speaking(store)
+    try:
+        status, made = post(web.server, {"language": "en"})
+        assert status == 200 and said(actions) == []
+        status, out = call(web.server, "/api/digest/speak", {"id": made["id"]})
+        assert (status, out) == (200, {"id": made["id"], "speech": {"started": True}})
+        wait_for(lambda: len(actions.calls) == 3)
+        assert said(actions)[1:] == ["a: Water is cut tomorrow.", "b: Heavy rain this afternoon."]
+        assert len(web.llm.prompts) == 1  # not made again
+
+        # A control: this machine only.
+        status, out = call(web.server, "/api/digest/speak", {"id": made["id"]}, FROM_LAN)
+        assert status == 403
+        assert call(web.server, "/api/digest/speak", {"id": made["id"]}, {})[0] == 403
+        status, out = call(web.server, "/api/digest/speak", {"id": "nobody-made-it"})
+        assert (status, out["code"]) == (404, "not_found")
+        status, out = call(web.server, "/api/digest/speak", {})
+        assert (status, out["code"]) == (400, "bad_id")
+        status, now = post(web.server, {"kind": "now", "stations": ["b"], "language": "en"})
+        status, out = call(web.server, "/api/digest/speak", {"id": now["id"]})
+        assert (status, out["code"]) == (409, "nothing_to_read")
+        web.hub.speaker = None
+        status, out = call(web.server, "/api/digest/speak", {"id": made["id"]})
+        assert (status, out["code"]) == (409, "no_speech")
+    finally:
+        web.close()
+        store.close()
+
+
+def test_the_page_stops_a_digest_being_read(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web, _ = speaking(store)
+    actions = LongSay()
+    web.hub.speaker.speech.actions = actions
+    try:
+        assert call(web.server, "/api/digest/speech/stop") == (200, {"stopped": False})
+        status, out = post(web.server, {"language": "en", "speak": True})
+        assert status == 200 and out["speech"] == {"started": True}
+        assert actions.speaking.wait(5)
+        assert call(web.server, "/api/digest/speech/stop", headers=FROM_LAN)[0] == 403
+        assert call(web.server, "/api/digest/speech/stop") == (200, {"stopped": True})
+        wait_for(lambda: web.hub.speaker.speech.claim())  # its turn was given back
+        assert [c[0] for c in actions.calls] == ["cut"]
     finally:
         web.close()
         store.close()

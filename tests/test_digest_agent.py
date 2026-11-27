@@ -59,6 +59,22 @@ def test_a_time_still_to_come_is_yesterdays_and_the_digest_says_so() -> None:
     assert render(out).splitlines()[0] == "RFI Monde, 01:43-02:43"
 
 
+def test_until_asks_for_a_time_that_ended_earlier_and_names_its_day(tmp_path, capsys) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    url = url_of(web.server)
+    try:
+        until = str(NOW - 35 * 60)
+        args = ["digest", "--url", url, "--stations", "a,b", "--minutes", "30", "--until", until]
+        assert main([*args, "--language", "en"]) == 0
+        assert capsys.readouterr().out.splitlines()[0] == "a, b, Wed 04 Mar 10:55-11:25"
+        assert main(["digest", "--url", url, "--now", "--until", until]) == 1
+        assert "now is about the last few minutes" in capsys.readouterr().err
+    finally:
+        web.close()
+        store.close()
+
+
 def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -> None:
     store = stocked(tmp_path)
     a = Alert(

@@ -181,7 +181,7 @@ an EventSource on such a page.
 
 `serve` prints one line when it starts saying which of these holds.
 
-| Who | The page's data: what was said, alerts, catches, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions (`/api/ask`) | Controls (`/api/manage/…`, start and stop) |
+| Who | The page's data: what was said, alerts, catches, audio, live events | The feed: `/feed/v1`, `/metrics` | Asking questions and for digests (`/api/ask`, `/api/digest`, `/api/digest/<id>/cancel`) | Controls (`/api/manage/…`, start and stop, reading a digest aloud: `/api/digest/speak`, `/api/digest/speech/stop`) |
 |---|---|---|---|---|
 | This machine | yes, no token; behind a proxy as through it, unless the request carries the control key (`wavescribe token`, the agent tools) | yes, no token; behind a proxy likewise | yes; behind a proxy likewise | yes; behind a proxy only with the control key (`wavescribe token`, the agent tools) |
 | The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
@@ -202,7 +202,8 @@ an EventSource on such a page.
   trust. Feed tokens guard the feed there, not the page.
 - **Asking** runs this machine's LLM, which is then busy for everything else, so another machine
   may ask only when `serve --allow-remote-ask` lets it. Otherwise the page there shows Ask as
-  unavailable (`ask` in `/api/state` says why) and `POST /api/ask` is 403.
+  unavailable (`ask` in `/api/state` says why, `ask_code` is `remote_off`) and `POST /api/ask`
+  is 403; digests likewise (`digest` and `digest_code`).
 - **Through a proxy.** A request carrying `Forwarded`, `X-Forwarded-For`, `X-Real-IP` or `Via`
   came through a proxy, so it is another machine's even when it connects from this one: it is
   read-only, counts against the limits for other machines, and needs a token as in the table.

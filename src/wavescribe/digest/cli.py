@@ -41,6 +41,8 @@ def body(args: argparse.Namespace) -> dict[str, Any]:
         out["since"] = args.since
     elif args.minutes is not None:
         out["minutes"] = args.minutes
+    if getattr(args, "until", None) is not None:
+        out["until"] = args.until
     if args.language:
         out["language"] = args.language
     if args.speak:
@@ -48,23 +50,29 @@ def body(args: argparse.Namespace) -> dict[str, Any]:
     return out
 
 
-def span(window: Mapping[str, Any]) -> str:
+def span(window: Mapping[str, Any], *, dated: bool = False) -> str:
     """A digest's window as its first line shows it: "14:30-16:00", or "yesterday 02:50 to
     today 02:43" when it starts the day before (a time of day still to come, given to
-    ``--since``, is yesterday's)."""
+    ``--since``, is yesterday's). ``dated`` (it ends before now, ``--until``): with its days,
+    "Tue 03 Mar 14:30-16:00"."""
     start, end = (datetime.fromtimestamp(window[k]) for k in ("since", "until"))
+    if dated:
+        if start.date() == end.date():
+            return f"{end:%a %d %b} {start:%H:%M}-{end:%H:%M}"
+        return f"{start:%a %d %b %H:%M} to {end:%a %d %b %H:%M}"
     if start.date() == end.date():
         return f"{start:%H:%M}-{end:%H:%M}"
     return f"yesterday {start:%H:%M} to today {end:%H:%M}"
 
 
-def render(out: Mapping[str, Any]) -> str:
+def render(out: Mapping[str, Any], *, dated: bool = False) -> str:
     """A digest for a terminal: what it covers and who wrote it from how much, the alerts of the
-    window, the points, then the moments they rest on."""
+    window, the points, then the moments they rest on. ``dated``: its window ends before now."""
     names = out.get("names") or {}
     shown = ", ".join(names.get(s, s) for s in out["stations"])
     head = f"Now on {shown}" if out["kind"] == "now" else shown
-    lines = [f"{head}, {span(out['window'])}", *([out["notice"]] if out.get("notice") else [])]
+    window = span(out["window"], dated=dated)
+    lines = [f"{head}, {window}", *([out["notice"]] if out.get("notice") else [])]
     if out["outcome"] == "points" and out["unread"]:
         unread = ", ".join(f"{names.get(s, s)} ({why})" for s, why in out["unread"].items())
         lines.append(f"Not read: {unread}.")

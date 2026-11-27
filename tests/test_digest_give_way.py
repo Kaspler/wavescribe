@@ -14,7 +14,16 @@ import pytest
 import wavescribe.pipeline as pipeline_module
 from tests.test_digest import NOW, STATIONS, FakeLlm, stocked
 from tests.test_pipeline import PLAN, EnergyVad, FakeTranscriber, ListSource
-from wavescribe.digest import DIGEST_PRIORITY, GIVE_WAY_BELOW, GIVE_WAY_TIMES, Busy, Digester
+from wavescribe.digest import (
+    DIGEST_PRIORITY,
+    GIVE_WAY_BELOW,
+    GIVE_WAY_TIMES,
+    KEPT,
+    Busy,
+    Cancelled,
+    Digester,
+    RequestError,
+)
 from wavescribe.pipeline import Pipeline
 
 TOKEN_S = 0.02
@@ -195,4 +204,101 @@ def test_a_digest_given_up_for_live_work_says_so(tmp_path: Path) -> None:
     with pytest.raises(Busy, match="live translation needed the model's queue"):
         d.run(d.request({"minutes": 60}), timeout=10)
     assert len(taken) == 1
+    store.close()
+
+
+# -- cancelled by its id ------------------------------------------------------------------------
+
+
+def running(d: Digester, request) -> tuple[threading.Thread, list]:
+    """``d.run(request)`` on a thread of its own; the list gets what it returned or raised."""
+    out: list = []
+
+    def work() -> None:
+        try:
+            out.append(d.run(request, timeout=20))
+        except Exception as e:
+            out.append(e)
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return thread, out
+
+
+def until(condition, what: str) -> None:
+    deadline = time.monotonic() + 5
+    while not condition():
+        assert time.monotonic() < deadline, what
+        time.sleep(0.01)
+
+
+def test_a_digest_cancelled_while_queued_never_reaches_the_model(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    llm = SlowLlm("- Water is cut tomorrow [1].")
+    queued: list = []
+
+    def submit(run, given_up) -> bool:
+        queued.append(run)  # behind a backlog that isn't worked through here
+        return True
+
+    d = Digester(store, lambda: STATIONS, submit, clock=lambda: NOW)
+    worker, out = running(d, d.request({"minutes": 60, "id": "cancel-me-1"}))
+    until(lambda: queued, "the digest's call was never queued")
+    assert d.cancel("cancel-me-1") == "cancelled"
+    worker.join(5)
+    [cancelled] = out  # answered at once, while still queued
+    assert isinstance(cancelled, Cancelled)
+    queued[0](llm)  # its turn comes: the model isn't spent on it, and nothing more is queued
+    assert llm.prompts == [] and len(queued) == 1
+    assert d.cancel("cancel-me-1") is None and d.kept("cancel-me-1") is None
+    store.close()
+
+
+def test_a_digest_cancelled_while_written_stops_at_the_next_token(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    llm = SlowLlm("- Water is cut tomorrow [1].")
+    pipeline = pipeline_with(llm)
+    d = digester_on(store, pipeline)
+    worker, out = running(d, d.request({"minutes": 60, "id": "cancel-me-2"}))
+    try:
+        assert llm.generating.wait(10)
+        t0 = time.monotonic()
+        assert d.cancel("cancel-me-2") == "cancelled"
+        worker.join(5)
+        waited = time.monotonic() - t0
+        assert isinstance(out[0], Cancelled) and waited < TOKENS * TOKEN_S / 2, waited
+        # The model is free at once, and the call isn't queued again.
+        translated = threading.Event()
+        pipeline.request_translation("Fogo", "pt-PT", ["en"], lambda out, m: translated.set())
+        assert translated.wait(5)
+        assert llm.stopped == 1 and len(llm.prompts) == 1 and not llm.mid
+    finally:
+        pipeline.stop()
+        store.close()
+
+
+def test_a_digest_is_kept_by_its_id_and_an_id_is_one_digests(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    go = threading.Event()
+    llm = FakeLlm("- Water is cut tomorrow [1].")
+
+    def submit(run, given_up) -> bool:
+        threading.Thread(target=lambda: (go.wait(5), run(llm)), daemon=True).start()
+        return True
+
+    d = Digester(store, lambda: STATIONS, submit, clock=lambda: NOW)
+    worker, out = running(d, d.request({"minutes": 60, "id": "same-id-123"}))
+    until(lambda: "same-id-123" in d._live, "the digest was never begun")
+    with pytest.raises(RequestError, match="already being made") as refused:
+        d.run(d.request({"minutes": 60, "id": "same-id-123"}))
+    assert refused.value.code == "id_in_use"
+    go.set()
+    worker.join(5)
+    assert out[0].request.id == "same-id-123"
+    assert d.kept("same-id-123") is out[0] and d.cancel("same-id-123") == "finished"
+    # Another machine reaches only what other machines asked for.
+    assert d.cancel("same-id-123", here=False) is None
+    for n in range(KEPT):
+        d.run(d.request({"minutes": 60, "id": f"later-{n:04d}"}))
+    assert d.kept("same-id-123") is None and d.kept(f"later-{KEPT - 1:04d}") is not None
     store.close()

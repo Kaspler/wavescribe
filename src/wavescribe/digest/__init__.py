@@ -39,15 +39,23 @@ The model is the translation LLM, shared with live translation, alerts and Ask. 
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
 once the previous call is done: live translation runs between the calls, and a digest waits
 while there is a backlog rather than holding it up.
+
+Each request has an ``id`` (the asker's, or one made for it), which its answer carries.
+``Digester.cancel`` drops a digest by it: one still queued for the model never reaches it, and
+one being written stops at the next token, as when it gives way, and isn't queued again. The
+last few answers are kept in memory by it (``Digester.kept``), so that one can be read aloud
+again without being made again.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import secrets
 import sys
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -57,6 +65,7 @@ from wavescribe.events import local_time
 from wavescribe.languages import language_name, same_language
 from wavescribe.log import event
 from wavescribe.radio.bandplan import policy_of
+from wavescribe.refusal import Refusal
 from wavescribe.rules.text import _WORD, NO_SPACES, fold
 
 if TYPE_CHECKING:
@@ -116,6 +125,9 @@ SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a recei
 UNANNOUNCED = ("pending", "covered", "logged")
 TIMEOUT_S = 240.0  # three prompts of notes and the choice, behind whatever backlog there is
 MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
+KEPT = 8  # answers kept in memory by id, to be read aloud again without being made again
+# A request's id, when the asker gives one: long enough that nobody else guesses it (a UUID).
+REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 TIME_FORMAT = "%H:%M"
 
 SYSTEM = (
@@ -144,8 +156,10 @@ _GROUP = re.compile(r"\d+(?:\s*\+\s*\d+)*")  # "3+9" in "3+9, 7, 1"
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")  # BCP-47, loosely
 
 
-class RequestError(ValueError):
-    """A digest asked for in a way that can't be served; the message says what to change."""
+class RequestError(Refusal):
+    """A digest asked for in a way that can't be served; the message says what to change, and
+    ``code`` names the refusals a program tells apart: ``bad_window`` (with ``max_minutes``),
+    ``bad_until``, ``bad_id`` and ``id_in_use``."""
 
 
 class Unavailable(RuntimeError):
@@ -160,8 +174,16 @@ class Failed(RuntimeError):
     """The model failed while making the digest; ``__cause__`` is why."""
 
 
+class Cancelled(RuntimeError):
+    """The digest was cancelled by its id (``Digester.cancel``) before it was made."""
+
+
+CANCELLED = "the digest was cancelled"
+
+
 class _GiveWay(Exception):
-    """A job that goes first waits for the model: the call stops, to start again after it."""
+    """A job that goes first waits for the model, or the digest was cancelled or is no longer
+    waited for: the call stops, to start again after that job, or not at all."""
 
 
 @dataclass(frozen=True)
@@ -171,6 +193,8 @@ class Request:
     since: float
     until: float
     language: str  # BCP-47, the reader's
+    id: str = ""  # the request's, which the answer carries and cancel and kept take
+    past: bool = False  # asked to end before the request was made: its times name the window
 
     @property
     def minutes(self) -> float:
@@ -208,6 +232,14 @@ class Parsed:
     points: list[tuple[str, list[int]]]  # each with the numbers it cites
     uncited: int  # points dropped for citing nothing they were given
     none: bool  # it said nothing of substance was said, and gave no point
+
+
+@dataclass(frozen=True)
+class _Live:
+    """A digest being made: what cancels it, and whether this machine asked for it."""
+
+    cancel: threading.Event
+    here: bool
 
 
 @dataclass
@@ -321,7 +353,12 @@ class Digest:
         unread = f"Not read: {unread}." if unread else ""
         if outcome == "nothing_said":
             heard = [s for s in self.request.stations if s not in self.unread]
-            where = f"{_names(heard, self.names)} in the last {self.request.minutes:.0f} minutes"
+            when = (
+                _clock_span(self.request)
+                if self.request.past
+                else f"in the last {self.request.minutes:.0f} minutes"
+            )
+            where = f"{_names(heard, self.names)} {when}"
             if not self.music:
                 return f"Nothing was said on {where}. {unread}".strip()
             # Not "nothing was said": a voice over a song goes with the song.
@@ -343,6 +380,7 @@ class Digest:
         n = self.numbered()
         r = self.request
         return {
+            "id": r.id,
             "kind": r.kind,
             "language": r.language,
             "stations": list(r.stations),
@@ -404,6 +442,9 @@ class Digester:
         self._submit = submit
         self._clock = clock
         self._running = threading.BoundedSemaphore(MAX_RUNNING)
+        self._lock = threading.Lock()
+        self._live: dict[str, _Live] = {}  # id -> a digest being made
+        self._kept: OrderedDict[str, tuple[Digest, bool]] = OrderedDict()  # id -> (it, here)
 
     def stations(self, exports: Exports | None = None) -> dict[str, Station]:
         """The stations a digest may cover: all of them on this machine, and for another
@@ -424,13 +465,24 @@ class Digester:
     ) -> Request:
         """A request from JSON: ``kind`` ("digest" or "now"), ``stations`` (by default those
         heard in the window, but a watch only when named: its lines are short, from many
-        speakers on many channels), ``minutes`` or ``since`` (seconds since 1970), ``language``. A
+        speakers on many channels), ``minutes`` or ``since`` (seconds since 1970), ``until``
+        (seconds since 1970, for a digest of a window that ended before now: by default now),
+        ``language``, and ``id``: the asker's for it, to cancel it by, else one is made. A
         station that ``exports`` hides is unknown, as it is everywhere else another machine
         looks. A ``remote`` request (another machine's) covers ``REMOTE_MINUTES`` at most."""
         now = self._clock()
         kind = body.get("kind") or "digest"
         if kind not in KINDS:
             raise RequestError("kind must be digest or now")
+        request_id = body.get("id")
+        if request_id is None:
+            request_id = secrets.token_urlsafe(12)
+        elif not isinstance(request_id, str) or not REQUEST_ID.fullmatch(request_id):
+            raise RequestError(
+                "id is 8 to 64 letters, digits, - and _ that no other digest uses, such as a "
+                "random UUID",
+                "bad_id",
+            )
         known = self.stations(exports)
         asked = body.get("stations")
         if asked is None:
@@ -462,21 +514,39 @@ class Digester:
         longest = MAX_NOW_MINUTES if kind == "now" else MAX_MINUTES
         longest = min(longest, REMOTE_MINUTES) if remote else longest
         who = "from another machine, " if remote else ""
-        minutes, since = body.get("minutes"), body.get("since")
+        minutes, since, until = body.get("minutes"), body.get("since"), body.get("until")
         if minutes is not None and since is not None:
             raise RequestError("give minutes or since, not both")
-        if since is not None:
-            if not _number(since) or not now - longest * 60 <= since < now:
+        end = now
+        if until is not None:
+            if kind == "now":
                 raise RequestError(
-                    f"{who}since must be a time in the last {longest:g} minutes, in seconds since "
-                    "1970"
+                    "now is about the last few minutes: for a time that ended earlier, ask for a "
+                    "digest with until",
+                    "bad_until",
+                )
+            if not _number(until) or until > now:
+                raise RequestError(
+                    "until must be a time that has passed, in seconds since 1970", "bad_until"
+                )
+            end = float(until)
+        window = {"code": "bad_window", "max_minutes": longest}
+        if since is not None:
+            if not _number(since) or not end - longest * 60 <= since < end:
+                raise RequestError(
+                    f"{who}since must be a time before until, {longest:g} minutes at most, in "
+                    "seconds since 1970"
+                    if until is not None
+                    else f"{who}since must be a time in the last {longest:g} minutes, in seconds "
+                    "since 1970",
+                    **window,
                 )
         else:
             if minutes is None:
                 minutes = NOW_MINUTES if kind == "now" else DEFAULT_MINUTES
             if not _number(minutes) or not 1 <= minutes <= longest:
-                raise RequestError(f"{who}minutes must be a number from 1 to {longest:g}")
-            since = now - minutes * 60
+                raise RequestError(f"{who}minutes must be a number from 1 to {longest:g}", **window)
+            since = end - minutes * 60
         language = body.get("language") or self.language()
         if (
             not isinstance(language, str)
@@ -486,20 +556,46 @@ class Digester:
             raise RequestError("language must be a BCP-47 tag, e.g. en or pt-PT")
         if kind == "digest" and not asked:
             # Not every station set up is running: a digest names only those it is about.
-            said = self.store.count(station_ids=stations, since=since, until=now, exports=exports)
+            said = self.store.count(station_ids=stations, since=since, until=end, exports=exports)
             running = self._running_now() if self._running_now is not None else stations
             stations = (
                 [sid for sid in stations if said.get(sid)]
                 or [sid for sid in stations if sid in running]
                 or stations
             )
-        return Request(kind, tuple(stations), float(since), now, language)
+        past = until is not None
+        return Request(kind, tuple(stations), float(since), end, language, request_id, past)
+
+    def cancel(self, request_id: str, *, here: bool = True) -> str | None:
+        """Drop the digest being made under ``request_id``: "cancelled" (still queued for the
+        model, it never reaches it; being written, it stops at the next token, and its answer
+        is ``Cancelled``), "finished" when it was made already, None when no digest has that
+        id. Another machine (``here`` false) reaches only the digests other machines asked
+        for, as if those of this one had no id."""
+        with self._lock:
+            live = self._live.get(request_id)
+            if live is not None and (here or not live.here):
+                live.cancel.set()
+                return "cancelled"
+            kept = self._kept.get(request_id)
+            if kept is not None and (here or not kept[1]):
+                return "finished"
+        return None
+
+    def kept(self, request_id: str) -> Digest | None:
+        """One of the last ``KEPT`` digests made, by its id, for this machine to read aloud
+        again; None when it is unknown or no longer kept."""
+        with self._lock:
+            kept = self._kept.get(request_id)
+        return kept[0] if kept is not None else None
 
     @staticmethod
     def _wait(job: _Job, timeout: float, stop: threading.Event | None) -> _Job:
         job.next()
         deadline = time.monotonic() + timeout
         while not job.done.wait(0.25):
+            if job.cancel.is_set():  # cancelled by its id; a step still queued is skipped
+                raise Cancelled(CANCELLED)
             if stop is not None and stop.is_set():
                 job.cancel.set()
                 raise Busy("Wavescribe is closing")
@@ -509,6 +605,8 @@ class Digester:
                     "no digest in time: live translation goes first, so the model may "
                     "be busy; try again in a few minutes"
                 )
+        if job.error is None and not job.finished:  # it stopped short: cancelled meanwhile
+            raise Cancelled(CANCELLED)
         return job
 
     # -- reading the store -----------------------------------------------------------------
@@ -596,17 +694,40 @@ class Digester:
         stop: threading.Event | None = None,
     ) -> Digest:
         """The digest, once the model has made it. Raises ``Unavailable``, ``Busy`` (other
-        digests are waiting, the queue is full, or no answer within ``timeout``) or ``Failed``.
-        With nothing said in the window it answers at once, without the model. ``stop`` (the
-        app closing) cancels it: ``Busy`` again, and what is still queued is skipped."""
-        # A turn is taken before the store is read: reading a day of many stations holds the
-        # store's read lock for a second, which callers queueing here mustn't multiply.
-        if not self._running.acquire(blocking=False):
-            raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
+        digests are waiting, the queue is full, or no answer within ``timeout``), ``Failed``,
+        ``Cancelled`` (by its id, meanwhile: ``cancel``) or ``RequestError`` (a digest with the
+        same id is being made). With nothing said in the window it answers at once, without
+        the model. ``stop`` (the app closing) cancels it: ``Busy`` again, and what is still
+        queued is skipped. The digest made is kept by its id (``kept``)."""
+        here = exports is None
+        cancel = threading.Event()
+        with self._lock:
+            if request.id in self._live:
+                raise RequestError(
+                    "a digest with this id is already being made: give each its own", "id_in_use"
+                )
+            if request.id:
+                self._live[request.id] = _Live(cancel, here)
+        made: Digest | None = None
         try:
-            return self._run(request, exports, timeout, stop)
+            # A turn is taken before the store is read: reading a day of many stations holds
+            # the store's read lock for a second, which callers queueing here mustn't multiply.
+            if not self._running.acquire(blocking=False):
+                raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
+            try:
+                made = self._run(request, exports, timeout, stop, cancel)
+            finally:
+                self._running.release()
         finally:
-            self._running.release()
+            with self._lock:
+                self._live.pop(request.id, None)
+                if made is not None and request.id:
+                    self._kept[request.id] = (made, here)
+                    self._kept.move_to_end(request.id)
+                    while len(self._kept) > KEPT:
+                        self._kept.popitem(last=False)
+        assert made is not None  # else it raised
+        return made
 
     def _run(
         self,
@@ -614,6 +735,7 @@ class Digester:
         exports: Exports | None,
         timeout: float,
         stop: threading.Event | None,
+        cancel: threading.Event,
     ) -> Digest:
         t0 = time.perf_counter()
         names = {sid: s.name for sid, s in self.stations(exports).items()}
@@ -635,10 +757,13 @@ class Digester:
                 for sid in request.stations
                 if request.since <= played.get(sid, -1.0) <= request.until
             ]
+        if cancel.is_set():  # while the store was read
+            raise Cancelled(CANCELLED)
         prompts = plan_prompts(selection.lines)
         if not prompts:
             return digest
-        job = self._wait(_Job(self._submit, request, prompts, names, self._ahead), timeout, stop)
+        job = _Job(self._submit, request, prompts, names, self._ahead, cancel)
+        job = self._wait(job, timeout, stop)
         if job.error is not None:
             if isinstance(job.error, Unavailable | Busy):
                 raise job.error
@@ -684,7 +809,8 @@ class Digester:
 
 class _Job:
     """One digest's calls to the model, each queued once the previous one is done. Runs on the
-    LLM's thread; ``done`` is set when it has finished, failed or been cancelled."""
+    LLM's thread; ``done`` is set when it has finished (``finished``), failed (``error``) or
+    been cancelled (neither). ``cancel``: cancelled by its id, or no longer waited for."""
 
     def __init__(
         self,
@@ -693,6 +819,7 @@ class _Job:
         prompts: list[list[Line]],
         names: Mapping[str, str],
         ahead: Callable[[], bool] | None = None,
+        cancel: threading.Event | None = None,
     ) -> None:
         self._submit = submit
         self._ahead = ahead or (lambda: False)
@@ -702,7 +829,8 @@ class _Job:
         self.names = names
         self._lines = {line.id: line for lines in prompts for line in lines}
         self.done = threading.Event()
-        self.cancel = threading.Event()
+        self.finished = False
+        self.cancel = cancel if cancel is not None else threading.Event()
         self.error: Exception | None = None
         self.notes: list[Point] = []
         self.points: list[Point] = []
@@ -725,7 +853,7 @@ class _Job:
         self.done.set()
 
     def _step(self, llm: Any) -> None:
-        if self.cancel.is_set():  # the request gave up waiting: don't spend the model on it
+        if self.cancel.is_set():  # cancelled, or no longer waited for: don't spend the model
             self.done.set()
             return
         if not hasattr(llm, "complete"):
@@ -738,6 +866,9 @@ class _Job:
                 raise _GiveWay
             finished = self._call(llm)
         except _GiveWay:
+            if self.cancel.is_set():  # the call stopped for good: the model is free at once
+                self.done.set()
+                return
             # From the start again, behind the job that goes first: the model's partial reply
             # can't be resumed.
             self.gave_way += 1
@@ -753,6 +884,9 @@ class _Job:
             self._fail(e)
             return
         if finished:
+            self.finished = True
+            self.done.set()
+        elif self.cancel.is_set():  # between two calls: the next one is never queued
             self.done.set()
         else:
             self.next()
@@ -810,7 +944,7 @@ class _Job:
         return merged(points)
 
     def _give_way(self, _text: str) -> None:
-        if self._ahead():
+        if self.cancel.is_set() or self._ahead():
             raise _GiveWay
 
     def _stations_of(self, ids: Iterable[int]) -> list[str]:

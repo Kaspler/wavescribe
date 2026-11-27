@@ -45,7 +45,7 @@ Each interface is a Python protocol with one or more implementations:
 | `Outputs` | Push events to URLs the user configured (`outputs.py`) | Webhooks and live pushes, filtered by event (alert, utterance), rule, minimum severity and station, with the translations chosen; JSON (`events.py`, the same shape as the pull feed), CAP 1.2 or plain text; utterances batched per `batch_s`; alerts at once with six tries over about a minute, utterances three (network errors, 408/425/429, 5xx), then they wait at the head of the bounded queue and go again every 5 to 60 s until the other end is back; an HMAC-SHA256 signature when a secret is set; never a redirect followed (`httpclient.py`, as for remote stations and `follow`: a 3xx is a failed delivery, so headers and signature go nowhere else); one thread and a bounded queue per output; every request logged to the `deliveries` table |
 | `Store` | Persistence, search and the speech audio archive | `Store` (`store.py`: SQLite with FTS5 trigram search) and `AudioArchive` (Opus through an ffmpeg subprocess) |
 | `Asker` | Answers a question about what was said (`ask.py`) | The translation LLM plans a search (stations, time range, words in the translation and station languages), FTS5 finds excerpts, and the LLM answers in the question's language citing them as [n]. Runs on the translation thread through `Pipeline.request_llm` |
-| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`, giving way between tokens to alerts and questions; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`) |
+| `Digester` | A few points the local model picked out of what some stations said over a time, or what one is on about now (`digest/`) | Selects what was said (no songs, idents or repeats; a fair share per station), the translation LLM writes points citing [n], at the lowest priority of `Pipeline.request_llm`, giving way between tokens to alerts and questions; `Speaker` reads them aloud through the alerts' `Actions`, stopped at once by an alert or Stop; `Scheduler` makes them on the clock (`[digest]` in `alerts.toml`); a digest is cancelled by its request id through the same give-way path |
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md` | `ModelRegistry` (`registry.py`) |
 | Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes | — |
 
@@ -301,8 +301,10 @@ The job waits behind alert translations and runs ahead of the continuous backlog
 for the few seconds an answer takes. Alerts never wait for it: they don't use translation.
 
 **Digests.** `POST /api/digest` (`wavescribe digest`, the agent tools `digest` and `now`) takes
-stations, a time and a language, and answers once the digest is written; it isn't stored.
-Steps (`digest/__init__.py`):
+stations, a time and a language, and answers once the digest is written; it isn't stored. The
+time is `minutes` or `since`, and `until` (seconds since 1970, by default now) for a window that
+ended earlier: never in the future, and the window no longer than for `minutes` (a day, six
+hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
 
 1. **Select.** What was said in the window, as its translation into the reader's language where
    there is one, without songs (flagged as another language), utterances of under three words
@@ -339,6 +341,20 @@ Steps (`digest/__init__.py`):
    digests are made at once; a digest takes its turn before reading the store, and a third
    is refused at once (503 with `Retry-After`).
 
+**Cancelling and reading again.** Each request has an `id`, the asker's (8 to 64 letters,
+digits, `-` and `_`: the page sends a random UUID) or one made for it, which the answer
+carries; a second request with the id of one being made is refused (`id_in_use`). The request
+blocks until the answer, so the page cancels by the id it chose: `POST
+/api/digest/<id>/cancel`, past the same gate as asking, sets the digest's cancel event. That is
+the event the give-way path already checks, so no second path stops the model: a call still
+queued is skipped when its turn comes, without touching the model; a call being written
+raises at the next token, as when it gives way, and isn't queued again, so the model goes back
+to live translation at once (a prompt being read still can't be stopped). The waiting request
+answers 409 `cancelled`. Another machine cancels only what other machines asked for. The last
+eight digests are kept in memory by id (`Digester.kept`), so that the page can have one read
+aloud again (`POST /api/digest/speak`) without spending the model; `POST
+/api/digest/speech/stop` stops the one being read (`Speech.stop`). Both are controls.
+
 The answer says what became of the digest (`outcome`: `points`, `nothing_said`, `not_read` with
 the stations and why in `unread`, `nothing_stood_out` or `unsourced`; with nothing kept from a
 station whose songs the gate dropped in the window, `nothing_said` says it played music, from
@@ -361,9 +377,9 @@ it opens with a fixed sentence (`summary` in `[speak.<lang>]`, built in for Engl
 is a Wavescribe summary, of which stations and hours, written by the local model from how many
 lines; names the earlier alerts about what was said only by time and rule (`earlier`); then
 reads its points. A digest without points is shown, never read. Each sentence is a `say` of
-its own, which an alert or the app closing stops at once; a reminder, never spoken, leaves
-it. A digest that comes while an alert is being spoken waits for the voice, a minute at most
-(`ALERT_WAIT_S`); then it isn't read, and the log says so.
+its own, which an alert, the page's Stop or the app closing stops at once; a reminder, never
+spoken, leaves it. A digest that comes while an alert is being spoken waits for the voice, a
+minute at most (`ALERT_WAIT_S`); then it isn't read, and the log says so.
 
 Scheduled digests run at the first real minute whose local time is on a period, so a change of
 the clocks neither skips nor repeats one, at least a minute apart; each covers the time since

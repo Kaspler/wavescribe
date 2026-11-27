@@ -92,7 +92,8 @@ def cmd_digest(args: argparse.Namespace) -> int:
     client = _client(args)
     try:
         out = client.digest(body(args))
-        shown = to_json(Tools(client).digested(out)) if args.json else render(out)
+        dated = args.until is not None  # a window that ended earlier: its day, not "today"
+        shown = to_json(Tools(client).digested(out)) if args.json else render(out, dated=dated)
     except (Unreachable, Refused) as e:
         print(f"wavescribe: {e}", file=sys.stderr)
         return 1
@@ -175,10 +176,10 @@ def add_parser(sub: Any) -> None:
         "digest",
         help="what was said while you weren't listening, from a running Wavescribe",
         description="A few points the running Wavescribe's local model picks out of what some "
-        "stations said over the last hour (or --minutes, or --since), each with the lines it "
-        "rests on, in your language; --now: what one station is on about. It waits behind "
-        "live translation, so it can take a few minutes, and it can miss things or get them "
-        "wrong. See docs/GETTING_STARTED.md.",
+        "stations said over the last hour (or --minutes, or --since; --until for a time that "
+        "ended earlier), each with the lines it rests on, in your language; --now: what one "
+        "station is on about. It waits behind live translation, so it can take a few minutes, "
+        "and it can miss things or get them wrong. See docs/GETTING_STARTED.md.",
     )
     server(p)
     p.add_argument("--stations", metavar="IDS", help="only these stations, comma-separated")
@@ -189,6 +190,14 @@ def add_parser(sub: Any) -> None:
         type=since,
         metavar="TIME",
         help="from this time on: a time of day like 21:30, or seconds since 1970",
+    )
+    p.add_argument(
+        "--until",
+        type=since,
+        metavar="TIME",
+        help="up to this time rather than now (not with --now): a time of day like 15:00 "
+        "(yesterday's when it is still to come), or seconds since 1970; --minutes then counts "
+        "back from it",
     )
     p.add_argument(
         "--language",

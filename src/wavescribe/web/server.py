@@ -455,7 +455,7 @@ class WebHub:
             "store": self.store is not None,
             "mt_model": self.plan.mt[0].id if self.plan.mt else None,
             **_ask_fields(self.ask_unavailable()),
-            "digest": digest.unavailable(self),
+            **digest.digest_fields(digest.unavailable(self)),
             "noncommercial": self.plan.noncommercial(),
             "audio_rate": SAMPLE_RATE,
             "recent": recent,
@@ -725,7 +725,7 @@ class Handler(BaseHTTPRequestHandler):
             hub = self.server.hub
             state = hub.state(can_control=self._is_local(), exports=self._exports())
             state.update(_ask_fields(self._ask_unavailable()))
-            state["digest"] = self._model_unavailable(state["digest"])
+            state.update(digest.digest_fields(self._model_unavailable(state["digest"])))
             self._json(state)
         elif path == "/api/events":
             self._events()
@@ -795,8 +795,9 @@ class Handler(BaseHTTPRequestHandler):
             self._manage("POST", url.path, query)
             return
         # From another machine only with --allow-remote-ask. A digest spends the model as a
-        # question does, so it passes the same gate.
-        if url.path in ("/api/ask", digest.PATH):
+        # question does, so it passes the same gate, and so does cancelling one.
+        cancelled = digest.cancel_id(url.path)
+        if url.path in ("/api/ask", digest.PATH) or cancelled is not None:
             if self.headers.get(CONTROL_HEADER) != "1":
                 self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
                 return
@@ -806,7 +807,9 @@ class Handler(BaseHTTPRequestHandler):
             if feed.page_grant(self, query) is None:  # an answer quotes what was said
                 self._unauthorised()
                 return
-            if url.path == digest.PATH:
+            if cancelled is not None:
+                digest.cancel(self, cancelled)
+            elif url.path == digest.PATH:
                 digest.handle(self)
             else:
                 self._ask()
@@ -816,6 +819,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.headers.get(CONTROL_HEADER) != "1":
             self._json({"error": f"missing {CONTROL_HEADER} header"}, HTTPStatus.FORBIDDEN)
+            return
+        if url.path == digest.SPEAK_PATH:  # the speakers are in this machine's room
+            digest.speak(self)
+            return
+        if url.path == digest.STOP_PATH:
+            digest.stop_speech(self)
             return
         parts = self.path.strip("/").split("/")
         if len(parts) == 4 and parts[:2] == ["api", "stations"] and parts[3] in ("start", "stop"):

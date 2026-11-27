@@ -165,8 +165,9 @@ named as Wavescribe last started it, with the `privacy` class its newest line wa
 one the store has no name for, by its id, with `language` null and no `privacy`. A `--config`
 file that can't be read fails, saying why. `digest --json` asks the running Wavescribe, so its
 utterances and alerts carry those links when that Wavescribe knows its own address. Its
-`--now`, `--minutes`, `--since`, `--stations`, `--language` and `--speak` are as in
-`wavescribe digest --help`. `follow` prints the feed's events as they come, each utterance with
+`--now`, `--minutes`, `--since`, `--until`, `--stations`, `--language` and `--speak` are as
+in `wavescribe digest --help`; `--until` ends the window before now (the `digest` tool always
+ends it now). `follow` prints the feed's events as they come, each utterance with
 one field more, `resume`.
 
 ```sh

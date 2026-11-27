@@ -5,7 +5,8 @@ Alerts and digests share the machine's one voice (``say``, which would talk over
 ``Speech`` stands in for the alerts' actions and takes the turns: an alert stops a digest
 being read at once, mid-sentence, and the rest of the digest isn't read, as the alert is the
 news then; a digest that comes while an alert speaks waits for it to end, ``ALERT_WAIT_S`` at
-most, and isn't read (the log says why) when alerts keep the voice longer. Closing stops it.
+most, and isn't read (the log says why) when alerts keep the voice longer. Closing stops it,
+and so does ``stop`` (the page's Stop), at once.
 
 A digest never sounds like an alert: it opens with a fixed sentence in the listener's
 language that says what it is, who wrote it and from how much (``summary`` in
@@ -54,6 +55,15 @@ FIELDS = {
     "summary": "{stations}, {start}, {end}, {read} and {said}",
     "earlier": "{count} and {alerts}",
 }
+# Why a digest isn't read aloud, as the ``code`` beside the sentence (``Speaker.start``).
+SPEECH_CODES = (
+    "no_voice",  # no [speak.<lang>] voice for its language
+    "no_speech",  # this machine has no `say`, or reading aloud isn't set up in this run
+    "voice_missing",  # the voice isn't installed
+    "nothing_to_read",  # it has no points
+    "no_phrases",  # the voice's language has no opening sentence, or a wrong one
+    "speaking",  # another digest is being read aloud (Stop ends it)
+)
 
 
 class Speech:
@@ -68,6 +78,7 @@ class Speech:
         self._cut = threading.Event()  # an alert came, or the app is closing: stop the digest
         self._closing = False
         self._digest = threading.Lock()  # one digest read aloud at a time
+        self._stopped = threading.Event()  # the digest whose turn it is was asked to stop
 
     def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
         self.actions.notify(title, body, sound=sound)
@@ -95,18 +106,37 @@ class Speech:
     def claim(self) -> bool:
         """The turn of one digest; False while another is being read aloud. ``read`` gives it
         back."""
-        return self._digest.acquire(blocking=False)
+        with self._turns:
+            if not self._digest.acquire(blocking=False):
+                return False
+            self._stopped.clear()  # a Stop for the digest before isn't one for this
+            return True
+
+    def stop(self) -> bool:
+        """Stops the digest being read aloud, mid-sentence, or waiting for its turn after an
+        alert; True when there was one."""
+        with self._turns:
+            if not self._digest.locked():
+                return False
+            self._stopped.set()
+            self._turns.notify_all()
+            return True
 
     def read(self, voice: str, sentences: Iterable[str], stop: threading.Event) -> int:
         """A digest whose turn was claimed, a sentence at a time, never over an alert: it
         starts once the alerts being said have ended (none for ``wait_s``: it isn't read), and
-        stops at once when another alert comes or ``stop`` is set. Returns how many sentences
-        were said to the end; the log says why a digest wasn't read to its end."""
+        stops at once when another alert comes, ``stop`` is set or ``Speech.stop`` is called.
+        Returns how many sentences were said to the end; the log says why a digest wasn't read
+        to its end."""
         said, sentences = 0, list(sentences)
+
+        def halted() -> bool:
+            return stop.is_set() or self._stopped.is_set()
+
         try:
             with self._turns:
                 deadline = time.monotonic() + self._wait_s
-                while self._alerts and not self._closing and not stop.is_set():
+                while self._alerts and not self._closing and not halted():
                     left = deadline - time.monotonic()
                     if left <= 0:
                         log.info(
@@ -115,15 +145,15 @@ class Speech:
                         )
                         return 0
                     self._turns.wait(min(left, 0.25))
-                if self._closing or stop.is_set():
+                if self._closing or halted():
                     return 0
                 self._cut.clear()  # an alert said before this digest began isn't one after it
             for sentence in sentences:
                 with self._voice:
-                    if self._cut.is_set() or stop.is_set():
+                    if self._cut.is_set() or halted():
                         break
                     done = self.actions.speak_until(
-                        voice, sentence, lambda: self._cut.is_set() or stop.is_set()
+                        voice, sentence, lambda: self._cut.is_set() or halted()
                     )
                 if not done:
                     break
@@ -131,7 +161,13 @@ class Speech:
         finally:
             self._digest.release()
         if said < len(sentences):
-            why = "Wavescribe is closing" if self._closing or stop.is_set() else "an alert came"
+            why = (
+                "Wavescribe is closing"
+                if self._closing or stop.is_set()
+                else "it was stopped"
+                if self._stopped.is_set()
+                else "an alert came"
+            )
             log.info("digest read aloud in part (%d of %d): %s", said, len(sentences), why)
         return said
 
@@ -228,51 +264,60 @@ class Speaker:
 
     def start(self, digest: Digest) -> dict[str, object]:
         """Start reading ``digest`` aloud in the background: ``{"started": true}``, or
-        ``{"started": false, "error": why}``."""
-        ready, why = self._ready(digest)
+        ``{"started": false, "error": why, "code": …}`` (``SPEECH_CODES``)."""
+        ready, why, code = self._ready(digest)
         if ready is None:
-            return {"started": False, "error": why}
+            return {"started": False, "error": why, "code": code}
         threading.Thread(target=self._read, args=ready, daemon=True, name="digest-speech").start()
         return {"started": True}
 
     def say(self, digest: Digest) -> str | None:
         """Read ``digest`` aloud and return when done; None, or why it wasn't read."""
-        ready, why = self._ready(digest)
+        ready, why, _code = self._ready(digest)
         if ready is None:
             return why
         self._read(*ready)
         return None
 
-    def _ready(self, digest: Digest) -> tuple[tuple[str, list[str]] | None, str]:
+    def stop(self) -> bool:
+        """Stop the digest being read aloud at once; True when one was (or was waiting for an
+        alert to end)."""
+        return self.speech.stop()
+
+    def _ready(self, digest: Digest) -> tuple[tuple[str, list[str]] | None, str, str]:
+        """(the voice and the sentences, "", ""), or (None, why not, its code)."""
         language = digest.request.language
         voice = self.voice(language)
         if voice is None:
-            return None, (
+            why = (
                 f"no voice speaks {language}: give it one in alerts.toml, [speak.{language}], "
                 "as for spoken alerts"
             )
+            return None, why, "no_voice"
         installed = self.speech.voices()
         if installed is None:
-            return None, "this machine has no speech to read it with (macOS `say`)"
+            return None, "this machine has no speech to read it with (macOS `say`)", "no_speech"
         if voice.voice not in installed:
-            return None, (
+            why = (
                 f"the voice {voice.voice!r} is not installed (System Settings > Accessibility > "
                 "Spoken Content)"
             )
+            return None, why, "voice_missing"
         if not digest.points:
-            return None, "there is nothing to read aloud: " + digest.text()
+            return None, "there is nothing to read aloud: " + digest.text(), "nothing_to_read"
         phrases = phrases_of(voice, language)
         if phrases is None:
-            return None, (
+            why = (
                 f"a digest read aloud opens by saying what it is: give [speak.{language}] in "
                 "alerts.toml a summary and an earlier sentence, as alerts.example.toml shows"
             )
+            return None, why, "no_phrases"
         wrong = check_phrases(*phrases)
         if wrong:
-            return None, f"[speak.{language}] in alerts.toml: {wrong}"
+            return None, f"[speak.{language}] in alerts.toml: {wrong}", "no_phrases"
         if not self.speech.claim():
-            return None, "another digest is being read aloud; try again when it ends"
-        return (voice.voice, spoken(digest, voice)), ""
+            return None, "another digest is being read aloud; try again when it ends", "speaking"
+        return (voice.voice, spoken(digest, voice)), "", ""
 
     def _read(self, voice: str, sentences: list[str]) -> None:
         try:

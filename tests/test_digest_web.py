@@ -2,6 +2,7 @@
 import dataclasses
 import http.client
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import numpy as np
 
 from tests.test_app import Running, make_app
 from tests.test_ask import llm_server
-from tests.test_digest import NOW, FakeLlm, add, stocked
+from tests.test_digest import MIN, NOW, FakeLlm, add, stocked
 from tests.test_pipeline import station
 from tests.test_store import result
 from tests.test_web import start_server
@@ -239,6 +240,147 @@ def test_a_busy_digester_says_when_to_try_again(tmp_path: Path) -> None:
         assert "already being made" in json.loads(resp.read())["error"]
         status, out = post(web.server, {"minutes": 600}, FROM_LAN)
         assert status == 400 and "from another machine" in out["error"]
+        assert (out["code"], out["max_minutes"]) == ("bad_window", 360)
+    finally:
+        web.close()
+        store.close()
+
+
+def call(server, path: str, body: object = None, headers: dict[str, str] = LOCAL):
+    conn = http.client.HTTPConnection(*server.server_address, timeout=10)
+    conn.request("POST", path, json.dumps(body) if body is not None else None, headers)
+    resp = conn.getresponse()
+    raw = resp.read()
+    return resp.status, json.loads(raw) if raw.startswith(b"{") else raw
+
+
+def test_the_state_says_why_digests_are_off_with_a_code(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    web.server.remote_ask = False
+    try:
+        assert web.hub.state()["digest_code"] is None
+        conn = http.client.HTTPConnection(*web.server.server_address, timeout=10)
+        conn.request("GET", "/api/state", headers=FROM_LAN)
+        state = json.loads(conn.getresponse().read())
+        assert (state["digest"], state["digest_code"]) == (REMOTE_ASK_OFF, "remote_off")
+    finally:
+        web.close()
+    server, hub, pipeline = start_server(np.zeros(1), store)  # its translator isn't an LLM
+    try:
+        assert hub.state()["digest_code"] == "no_llm"
+        status, out = post(server, {})
+        assert (status, out["code"]) == (409, "no_llm")
+    finally:
+        hub.close()
+        pipeline.stop()
+        server.shutdown()
+        store.close()
+
+
+def test_an_answer_carries_its_id_the_askers_or_one_made_for_it(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    try:
+        status, out = post(web.server, {"language": "en"})
+        assert status == 200 and len(out["id"]) >= 16
+        assert post(web.server, {"id": "9b2c4e1a-page"})[1]["id"] == "9b2c4e1a-page"
+        for bad in ("short", "has space in it", 12345678, "x" * 65):
+            status, out = post(web.server, {"id": bad})
+            assert (status, out["code"]) == (400, "bad_id"), bad
+    finally:
+        web.close()
+        store.close()
+
+
+def test_until_ends_the_window_before_now(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    web = Serving(store)
+    try:
+        body = {"stations": ["a", "b"], "minutes": 30, "until": NOW - 35 * MIN, "language": "en"}
+        status, out = post(web.server, body)
+        assert status == 200
+        assert out["window"] == {"since": NOW - 65 * MIN, "until": NOW - 35 * MIN, "minutes": 30}
+        assert out["counts"]["stations"] == {"a": 3, "b": 0}  # b spoke after it
+        assert "Water cut" in web.llm.prompts[-1] and "rain" not in web.llm.prompts[-1]
+        status, out = post(web.server, {"since": NOW - 40 * MIN, "until": NOW - 25 * MIN})
+        assert out["window"]["minutes"] == 15 and out["counts"]["stations"]["b"] == 1
+        # Nothing said then: the digest names the times, not "the last 10 minutes".
+        status, out = post(web.server, {"stations": ["b"], "minutes": 10, "until": NOW - 35 * MIN})
+        assert out["text"] == "Nothing was said on b between 11:15 and 11:25."
+
+        for wrong, code in (
+            ({"until": NOW + 60}, "bad_until"),  # still to come
+            ({"until": "noon"}, "bad_until"),
+            ({"kind": "now", "until": NOW - 600}, "bad_until"),
+            ({"since": NOW - 30 * MIN, "until": NOW - 40 * MIN}, "bad_window"),
+            ({"since": NOW - 3 * 1440 * MIN, "until": NOW - 30 * MIN}, "bad_window"),
+            ({"minutes": 2000, "until": NOW - 30 * MIN}, "bad_window"),
+        ):
+            status, out = post(web.server, wrong)
+            assert (status, out["code"]) == (400, code), wrong
+        status, out = post(web.server, {"since": NOW - 9 * 60 * MIN, "until": NOW - MIN}, FROM_LAN)
+        assert out["max_minutes"] == 360 and "from another machine" in out["error"]
+    finally:
+        web.close()
+        store.close()
+
+
+class Queued:
+    """A model queue that holds each call until ``release``: a digest waits as behind a
+    backlog."""
+
+    def __init__(self, llm) -> None:
+        self.llm = llm
+        self.calls: list = []
+
+    def __call__(self, run, given_up) -> bool:
+        self.calls.append(run)
+        return True
+
+    def release(self) -> None:
+        while self.calls:
+            self.calls.pop(0)(self.llm)
+
+
+def test_the_page_cancels_a_digest_by_its_id(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+    queue = Queued(FakeLlm("- Water is cut tomorrow [1]."))
+    web = Serving(store, queue.llm, submit=queue)
+    answers: list = []
+    try:
+        asking = threading.Thread(
+            target=lambda: answers.append(post(web.server, {"id": "page-0001-abc"})), daemon=True
+        )
+        asking.start()
+        deadline = time.monotonic() + 5
+        while not queue.calls:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        # The same gate as asking: no header, no cancelling.
+        assert call(web.server, "/api/digest/page-0001-abc/cancel", headers={})[0] == 403
+        # Another machine can't cancel what this one asked for: as if there were no such id.
+        status, out = call(web.server, "/api/digest/page-0001-abc/cancel", headers=FROM_LAN)
+        assert (status, out["code"]) == (404, "not_found")
+        status, out = call(web.server, "/api/digest/page-0001-abc/cancel")
+        assert (status, out) == (200, {"id": "page-0001-abc", "cancelled": True})
+        asking.join(5)
+        [(status, out)] = answers
+        assert (status, out["code"], out["id"]) == (409, "cancelled", "page-0001-abc")
+        queue.release()
+        assert queue.llm.prompts == []  # it never reached the model
+        status, out = call(web.server, "/api/digest/page-0001-abc/cancel")
+        assert (status, out["code"]) == (404, "not_found")
+
+        done = threading.Thread(target=lambda: answers.append(post(web.server, {})), daemon=True)
+        done.start()
+        while not queue.calls:
+            time.sleep(0.01)
+        queue.release()
+        done.join(5)
+        made = answers[-1][1]["id"]
+        status, out = call(web.server, f"/api/digest/{made}/cancel")
+        assert (status, out["code"]) == (409, "finished")
     finally:
         web.close()
         store.close()
