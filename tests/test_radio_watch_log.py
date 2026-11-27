@@ -307,7 +307,7 @@ def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(
 # -- the routes --------------------------------------------------------------------------------
 
 
-def test_catches_route_gives_other_machines_only_what_may_leave(
+def test_catch_routes_give_other_machines_only_what_may_leave(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from types import SimpleNamespace
@@ -350,6 +350,13 @@ def test_catches_route_gives_other_machines_only_what_may_leave(
         assert {s["id"]: s["language"] for s in listed}["walkies"] is None
         assert request(server, "GET", "/api/catches?mhz=1e303")[0] == 400  # past any tuner
         assert request(server, "GET", "/api/catches?mhz=5")[0] == 400
+        # The feed is what leaves this machine, also for a program on it, and has no notes.
+        status, body = request(server, "GET", "/feed/v1/catches")
+        [fed] = json.loads(body)
+        assert status == 200 and fed["station"] == "ham" and set(fed) == CATCH_KEYS
+        assert b"come home" not in body and b"calling channel" not in body
+        assert request(server, "GET", "/feed/v1/catches?stations=walkies")[1] == b"[]"
+        assert request(server, "GET", "/feed/v1/catches?hours=x")[0] == 400
         monkeypatch.setattr(Handler, "_is_local", lambda _self: False)
         status, body = request(server, "GET", "/api/catches")
         [shared] = json.loads(body)["catches"]

@@ -125,6 +125,7 @@ checks it like a real one and keeps nothing.
 | `GET /feed/v1/events` | Server-Sent Events: `utterance` and `alert` by default. Filters: `?events=utterance,alert,status`, `?stations=a,b`, `?langs=en`. |
 | `GET /feed/v1/utterances` | What was said, in the order it was stored (by `id`): `?since=<epoch>&until=<epoch>` or `?since_id=<id>` (a segment id, or a live stream's event id), `?stations=`, `?langs=`, `?limit=` (500 by default, up to 10,000; counts only what this machine may give), `?format=json\|ndjson\|csv`. A page cut at the limit goes on with `?since_id=<its last id>`, with nothing skipped. A line still being translated is there without its translations. |
 | `GET /feed/v1/alerts` | Recent alerts (`?since=<epoch>`). |
+| `GET /feed/v1/catches` | What band watches caught, newest first, each with the words heard in it, in the shape `wavescribe radio catches --json` gives ([AGENT_TOOLS.md](AGENT_TOOLS.md)) but without your notes: `?hours=` (24; 0 for everything kept), `?mhz=` with `?width_khz=` either side, `?stations=`, `?limit=` (100 by default, up to 500). Only catches on radio whose text may leave this machine ([RADIO.md](RADIO.md)). |
 | `GET /feed/v1/stations` | Stations: language, translation languages, running, connected, last heard, lag. |
 | `GET /feed/v1/node` | This machine: name, URL, version, feed version, translation languages. |
 | `GET /healthz` | `{"ok": true}` once models are loaded (503 before). It needs no token. |
@@ -158,7 +159,8 @@ In CSV, a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return g
 apostrophe, so a spreadsheet doesn't run it as a formula.
 
 `since`, `until` and `limit` that aren't numbers, and a `since_id` that is neither a segment id
-nor an event id, get a 400 that names the parameter: `{"error": "bad parameter: …"}`. A
+nor an event id, get a 400 that names the parameter: `{"error": "bad parameter: …"}`;
+`/feed/v1/catches` says what a valid query is instead. A
 `limit` out of range is held to 1–10,000. A `Last-Event-ID` header that isn't an event id is
 ignored, and the stream starts live. Unknown parameters and `events` values are ignored.
 

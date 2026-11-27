@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tests.test_app import Running, alert_on, make_app, wait_for
@@ -25,6 +26,7 @@ from wavescribe import __version__
 from wavescribe.agent.client import Client, follow
 from wavescribe.ask import Asker
 from wavescribe.cli import main
+from wavescribe.radio.watch import Catch
 from wavescribe.store import Store
 
 # What every utterance event carries (docs/FEED.md); audio_url only with a known address.
@@ -71,6 +73,7 @@ TOOL_RESULT_KEYS = {
     "search": {"utterances"},
     "alerts": {"alerts"},
     "wait_for_alert": {"alert", "waited_s"},
+    "catches": {"catches"},
     "ask": {"answer", "sources", "plan"},
     "status": {"node", "stations", "status", "ask", "mt_model", "noncommercial", "store"},
 }
@@ -374,7 +377,8 @@ def test_follow_reconnects_and_resumes_after_the_last_utterance(tmp_path: Path) 
 
 # -- the MCP adapter --------------------------------------------------------------------------
 
-READ_TOOLS = ["stations", "recent", "search", "alerts", "wait_for_alert", "ask", "status"]
+READ_TOOLS = ["stations", "recent", "search", "alerts", "wait_for_alert", "catches", "ask",
+              "status"]  # fmt: skip
 CONTROL_TOOLS = ["start_station", "stop_station", "add_station"]
 ALERT_TOOLS = ("alerts", "wait_for_alert")
 
@@ -386,6 +390,10 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
     )
     second = stored(store, "b", "Previsão de chuva forte", en="Heavy rain forecast")
     alert_on(store, "a", "Corte de água amanhã no centro", first, ["broadcast"])
+    for freq, privacy in ((98_100_000, "broadcast"), (145_500_000, "amateur")):
+        audio = np.zeros(1600, np.float32)
+        t = time.time() - 30
+        store.add_catch(Catch(freq, "nfm", t, t + 2, t, audio, station_id="a", privacy=privacy))
     server, hub, pipeline = llm_server(store)
     llm = FakeLlm({"terms": ["água"]})
     hub.asker = Asker(store, [station("a"), station("b")], lambda run: (run(llm), True)[1])
@@ -450,6 +458,15 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
         [alert] = alerts["alerts"]
         assert set(alerts) == TOOL_RESULT_KEYS["alerts"] and set(alert) == ALERT_KEYS
         assert alert["rule"] == "water" and alert["text"] == "Corte de água amanhã no centro"
+
+        _, caught = mcp.call("catches")
+        assert set(caught) == TOOL_RESULT_KEYS["catches"]
+        [fed] = caught["catches"]  # by default, amateur radio's catch doesn't leave
+        assert set(fed) == CATCH_KEYS and fed["freq_hz"] == 98_100_000
+        assert mcp.call("catches", mhz=145.5, width_khz=10)[1] == {"catches": []}
+        assert mcp.call("catches", stations=["b"])[1] == {"catches": []}
+        over = {"name": "catches", "arguments": {"limit": 500}}  # past the schema's maximum
+        assert mcp.request("tools/call", over)["error"]["code"] == -32602
 
         _, status = mcp.call("status")
         assert set(status) == TOOL_RESULT_KEYS["status"]

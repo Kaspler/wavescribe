@@ -8,6 +8,8 @@
                               ?until=, ?stations=, ?langs=, ?limit=, ?format=), in the order
                               stored: a page goes on with ?since_id=<its last id>
     GET  /feed/v1/alerts      recent alerts
+    GET  /feed/v1/catches     what band watches caught, newest first (?hours=, ?mhz=,
+                              ?width_khz=, ?stations=, ?limit=)
     GET  /feed/v1/stations    stations, whether they run, lag
     GET  /feed/v1/node        this machine: name, URL, version, languages
     POST /feed/v1/ingest      another Wavescribe pushes its events here (a "push" token)
@@ -32,6 +34,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import queue
 import secrets
 import threading
@@ -57,6 +60,7 @@ if TYPE_CHECKING:
     from wavescribe.web.server import Handler
 
 log = logging.getLogger(__name__)
+MAX_CATCHES = 500  # per request, on the page's /api/catches and on /feed/v1/catches
 
 REPLAY_MAX = 1000  # utterances replayed on (re)connect
 CONTEXT = 2  # utterances before an alert's, in its feed event (as an output's default)
@@ -265,6 +269,8 @@ def handle_get(h: Handler, path: str, query: dict[str, str]) -> bool:
         utterances(h, query)
     elif path == "/feed/v1/alerts":
         alerts(h, query)
+    elif path == "/feed/v1/catches":
+        catches(h, query)
     elif path == "/feed/v1/stations":
         h._json(stations(h))
     elif path == "/feed/v1/node":
@@ -461,6 +467,46 @@ def alerts(h: Handler, query: dict[str, str]) -> None:
     langs = _list(query.get("langs"))
     h._json([alert_event(a, stations_, node_, languages=langs,
                          context=_before(hub, a, leaving)) for a in rows])  # fmt: skip
+
+
+def catch_filter(query: dict[str, str]) -> dict[str, Any]:
+    """The arguments of ``Store.catches`` from a request's query, for the page's /api/catches
+    and for /feed/v1/catches alike. ValueError says what a valid query is."""
+    from wavescribe.radio.bandplan import TUNER_RANGE_HZ
+
+    lo, hi = (f / 1e6 for f in TUNER_RANGE_HZ)
+    try:
+        mhz = float(query["mhz"]) if query.get("mhz") else None
+        width_khz, hours = float(query.get("width_khz") or 0), float(query.get("hours") or 24)
+        limit = int(query.get("limit") or 100)
+        if not all(math.isfinite(x) for x in (width_khz, hours)):
+            raise ValueError
+        if mhz is not None and not lo <= mhz <= hi:
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            f"mhz is {lo:g} to {hi:g}, width_khz and hours are numbers, limit a whole one"
+        ) from None
+    return {
+        "freq_hz": round(mhz * 1e6) if mhz else None,
+        "width_hz": width_khz * 1e3,
+        "station_ids": _list(query.get("stations")) or None,
+        "since": time.time() - hours * 3600 if hours > 0 else None,
+        "limit": max(1, min(limit, MAX_CATCHES)),
+    }
+
+
+def catches(h: Handler, query: dict[str, str]) -> None:
+    """What band watches caught, as the page lists them, but only what may leave this machine
+    (``WebHub.exports``), also when a program on this machine reads it, and without the user's
+    notes about each frequency: those are the user's own, not something heard."""
+    hub = h.server.hub
+    try:
+        args = catch_filter(query)
+    except ValueError as e:
+        h._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+        return
+    h._json(hub.store.catches(**args, exports=hub.exports()) if hub.store else [])
 
 
 def _before(hub: Any, alert: dict[str, Any], leaving: Any) -> list[dict[str, Any]]:

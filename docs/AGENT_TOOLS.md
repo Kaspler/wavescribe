@@ -41,7 +41,8 @@ The `--json` commands read Wavescribe's files and work without it.
   you keep it ([RADIO.md](RADIO.md), *What Wavescribe does with each kind of radio*). The
   tools that read the feed (`recent`, `alerts`, `wait_for_alert`, and `follow` on the command
   line) carry only what may leave this machine: by default broadcast radio and internet
-  streams, and alerts from other radio without their words.
+  streams, and alerts from other radio without their words. So does `catches`, which reads
+  what band watches caught.
 - **Whatever a tool returns goes to the agent's model.** If that model runs on someone else's
   servers, what was said is sent there. Some radio may be received but not passed on to anyone
   else; giving it to an online service passes it on. Keep radio that isn't broadcast away from
@@ -91,6 +92,7 @@ an error instead.
 | `search` | Full-text search of everything kept, in the original words and the translations. Each word is found at the start of a word (*flood* finds *floods*); `*word` finds it inside words too. | `{utterances}`, newest first: 20, or `limit` up to 60. |
 | `alerts` | Recent alerts, newest first, with their status and what was said; `minutes` keeps those mentioned in the last that many minutes. | `{alerts}`: 10, or `limit` up to 30. |
 | `wait_for_alert` | Waits for the next announced alert, `timeout_s` seconds (60, up to 300), optionally only from some `stations` or from a `min_severity` up. Further mentions of an alert already announced don't count. | `{alert}`, or `{alert: null, waited_s}` when none came. The alert's `change` says why it came: `new`, `escalated` (more serious now), `reminder` (still being mentioned, at most hourly) or `ended`. |
+| `catches` | What your band watches caught, newest first: each transmission that broke the silence on a channel, with the words heard in it. `hours` back (24; 0 for everything kept), optionally only around `mhz` (with `width_khz` either side) or from some `stations`. Only what may leave this machine: by default broadcast radio, so catches on amateur, walkie-talkie or other radio are left out until you let that kind of radio out ([RADIO.md](RADIO.md)). Your names, notes and tags for frequencies stay on the page. | `{catches}`: 50, or `limit` up to 200, each as `wavescribe radio catches --json` gives it without the notes: `id`, `station` (the watch), `freq_hz`, `mhz`, `t_start` and `t_end` (seconds since 1970), `duration`, `mode`, `band`, `label`, `snr_db`, `peak_db`, `voice` (true when someone spoke, false when nobody did, null when not checked), `reason` (`carrier` when it stayed on for minutes), `privacy` and `utterances` (`id`, `t`, `language`, `text`). |
 | `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It takes from a few seconds to about a minute, and needs a language model as the translator; otherwise it fails with the reason. | `{answer, sources, plan}`: `sources` are the cited utterances, each with the `n` the answer cites it by; `plan` is where it looked (`stations`, `since`, `until`, `terms`, and whether it read an `overview`, `widened` the search or `sampled`). |
 | `status` | What Wavescribe is doing, and why a station isn't. | `{node, stations, status, ask, mt_model, noncommercial, store}`: `node` is this machine (`name`, `url`, `version`, `feed_version`, `translation_languages`); `stations` every station set up, with `available` and `reason` (why it can't run); `status` the running part (`ready`, `models`, each running station's `connected`, `error`, `retry_in_s`, `behind_s` (`text` and `translation`: seconds its oldest speech has waited for text and its oldest line for translation; null when nothing waits) and `dropped` (`asr`, `mt`, `rules`: speech never written down, lines left untranslated and LLM rule checks that couldn't run, over the last 10 minutes), queue depths, `lag`, and `load`: `state` `ok`, `behind` or `overloaded`, with a `reason` sentence, null when ok); `ask` is null when ask works, else why not; `mt_model` the translation model; `noncommercial` the restricted models in use; `store` whether history is kept. |
 | `start_station`, `stop_station` | Only with `--allow-control`. A start right after a stop waits for the stop to finish, up to 10 s, or fails saying so. | `{ok: true}`. |
@@ -199,7 +201,8 @@ alert. Both are in [FEED.md](FEED.md). `follow` and the MCP tools use the same r
   only from this machine. Point `wavescribe mcp` at the Wavescribe on the same Mac; `follow
   --url` can read another machine's feed.
 - **Audio.** The tools carry text and metadata only.
-- **Receivers.** Tuning and scanning a radio receiver have no tools.
+- **Receivers.** Tuning and scanning a radio receiver, and starting a band watch, have no
+  tools; `catches` only reads what a watch you started caught.
 
 ## Security notes
 

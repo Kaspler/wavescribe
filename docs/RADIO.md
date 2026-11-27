@@ -249,7 +249,8 @@ whisper-large-v3-turbo`). A watch with one language works with any model.
 
 **What is kept.** A watch takes the strictest class of any channel in its window, with the same
 confirmation. Its catches are kept as long as text of that class, and leave this machine only
-where that class's text may. With the defaults, a PMR446 watch keeps nothing: its catches and
+where that class's text may: `/feed/v1/catches` ([FEED.md](FEED.md)) and the agent tool
+`catches` ([AGENT_TOOLS.md](AGENT_TOOLS.md)) give no others. With the defaults, a PMR446 watch keeps nothing: its catches and
 words are shown while `radio watch` runs and never written down, so `radio catches` stays empty.
 A 2 m watch keeps both for 7 days, on this machine only. Notes on frequencies (`radio note`) stay
 on this machine and are its heard list's names too.

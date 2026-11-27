@@ -239,6 +239,48 @@ TOOLS = (
         ),
     ),
     Tool(
+        "catches",
+        "What the user's band watches caught, newest first. A watch listens to every channel "
+        "of a band at once and keeps each transmission that breaks the silence on one: when, "
+        "on which frequency, how strong, and the words heard in it. Returns {catches}, each "
+        "with id, station (the watch), freq_hz, mhz, t_start and t_end (seconds since 1970), "
+        "duration (seconds), mode (wfm, nfm or am), band and label (where it is in the band "
+        "plan), snr_db (how far above the channel's noise), peak_db, voice (true: someone "
+        "spoke; false: nobody did, such as a carrier or data burst; null: not checked), reason "
+        "(carrier: on for minutes, so taken as the channel's noise from then on), privacy (the "
+        "kind of radio) and utterances [{id, t, language, text}]. Only catches that may leave "
+        "this machine: the user decides per kind of radio what is passed on, and by default "
+        "only broadcast radio is, so catches on amateur, walkie-talkie or other radio are left "
+        "out until the user lets that kind out. Read only: it can't start a watch, tune a "
+        "receiver or confirm that the user may receive a channel; that stays with the user. "
+        + UNTRUSTED,
+        _arguments(
+            hours={
+                "type": "number",
+                "minimum": 0,
+                "description": "How many hours back (24); 0 for everything kept.",
+            },
+            mhz={
+                "type": "number",
+                "minimum": 0,
+                "description": "Only this frequency, in MHz.",
+            },
+            width_khz={
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10000,
+                "description": "With mhz: also this many kHz either side (0).",
+            },
+            stations={**STATIONS, "description": "Only catches of these watches."},
+            limit={
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "At most this many catches (50).",
+            },
+        ),
+    ),
+    Tool(
         "ask",
         "Ask a question about what was said on the radio, in any language. Wavescribe's local "
         "language model looks through the transcripts and answers in the question's language, "
@@ -364,6 +406,14 @@ class Tools:
         if "minutes" in args:
             query = {"since": f"{time.time() - args['minutes'] * 60:.3f}"}
         return {"alerts": self.client.get("/feed/v1/alerts", query)[: args.get("limit", 10)]}
+
+    def catches(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
+        query: dict[str, Any] = {"hours": args.get("hours", 24), "limit": args.get("limit", 50)}
+        if "mhz" in args:
+            query.update(mhz=args["mhz"], width_khz=args.get("width_khz", 0))
+        if args.get("stations"):
+            query["stations"] = ",".join(args["stations"])
+        return {"catches": self.client.get("/feed/v1/catches", query)}
 
     def wait_for_alert(self, args: dict[str, Any], cancelled: threading.Event) -> Any:
         from wavescribe.rules import SEVERITIES

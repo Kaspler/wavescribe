@@ -63,7 +63,6 @@ INFLIGHT_MAX_S = 900.0
 REVOKED_MAX = 1024  # feed token ids remembered as revoked (ids are random, never reused)
 MAX_LISTENERS = 8  # audio listeners per station
 CONTROL_HEADER = "X-Wavescribe"  # required on changes: a cross-site form can't set it
-MAX_CATCHES = 500  # per request to /api/catches
 
 # On every response. The page has no inline script or style, so the policy needs no exceptions;
 # frame-ancestors and X-Frame-Options stop another site from framing the control centre.
@@ -976,32 +975,16 @@ class Handler(BaseHTTPRequestHandler):
     def _catches(self, query: dict[str, str]) -> None:
         """What watches caught and kept (radio/watch.py), newest first, with their words. For
         another machine only what may leave this one, and none of the user's notes."""
-        from wavescribe.radio.bandplan import TUNER_RANGE_HZ
-
         hub = self.server.hub
-        lo, hi = (f / 1e6 for f in TUNER_RANGE_HZ)
         try:
-            mhz = float(query["mhz"]) if query.get("mhz") else None
-            width_khz, hours = float(query.get("width_khz") or 0), float(query.get("hours") or 24)
-            limit = int(query.get("limit") or 100)
-            if not all(math.isfinite(x) for x in (width_khz, hours)):
-                raise ValueError
-            if mhz is not None and not lo <= mhz <= hi:
-                raise ValueError
-        except ValueError:
-            msg = f"mhz is {lo:g} to {hi:g}, width_khz and hours are numbers, limit a whole one"
-            self._json({"error": msg}, HTTPStatus.BAD_REQUEST)
+            args = feed.catch_filter(query)
+        except ValueError as e:
+            self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
             return
         if hub.store is None:
             self._json({"catches": []})
             return
-        rows = hub.store.catches(
-            freq_hz=round(mhz * 1e6) if mhz else None,
-            width_hz=width_khz * 1e3,
-            since=time.time() - hours * 3600 if hours > 0 else None,
-            limit=max(1, min(limit, MAX_CATCHES)),
-            exports=self._exports(),
-        )
+        rows = hub.store.catches(**args, exports=self._exports())
         if self._is_local() and hub.app is not None:
             from wavescribe.radio.watch import with_notes
 
