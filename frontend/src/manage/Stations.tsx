@@ -145,6 +145,8 @@ function RegionNote({ s, reload }: { s: Any; reload: () => Promise<void> }) {
 function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; reload: () => Promise<void> }) {
   const [name, setName] = useState(s.name);
   const [lang, setLang] = useState(s.language);
+  // The languages a detected station mostly is; a named language takes none.
+  const [langs, setLangs] = useState<string[]>(s.languages || []);
   const [targets, setTargets] = useState<string[]>(s.translate_to || []);
   const [alerts, setAlerts] = useState<string[]>(s.alert_languages || []);
   const [prio, setPrio] = useState(String(s.priority));
@@ -180,11 +182,13 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const save = async () => {
     if (mode !== "listen" && s.kind !== "remote" && !lang.trim()) { document.getElementById(id("lang"))?.focus(); return; }
     // Only what changed is sent: each field sent becomes the station's own setting.
+    // Named after being detected, it drops the languages it mostly was: the server takes them
+    // with "auto" only, and an empty list clears them.
     const ch: Any = changedFields(
-      { name: s.name, language: s.language, translate_to: s.translate_to || [], alert_languages: s.alert_languages || [], priority: s.priority,
-        asr_model: s.asr_choice || null, mt_model: s.mt_choice || null, disabled: s.disabled || null },
-      { name: name.trim(), language: lang.trim(), translate_to: targets, alert_languages: alerts, priority: +prio,
-        asr_model: model || null, mt_model: mtModel || null, disabled: off || null },
+      { name: s.name, language: s.language, languages: s.languages || [], translate_to: s.translate_to || [], alert_languages: s.alert_languages || [],
+        priority: s.priority, asr_model: s.asr_choice || null, mt_model: s.mt_choice || null, disabled: s.disabled || null },
+      { name: name.trim(), language: lang.trim(), languages: lang.trim() === "auto" ? langs : [], translate_to: targets, alert_languages: alerts,
+        priority: +prio, asr_model: model || null, mt_model: mtModel || null, disabled: off || null },
     );
     // Sent only when it changed: the server checks for models whenever transcription is in a change.
     if (mode !== saved) Object.assign(ch, { transcribe: mode === "listen" ? false : null, translate: mode === "transcribe" ? false : null });
@@ -216,7 +220,7 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
       )}
       <div className="m-form">
         <Field id={id("name")} label="Name" hint="How it's shown on the reading page."><Input id={id("name")} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <SpokenField id={id("lang")} lang={lang} onLang={setLang} known={knownLangs()} />
+        <SpokenField id={id("lang")} lang={lang} onLang={setLang} langs={langs} onLangs={setLangs} known={knownLangs()} />
         {mode === "translate" && (
           <Field label="Translate into" hint="Continuously, as the station speaks.">
             <LangChips value={targets} onChange={setTargets} known={knownLangs()} offer={readerLang(lang)} label="Add a translation language" />

@@ -275,13 +275,14 @@ function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: LiveReceiver
 
 // -- keeping it ------------------------------------------------------------------------------
 
-/** Keeps what is tuned as a station. Its language is named, or detected among any the model
- * tells apart: this route takes no list of the languages it mostly is. */
+/** Keeps what is tuned as a station. Its language is named, or detected, among the languages it
+ * mostly is where the person gives them. */
 function Keep({ st, radio, dev, onKept }: { st: LiveReceiver; radio: Any; dev: string; onKept: () => Promise<void> }) {
   const [does, setDoes] = useState<string>("translate");
   // Until the person chooses, the language follows what is tuned, once the receivers are known.
   const [chosen, setLang] = useState<string | null>(null);
   const lang = chosen ?? spokenLang(stationsOnAir(radio?.receivers || [], S.stations), { mhz: st.mhz, device: dev }, (m) => bandAt(radio?.bands || [], m)?.id ?? null);
+  const [langs, setLangs] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [retune, setRetune] = useState<string | null>(null);
   // The question takes the focus while it is asked.
@@ -290,7 +291,7 @@ function Keep({ st, radio, dev, onKept }: { st: LiveReceiver; radio: Any; dev: s
   const save = async (force = false) => {
     if (does !== "listen" && !lang.trim()) { document.getElementById("lv-lang")?.focus(); return; }
     try {
-      const v = await post(`/live/${dev}/station`, { does, ...spokenFields(lang), name: name.trim() || st.rds?.ps?.trim() || undefined, translate_to: radio?.defaults?.translate_to, retune: force });
+      const v = await post(`/live/${dev}/station`, { does, ...spokenFields(lang, langs), name: name.trim() || st.rds?.ps?.trim() || undefined, translate_to: radio?.defaults?.translate_to, retune: force });
       const said = addedToast(v, `${v.name} is a station now${does === "listen" ? "" : ": it's on the reading page"}`);
       toast(said.text, said.bad);
       setRetune(null);
@@ -316,7 +317,7 @@ function Keep({ st, radio, dev, onKept }: { st: LiveReceiver; radio: Any; dev: s
         <Field id="lv-name" label="Name" hint={st.mode === "wfm" ? "Optional: an FM station names itself from RDS." : "Optional"}>
           <Input id="lv-name" value={name} placeholder={st.rds?.ps?.trim() || `${fmtMhz(st.mhz, st.mode)} MHz`} onChange={(e) => setName(e.target.value)} />
         </Field>
-        {does !== "listen" && <SpokenField id="lv-lang" lang={lang} onLang={setLang} known={knownLangs()} />}
+        {does !== "listen" && <SpokenField id="lv-lang" lang={lang} onLang={setLang} langs={langs} onLangs={setLangs} known={knownLangs()} />}
       </div>
       {retune && (
         <div ref={question} className="m-panel rd-retune">

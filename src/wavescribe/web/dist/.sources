@@ -36,7 +36,7 @@ c0f4303cc263ae91b0f2250573684335bba0e7a5 frontend/src/lib/types.ts
 9d2f9be22ce92e802f39838cae1d37e90a5329d1 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 03f722037f7357d28133c9904e8bae068778978d frontend/src/manage/Internet.tsx
-8bd551679e88ac51783d9c58114a461945a672e2 frontend/src/manage/Listen.tsx
+a0c9af0d51542f1a6c307d081778412e84339128 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
@@ -48,7 +48,7 @@ eb68fc38596abcbc38704f9c8c59b5f44ce17e82 frontend/src/manage/Radio.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
-4154707783e8a3d0c883f69362da38d83ebb7252 frontend/src/manage/Stations.tsx
+6b91179049171a2432ae1de4e117cf92766a5c4d frontend/src/manage/Stations.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
