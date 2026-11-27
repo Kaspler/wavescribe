@@ -1,13 +1,17 @@
 // Listen's radio: what the receivers found here, each a press from playing, and a receiver tuned by
 // hand, like a radio or an SDR program. Nothing heard here is written down, stored or checked for
 // alerts; "Keep as a station" makes it one (radio/live.py).
-import { useEffect, useState } from "react";
-import { ActButton, Button, Field, Input, Lamp, LangPicker, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
-import { ApiError, type Any, HANDOFF, del, knownLangs, localLang, post, refreshPage } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { S } from "../lib/live";
+import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
+import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
 import { and, fmtMhz } from "./bands";
+import { bandAt } from "./dial";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
 import { Scope, snap } from "./Scope";
+import { SpokenField } from "./SpokenField";
+import { spokenFields, spokenLang, stationsOnAir } from "./spokenLang";
 import { Ask, TuneControls, TunedHead, type Tuner, remember, useLivePoll, useSteps, useTuner } from "./tuner";
 
 const ZOOMS = [
@@ -267,17 +271,27 @@ function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: Any; radio: 
 
 // -- keeping it ------------------------------------------------------------------------------
 
+/** Keeps what is tuned as a station. Its language is named, or detected among any the model
+ * tells apart: this route takes no list of the languages it mostly is. */
 function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; onKept: () => Promise<void> }) {
   const [does, setDoes] = useState<string>("translate");
-  const [lang, setLang] = useState<string>(() => localLang(radio));
+  // Until the person chooses, the language follows what is tuned, once the receivers are known.
+  const [chosen, setLang] = useState<string | null>(null);
+  const lang = chosen ?? spokenLang(stationsOnAir(radio?.receivers || [], S.stations), { mhz: st.mhz, device: dev }, (m) => bandAt(radio?.bands || [], m)?.id ?? null);
   const [name, setName] = useState("");
   const [retune, setRetune] = useState<string | null>(null);
+  // The question takes the focus while it is asked.
+  const question = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (retune) question.current?.querySelector<HTMLElement>("button")?.focus(); }, [!!retune]);
   const save = async (force = false) => {
+    if (does !== "listen" && !lang.trim()) { document.getElementById("lv-lang")?.focus(); return; }
     try {
-      const v = await post(`/live/${dev}/station`, { does, language: lang.trim(), name: name.trim() || st.rds?.ps?.trim() || undefined, translate_to: radio?.defaults?.translate_to, retune: force });
+      const v = await post(`/live/${dev}/station`, { does, ...spokenFields(lang), name: name.trim() || st.rds?.ps?.trim() || undefined, translate_to: radio?.defaults?.translate_to, retune: force });
       toast(`${v.name} is a station now${does === "listen" ? "" : ": it's on the reading page"}`);
       setRetune(null);
       await onKept();
+      // Listening ended with it: the focus goes where the next frequency is typed.
+      requestAnimationFrame(() => document.getElementById("lv-f")?.focus());
     } catch (e) {
       if (e instanceof ApiError && e.code === "retune") setRetune(e.message);
       else throw e;
@@ -297,23 +311,19 @@ function Keep({ st, radio, dev, onKept }: { st: Any; radio: Any; dev: string; on
         <Field id="lv-name" label="Name" hint={st.mode === "wfm" ? "Optional: an FM station names itself from RDS." : "Optional"}>
           <Input id="lv-name" value={name} placeholder={st.rds?.ps?.trim() || `${fmtMhz(st.mhz, st.mode)} MHz`} onChange={(e) => setName(e.target.value)} />
         </Field>
-        {does !== "listen" && (
-          <Field id="lv-lang" label="Language spoken" hint="Its name in English or in the language itself, or a tag.">
-            <LangPicker id="lv-lang" value={lang} onChange={setLang} options={knownLangs()} />
-          </Field>
-        )}
+        {does !== "listen" && <SpokenField id="lv-lang" lang={lang} onLang={setLang} known={knownLangs()} />}
       </div>
       {retune && (
-        <div className="m-panel rd-retune">
+        <div ref={question} className="m-panel rd-retune">
           <p className="m-line">{retune}</p>
           <div className="m-actions">
             <ActButton variant="primary" run={() => save(true)}>Retune and keep it</ActButton>
-            <Button variant="ghost" onClick={() => setRetune(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => { setRetune(null); requestAnimationFrame(() => document.getElementById("lv-keep-add")?.focus()); }}>Cancel</Button>
           </div>
         </div>
       )}
       <div className="m-actions">
-        <ActButton variant="primary" icon="plus" disabled={does !== "listen" && !lang.trim()} run={() => save(false)}>Keep as a station</ActButton>
+        <ActButton id="lv-keep-add" variant="primary" icon="plus" run={() => save(false)}>Keep as a station</ActButton>
         {st.privacy !== "broadcast" && (
           <span className="m-hint">This is {st.privacy} radio: what's kept of it follows <a className="rd-link" href="#/settings/storage">What's kept</a>.</span>
         )}

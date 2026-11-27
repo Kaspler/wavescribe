@@ -4,10 +4,11 @@
 // (src/wavescribe/radio/service.py).
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { playLive } from "../lib/audio";
+import { S } from "../lib/live";
 import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
-import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
-import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
+import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
+import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
@@ -19,6 +20,8 @@ import { type AddResult, addOnAir } from "./onair";
 import { MoveThere } from "./MoveThere";
 import { Refusal } from "./Refusal";
 import { refused } from "./refusals";
+import { SpokenField } from "./SpokenField";
+import { spokenFields, spokenLang, stationsOnAir } from "./spokenLang";
 import { Ask, type Tuner, useTuner } from "./tuner";
 
 const REGION_NAMES: Record<string, string> = {
@@ -901,7 +904,13 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
   const [device, setDevice] = useState<string>(() => pre.device || pickRx());
   const [name, setName] = useState(pre.name || "");
   const [does, setDoes] = useState("translate");
-  const [lang, setLang] = useState<string>(() => localLang(v));
+  // Until the person chooses, the language follows the frequency and the receiver.
+  const [chosen, setLang] = useState<string | null>(null);
+  const lang = chosen ?? spokenLang(stationsOnAir(v.receivers, S.stations), { mhz: f, device }, (m) => bandAt(v.bands, m)?.id ?? null);
+  const [langs, setLangs] = useState<string[]>([]);
+  // Only as the form opens: not when the field comes back after "Listen only".
+  const opening = useRef(true);
+  useEffect(() => { opening.current = false; }, []);
   const [to, setTo] = useState<string[]>(v.defaults.translate_to || []);
   const [ack, setAck] = useState(false);
   // The server's question when adding it moves the receiver away from stations it has: its
@@ -925,12 +934,13 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
   const effMode = mode || band?.mode || "nfm";
   const called = name.trim() || pre.name || `${fmtMhz(f, effMode)} MHz`;
   const submit = async (confirmed = false) => {
+    if (does !== "listen" && !lang.trim()) { document.getElementById("rd-lang")?.focus(); return; }
     setTrouble(null);
     setAsked(null);
     let r: AddResult;
     try {
       r = await addOnAir({
-        device, mhz: f, mode: mode || undefined, name: name.trim() || undefined, language: lang.trim(), translate_to: does === "translate" ? to : [],
+        device, mhz: f, mode: mode || undefined, name: name.trim() || undefined, ...spokenFields(lang, langs), translate_to: does === "translate" ? to : [],
         acknowledge: ack, ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
       }, confirmed);
     } catch (e) {
@@ -969,11 +979,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
       </div>
       <div className="m-form rd-form">
         <Field id="rd-name" label="Name" hint={effMode === "wfm" ? "Optional: an FM station names itself from RDS." : "Optional: a channel label."}><Input id="rd-name" value={name} placeholder={band ? band.name : ""} onChange={(e) => setName(e.target.value)} /></Field>
-        {does !== "listen" && (
-          <Field id="rd-lang" label="Language spoken" hint="Its name in English or in the language itself, or a tag.">
-            <LangPicker id="rd-lang" value={lang} onChange={setLang} options={knownLangs()} />
-          </Field>
-        )}
+        {does !== "listen" && <SpokenField id="rd-lang" lang={lang} onLang={setLang} langs={langs} onLangs={setLangs} known={knownLangs()} focusIfEmpty={opening.current} />}
         {does === "translate" && (
           <Field id="rd-to" label="Translate into" wide hint="Continuously, as it speaks."><LangChips value={to} onChange={setTo} known={knownLangs()} offer={readerLang(lang)} label="Translate into" /></Field>
         )}
@@ -1021,7 +1027,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: Any; pre: Any; tuner: Tuner;
         </Refusal>
       )}
       <div className="m-actions">
-        <ActButton variant="primary" icon="plus" disabled={(does !== "listen" && !lang.trim()) || (needsAck && !ack) || !device || rx?.busy_code === "scan" || !!already} run={() => submit(!!asked)}>
+        <ActButton variant="primary" icon="plus" disabled={(needsAck && !ack) || !device || rx?.busy_code === "scan" || !!already} run={() => submit(!!asked)}>
           {asked ? (asked.stops.length ? `Stop ${and(asked.stops)} and add` : "Move it and add") : "Add as a station"}
         </ActButton>
         <Button variant="ghost" onClick={() => (asked ? setAsked(null) : onDone())}>{asked ? "Keep it as it is" : "Cancel"}</Button>

@@ -81,6 +81,9 @@
 .m-form-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 .m-form .input, .m-form .select { width: 100%; }
 .m-form .input-short { width: 96px; }
+/* The language spoken, and Detect it beside it. */
+.m-spoken { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); }
+.m-spoken .lang-pick { flex: 1 1 14ch; }
 .m-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: var(--s6); }
 .m-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .m-row-end { align-items: flex-end; }

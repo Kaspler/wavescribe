@@ -1,7 +1,7 @@
 // Radio's and Settings' calls. /api/manage answers only the Wavescribe machine itself, and every
 // change carries the X-Wavescribe header.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LANGS, countryLang, langNameEn } from "../lib/lang";
+import { LANGS, langNameEn } from "../lib/lang";
 import { S, stationsChanged } from "../lib/live";
 import { P } from "../lib/prefs";
 import { emit } from "../lib/store";
@@ -118,15 +118,6 @@ export function knownLangs(stations: { language: string; translate_to?: string[]
 /** The reader's own language, offered as a translation unless the station already speaks it. */
 export const readerLang = (spoken: string): string[] => (P.lang && primaryOf(P.lang) !== primaryOf(spoken) ? [P.lang] : []);
 const primaryOf = (t: string) => (t || "").split("-")[0].toLowerCase();
-
-/** The language a new station on the air most likely speaks: the default set for new stations,
- * else the language of the machine's country (where the server says it), else the one most of
- * this machine's radio stations speak. Empty when nothing says. */
-export function localLang(radio: Any): string {
-  const said = S.stations.filter((s) => s.kind === "sdr" && s.language && s.language !== "auto").map((s) => s.language);
-  const most = [...new Set(said)].sort((a, b) => said.filter((x) => x === b).length - said.filter((x) => x === a).length)[0];
-  return radio?.defaults?.language || countryLang(radio?.country) || most || "";
-}
 
 export const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 export const SEV_WORD: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };

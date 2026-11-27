@@ -1,7 +1,7 @@
 // Choosing a language by its name in English, in the language itself, or its tag.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LANGS, canonicalTag, countryLang, findLangs, pick, resolveLang } from "../src/lib/lang.ts";
+import { LANGS, canonicalTag, findLangs, pick, resolveLang } from "../src/lib/lang.ts";
 
 test("a name in English, in the language itself, or a tag finds it", () => {
   assert.equal(findLangs("ukr", LANGS)[0], "uk");
@@ -37,13 +37,6 @@ test("tags are written as BCP-47 writes them", () => {
   assert.equal(canonicalTag("not a tag"), null);
 });
 
-test("a country gives the language most people there speak", () => {
-  assert.equal(countryLang("pt"), "pt-PT");
-  assert.equal(countryLang("UA"), "uk-UA");
-  assert.equal(countryLang("JP"), "ja-JP");
-  assert.equal(countryLang(null), null);
-  assert.equal(countryLang("Europe"), null);
-});
 
 test("a line is shown in the reader's language: translated, or as heard when it was said in it", () => {
   const line = (language, translations = {}) => ({ language, text: `in ${language}`, translations, pending: [] });

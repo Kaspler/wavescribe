@@ -110,14 +110,3 @@ export function resolveLang(text: string, tags: string[]): string | null {
   const hit = [...new Set(tags)].filter((t) => langName(t).split(" · ").some((n) => fold(n) === q));
   return hit.length ? hit.sort((a, b) => a.length - b.length)[0] : null;
 }
-
-/** The language most people speak in a country, as a tag with the country ("PT" → "pt-PT"). */
-export function countryLang(country: string | null | undefined): string | null {
-  if (!country || !/^[A-Za-z]{2}$/.test(country)) return null;
-  try {
-    const l = new Intl.Locale(`und-${country.toUpperCase()}`).maximize();
-    return l.language && l.language !== "und" ? `${l.language}-${country.toUpperCase()}` : null;
-  } catch {
-    return null;
-  }
-}

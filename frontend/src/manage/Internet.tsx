@@ -5,6 +5,8 @@ import { langNameEn } from "../lib/lang";
 import { day } from "../lib/time";
 import { ActButton, Advanced, Button, Check, Field, Input, LangChips, LangPicker, Section, Segmented, Table, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
+import { SpokenField } from "./SpokenField";
+import { spokenFields } from "./spokenLang";
 import { MODE_HINT, primaryTargets } from "./Stations";
 
 export function OnTheInternet() {
@@ -50,6 +52,7 @@ type Pre = { name?: string; language?: string; detected?: string; translate_to?:
 function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: Any[]; onDone: () => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(pre.name || "");
   const [lang, setLang] = useState(pre.language || "");
+  const [langs, setLangs] = useState<string[]>([]);
   const [targets, setTargets] = useState<string[]>(pre.translate_to || primaryTargets(stations).slice(0, 2));
   const [prio, setPrio] = useState("5");
   const [start, setStart] = useState(true);
@@ -80,9 +83,8 @@ function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: 
       </div>
       <div className="m-form">
         <Field id="new-name" label="Name" hint="How it's shown on the reading page."><Input ref={first} id="new-name" value={name} placeholder="Station name" onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id="new-lang" label="Language spoken" hint={pre.detected ? `Detected: ${pre.detected}` : "Its name in English or in the language itself, or a tag such as pt-PT. The wrong language gives gibberish."}>
-          <LangPicker id="new-lang" value={lang} onChange={setLang} options={knownLangs(stations)} />
-        </Field>
+        <SpokenField id="new-lang" lang={lang} onLang={setLang} langs={langs} onLangs={setLangs} known={knownLangs(stations)}
+                     named={pre.detected && lang === pre.language ? `Detected: ${pre.detected}` : undefined} />
         {does === "translate" && <Field label="Translate into" hint="Continuously, as the station speaks."><LangChips value={targets} onChange={setTargets} known={knownLangs(stations)} offer={readerLang(lang)} label="Add a translation language" /></Field>}
         {does !== "listen" && (
           <Field id="new-prio" label="Priority" hint="1 is transcribed first when the machine falls behind.">
@@ -94,7 +96,7 @@ function StationForm({ pre, stations, onDone, onCancel }: { pre: Pre; stations: 
         <ActButton variant="primary" icon="plus" disabled={!name.trim() || !lang.trim()}
                    run={async () => {
                      const added = await post("/stations", {
-                       ...pre.raw, name: name.trim(), language: lang.trim(), translate_to: targets, priority: +prio, start,
+                       ...pre.raw, name: name.trim(), ...spokenFields(lang, langs), translate_to: targets, priority: +prio, start,
                        ...(does === "listen" ? { transcribe: false } : does === "transcribe" ? { translate: false } : {}),
                      });
                      toast(`${added.name} added${start ? " and starting" : ""}`);

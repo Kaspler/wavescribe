@@ -5,10 +5,12 @@ import { Icon } from "../components/Icon";
 import {
   ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LangPicker, LinkButton, Section, Segmented, Select, Tag, act, cx,
 } from "../components/ui";
+import { spoken } from "../reading/Column";
 import { type Any, docUrl, del, get, knownLangs, post, readerLang, refreshPage, useLoad } from "./api";
 import { changedFields } from "./drafts";
 import { watchWords } from "./Caught";
 import { MoveThere } from "./MoveThere";
+import { SpokenField } from "./SpokenField";
 
 export function Stations() {
   const { data, error, reload: load } = useLoad(() => get("/stations"));
@@ -88,7 +90,7 @@ function StationRow({ s, devices, radio, reload }: { s: Any; devices: string[]; 
         {s.origin === "page" ? <Tag tone="accent">added here</Tag> : s.overridden.length > 0 && <Tag tone="accent" title={s.overridden.join(", ")}>changed here</Tag>}
       </div>
       <p className="m-item-sub">
-        {langNameEn(s.language)}
+        {spoken(s)}
         {s.transcribe === false ? " · listen only, not written down" : (
           <>
             {intoOthers(s).length ? ` → ${intoOthers(s).map(langNameEn).join(", ")}` : (s.translate_to || []).length ? "" : " · not translated"}
@@ -105,6 +107,9 @@ function StationRow({ s, devices, radio, reload }: { s: Any; devices: string[]; 
         </div>
       ) : <p className="m-trouble">{s.reason}</p>)}
       {s.available && s.translate_to_missing?.length > 0 && !s.listen_only && s.reason && <p className="m-item-sub">{s.reason}</p>}
+      {/* Detected without a model that tells languages apart: unlike a missing model for one
+          language, naming the language is a way out too, so the reason is spelled out. */}
+      {s.available && s.listen_only && s.language === "auto" && !s.disabled && s.reason && <p className="m-item-sub">{s.reason}</p>}
       {s.error && <p className="m-trouble">A change from this page wasn't applied: {s.error}</p>}
       <RegionNote s={s} reload={reload} />
       {open && <StationEditor s={s} devices={devices} reload={reload} />}
@@ -153,12 +158,16 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const [fm, setFm] = useState((s[freqKey] || []).join(", "));
   const [models, setModels] = useState<[string, string][]>([]);
   const [translators, setTranslators] = useState<[string, string][]>([]);
+  // Detected: the model list doesn't say which models tell languages apart, so the server picks
+  // one, and only a model already chosen for the station is listed beside Automatic.
+  const detect = lang === "auto";
   useEffect(() => {
     const tag = (x: string) => x.split("-")[0];
     const label = (e: Any) => `${e.id}${e.fit?.level === "too_big" ? " (won't fit)" : ""}`;
+    const speaks = (e: Any) => (detect ? e.id === s.asr_choice : e.languages.includes("*") || e.languages.some((l: string) => tag(l) === tag(lang)));
     get("/models").then((m) => {
       setModels(m.models
-        .filter((e: Any) => e.capability === "asr" && e.installed && (e.languages.includes("*") || e.languages.some((l: string) => tag(l) === tag(lang))))
+        .filter((e: Any) => e.capability === "asr" && e.installed && speaks(e))
         .map((e: Any) => [e.id, label(e)]));
       setTranslators(m.models.filter((e: Any) => e.capability === "translate" && e.installed).map((e: Any) => [e.id, label(e)]));
     }).catch(() => {});
@@ -166,6 +175,7 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const saved = s.transcribe === false ? "listen" : s.translate === false ? "transcribe" : "translate";
   const [mode, setMode] = useState(saved);
   const save = async () => {
+    if (mode !== "listen" && s.kind !== "remote" && !lang.trim()) { document.getElementById(id("lang"))?.focus(); return; }
     // Only what changed is sent: each field sent becomes the station's own setting.
     const ch: Any = changedFields(
       { name: s.name, language: s.language, translate_to: s.translate_to || [], alert_languages: s.alert_languages || [], priority: s.priority,
@@ -203,9 +213,7 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
       )}
       <div className="m-form">
         <Field id={id("name")} label="Name" hint="How it's shown on the reading page."><Input id={id("name")} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id={id("lang")} label="Language spoken" hint="Its name in English or in the language itself, or a tag such as pt-PT. The wrong language gives gibberish.">
-          <LangPicker id={id("lang")} value={lang} onChange={setLang} options={knownLangs()} />
-        </Field>
+        <SpokenField id={id("lang")} lang={lang} onLang={setLang} known={knownLangs()} />
         {mode === "translate" && (
           <Field label="Translate into" hint="Continuously, as the station speaks.">
             <LangChips value={targets} onChange={setTargets} known={knownLangs()} offer={readerLang(lang)} label="Add a translation language" />
@@ -233,7 +241,7 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
       {transcribing && s.kind !== "remote" && (
         <Advanced id="station-editor">
           <div className="m-form">
-            <Field id={id("model")} label="Speech model" hint={models.length ? "Automatic picks the first installed model that speaks its language and fits." : "None downloaded for this language yet: see Languages and models."}>
+            <Field id={id("model")} label="Speech model" hint={detect ? "Automatic picks the first installed model that tells languages apart." : models.length ? "Automatic picks the first installed model that speaks its language and fits." : "None downloaded for this language yet: see Languages and models."}>
               <Select id={id("model")} value={model} onChange={(e) => setModel(e.target.value)} options={[["", "Automatic: the first that fits"], ...models]} />
             </Field>
             {mode === "translate" && (
