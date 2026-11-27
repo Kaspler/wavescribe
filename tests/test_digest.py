@@ -304,7 +304,11 @@ def test_every_point_cites_the_utterances_it_rests_on(tmp_path: Path) -> None:
         "- a: Water is cut tomorrow. [1]",
         "- b: Station a says rain, and a bridge closing. [2, 3]",
     ]
-    assert not out["empty"] and out["model"] == "fake-llm"
+    assert out["outcome"] == "points" and out["model"] == "fake-llm" and out["unread"] == {}
+    assert out["notice"] == (
+        "Written by the local model from 3 of 6 lines heard between 11:00 and 12:00; it can "
+        "miss things or get them wrong."
+    )
     store.close()
 
 
@@ -397,7 +401,7 @@ def test_nothing_of_substance_is_said_in_words_of_its_own(tmp_path: Path) -> Non
     llm = FakeLlm("NONE: An evacuation of the riverside has been ordered, leave now.")
     d = digester(store, llm)
     out = d.run(d.request({"minutes": 60})).payload()
-    assert out["empty"] and out["points"] == [] and out["sources"] == []
+    assert out["outcome"] == "nothing_stood_out" and out["points"] == [] and out["sources"] == []
     # Never the model's sentence, which no source backs: what was read, in words of its own.
     assert out["text"] == "Nothing stood out in the 4 lines read of 7 said."
     store.close()
@@ -420,8 +424,41 @@ def test_nothing_said_needs_no_model(tmp_path: Path) -> None:
     llm = FakeLlm("- invented [1].")
     d = digester(store, llm)
     out = d.run(d.request({"minutes": 30, "stations": ["a"]})).payload()
-    assert llm.prompts == [] and out["empty"]
-    assert out["text"] == "nothing was said on a in the last 30 minutes"
+    assert llm.prompts == [] and out["outcome"] == "nothing_said" and out["notice"] is None
+    assert out["text"] == "Nothing was said on a in the last 30 minutes."
+    store.close()
+
+
+def test_a_station_that_keeps_no_text_or_isnt_running_is_not_read(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    pmr = dataclasses.replace(station("pmr"), name="PMR 3", privacy="private")
+    stations = [station("a"), station("b"), pmr]
+    d = Digester(
+        store, lambda: stations, lambda run: True, clock=lambda: NOW, running=lambda: {"a"}
+    )
+    out = d.run(d.request({"minutes": 30, "stations": ["a", "b", "pmr"]})).payload()
+    assert out["outcome"] == "nothing_said"
+    assert out["unread"] == {"b": "isn't running", "pmr": "its kind of radio keeps no text"}
+    assert out["text"] == (
+        "Nothing was said on a in the last 30 minutes. Not read: b (isn't running), PMR 3 (its "
+        "kind of radio keeps no text)."
+    )
+    out = d.run(d.request({"minutes": 30, "stations": ["pmr"]})).payload()
+    assert out["outcome"] == "not_read"
+    assert out["text"] == "Not read: PMR 3 (its kind of radio keeps no text)."
+    # Asked for every station when none was heard: those running, not all those set up.
+    assert d.request({"minutes": 30}).stations == ("a",)
+    store.close()
+
+
+def test_a_sample_says_so(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    for i in range(400):
+        add(store, "a", f"frase número {i} " + "palavras " * 60, NOW - 3500 + i * 8)
+    d = digester(store, FakeLlm("- Something was said [1]."))
+    out = d.run(d.request({"minutes": 60, "stations": ["a"]})).payload()
+    assert out["counts"]["read"] * 10 < out["counts"]["said"]
+    assert out["notice"].startswith("Written by the local model from a sample: 20 of 400 lines")
     store.close()
 
 
@@ -438,8 +475,9 @@ def test_only_songs_and_idents_need_no_model(tmp_path: Path) -> None:
     llm = FakeLlm("- invented [1].")
     d = digester(store, llm)
     out = d.run(d.request({"minutes": 30, "stations": ["a", "b"]})).payload()
-    assert llm.prompts == [] and out["empty"] and out["counts"]["skipped"] == 2
-    assert out["text"] == "only music, station idents and repeats on a and b in the last 30 minutes"
+    assert llm.prompts == [] and out["outcome"] == "nothing_stood_out"
+    assert out["counts"]["skipped"] == 2 and out["unread"] == {}
+    assert out["text"] == "Only music, station idents and repeats among the 2 lines said."
     store.close()
 
 
@@ -447,7 +485,7 @@ def test_a_reply_that_cites_nothing_it_was_given_shows_no_points(tmp_path: Path)
     store = stocked(tmp_path)
     d = digester(store, FakeLlm("- The dam has burst [12].\n- Everyone must leave."))
     out = d.run(d.request({"minutes": 60})).payload()
-    assert out["empty"] and out["points"] == [] and out["counts"]["uncited"] == 2
+    assert out["outcome"] == "unsourced" and out["points"] == [] and out["counts"]["uncited"] == 2
     assert out["text"] == (
         "The model's reply cited none of the lines it read, so it isn't shown: it may have "
         "missed things. Try again, or read the transcript."

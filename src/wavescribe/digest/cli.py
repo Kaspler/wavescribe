@@ -48,14 +48,18 @@ def body(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def render(out: Mapping[str, Any]) -> str:
-    """A digest for a terminal: what it covers, the alerts of the window, the points, then the
-    moments they rest on."""
+    """A digest for a terminal: what it covers and who wrote it from how much, the alerts of the
+    window, the points, then the moments they rest on."""
     names = out.get("names") or {}
     shown = ", ".join(names.get(s, s) for s in out["stations"])
-    window, counts = out["window"], out["counts"]
+    window = out["window"]
     span = f"{local_time(window['since'], '%H:%M')}-{local_time(window['until'], '%H:%M')}"
     head = f"Now on {shown}" if out["kind"] == "now" else shown
-    lines = [f"{head}, {span}: {counts['said']} said, {counts['read']} read", ""]
+    lines = [f"{head}, {span}", *([out["notice"]] if out.get("notice") else [])]
+    if out["outcome"] == "points" and out["unread"]:
+        unread = ", ".join(f"{names.get(s, s)} ({why})" for s, why in out["unread"].items())
+        lines.append(f"Not read: {unread}.")
+    lines.append("")
     for a in out["alerts"]:
         summaries = a.get("summaries") or {}
         said = next(

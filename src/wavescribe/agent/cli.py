@@ -111,11 +111,11 @@ def add_parser(sub: Any) -> None:
     p = sub.add_parser(
         "digest",
         help="what was said while you weren't listening, from a running Wavescribe",
-        description="A few points on what mattered on some stations over the last hour (or "
-        "--minutes, or --since), each with the moments it rests on, written by the running "
-        "Wavescribe's language model in your language; --now: what one station is on about. "
-        "It waits behind live translation, so it can take a few minutes. See "
-        "docs/GETTING_STARTED.md.",
+        description="A few points the running Wavescribe's local model picks out of what some "
+        "stations said over the last hour (or --minutes, or --since), each with the lines it "
+        "rests on, in your language; --now: what one station is on about. It waits behind "
+        "live translation, so it can take a few minutes, and it can miss things or get them "
+        "wrong. See docs/GETTING_STARTED.md.",
     )
     server(p)
     p.add_argument("--stations", metavar="IDS", help="only these stations, comma-separated")

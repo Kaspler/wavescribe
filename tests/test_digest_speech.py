@@ -162,7 +162,7 @@ def test_a_digest_with_nothing_to_say_is_not_read(tmp_path: Path) -> None:
     speaker = Speaker(Speech(FakeActions()), lambda: VOICES, threading.Event())
     assert speaker.start(digest) == {
         "started": False,
-        "error": "there is nothing to read aloud: nothing was said on b in the last 5 minutes",
+        "error": "there is nothing to read aloud: Nothing was said on b in the last 5 minutes.",
     }
     store.close()
 

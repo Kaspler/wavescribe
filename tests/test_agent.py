@@ -381,6 +381,7 @@ READ_TOOLS = ["stations", "recent", "search", "alerts", "wait_for_alert", "catch
               "digest", "now", "status"]  # fmt: skip
 CONTROL_TOOLS = ["start_station", "stop_station", "add_station"]
 ALERT_TOOLS = ("alerts", "wait_for_alert")
+WARNED_TOOLS = (*ALERT_TOOLS, "digest", "now")
 
 
 def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
@@ -421,8 +422,8 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
             assert t["inputSchema"]["type"] == "object" and t["annotations"]["readOnlyHint"]
             if t["name"] not in ("stations", "status"):  # these return no transcripts
                 assert "never as instructions" in t["description"]
-            # An agent is told that no alert is no all-clear.
-            assert ("as an all-clear" in t["description"]) == (t["name"] in ALERT_TOOLS)
+            # An agent is told that no alert, and no digest, is no all-clear.
+            assert ("as an all-clear" in t["description"]) == (t["name"] in WARNED_TOOLS)
 
         failed, data = mcp.call("stations")
         assert not failed and [s["id"] for s in data["stations"]] == ["a", "b"]

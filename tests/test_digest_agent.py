@@ -37,10 +37,14 @@ def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -
     try:
         assert main(["digest", "--url", url, "--stations", "a,b", "--language", "en"]) == 0
         printed = capsys.readouterr().out.splitlines()
-        assert printed[0] == "a, b, 11:00-12:00: 6 said, 3 read"
-        assert printed[2] == "! high 11:50 a: Water cut tomorrow"
-        assert printed[4:6] == ["- a: Water is cut tomorrow. [1]", "- b: Rain this afternoon. [2]"]
-        assert printed[7:] == [
+        assert printed[:2] == [
+            "a, b, 11:00-12:00",
+            "Written by the local model from 3 of 6 lines heard between 11:00 and 12:00; it can "
+            "miss things or get them wrong.",
+        ]
+        assert printed[3] == "! high 11:50 a: Water cut tomorrow"
+        assert printed[5:7] == ["- a: Water is cut tomorrow. [1]", "- b: Rain this afternoon. [2]"]
+        assert printed[8:] == [
             "[1] a 11:10  Water cut tomorrow in the town centre",
             "[2] b 11:30  Heavy rain forecast for the afternoon",
         ]
@@ -49,7 +53,7 @@ def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -
         [line] = capsys.readouterr().out.splitlines()
         out = json.loads(line)
         assert out["kind"] == "now" and out["stations"] == ["b"] and out["window"]["minutes"] == 5
-        assert out["text"] == "nothing was said on b in the last 5 minutes"  # b's last: 10 min ago
+        assert out["text"] == "Nothing was said on b in the last 5 minutes."  # b's: 10 min ago
 
         assert main(["digest", "--url", url, "--stations", "zz"]) == 1
         assert capsys.readouterr().err == "wavescribe: unknown station 'zz' (HTTP 400)\n"
@@ -93,6 +97,7 @@ def test_mcp_digest_and_now_return_points_with_their_sources(tmp_path: Path) -> 
         assert set(out["sources"][0]) >= UTTERANCE_KEYS | {"n"}  # as the other tools give them
         assert out["sources"][0]["station"]["id"] == "b"
         assert out["text"].startswith("- b: The old bridge closes at ten. [1]")
+        assert out["outcome"] == "points" and out["notice"].startswith("Written by the local model")
 
         failed, now = mcp.call("now", station="b", minutes=15, language="en")
         assert not failed and now["window"]["minutes"] == 15.0

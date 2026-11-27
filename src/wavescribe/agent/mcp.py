@@ -97,14 +97,19 @@ LANGUAGE = {
     "stations are translated into).",
 }
 DIGEST = (
-    "Returns {text, points, sources, alerts, window, counts, empty}: text is the digest as "
-    "plain lines; points are {text, stations, sources}, sources being numbers among the "
-    "returned sources, the utterances cited, each with its n; alerts are those announced in "
-    "the window, as the alerts tool gives them, apart from the points; empty is true when "
-    "nothing of substance was said, and text then says so. The points come from a small model "
-    "reading speech recognition: check the sources before relying on them. It covers all "
-    "radio kept on this machine, including radio that isn't broadcast. Fails with the reason "
-    "when no language model is loaded. "
+    "Returns {text, points, sources, alerts, window, counts, outcome, notice, unread}: text is "
+    "the digest as plain lines; points are {text, stations, sources}, sources being numbers "
+    "among the returned sources, the utterances cited, each with its n; alerts are those "
+    "announced in the window, as the alerts tool gives them, apart from the points; outcome is "
+    "points, nothing_said, not_read (unread names the stations and why), nothing_stood_out or "
+    "unsourced (the model cited nothing, so nothing is shown), and text then says which in "
+    "Wavescribe's own words; notice says that the local model wrote it and from how much of "
+    "what was said. The points come from a small model reading a sample of speech "
+    "recognition: check the sources before relying on them. A digest can miss things or get "
+    "them wrong and is no warning system: never present it, or one without points, as an "
+    "all-clear, and point the user to official warnings when safety is at stake. It covers "
+    "all radio kept on this machine, including radio that isn't broadcast. Fails with the "
+    "reason when no language model is loaded. "
 )
 SPEAK = {
     "type": "boolean",
@@ -335,11 +340,10 @@ TOOLS = (
     ),
     Tool(
         "digest",
-        "What mattered on the radio while the user wasn't listening: a few points on the last "
-        "`minutes` (default 60, at most a day), the most important first, each naming the "
-        "station that said it. Wavescribe's local language model writes it from the "
-        "transcripts, behind live translation, so it takes from half a minute to a few "
-        "minutes. " + DIGEST + UNTRUSTED,
+        "A few points Wavescribe's local language model picked out of what the radio said over "
+        "the last `minutes` (default 60, at most a day), each naming the station and citing "
+        "the utterances it rests on. It is written behind live translation, so it takes from "
+        "half a minute to a few minutes. " + DIGEST + UNTRUSTED,
         _arguments(
             stations=STATIONS,
             minutes={
@@ -572,7 +576,17 @@ class Tools:
         out = self.client.digest(body)
         sources = out["sources"]
         cited = [{"n": s["n"], **e} for s, e in zip(sources, self._events(sources), strict=True)]
-        kept = ("text", "points", "window", "counts", "empty", "language", "speech")
+        kept = (
+            "text",
+            "points",
+            "window",
+            "counts",
+            "outcome",
+            "notice",
+            "unread",
+            "language",
+            "speech",
+        )
         return {
             **{k: out[k] for k in kept if k in out},
             "sources": cited,

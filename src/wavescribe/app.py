@@ -293,7 +293,9 @@ class App:
             llm = functools.partial(
                 self.pipeline.request_llm, name="digest", priority=DIGEST_PRIORITY
             )
-            self.hub.digester = Digester(store, lambda: self.config.stations, llm)
+            self.hub.digester = Digester(
+                store, lambda: self.config.stations, llm, running=self.running
+            )
             self.hub.speaker = Speaker(self.speech, self._alert_voices, self.hub._closed)
         self.digests = self._digest_schedule()
         from wavescribe.downloads import Downloads

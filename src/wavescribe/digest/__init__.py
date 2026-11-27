@@ -47,7 +47,7 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 from wavescribe.events import local_time
 from wavescribe.languages import language_name, same_language
 from wavescribe.log import event
+from wavescribe.radio.bandplan import policy_of
 from wavescribe.rules.text import NO_SPACES
 
 if TYPE_CHECKING:
@@ -66,6 +67,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 KINDS = ("digest", "now")
+# What became of a digest. "points": there are some. "nothing_said": nothing was kept from the
+# stations read in the window. "not_read": none of them could be read (radio whose text is
+# never kept, or a station not running). "nothing_stood_out": what was read held nothing of
+# substance, as the model or the selection found. "unsourced": the model's reply cited none of
+# what it read, so nothing of it is shown.
+OUTCOMES = ("points", "nothing_said", "not_read", "nothing_stood_out", "unsourced")
+SAMPLE = 10  # reading fewer than one line in this many, a digest says it read a sample
 DEFAULT_MINUTES = 60.0
 NOW_MINUTES = 5.0
 MAX_MINUTES = 24 * 60.0  # beyond a day, even two stages would read too thin a sample
@@ -199,6 +207,7 @@ class Digest:
     uncited: int = 0  # points the model gave without a source it was given, left out
     nothing: bool = False  # every reply said nothing of substance was said
     note: str | None = None  # why there are no points otherwise
+    unread: dict[str, str] = field(default_factory=dict)  # station -> why it wasn't read
     model: str | None = None
     timings: dict[str, int] = field(default_factory=dict)
 
@@ -221,13 +230,52 @@ class Digest:
                 out.setdefault(i, len(out) + 1)
         return out
 
+    @property
+    def outcome(self) -> str:
+        if self.points:
+            return "points"
+        if not sum(self.said.values()):
+            return "not_read" if len(self.unread) == len(self.request.stations) else "nothing_said"
+        return "nothing_stood_out" if self.nothing or not self.calls else "unsourced"
+
+    def coverage(self) -> str:
+        """How much of what was said the model read: "all 12 lines", "92 of 417 lines", "a
+        sample: 252 of 259,200 lines"."""
+        said = sum(self.said.values())
+        if self.read >= said:
+            return f"all {_lines(said)}"
+        sample = "a sample: " if self.read * SAMPLE < said else ""
+        return f"{sample}{self.read:,} of {_lines(said)}"
+
+    def notice(self) -> str | None:
+        """Who wrote the digest, from what: None when the model wasn't asked."""
+        if not self.calls:
+            return None
+        return (
+            f"Written by the local model from {self.coverage()} heard {_clock_span(self.request)}"
+            "; it can miss things or get them wrong."
+        )
+
     def text(self) -> str:
         """The digest as plain text: a point a line with the numbers of its sources, or the
-        one sentence that says why there are none."""
-        if not self.points:
-            if self.nothing:
-                said = sum(self.said.values())
-                return f"Nothing stood out in the {_lines(self.read)} read of {said} said."
+        sentences that say why there are none, in words of Wavescribe's own."""
+        outcome = self.outcome
+        if outcome != "points":
+            said = sum(self.said.values())
+            unread = ", ".join(f"{self.names.get(s, s)} ({why})" for s, why in self.unread.items())
+            unread = f"Not read: {unread}." if unread else ""
+            if outcome == "nothing_said":
+                heard = [s for s in self.request.stations if s not in self.unread]
+                where = (
+                    f"{_names(heard, self.names)} in the last {self.request.minutes:.0f} minutes"
+                )
+                return f"Nothing was said on {where}. {unread}".strip()
+            if outcome == "not_read":
+                return unread
+            if outcome == "nothing_stood_out" and not self.calls:
+                return f"Only music, station idents and repeats among the {_lines(said)} said."
+            if outcome == "nothing_stood_out":
+                return f"Nothing stood out in the {_lines(self.read)} read of {said:,} said."
             return self.note or ""
         n = self.numbered()
         return "\n".join(
@@ -267,7 +315,9 @@ class Digest:
                 {"n": k, **self.rows[i], "name": self.names.get(self.rows[i]["station"])}
                 for i, k in n.items()
             ],
-            "empty": not self.points,
+            "outcome": self.outcome,
+            "unread": dict(self.unread),
+            "notice": self.notice(),
             "text": self.text(),
             "model": self.model,
             "timings": self.timings,
@@ -284,9 +334,11 @@ class Digester:
         submit: Callable[[Callable[[Any], None]], bool],
         *,
         clock: Callable[[], float] = time.time,
+        running: Callable[[], Collection[str]] | None = None,
     ) -> None:
         self.store = store
         self._stations = stations  # read each time: the page adds and removes stations
+        self._running_now = running  # the stations running, when known
         self._submit = submit
         self._clock = clock
         self._running = threading.BoundedSemaphore(MAX_RUNNING)
@@ -359,7 +411,12 @@ class Digester:
         if kind == "digest" and not asked:
             # Not every station set up is running: a digest names only those it is about.
             said = self.store.count(station_ids=stations, since=since, until=now, exports=exports)
-            stations = [sid for sid in stations if said.get(sid)] or stations
+            running = self._running_now() if self._running_now is not None else stations
+            stations = (
+                [sid for sid in stations if said.get(sid)]
+                or [sid for sid in stations if sid in running]
+                or stations
+            )
         return Request(kind, tuple(stations), float(since), now, language)
 
     @staticmethod
@@ -400,6 +457,22 @@ class Digester:
                 lines.append(Line(u["id"], sid, u["t_start"], text))
                 out.rows[u["id"]] = u
             out.lines[sid] = lines
+        return out
+
+    def unread(self, request: Request, said: Mapping[str, int]) -> dict[str, str]:
+        """The stations of ``request`` that said nothing because nothing of them could be read,
+        with why: radio whose text is never kept, or a station that isn't running."""
+        stations = self.stations()
+        running = self._running_now() if self._running_now is not None else None
+        out = {}
+        for sid in request.stations:
+            if said.get(sid) or sid not in stations:
+                continue
+            policy = policy_of(stations[sid])
+            if policy is not None and policy.text_days == 0:
+                out[sid] = "its kind of radio keeps no text"
+            elif running is not None and sid not in running:
+                out[sid] = "isn't running"
         return out
 
     def alerts(self, request: Request, exports: Exports | None = None) -> list[dict[str, Any]]:
@@ -444,15 +517,9 @@ class Digester:
             self.alerts(request, exports),
             selection.rows,
         )
+        digest.unread = self.unread(request, selection.said)
         prompts = plan_prompts(selection.lines)
         if not prompts:
-            where = (
-                f"on {_names(request.stations, names)} in the last {request.minutes:.0f} minutes"
-            )
-            if selection.said:
-                digest.note = f"only music, station idents and repeats {where}"
-            else:
-                digest.note = f"nothing was said {where}"
             return digest
         if not self._running.acquire(blocking=False):
             raise Busy(f"{MAX_RUNNING} digests are already being made; try again in a minute")
@@ -496,7 +563,7 @@ class Digester:
             read=digest.read,
             calls=job.calls,
             points=len(job.points),
-            empty=not job.points,
+            outcome=digest.outcome,
             **digest.timings,
         )
         return digest
@@ -864,6 +931,12 @@ def _lines(n: int) -> str:
 def _names(ids: Iterable[str], names: Mapping[str, str]) -> str:
     shown = [names.get(sid, sid) for sid in ids]
     return ", ".join(shown[:-1]) + f" and {shown[-1]}" if len(shown) > 1 else "".join(shown)
+
+
+def _clock_span(request: Request) -> str:
+    """The window for people: "between 22:05 and 23:05", with the days when it spans two."""
+    span = _span(request)
+    return span.split(" on ")[0] if " on " in span else span
 
 
 def _span(request: Request) -> str:
