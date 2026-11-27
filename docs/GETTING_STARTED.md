@@ -450,7 +450,9 @@ each station's language. Read them, fix any that are wrong, and save.
   - **Let the model confirm** each match (`verify = true`): hits are checked by the local
     model in context before they're announced. It filters out songs, adverts, sport and other
     meanings of the word. A match the model couldn't check still goes out, marked
-    *not checked* and one severity lower (*When a match can't be checked*, below).
+    *not checked* and one severity lower; while the box is ticked, **When a match can't be
+    checked** under it chooses *One step lower*, *Its own severity* or *Wait for the check*
+    (below).
   - **Patterns (regular expressions)** match as well as words, such as a road and its number:
     `\bA-?\s?\d{1,3}\b.{0,30}\bclosed\b`. They ignore case and work in any language, but match
     the text exactly as written otherwise (no accents folded, no plurals). `\b` marks the edge
@@ -479,7 +481,9 @@ checked**: the notification's title has it after the severity ("MEDIUM, not chec
 water-cut · …"), and the alert's reason says why ("not checked by the LLM: it was busy; raised
 as medium, not high"). *Not checked* means the words were heard and nothing looked at what
 they were about: it can be the event, a song or a football team. What becomes of such a match
-is the rule's `unverified`, in `config/alerts.toml` (a rule made on the page has `"lower"`):
+is the rule's `unverified`: on the page, **When a match can't be checked** in the rule's
+*Advanced* (*One step lower*, *Its own severity*, *Wait for the check*), and in
+`config/alerts.toml` one of these three words (switching the check off on the page drops it):
 
 - `"lower"`, the default: raised one severity lower than it would have been. A *critical* match
   comes as *high*, a *high* one as *medium*, and a *medium* one as *low*, which is only

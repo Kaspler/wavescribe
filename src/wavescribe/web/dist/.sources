@@ -36,7 +36,7 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 f67ef5594f772ab41e3208fd6517327244285f83 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
-d7d506f2d60238d1dce34a8667ff37b575df2ba9 frontend/src/manage/AlertRules.tsx
+abfed1d426ad182339826627d4b8fca093ffd0e8 frontend/src/manage/AlertRules.tsx
 b7c38bd7694b8dc05265269ff48ad2cc80825320 frontend/src/manage/Caught.tsx
 3b4e0473f651c0262d8f8a68059690a9bfaf3274 frontend/src/manage/DialView.tsx
 7774ce4c96b048e5f3e8c24636aef3b6234cd4c3 frontend/src/manage/FeedApi.tsx
@@ -62,7 +62,7 @@ dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 16baa601a050446286a84ab9edd1f44752f442d7 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 8462bc03da016801dfd7271eefbb09367d9cdfc9 frontend/src/manage/dial.ts
-723b5deec3455e824eb5d4b7531638e944d142df frontend/src/manage/drafts.ts
+5809d78929ef5668680544b0366c7c8ad02bb409 frontend/src/manage/drafts.ts
 566be0651cd586525b96998225f1d504a261e47d frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
@@ -109,7 +109,7 @@ b8346db81c1de59110f722a54d1476a7c987e0a9 frontend/tests/channels.test.mjs
 cf67357d79e25e10e9b0e9e3299c3e3f3973c8cd frontend/tests/colNote.test.mjs
 ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
 25416519f29f0bc1ce9095757f1c28fa0753b57e frontend/tests/digest.test.mjs
-718802d0fc8bdd9f3d560b139f1376c73231ffe2 frontend/tests/drafts.test.mjs
+1529aca37ae80e84524f10c0d33f06e2c49c2b05 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 d551a2df95c0a9ebd58fde325d160571d4b19bc1 frontend/tests/hold.test.mjs
 20042eec724f4882d254fb7ff510ecddf205973d frontend/tests/langs.test.mjs

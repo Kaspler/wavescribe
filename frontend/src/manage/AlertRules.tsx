@@ -125,6 +125,13 @@ const KINDS: Record<string, { tag: string; title: string }> = {
   silence: { tag: "station silent", title: "New rule: a station goes silent" },
   traffic: { tag: "traffic", title: "New rule: a traffic announcement" },
 };
+/** What becomes of a match the model couldn't check (no model, too busy, no answer in 90 s): a
+ * keyword rule's `unverified`, with `verify`. "lower" is the server's default. */
+const UNVERIFIED = [
+  { value: "lower", label: "One step lower", hint: "Raised at once, one severity lower than it would have been, and marked “not checked”. The default." },
+  { value: "announce", label: "Its own severity", hint: "Raised at once at the severity it would have had, marked “not checked”." },
+  { value: "hold", label: "Wait for the check", hint: "Shown as Low while the model is asked again, then raised if it confirms the match. With no answer within 10 minutes, raised one severity lower." },
+] as const;
 const SILENCE_MINUTES = [0.5, 1440] as const; // the server's limits (rules/__init__.py)
 const SILENCE_DB = [-120, 0] as const;
 
@@ -186,6 +193,8 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
   const [topics, setTopics] = useState<string[]>(r.topics || []);
   const [near, setNear] = useState<string[]>(r.near || []);
   const [verify, setVerify] = useState(!!r.verify);
+  const [unverified, setUnverified] = useState<string>(UNVERIFIED.some((u) => u.value === r.unverified) ? r.unverified : "lower");
+  const takesUnverified = !!v.rule_keys?.keyword?.includes("unverified"); // a server from before it doesn't
   const [regex, setRegex] = useState<string>((r.regex || []).join("\n"));
   const [regexErr, setRegexErr] = useState<string | null>(null);
   const [after, setAfter] = useState(String(r.after_minutes ?? 5));
@@ -212,6 +221,7 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
         if (ws.length) t[l] = ws;
       }
       Object.assign(f, { terms: t, topics, near, verify, regex: lines(regex) });
+      if (takesUnverified) f.unverified = unverified; // left out with verify off (ruleBody)
     }
     return f;
   };
@@ -331,6 +341,13 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
               <Check checked={verify} onChange={setVerify}>Let the model confirm each match in context before raising it above Low</Check>
               <p className="field-hint">Fewer false alarms, a few seconds later.</p>
             </div>
+          )}
+          {words && verify && takesUnverified && (
+            <Field label="When a match can't be checked" wide
+                   hint={<>{UNVERIFIED.find((u) => u.value === unverified)?.hint} The model may not answer: none is loaded, it is busy, or 90 s pass.</>}>
+              <Segmented label="When a match can't be checked" value={unverified} onChange={setUnverified}
+                         options={UNVERIFIED.map(({ value, label }) => ({ value, label }))} />
+            </Field>
           )}
           {words && (
             <Field id="ru-regex" wide label="Patterns (regular expressions)"
