@@ -301,7 +301,7 @@ refused (400), so it never replaces that one and its secret or headers:
 | `headers` | extra headers, e.g. `Authorization` for the receiving end |
 | `secret` | signs each request, see below |
 | `context` | how many utterances before an alert's to include (2) |
-| `alert_max_age_hours` | how long an alert that hasn't got there is still sent, counted from when it was raised: 24 by default, more than 0 and at most 168 (a week). The page's form has no field for it: it is read from the output's `[[output]]` in `config/ui.toml`, and stays when the output is edited on the page |
+| `alert_max_age_hours` | how long an alert that hasn't got there is still sent, counted from when it was raised: 24 by default, more than 0 and at most 168 (a week). The page's form has no field for it: it is read from the output's `[[output]]` in `config/ui.toml`, stays when the output is edited on the page, and is said under the output's *Advanced* ("Alerts older than 24 h aren't sent") |
 
 **Delivery:**
 
@@ -340,7 +340,11 @@ refused (400), so it never replaces that one and its secret or headers:
 - **Not as news a day later.** An alert that still hasn't got there 24 hours after it was
   raised (`alert_max_age_hours`) is given up, not sent late. The delivery log says so (`not
   delivered within 24 h of the alert: given up`) and the output's status counts it. There is
-  no "never": with the queue's 2,000 this bounds what waits.
+  no "never": with the queue's 2,000 this bounds what waits. The page says, for each output
+  under *Settings → Connections* and *Health*, how many alerts wait and how long the oldest
+  has ("2 alerts waiting, oldest 3 min"), and, since the output started or was changed, how
+  many were given up as too old or dropped from a full queue (`alerts_waiting`,
+  `alerts_oldest_age_s`, `alerts_expired`, `alerts_dropped` in its status).
 - **Outputs that change.** An output that is edited goes on with the alerts that waited for
   it, at its new URL and in its new format, when it still asks for them (rules, stations,
   severity), without translations or context it no longer includes; its waiting utterances
@@ -355,7 +359,8 @@ refused (400), so it never replaces that one and its secret or headers:
   of Wavescribe loses nothing, a power cut or a system crash can lose the last moments.
 - Every request is logged, with its status, attempts and time, and for an alert its delivery
   id and whether it had waited through a restart (`after_restart`). An alert that was given
-  up or dropped is logged as a failure with the reason. The page shows the log; it is also
+  up or dropped is logged as a failure with the reason. The page shows the log, an alert that
+  waited through a restart marked "after a restart" and its delivery id on hover; it is also
   in the store's `deliveries` table.
 - A redirect (any 3xx) is never followed: it is a failed delivery, not tried again, logged
   with its status and where it pointed (`HTTP 302: redirected to …; not followed`). The

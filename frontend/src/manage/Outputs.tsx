@@ -5,6 +5,7 @@ import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangChips, Section, Segmented, Select, Table, Tag, act, toast,
 } from "../components/ui";
 import { type Any, ApiError, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useEvery, useLoad } from "./api";
+import { alertsLine, deliveryKey, maxAge } from "./deliveries";
 
 const SECRET_HEADER = /auth|token|key|secret|cookie|password/i; // values shown as dots
 
@@ -43,10 +44,13 @@ export function Outputs() {
         <Table caption="Deliveries" empty={log === "failed" ? "No failed deliveries." : "Nothing delivered yet."}
                cols={[{ label: "Time" }, { label: "Connection" }, { label: "Event" }, { label: "Result" }, { label: "Tries", num: true }, { label: "ms", num: true }, { label: "Error" }]}>
           {rows.map((d) => (
-            <tr key={d.id}>
+            <tr key={deliveryKey(d)}>
               <td className="num">{hms(d.t)}</td>
-              <td>{v.outputs.find((o: Any) => o.id === d.output_id)?.name || d.output_id || d.output}</td>
-              <td>{d.event}{d.ref ? ` ${d.ref}` : ""}</td>
+              <td>{v.outputs.find((o: Any) => o.id === (d.output_id ?? d.output))?.name || d.output_id || d.output}</td>
+              <td title={d.delivery ? `Delivery ${d.delivery} (X-Wavescribe-Delivery)` : undefined}>
+                {d.event}{d.ref ? ` ${d.ref}` : ""}
+                {d.after_restart && <span className="m-muted"> · after a restart</span>}
+              </td>
               <td>{d.ok ? <Tag tone="good">{d.status ?? "ok"}</Tag> : <Tag tone="warn">{d.status ?? "failed"}</Tag>}</td>
               <td className="num">{d.attempts}</td>
               <td className="num">{d.ms ?? "–"}</td>
@@ -61,6 +65,7 @@ export function Outputs() {
 
 function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: () => Promise<void> }) {
   const st = o.status || {};
+  const waiting = alertsLine(st);
   return (
     <li className={`m-item${o.enabled ? "" : " is-off"}`}>
       <div className="m-item-head">
@@ -86,6 +91,7 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
       </p>
       <p className="m-item-sub num">
         {st.sent ?? 0} sent · {st.failed ?? 0} failed · {st.dropped ?? 0} dropped · {st.queued ?? 0} queued
+        {waiting && ` · ${waiting}`}
         {st.last_error && <span className="is-trouble"> · last error: {st.last_error}</span>}
       </p>
       {o.enabled && st.waiting && (
@@ -113,6 +119,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   const [why, setWhy] = useState<string | null>(null);
   // A central Wavescribe's ingest takes utterances only: it runs its own rules (docs/FEED.md).
   const central = /\/feed\/v1\/ingest\/?$/.test(url.trim());
+  const maxAgeText = maxAge(o.alert_max_age_hours);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
   const save = async () => {
@@ -170,6 +177,12 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
             <Field id="o-ctx" label="Context before an alert" hint="Utterances before the alert's, from the same station.">
               <Input id="o-ctx" type="number" min={0} max={10} value={ctx} onChange={(e) => setCtx(e.target.value)} className="input-short" />
             </Field>
+            {maxAgeText && events.includes("alert") && (
+              <p className="m-hint field-wide">
+                Alerts older than {maxAgeText} aren't sent: one that hasn't got there by then is given up, not sent late.
+                It is <code>alert_max_age_hours</code> in this output's <code>[[output]]</code> in config/ui.toml.
+              </p>
+            )}
             <Field id="o-secret" label="Signing secret" hint="Each request then carries X-Wavescribe-Signature: an HMAC-SHA256 of timestamp.body (docs/FEED.md).">
               <Input id="o-secret" type="password" value={secret} autoComplete="new-password" placeholder={o.secret ? "Set; leave empty to keep it" : "Optional"} onChange={(e) => setSecret(e.target.value)} />
               {o.secret && <Check checked={dropSecret} onChange={setDropSecret}>Remove the secret</Check>}

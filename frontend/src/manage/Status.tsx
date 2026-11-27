@@ -10,6 +10,7 @@ import { ActButton, Advanced, Field, Input, Lamp, LinkButton, Section, Table, Ta
 import { T } from "../reading/strings";
 import { type Any, bytes, get, mb, num, post, secs, useEvery, useLoad } from "./api";
 import { checksLine } from "./checks";
+import { alertsLine } from "./deliveries";
 
 const kept = (v: string, old: number | null) => (v.trim() === "" ? old : +v);
 
@@ -232,7 +233,10 @@ function OutputHealth({ outs }: { outs: Record<string, Any> }) {
       <Table caption="Connections" cols={[{ label: "Connection" }, { label: "Sent", num: true }, { label: "Failed", num: true }, { label: "Dropped", num: true }, { label: "Queued", num: true }, { label: "Last error" }]}>
         {Object.entries(outs).map(([id, o]) => (
           <tr key={id}>
-            <td>{id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}</td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
+            <td>
+              {id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}
+              {alertsLine(o) && <span className="m-cell-note">{alertsLine(o)}</span>}
+            </td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
             <td className={o.last_error ? "is-trouble" : "m-muted"}>{o.last_error || "–"}</td>
           </tr>
         ))}

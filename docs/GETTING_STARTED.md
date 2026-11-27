@@ -713,7 +713,9 @@ passes that on to Wavescribe, but not the SIGINT that Ctrl-C sends in a Terminal
   heaviest part. Under *Models and queues*, while a rule has *Let the model confirm* on (or
   once a check was made), it counts the word matches the model was asked to confirm since
   Wavescribe started: confirmed, rejected, not run and why (timed out, failed, model busy, no
-  model loaded), and held to be asked again ([section 7](#7-get-alerts)).
+  model loaded), and held to be asked again ([section 7](#7-get-alerts)). For each webhook or
+  push it shows what was sent and failed, and the alerts that haven't got there yet, with how
+  long the oldest has waited ([FEED.md](FEED.md)).
 - **Check everything** with `uv run wavescribe doctor` ([Troubleshooting](#troubleshooting)).
 - **Update:** stop Wavescribe, then `git pull` (or download the ZIP again) and `uv sync`. With
   the service, run `uv run wavescribe service install` again afterwards to restart it on the
