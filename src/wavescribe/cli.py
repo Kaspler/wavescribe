@@ -29,6 +29,15 @@ DEFAULT_SETTINGS = Path("config/ui.toml")  # settings.DEFAULT_SETTINGS_PATH, wit
 NC_HELP = "acknowledge that a restricted model is for non-commercial use only"
 
 
+def typed(command: str) -> str:
+    """A Wavescribe command as it is typed in this install, for a line that says what to run
+    next: in a clone it runs through uv (``uv run wavescribe serve``), which is how the README
+    and the guide start it; installed as a package, it is ``wavescribe serve``."""
+    clone = Path(__file__).resolve().parents[2]
+    in_clone = (clone / "pyproject.toml").is_file() and (clone / "uv.lock").is_file()
+    return f"uv run wavescribe {command}" if in_clone else f"wavescribe {command}"
+
+
 def _size(gb: float | None) -> str:
     if not gb:
         return "-"
@@ -106,15 +115,17 @@ def cmd_models_fetch(args: argparse.Namespace) -> int:
             print(f"wavescribe: {e}", file=sys.stderr)
             return 2
         print(f"  accepted (recorded in {registry.licenses.path})")
-    for entry in entries:
-        print(f"{entry.id}: {entry.license} ({entry.license_url})")
-        print(f"  from {entry.source}" + (f" @ {entry.revision}" if entry.revision else ""))
-        path = registry.fetch(entry)
-        print(f"  -> {path}")
+    from wavescribe import modelfetch
+
+    code = modelfetch.run(registry, entries)
+    if code:
+        return code
     out = DATA_DIR / "THIRD_PARTY_MODELS.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(credits_markdown(registry), encoding="utf-8")
     print(f"credits for the installed models: {out}")
+    models = "The model is" if len(entries) == 1 else "The models are"
+    print(f"Done. {models} installed. Start Wavescribe with: {typed('serve --open')}")
     return 0
 
 

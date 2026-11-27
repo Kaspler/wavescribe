@@ -44,6 +44,22 @@ The registered models with their licences and whether each is installed and acce
 `models fetch [ID …]` downloads models from their rights holders: the ones named, or with no
 id the first model of each chain (about 8 GB).
 
+- It first says how many models and how much there is to download and how much disk is free,
+  and refuses when the disk has no room for it. A model that is installed already is skipped
+  without using the network.
+- In a terminal it shows progress bars. With its output going to a file or a pipe it prints a
+  line such as `300 MB of 1.5 GB (20%)` at most every 15 seconds.
+- A download that fails (no connection, a connection that broke off, a certificate this
+  computer doesn't trust, a full disk, an error answer) ends with one sentence after
+  `wavescribe:` and exit code 1. Files that finished are kept, and the same command again
+  downloads only what is missing; a file that was cut off starts again from its beginning.
+- Ctrl-C stops it at once, says which models finished and which didn't, and exits with 130.
+- When everything named is installed it writes `data/THIRD_PARTY_MODELS.md` and ends with the
+  command that starts Wavescribe.
+
+Certificates are checked against the operating system's trust store. The registered models
+are public: no Hugging Face account or token is needed.
+
 | Option | What it does |
 |---|---|
 | `--accept-license LICENCE` | accept an opt-in or restricted model's licence, by the licence id `models list` shows |

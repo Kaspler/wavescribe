@@ -17,48 +17,29 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from wavescribe.log import event
-from wavescribe.registry import ModelEntry, ModelRegistry
+from wavescribe.modelfetch import RETRY_ON_PAGE, dir_bytes, target_dir
+from wavescribe.registry import RETRY, ModelEntry, ModelRegistry
 
 log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT_S = 6 * 3600
 STOP_WAIT_S = 5.0  # after asking a download to stop, before it is killed
+ERROR_MAX_CHARS = 500  # the longest sentence `models fetch` ends with is under 400
 
 
 def fetch_command(model_id: str) -> list[str]:
     return [sys.executable, "-m", "wavescribe", "models", "fetch", model_id]
 
 
-def _hf_cache() -> Path:
-    if os.environ.get("HF_HUB_CACHE"):
-        return Path(os.environ["HF_HUB_CACHE"])
-    home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
-    return home / "hub"
-
-
-def target_dir(registry: ModelRegistry, entry: ModelEntry) -> Path:
-    """Where a download's bytes land (to measure progress)."""
-    if entry.kind == "hf":
-        return _hf_cache() / ("models--" + entry.location.replace("/", "--"))
-    return registry.models_dir / entry.id
-
-
-def dir_bytes(path: Path) -> int:
-    total = 0
-    if not path.exists():
-        return 0
-    for root, _dirs, files in os.walk(path):
-        for f in files:
-            p = Path(root) / f
-            if p.is_symlink():  # HF snapshots link to blobs: count the blobs only
-                continue
-            with contextlib.suppress(OSError):
-                total += p.stat().st_size
-    return total
+def _why(output: str) -> str:
+    """Why a download failed, for the page: the sentence `models fetch` ended with, where
+    "run the same command again" becomes what the page offers."""
+    lines = output.strip().splitlines()
+    line = (lines[-1] if lines else "failed").strip().removeprefix("wavescribe: ")
+    return line.replace(RETRY, RETRY_ON_PAGE)[:ERROR_MAX_CHARS]
 
 
 class Downloads:
@@ -112,8 +93,7 @@ class Downloads:
             elif self._closed:
                 job["state"], job["error"] = "failed", "stopped when Wavescribe stopped"
             else:
-                lines = (err or out or "").strip().splitlines()
-                job["state"], job["error"] = "failed", (lines[-1] if lines else "failed")[:300]
+                job["state"], job["error"] = "failed", _why(err or out or "")
         except (OSError, subprocess.SubprocessError) as e:
             job["state"], job["error"] = "failed", str(e)[:300]
         if job["state"] == "failed":

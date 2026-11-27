@@ -29,6 +29,31 @@ def test_a_download_still_running_stops_with_serve(tmp_path: Path, monkeypatch) 
     assert "stopped before" in fetching.status()["m"]["error"]
 
 
+def test_a_download_that_fails_shows_the_command_lines_sentence_on_the_page(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import urllib.error
+
+    from wavescribe import modelfetch
+
+    reg = registry(tmp_path)
+    refused = urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+    sentence = modelfetch.explain(reg.get("m"), refused)
+    assert "run the same command again and it downloads only what is missing" in sentence
+    code = "import sys; print('m: MIT'); print(sys.argv[1], file=sys.stderr); sys.exit(1)"
+    failing = [sys.executable, "-c", code, f"wavescribe: {sentence}"]
+    monkeypatch.setattr(downloads, "fetch_command", lambda _model: failing)
+    fetching = downloads.Downloads(reg)
+    fetching.start("m")
+    wait_for(lambda: fetching.status()["m"]["state"] == "failed")
+    error = fetching.status()["m"]["error"]
+    # The whole sentence, with what the page offers in place of "run the same command again".
+    assert error == sentence.replace("run the same command again", "start the download again")
+    assert error.startswith("couldn't download m: no connection to ")
+    assert error.endswith("start the download again and it downloads only what is missing.")
+    assert "Traceback" not in error and "command" not in error
+
+
 def test_serve_stopping_stops_its_downloads(tmp_path: Path, monkeypatch) -> None:
     app = make_app(tmp_path)
     stopped: list[bool] = []

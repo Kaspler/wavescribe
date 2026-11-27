@@ -89,7 +89,16 @@ uv run wavescribe models fetch
 ```
 
 That's about 8 GB: about four minutes on a fast fibre line, half an hour at 35 Mbit/s and an
-hour at 20 Mbit/s. If it is interrupted, run it again: what is already there is kept.
+hour at 20 Mbit/s. It says the total first and checks that the disk has room before it
+downloads anything, and its last line is the command that starts Wavescribe. These models need
+no account and no token.
+
+- **To stop it,** press **Ctrl-C**: it stops at once and says which models finished.
+- **With no network, or when the download breaks off,** it ends with one sentence that says
+  what failed. Nothing is broken: run the same command again. Models that finished are skipped,
+  and a model of several files keeps the files that finished; a file that was cut off starts
+  again from its beginning.
+- **A certificate error** is in [Troubleshooting](#troubleshooting).
 
 | Model | What it does | Size |
 |---|---|---|
@@ -668,6 +677,9 @@ safe to run while Wavescribe is running.
 |---|---|
 | The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. `uv run wavescribe doctor` says whether another program holds the port; if so, start it with another, e.g. `--port 8780`. |
 | The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that (`uv run wavescribe doctor` helps), then `uv run wavescribe service install` again. |
+| `models fetch` says *no connection* or *the connection broke off* | The Mac isn't online, or the download was cut off. Nothing is broken and the files that finished are kept: check the network and run the same command again (on the page, start the download again). It downloads only what is missing. |
+| `models fetch` says *this computer doesn't trust the certificate* | Downloads check the server's certificate against the certificates macOS trusts (the Keychain), as a browser does. Check the Mac's date and time. If a company proxy or a security program inspects HTTPS, add its certificate to the System keychain. Then run the same command again. |
+| `models fetch` says *not enough room on the disk* | It says how much is missing, and nothing was downloaded. Make that much room, or name fewer models (`uv run wavescribe models list` shows their sizes), then run it again. |
 | A station says *No text yet* | Its speech model isn't downloaded. Download it under Settings → **Languages and models**; the text starts when it finishes. Meanwhile the station can be played. |
 | No sound | **Start** only starts a station. Press **Listen** at the top of its column, or play it from **Listen** at the top of the page, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
 | Nonsense text, or the wrong language | Check the station's language under Settings → **Stations**. Some songs still get through the music filter; heavy accents, phone-ins and weak signals transcribe worse. |
