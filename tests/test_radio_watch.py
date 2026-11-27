@@ -89,7 +89,8 @@ def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits(
 @pytest.mark.parametrize(
     ("band", "region", "kind", "other"),
     [
-        ("marine", "1", "utility", "157.45-160.6 MHz is Land mobile radio (VHF), private radio"),
+        ("marine", "1", "utility",
+         "157.45-160.6 MHz is Business and public-service radio (VHF), private radio"),
         ("70cm", "1", "amateur",
          "433.05-434.7875 MHz is 433 MHz short-range devices, private radio"),
     ],
@@ -97,7 +98,7 @@ def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits(
 def test_a_band_of_two_classes_suggests_the_slice_with_most_of_its_own_channels(
     band: str, region: str, kind: str, other: str
 ) -> None:
-    """Marine VHF's middle is land mobile radio: private, so a slice there would keep nothing,
+    """Marine VHF's middle is business radio: private, so a slice there would keep nothing,
     and the old slice about the middle was mostly that."""
     with pytest.raises(WatchError) as e:
         plan_window(band, region, rate=RATE)

@@ -135,7 +135,7 @@ def _slice(
 ) -> tuple[float, float, int]:
     """A slice of a window a watch can be tuned to, in MHz, and its number of channels: the one
     with the most of the band's own channels and none of another kind between them, nearest the
-    middle among equals. Marine VHF's middle is land mobile radio, which keeps nothing: its
+    middle among equals. Marine VHF's middle is business radio, which keeps nothing: its
     slice is the ships' channels. The range is planned again from its own band, so the slice is
     checked as the user will give it."""
     own = _own(watch, region, width)
@@ -185,7 +185,8 @@ def _about_the_middle(
 
 def other_kinds(watch: Watch, region: str, width: float) -> str:
     """Where a window is another kind of radio than its band, in words ("157.45-160.6 MHz is
-    Land mobile radio (VHF), private radio"); "" when it is one kind all through."""
+    Business and public-service radio (VHF), private radio"); "" when it is one kind all
+    through."""
     band = _asked(watch, region)
     own_class = band.privacy if band is not None else None
     runs: list[tuple[int, int, str, list[str]]] = []  # first Hz, last Hz, class, band names

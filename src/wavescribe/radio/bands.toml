@@ -103,11 +103,12 @@ privacy = "utility"
 regions = ["1", "2", "3"]
 
 # Between the ships' channels (up to 157.425) and the coast stations' (from 160.625) marine VHF
-# has none: in many countries this is land mobile radio, businesses' and services' own. Being
-# narrower than the marine band, it is what a frequency here is looked up as.
+# has none: in many countries this is land mobile radio, businesses' and services' own (taxis,
+# utilities, site radio, some public services). Being narrower than the marine band, it is what
+# a frequency here is looked up as. The id keeps the technical term; the name is plain.
 [[band]]
 id = "land-mobile-vhf"
-name = "Land mobile radio (VHF)"
+name = "Business and public-service radio (VHF)"
 start = 157.45
 stop = 160.6
 mode = "nfm"
