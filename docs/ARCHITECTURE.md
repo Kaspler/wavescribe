@@ -668,7 +668,11 @@ receiver, and on each of those dongles) says when another program holds it: `{pi
 other_wavescribe, reason}`, else null. `busy_code` says it in one word for the page, the first
 that applies: `scan`, `live` (the hand tuner), `watch` (a running watch, even beside stations),
 `station`, `monitor` (the antenna test's spectrum monitor), `other_program` (`held_elsewhere`),
-else null. Each receiver keeps its full `serial`, so Settings can match a stick to its letter;
+else null. Every view of a receiver (these, `GET /api/manage/receivers` and the hand tuner's
+`/api/manage/live/<id>`, where the hand tuner may have moved it) gives `span_mhz` as `[lo, hi]`
+in MHz: what it takes in, its centre ± half its sample rate (`span_mhz()`); a channel is heard
+a margin inside those edges (120 kHz for broadcast FM, 60 kHz for a narrow channel). Each
+receiver keeps its full `serial`, so Settings can match a stick to its letter;
 the scan job (`scan`) names its receiver by `device` and its dongle by the serial's last
 characters only (`masked_serial`: `"…042"`), since a job's words get pasted into reports; the
 saved scans and `last_scan` keep the full serial. The job's `started` is when it began (Unix

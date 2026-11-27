@@ -328,6 +328,24 @@ def test_each_receiver_says_in_a_word_what_holds_it(
         r.close()
 
 
+def test_every_view_of_a_receiver_gives_what_it_takes_in_as_lo_and_hi(tmp_path: Path) -> None:
+    raw = stations(98.0)
+    raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]  # wider than 1.92 MS/s
+    r = running(tmp_path, raw)
+    try:
+        [rx] = r.call("GET", "/api/manage/radio")[1]["receivers"]
+        [dev] = r.call("GET", "/api/manage/receivers")[1]["devices"]
+        tuner = r.call("GET", "/api/manage/live/a")[1]
+        assert rx["span_mhz"] == dev["span_mhz"] == tuner["span_mhz"] == [96.8, 99.2]
+        status, moved = r.call("POST", "/api/manage/receivers/a",
+                               {"center_mhz": 145.00625, "sample_rate": 1_920_000})  # fmt: skip
+        assert status == 200 and moved["span_mhz"] == [144.04625, 145.96625], moved
+        [rx] = r.call("GET", "/api/manage/radio")[1]["receivers"]
+        assert rx["span_mhz"] == moved["span_mhz"]
+    finally:
+        r.close()
+
+
 def test_the_models_say_which_can_tell_languages_apart(tmp_path: Path) -> None:
     from dataclasses import replace
 

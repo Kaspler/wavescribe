@@ -1075,7 +1075,7 @@ def test_the_page_offers_the_control_centre_only_to_this_machine(
 def test_dongles_are_added_and_removed_from_the_page(node: Running) -> None:
     dongle = {"id": "x", "serial": "SN0042", "center_mhz": 95.0, "gain_db": 20}
     status, dev = node.call("POST", "/api/manage/receivers", dongle)
-    assert status == 200 and dev["origin"] == "page" and dev["span_mhz"] == [93.92, 96.08]
+    assert status == 200 and dev["origin"] == "page" and dev["span_mhz"] == [93.8, 96.2]
     assert node.call("POST", "/api/manage/receivers", {"id": "y", "serial": "1"})[0] == 400
     for bad in ({"serial": "00000001", "center_mhz": 98, "gain_db": 30}, {**dongle, "id": "z "}):
         assert node.call("POST", "/api/manage/receivers", bad)[0] == 400  # nothing half-saved

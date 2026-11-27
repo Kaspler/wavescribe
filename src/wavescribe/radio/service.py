@@ -56,6 +56,14 @@ def _coded(e: Exception) -> RadioError:
     return RadioError(sentence(str(e)), getattr(e, "code", None), **getattr(e, "extra", {}))
 
 
+def span_mhz(d: Any) -> list[float]:
+    """What a receiver tuned as ``d`` takes in, ``[lo, hi]`` in MHz: its centre ± half its sample
+    rate, as every view of a receiver gives it (``span_mhz``). A channel is heard a margin inside
+    these edges (``dsp.margin_hz``: 120 kHz for broadcast FM, 60 kHz for a narrow channel)."""
+    return [round((d.center_hz - d.sample_rate / 2) / 1e6, 6),
+            round((d.center_hz + d.sample_rate / 2) / 1e6, 6)]  # fmt: skip
+
+
 class RadioService:
     def __init__(self, app: App, catalog: Catalog | None = None) -> None:
         self.app = app
@@ -100,7 +108,7 @@ class RadioService:
                     else "monitor" if d.id in _monitors else None)  # fmt: skip
             out.append({
                 "id": d.id, "serial": d.serial, "gain_db": d.gain_db,
-                "center_mhz": d.center_hz / 1e6, "span_mhz": d.sample_rate / 1e6,
+                "center_mhz": d.center_hz / 1e6, "span_mhz": span_mhz(d),
                 "busy": busy, "busy_code": code, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
                               "running": s.id in running, "out_of_reach": s.out_of_reach}

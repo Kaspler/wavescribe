@@ -43,7 +43,7 @@ from wavescribe.dsp.rds import RdsDecoder
 from wavescribe.dsp.wfm import WfmDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import Band, lookup, mhz_text
-from wavescribe.radio.service import RadioError
+from wavescribe.radio.service import RadioError, span_mhz
 from wavescribe.radio.words import joined, receiver_name, sentence, them
 from wavescribe.sources import SourceHealth
 
@@ -459,7 +459,7 @@ class LiveService:
         cfg = rx.device.config if rx else self._current_config(d)
         out: dict[str, Any] = {
             "id": d.id, "device": d.id, "open": rx is not None, "center_mhz": cfg.center_hz / 1e6,
-            "span_mhz": cfg.sample_rate / 1e6, "gain_db": cfg.gain_db,
+            "span_mhz": span_mhz(cfg), "gain_db": cfg.gain_db,
             "holders": self._holders(d.id), "paused": self._names(
                 (self._paused.get(d.id) or {}).get("stations", [])),
         }  # fmt: skip

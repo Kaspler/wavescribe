@@ -324,6 +324,7 @@ _monitors: dict[str, Any] = {}
 
 
 def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
+    from wavescribe.radio.service import span_mhz
     from wavescribe.sources import sdr
 
     status = app.pipeline.status()["stations"]
@@ -337,8 +338,7 @@ def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
             **device_dict(d),
             "origin": "page" if d.id in page_devices else "file",
             "overridden": sorted(overrides.get(d.id, {})),
-            "span_mhz": [round((d.center_hz - d.sample_rate * 0.45) / 1e6, 3),
-                         round((d.center_hz + d.sample_rate * 0.45) / 1e6, 3)],
+            "span_mhz": span_mhz(d),  # what it takes in, [lo, hi], as every view gives it
             "running": dev is not None and dev.connected,
             "reconnects": dev.reconnects if dev else 0,
             "clipped": dev.clipped if dev else None,
