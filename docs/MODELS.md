@@ -168,7 +168,7 @@ backend supports its format. These models (tier `byo`) never join the chains: na
 `--asr <id>` or `--translator <id>`. The app warns about unknown licences and unpinned
 revisions, and complying with the licence is your responsibility.
 
-## Languages used so far
+## Languages measured
 
 Portuguese stations (pt-PT) and world news stations in several languages, translated into
 English and other languages.

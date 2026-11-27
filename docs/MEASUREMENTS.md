@@ -89,7 +89,7 @@ Qwen3.5's English is usually more natural, and it repairs ASR errors ("Estrela A
 slips too: one duplicated word, an untranslated *duende*, and "at the bottom" for *no fundo*,
 where MADLAD's "deep down" was right. **The prompt must name languages.** Asked for "uk", Qwen
 answered in English (UK as in United Kingdom), so `language_name()` takes English names from
-CLDR via Babel. **Decision:** Qwen3.5-9B is the default translator; MADLAD stays in the chain as
+CLDR via Babel. **Default:** Qwen3.5-9B is the default translator; MADLAD stays in the chain as
 the CPU fallback. Power on battery wasn't measured.
 
 **ASR language confusion.** Parakeet v3 picks the language itself and can't be told which one to
