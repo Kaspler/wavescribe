@@ -129,11 +129,14 @@ export function OnTheAir() {
   const canWatch = useWatchesHere();
   const { data: st, reload: reloadStations } = useLoad(() => (canWatch ? get("/stations") : Promise.resolve(null)), [canWatch]);
   useEvery(10000, reloadStations, canWatch);
+  // What opened the form: the focus goes back there when it closes, while it is still there.
+  const opener = useRef<HTMLElement | null>(null);
   if (!v) return loading(error);
   const watches: Any[] = ((st?.stations || []) as Any[]).filter((s) => s.watch != null);
   // The form is further down the page: it is brought into view, and the focus goes to its first
   // field, so the keyboard continues where the eyes go.
   const openAdd = (t: Any) => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAdd(t);
     requestAnimationFrame(() => {
       const h = document.getElementById("rd-tune");
@@ -160,7 +163,11 @@ export function OnTheAir() {
       <Finder v={v} job={job} running={running} onJob={setJob} onAdd={openAdd} reload={reload} tuner={tuner}
               watches={canWatch ? watches : null} want={want} onWatched={async () => { await reloadStations(); await reload(); await refreshPage(); }} />
       {add && <AddFromAir v={v} pre={add} key={`${add.mhz}-${add.t}`} tuner={tuner}
-                          onDone={async () => { setAdd(null); await Promise.all([reload(), reloadStations(), tuner.reload()]); }} />}
+                          onDone={async () => {
+                            setAdd(null);
+                            await Promise.all([reload(), reloadStations(), tuner.reload()]);
+                            requestAnimationFrame(() => { if (opener.current?.isConnected) opener.current.focus(); });
+                          }} />}
       {canWatch && <Caught bands={v.bands} watches={watches} keptNothing={keptNothing} onAdd={openAdd} onChooseBand={firstWatch} />}
       <Heard v={v} onAdd={openAdd} reload={reload} />
     </>

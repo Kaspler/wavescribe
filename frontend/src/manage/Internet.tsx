@@ -12,7 +12,14 @@ import { MODE_HINT, primaryTargets } from "./Stations";
 
 export function OnTheInternet() {
   const { data, error, reload } = useLoad(() => get("/stations"));
-  const [pre, setPre] = useState<{ from: string; p: Pre } | null>(null);
+  const [pre, setOpen] = useState<{ from: string; p: Pre } | null>(null);
+  // What opened the form: the focus goes back there when it closes, while it is still there.
+  const opener = useRef<HTMLElement | null>(null);
+  const setPre = (next: { from: string; p: Pre } | null) => {
+    if (next) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    else requestAnimationFrame(() => { if (opener.current?.isConnected) opener.current.focus(); });
+    setOpen(next);
+  };
   if (!data) return <p className="m-loading">{error ? `Couldn't load the stations: ${error}` : "Loading…"}</p>;
   const stations: Any[] = data.stations;
   const useFrom = (from: string) => (url: string, extra: Partial<Pre> & { hls?: boolean } = {}) => {

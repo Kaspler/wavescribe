@@ -14,7 +14,7 @@ c480ad0ffc8c3b901806751b47c26cefbde27006 frontend/public/manifest.webmanifest
 938af0ba42364a8a08d3570f8ef90132e7f44165 frontend/src/components/ErrorBoundary.tsx
 4ab42ccffcf3b4213a254db5534cd4eec8ab917d frontend/src/components/Icon.tsx
 852dd08acc3e316d5b69957ce66c3dcc7a219058 frontend/src/components/ui.css
-9e41bd9a7c139422d4aab88ed9983f0412936fcb frontend/src/components/ui.tsx
+a99b44e63a2db7b7b3c74ea0f8f1183a2eb5390e frontend/src/components/ui.tsx
 4a3d400b065d135d842753dbd21c8cefcdfd75ed frontend/src/lib/alerts.ts
 fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 6393956f39e5c9bf33fd16582ee192e7e97e6bf6 frontend/src/lib/auth.ts
@@ -35,7 +35,7 @@ e00621249cbda3ff7637b3c1c1d640379057b5b5 frontend/src/lib/lang.ts
 e52d45f769aa3390c41590485760ddf9efaf3f3f frontend/src/manage/Caught.tsx
 7f2671dbbca3f95bd458ad913c77e923bd43c4ef frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
-bd888117fb0d9575aef81e607e54dcce4446a872 frontend/src/manage/Internet.tsx
+03f722037f7357d28133c9904e8bae068778978d frontend/src/manage/Internet.tsx
 2ec69dc917b64bbdf87249c5678628e89d58c16f frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
@@ -43,7 +43,7 @@ ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 0830993c56cdfd17da1789b13ce5e439758d600a frontend/src/manage/MoveStation.tsx
 157bdbf49a829e680d3a4e9a67b6add81f2be726 frontend/src/manage/MoveThere.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-56d7ba59162b6c67507e4c60fd61615b3de06570 frontend/src/manage/Radio.tsx
+c8b4b38d2569f0d378a70ee643041a5a1e9b9220 frontend/src/manage/Radio.tsx
 db88957c9b82f3898a70850a4db4dd7c7f1fb5b0 frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx

@@ -401,9 +401,20 @@ export async function act<T>(fn: () => Promise<T>, done?: string): Promise<T | u
 /** A button whose click runs `act`, disabled while it runs. */
 export function ActButton({ run, done, ...rest }: ButtonProps & { run: () => Promise<unknown>; done?: string }) {
   const [busy, setBusy] = useState(false);
-  return (
-    <Button {...rest} busy={busy} onClick={async () => { setBusy(true); try { await act(run, done); } finally { setBusy(false); } }} />
-  );
+  const self = useRef<HTMLButtonElement>(null);
+  const press = async () => {
+    // Disabled while it runs, it drops the focus: it takes it back after, where it is still on the
+    // page and nothing else took it meanwhile.
+    const had = document.activeElement === self.current;
+    setBusy(true);
+    try {
+      await act(run, done);
+    } finally {
+      setBusy(false);
+      if (had) requestAnimationFrame(() => { if (self.current?.isConnected && document.activeElement === document.body) self.current.focus(); });
+    }
+  };
+  return <Button {...rest} ref={self} busy={busy} onClick={press} />;
 }
 
 /** Closes a popover on Escape or a click outside it, and returns focus to its button. */
