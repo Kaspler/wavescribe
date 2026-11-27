@@ -44,7 +44,9 @@ neither the start of the window nor one station has the digest to itself, and wh
 last, which someone who missed it most needs, comes first. It joins the notes of one story
 with "+", so the story is chosen once; the point is the first of them, with its own sources,
 as the joins are too often wrong to take the others' on their word. When it chooses fewer
-than asked, the notes it left out make up the rest, in the order shown.
+than asked, the digest has fewer points: it left the others out on purpose (advertising, a
+station's trailers). Only when its reply names no note do the notes stand in, in the order
+shown.
 
 The model is the translation LLM, shared with live translation, alerts and Ask. Each call of a
 digest is a job of its own at ``DIGEST_PRIORITY``, behind every station's backlog, queued only
@@ -982,9 +984,13 @@ class _Job:
         reply = llm.complete(messages, max_tokens=CHOICE_TOKENS, on_text=self._give_way)
         groups = parse_choice(reply, len(notes), POINTS["digest"])
         chosen = [g[0] for g in groups]
-        told = {n for g in groups if len(g) <= MAX_JOIN for n in g}
-        rest = [n for n in range(1, len(notes) + 1) if n not in told and n not in chosen]
-        self.points = [notes[n - 1] for n in chosen + rest][: POINTS["digest"]]
+        # The notes it left out, it left out on purpose (advertising, a trailer): fewer chosen
+        # is fewer points. Not so those of a "join" too long to be one story, which it named:
+        # they follow, each a point of its own. A reply that names no note chose nothing, and
+        # the notes stand in, in the order shown.
+        lumped = [n for g in groups if len(g) > MAX_JOIN for n in g[1:]]
+        numbers = chosen + lumped if groups else list(range(1, len(notes) + 1))
+        self.points = [notes[n - 1] for n in numbers][: POINTS["digest"]]
         return True
 
     def _reply(

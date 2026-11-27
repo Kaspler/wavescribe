@@ -407,11 +407,8 @@ def test_two_stages_choose_among_notes_and_keep_the_sources_of_each(tmp_path: Pa
     assert "Which 5 of them matter most" in choice and "of two that matter as much" in choice
     assert "Advertising, sponsorship and the station's promotion of itself" in choice
     # The note joined to the first is left out, sources and all: a join isn't trusted. Two
-    # chosen of five asked for, the notes left out make up the rest, in the order shown.
-    assert digest.text() == (
-        "- a: Latest note on a. [1]\n- c: A note on c. [2]\n- b: A note on b. [3]\n"
-        "- a: Second note on a. [4]"
-    )
+    # chosen of five asked for are two points: the notes it left out, it left out on purpose.
+    assert digest.text() == "- a: Latest note on a. [1]\n- c: A note on c. [2]"
     assert digest.read == sum(p.count("\n[") for p in llm.prompts[:9])
     store.close()
 
@@ -698,6 +695,26 @@ def test_an_unreadable_choice_keeps_notes_from_each_station(tmp_path: Path) -> N
     lumped = FakeLlm(*notes, *notes, "1+2+3+4+5+6+7+8")
     d = digester(store, lumped, stations=[station("a"), station("b")])
     assert len(d.run(d.request({"minutes": 60})).points) == 5
+    store.close()
+
+
+def test_a_choice_of_fewer_notes_than_asked_is_a_shorter_digest(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    for i in range(200):
+        add(store, "a", f"a frase {i} " + "palavras " * 30, NOW - 3500 + i * 17)
+    notes = [
+        "- A sale at a shop [1].\n- The road north is closed [2].",
+        "- A concert the station holds [1].\n- Its morning show [2].",
+        "- The river is rising [1].\n- Tickets for a show [2].",
+    ]
+    # Shown the latest part first, a part's note in turn: the river, the concert, the sale, the
+    # tickets, the morning show, the road.
+    llm = FakeLlm(*notes, "1, 6")
+    d = digester(store, llm, stations=[station("a")])
+    digest = d.run(d.request({"minutes": 60}))
+    # The four it left out stay out: nothing makes the digest up to five.
+    assert [p.text for p in digest.points] == ["The river is rising.", "The road north is closed."]
+    assert digest.outcome == "points" and digest.calls == 4
     store.close()
 
 

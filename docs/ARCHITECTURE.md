@@ -361,9 +361,13 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    which is about the last excerpts); otherwise a short last call picks the five points that
    matter most, by number, from the notes shown one from each part in turn, the latest part
    first, each with the time of what it rests on, since a small model favours what it reads
-   first; of two that matter as much, it is asked for the later. When a model lists more
-   points than asked, each station's share is spread over its list, first and last, never
-   its first few. When the model read a sample, the notice says it was spread evenly.
+   first; of two that matter as much, it is asked for the later. When it picks fewer than
+   five, the digest has fewer points: the notes it left out, it left out on purpose (on real
+   transcripts, mostly advertising and trailers), so nothing makes the number up. Only a reply
+   that names no note is replaced, by the notes in the order shown. When a
+   model lists more points than asked in a digest of one call, each station's share is spread
+   over its list, first and last, never its first few. When the model read a sample, the
+   notice says it was spread evenly.
 3. **Queue.** Each call is a job of its own at the lowest priority, behind every station's
    translation, so live translation runs between them; an hour of two busy stations takes
    a minute or two while they are translated. While a call generates, it checks between tokens
