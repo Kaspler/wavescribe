@@ -35,8 +35,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 from wavescribe import jsonsafe
+from wavescribe.asr.language import AUTO as AUTO_LANGUAGE
 from wavescribe.audio import SAMPLE_RATE, AudioChunk
-from wavescribe.config import StationsConfig
+from wavescribe.config import Station, StationsConfig
 from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
 from wavescribe.pipeline import Pipeline, Plan, Result
@@ -426,6 +427,7 @@ class WebHub:
                     "asr_model": entry[0].id if entry else ("remote" if s.remote else None),
                     "kind": "remote" if s.remote else "sdr" if s.sdr else "stream",
                     "disabled": s.disabled,
+                    **_radio_fields(s),
                 }
             )
         recent = self.history(exports=exports)
@@ -526,6 +528,26 @@ class WebHub:
     def _status_loop(self) -> None:
         while not self._closed.wait(STATUS_INTERVAL_S):
             self.publish("status", self.status())
+
+
+def _radio_fields(s: Station) -> dict[str, Any]:
+    """What ``/api/state`` says of a station's radio: its receiver (``device``), the band id or
+    ``[lo_mhz, hi_mhz]`` it watches (``watch``) and the languages a watch transcribes (an
+    empty list: any it tells), its privacy class, and why its receiver doesn't hear it where
+    that is tuned (``out_of_reach``). None where they don't apply (a stream, a fixed frequency)."""
+    t = s.sdr
+    watch = t.watch if t is not None else None
+    spec, languages = None, None
+    if watch is not None:
+        spec = watch.spec if isinstance(watch.spec, str) else list(watch.spec)
+        languages = list(s.languages) if s.language == AUTO_LANGUAGE else [s.language]
+    return {
+        "device": t.device.id if t is not None else None,
+        "watch": spec,
+        "languages": languages,
+        "privacy": s.privacy,
+        "out_of_reach": s.out_of_reach,
+    }
 
 
 def _payload(result: Result, *, final: bool, mt: bool, audio: bool = False) -> dict[str, Any]:

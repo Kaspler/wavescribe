@@ -204,6 +204,16 @@ display language, text size, theme, and which stations to show; these live in th
 only. A station not translated into the viewer's language falls back to its first
 translation, and the settings say so.
 
+`GET /api/state` gives each station with what the page shows of it: besides its name, languages,
+mode and whether it runs (`available`, with `reason` when it can't), its radio, so the page
+needn't work that out: `device` (its receiver's id; null for a stream or another machine's
+station), `watch` (what a watch listens to: the band id, or `[lo_mhz, hi_mhz]` for a range; null
+for any other station), `languages` (the languages a watch transcribes: its own, or those
+language `auto` is narrowed to, `[]` for any Whisper tells; null for any other station),
+`privacy` (its class, radio/bandplan.py) and `out_of_reach` (why its receiver doesn't hear it
+where that is tuned, the sentence `reason` gives unless the station is switched off; null when
+it is heard).
+
 It binds to 127.0.0.1 by default. `--lan` binds every interface and prints the LAN addresses for
 phones and tablets; requests that don't come from the machine itself are read-only (they can read
 and listen but not start or stop stations), and every POST needs an `X-Wavescribe` header, which
