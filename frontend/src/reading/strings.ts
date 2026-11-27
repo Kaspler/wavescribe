@@ -4,6 +4,19 @@
 const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
 /** ", about 1.5 GB", ", a few megabytes", or nothing while the size isn't known. */
 const about = (gb: number | null) => (gb == null ? "" : gb >= 0.1 ? `, about ${gb.toFixed(1)} GB` : ", a few megabytes");
+/** What the model's work ahead of a summary is, by its kind (pipeline.work_kind). */
+const WORK: Record<string, string> = {
+  translation: "live translation",
+  alert: "alerts",
+  check: "checks of alert matches",
+  rules: "alert rules",
+  question: "questions",
+  digest: "another summary",
+  model: "a model loading",
+  other: "other work",
+};
+/** "40 s", "2 min": about how long, for a wait that is only a guess. */
+const roughly = (s: number) => (s < 60 ? `${Math.max(1, Math.round(s))} s` : `${Math.round(s / 60)} min`);
 /** Why a line has no translation, by the reason its flag gives (T.noTranslationWhy). */
 const NO_TRANSLATION: Record<string, string> = {
   declined: "No translation: the model couldn't translate this line.",
@@ -231,7 +244,14 @@ export const T = {
   oneAtATime: "One summary at a time: cancel this one to ask for another.",
   lastSummary: (what: string, at: string) => `${what}, asked at ${at}`,
   writing: "Writing the summary…",
-  writingCost: "Up to a minute: live translation goes first.",
+  writingCost: "Live translation goes first, so it can take a few minutes.",
+  // Where a summary being made stands (digest.ts, waitOf), in place of "Writing the summary…".
+  summaryInLine: (behind: number) =>
+    behind > 0 ? `Waiting for its turn, behind ${behind} other ${behind === 1 ? "summary" : "summaries"}` : "Waiting for its turn",
+  summaryBehind: (what: string[], turnIn: number | null) =>
+    `${what.length ? `Waiting behind ${and(what.map((k) => WORK[k] || k.replace(/_/g, " ")))}` : "Waiting for the model"}` +
+    `${turnIn ? `; its turn within about ${roughly(turnIn)}` : ""}`,
+  summaryPart: (call: number, calls: number) => `Writing: part ${call} of ${calls}`,
   cancel: "Cancel",
   show: "Show",
   cancelling: "Cancelling…",

@@ -265,8 +265,11 @@ since you last looked when this browser knows. It covers every running station i
 whether or not its column is on screen ("Showing 2 of 3" changes nothing); **Choose stations**
 in the same menu leaves some out until the page is loaded again, and the summary names the
 stations it covers. A column's **⋯** menu asks for that station alone, or *What are they
-talking about now?* in a line under its name. When the model is busy, **Try again at …** names
-the second from which the button works. The points come beside the columns (on a phone, in their place); press a point's
+talking about now?* in a line under its name. While one is being made, the panel says where it
+stands: waiting for its turn behind other summaries, waiting behind the model's other work
+(live translation, alerts…) with about when its turn comes, or writing, part 2 of 3. When the
+model is busy, **Try again at …** names the second from which the button works. The points come
+beside the columns (on a phone, in their place); press a point's
 time to read that line in the transcript. **Cancel** stops one being written, on the server too,
 and so does leaving the page. On the Wavescribe machine, **Read it aloud** under a summary has
 the Mac read it and **Stop** ends that; *Read it aloud on this Mac when it's ready* reads one as

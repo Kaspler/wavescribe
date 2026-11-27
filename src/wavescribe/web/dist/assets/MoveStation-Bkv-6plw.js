@@ -1,1 +1,0 @@
-export{t as default}from"./MoveThere-RZg1-jal.js";

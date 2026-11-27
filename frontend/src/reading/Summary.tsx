@@ -17,7 +17,7 @@ import { langNameEn } from "../lib/lang";
 import { Aloud, readAloud, stopReading } from "./aloud";
 import {
   type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, lastNight, linksOf, readingAt, retryWait, saidBy,
-  shown, sinceClock, untilClock, windowProblem,
+  shown, sinceClock, untilClock, waitOf, windowProblem,
 } from "./digest";
 import { T } from "./strings";
 import {
@@ -307,11 +307,25 @@ function CancelButton({ job }: { job: Job }) {
   );
 }
 
+/** Where the summary being made stands, as the status the page gets says it: in line behind
+ * other summaries, waiting behind the model's other work, or writing which part; until the
+ * status says, or from a server that doesn't, that it is being written. */
+function Progress({ job }: { job: Job }) {
+  useTopics("status");
+  const w = waitOf(S.status, job.id);
+  const line = !w ? T.writing
+    : w.state === "in_line" ? T.summaryInLine(w.behind)
+    : w.state === "waiting" ? T.summaryBehind(w.what, w.turnIn)
+    : w.call != null && w.calls != null && w.calls > 1 ? T.summaryPart(w.call, w.calls)
+    : T.writing;
+  return <p className="sum-working-line">{line} <Elapsed since={job.asked} /></p>;
+}
+
 function Body({ job }: { job: Job }) {
   if (making(job)) {
     return (
       <div className="sum-working">
-        <p className="sum-working-line">{T.writing} <Elapsed since={job.asked} /></p>
+        <Progress job={job} />
         <p className="sum-cost">{T.writingCost}</p>
         <CancelButton job={job} />
       </div>

@@ -260,7 +260,7 @@ const OFF = ["no_store", "no_llm", "not_set_up"];
  * before any digest is looked at: a read token wanted (401), or this device not allowed to use
  * the model (403). Any other code is shown in the server's words. `now`: seconds since 1970. */
 export function failureOf(status: number, data: unknown, o: { retryAfter?: string | null; now?: number } = {}): Failure {
-  const d = (data && typeof data === "object" ? data : {}) as { error?: unknown; code?: unknown; max_minutes?: unknown };
+  const d = (data && typeof data === "object" ? data : {}) as { error?: unknown; code?: unknown; max_minutes?: unknown; retry_after_s?: unknown };
   const code = typeof d.code === "string" && d.code ? d.code : null;
   const text = asSentence(typeof d.error === "string" && d.error ? d.error : `the server answered ${status}`);
   const kind: Failure["kind"] = code === "busy" ? "busy"
@@ -271,7 +271,9 @@ export function failureOf(status: number, data: unknown, o: { retryAfter?: strin
     : status === 403 ? "off_here"
     : status >= 500 ? "failed"
     : "refused";
-  const after = Number.parseInt(o.retryAfter ?? "", 10);
+  // The answer's own retry_after_s, else its Retry-After header: the same time, in seconds.
+  const own = typeof d.retry_after_s === "number" && Number.isFinite(d.retry_after_s) && d.retry_after_s > 0 ? d.retry_after_s : null;
+  const after = own ?? Number.parseInt(o.retryAfter ?? "", 10);
   const given = Number.isFinite(after) && after > 0;
   // A refusal the page has no code for, sent with a time to try again (a server newer than this
   // page, say), is a wait as "busy" is: its sentence as it is, and its time.
@@ -283,6 +285,42 @@ export function failureOf(status: number, data: unknown, o: { retryAfter?: strin
     retry: waits || kind === "failed" || code === "id_in_use",
     retryAt,
     maxMinutes: code === "bad_window" && Number.isFinite(max) && max > 0 ? max : null,
+  };
+}
+
+// -- waiting for one -----------------------------------------------------------------------
+
+/** Where a summary being made stands, from the status's `digests` (one row per digest not made
+ * yet, web: Digester.status): "in_line" behind `behind` other summaries; "waiting" for the
+ * model behind `behind` units of its work, of the kinds in `what` (most first), its turn ahead
+ * of the station lines within `turnIn` seconds (0: it is ahead of them already); "writing" part
+ * `call` of `calls`. Null when the status has no row with this request's `id`: a server from
+ * before, a row not there yet, or a summary asked for from another device. */
+export interface Wait {
+  state: "in_line" | "waiting" | "writing";
+  behind: number;
+  what: string[];
+  turnIn: number | null;
+  call: number | null;
+  calls: number | null;
+}
+
+const STATES: readonly string[] = ["in_line", "waiting", "writing"];
+const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+
+export function waitOf(status: unknown, id: string): Wait | null {
+  const rows = status && typeof status === "object" ? (status as { digests?: unknown }).digests : null;
+  if (!Array.isArray(rows)) return null;
+  const row = rows.find((r) => r && typeof r === "object" && (r as { id?: unknown }).id === id) as Record<string, unknown> | undefined;
+  if (!row || typeof row.state !== "string" || !STATES.includes(row.state)) return null;
+  const calls = count(row.calls), call = count(row.call);
+  return {
+    state: row.state as Wait["state"],
+    behind: Math.round(count(row.behind) ?? 0),
+    what: Array.isArray(row.behind_what) ? row.behind_what.filter((k): k is string => typeof k === "string") : [],
+    turnIn: count(row.turn_in_s),
+    call: call != null && calls != null && call >= 1 && calls >= 1 ? Math.min(call, calls) : null,
+    calls: call != null && calls != null && call >= 1 && calls >= 1 ? calls : null,
   };
 }
 
