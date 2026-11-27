@@ -18,7 +18,9 @@ remind_minutes = 60            # still mentioned this long after it was announce
 # Spoken alerts: a voice and a fixed phrase per language. The phrase is spoken when no checked
 # translation is available, so the alert is never silent. Voices come from macOS (System
 # Settings → Accessibility → Spoken Content → System voice → Manage voices).
-# intro is spoken before a checked translation of what was said.
+# intro is spoken before a checked translation of what was said. summary and earlier open a
+# digest read aloud ([digest] below), so that it never sounds like an alert; English has its own
+# by default, other languages give theirs as the [speak.es] example shows.
 [speak.en]
 voice = "Daniel"
 intro = "Attention. The radio reports:"
@@ -29,6 +31,8 @@ fallback = "Attention. An important announcement on the radio. Please check the 
 # voice = "Mónica"
 # intro = "Atención. La radio informa:"
 # fallback = "Atención. Un aviso importante en la radio. Mire la pantalla."
+# summary = "Resumen de Wavescribe de {stations}, de {start} a {end}. Escrito por el modelo local a partir de {read} de {said} líneas; puede omitir cosas o equivocarse."
+# earlier = "Alertas anteriores, {count} en total: {alerts}."
 
 # min_mentions: below this many mentions within the cooldown the alert stays low (stored, not
 # announced), unless a local place from `near` is named. A real event is repeated on every
@@ -144,13 +148,15 @@ high = ["notify", "speak:en", "log"]
 medium = ["notify", "log"]
 low = ["log"]
 
-# A digest of what was said since the last one, at whole periods of the clock: a notification,
-# read aloud in the [speak.<language>] voice, or both. It covers only radio that may leave this
-# machine, and nothing is shown or said when nothing of substance was said.
+# A digest of what was said since the last one, at whole periods of the clock: a few points the
+# local model picked out, each with the lines it rests on. It can miss things or get them wrong,
+# and it is no warning. It is always shown as a quiet notification, whatever became of it
+# (nothing stood out, nothing was said, or why none could be made); speak = true also reads its
+# points aloud in the [speak.<language>] voice, and an alert stops it at once. It covers only
+# radio that may leave this machine.
 # [digest]
 # every_minutes = 60            # 30 is on the hour and half past; 15, 120 and 180 work too
 # stations = ["tsf"]            # leave out for every station
 # language = "en"               # default: notify_language
 # speak = true
-# notify = true
 # quiet_hours = ["22:00", "07:00"]

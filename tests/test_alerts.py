@@ -38,15 +38,21 @@ class FakeActions:
         self.calls: list[tuple] = []
         self.fail = fail
 
-    def notify(self, title: str, body: str) -> None:
+    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
         if "notify" in self.fail:
             raise ActionError("notifications are off")
-        self.calls.append(("notify", title, body))
+        self.calls.append(("notify" if sound else "show", title, body))
 
     def speak(self, voice: str, text: str) -> None:
         if "speak" in self.fail:
             raise ActionError("no audio device")
         self.calls.append(("speak", voice, text))
+
+    def speak_until(self, voice: str, text: str, stopped) -> bool:
+        if stopped():
+            return False
+        self.speak(voice, text)
+        return True
 
     def voices(self) -> set[str]:
         return {"Lesya"}

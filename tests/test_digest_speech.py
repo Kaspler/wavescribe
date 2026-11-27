@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Digests read aloud and on a schedule, heard through a fake speaker: no sound is made."""
 
+import dataclasses
+import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -10,15 +13,17 @@ import tests.test_app
 from tests.test_agent import Mcp, url_of
 from tests.test_alerts import FakeActions
 from tests.test_app import make_app, wait_for
-from tests.test_digest import NOW, FakeLlm, digester, stocked
+from tests.test_digest import MIN, NOW, FakeLlm, digester, stocked
 from tests.test_digest_web import FROM_LAN, Serving, post
 from wavescribe.alerts import Alert, Voice
+from wavescribe.alerts.actions import ActionError, LogOnlyActions, MacActions
 from wavescribe.cli import main
 from wavescribe.config import ConfigError
 from wavescribe.digest.schedule import Schedule
-from wavescribe.digest.speech import Speaker, Speech, spoken
+from wavescribe.digest.speech import SPOKEN_CHARS, Speaker, Speech, spoken
 
-VOICES = {"en": Voice("Lesya", "An alert.")}
+EN = Voice("Lesya", "An alert.")
+VOICES = {"en": EN}
 TWO_POINTS = "- Water is cut tomorrow [1].\n- Heavy rain this afternoon [2]."
 
 
@@ -49,57 +54,146 @@ def said(actions: FakeActions) -> list[str]:
     return [c[2] for c in actions.calls if c[0] == "speak"]
 
 
-def made(tmp_path: Path, reply: str = TWO_POINTS, minutes: float = 60):
+def made(tmp_path: Path, reply: str = TWO_POINTS, minutes: float = 60, *alerts: Alert):
     store = stocked(tmp_path)
-    alert = Alert(
-        "water", "high", ["a"], "pt-PT", "Corte de água amanhã", ["água"], NOW - 600, NOW - 600
+    water = Alert(
+        "water",
+        "high",
+        ["a"],
+        "pt-PT",
+        "Corte de água amanhã",
+        ["água"],
+        NOW - 600,
+        NOW - 600,
+        status="delivered",
     )
-    store.add_alert(alert)
-    store.add_alert_summaries(alert, {"en": "Water cut tomorrow"}, "fake-mt")
+    for alert in (water, *alerts):
+        store.add_alert(alert)
+    store.add_alert_summaries(water, {"en": "Water cut tomorrow"}, "fake-mt")
     d = digester(store, FakeLlm(reply))
     return store, d.run(d.request({"minutes": minutes, "language": "en"}))
+
+
+OPENING = (
+    "Wavescribe summary of a, b, 11:00 to 12:00. Written by the local model from 3 of 6 lines; "
+    "it can miss things or get them wrong."
+)
 
 
 # -- what is said -------------------------------------------------------------------------------
 
 
-def test_a_digest_is_read_as_its_alerts_then_its_points_with_stations(tmp_path: Path) -> None:
+def test_a_digest_says_what_it_is_names_earlier_alerts_and_reads_its_points(tmp_path) -> None:
     store, digest = made(tmp_path)
-    assert spoken(digest) == [
-        "Water cut tomorrow",
+    assert spoken(digest, EN) == [
+        OPENING,
+        "Earlier alerts, 1 in all: 11:50, water.",  # never in the words it was announced in
         "a: Water is cut tomorrow.",
         "b: Heavy rain this afternoon.",
     ]
-    assert spoken(digest, seconds=1) == ["Water cut tomorrow"]  # at least one, however short
+    assert spoken(digest, EN, seconds=1)[2:] == ["a: Water is cut tomorrow."]  # one at least
     store.close()
 
 
-def test_nothing_of_substance_is_read_as_the_models_sentence(tmp_path: Path) -> None:
+def test_a_station_alert_or_one_still_pending_is_not_named(tmp_path: Path) -> None:
+    quiet = Alert(
+        "silence",
+        "medium",
+        ["a"],
+        "en",
+        "No audio from a for 10 minutes.",
+        [],
+        NOW - 55 * MIN,
+        NOW - 55 * MIN,
+        status="delivered",
+        kind="silence",
+    )
+    waiting = Alert("fire", "high", ["b"], "pt-PT", "Fogo", ["fogo"], NOW - 60, NOW - 60)
+    store, digest = made(tmp_path, TWO_POINTS, 60, quiet, waiting)
+    assert [a["rule"] for a in digest.alerts] == ["silence", "water"]  # not one being delivered
+    assert spoken(digest, EN)[1] == "Earlier alerts, 1 in all: 11:50, water."
+    store.close()
+
+
+def test_every_utterance_is_a_sentence_or_two_however_long_the_point(tmp_path: Path) -> None:
+    rambling = "The station reported that water will be cut tomorrow " + "and so on " * 300
+    store, digest = made(tmp_path, f"- {rambling}[1].\n- {rambling.upper()}[2].")
+    long_names = {**digest.names, "a": "A station with a very long name " * 5}
+    lines = spoken(dataclasses.replace(digest, names=long_names), EN)
+    assert len(lines) == 4 and all(len(line) <= SPOKEN_CHARS for line in lines)
+    assert lines[0].endswith("it can miss things or get them wrong.")
+    store.close()
+
+
+def test_a_digest_without_points_is_shown_never_read(tmp_path: Path) -> None:
     store, digest = made(tmp_path, "NONE: Only music and adverts.", minutes=15)
-    assert spoken(digest) == ["Nothing stood out in the 1 line read of 1 said."]
+    assert spoken(digest, EN) == []
+    speaker = Speaker(Speech(FakeActions()), lambda: VOICES, threading.Event())
+    assert speaker.say(digest) == (
+        "there is nothing to read aloud: Nothing stood out in the 1 line read of 1 said."
+    )
+    store.close()
+
+
+def test_another_language_opens_in_its_own_words(tmp_path: Path) -> None:
+    store, digest = made(tmp_path)
+    digest = dataclasses.replace(digest, request=dataclasses.replace(digest.request, language="uk"))
+    voices = {"uk": Voice("Lesya", "Увага.")}
+    speaker = Speaker(Speech(FakeActions()), lambda: voices, threading.Event())
+    assert "give [speak.uk] in alerts.toml a summary and an earlier sentence" in speaker.say(digest)
+    voices["uk"] = Voice(
+        "Lesya", "Увага.", summary="Підсумок {station}.", earlier="Раніше: {alerts}."
+    )
+    assert speaker.say(digest) == (
+        "[speak.uk] in alerts.toml: summary may use only {stations}, {start}, {end}, {read} and "
+        "{said}, each in braces"
+    )
+    voices["uk"] = Voice(
+        "Lesya", "Увага.", summary="Підсумок: {stations}.", earlier="Раніше: {alerts}."
+    )
+    assert spoken(digest, voices["uk"])[:2] == ["Підсумок: a, b.", "Раніше: 11:50, water."]
     store.close()
 
 
 # -- taking turns with alerts -------------------------------------------------------------------
 
 
-def test_an_alert_waits_only_for_the_sentence_being_said() -> None:
-    actions = HeldActions("first")
+class LongSay(FakeActions):
+    """Each sentence of a digest goes on until it is stopped, as a long one would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.speaking = threading.Event()
+
+    def speak_until(self, voice: str, text: str, stopped) -> bool:
+        self.speaking.set()
+        deadline = time.monotonic() + 5
+        while not stopped():
+            assert time.monotonic() < deadline, "a digest's sentence was never stopped"
+            time.sleep(0.01)
+        self.calls.append(("cut", voice, text))
+        return False
+
+
+def test_an_alert_stops_a_digest_being_read_at_once() -> None:
+    actions = LongSay()
     speech = Speech(actions)
     assert speech.claim()
     count: list[int] = []
     reader = in_background(
-        lambda: count.append(speech.read("Lesya", ["first", "second", "third"], threading.Event()))
+        lambda: count.append(speech.read("Lesya", ["first", "second"], threading.Event()))
     )
     assert actions.speaking.wait(5)
-    alert = in_background(lambda: speech.speak("Lesya", "Evacuate the riverside"))
-    wait_for(lambda: speech._alerts == 1)  # the alert is waiting for the voice
-    actions.go.set()
+    t0 = time.monotonic()
+    speech.speak("Lesya", "Evacuate the riverside")
+    assert time.monotonic() - t0 < 1  # not the length of the sentence being read
     reader.join(5)
-    alert.join(5)
     # The alert is the news then: the rest of the digest isn't read after it.
-    assert said(actions) == ["first", "Evacuate the riverside"] and count == [1]
-    assert speech.claim()  # the turn was given back
+    assert actions.calls == [
+        ("cut", "Lesya", "first"),
+        ("speak", "Lesya", "Evacuate the riverside"),
+    ]
+    assert count == [0] and speech.claim()  # the turn was given back
 
 
 def test_a_digest_starts_once_an_alert_being_said_has_ended() -> None:
@@ -112,18 +206,56 @@ def test_a_digest_starts_once_an_alert_being_said_has_ended() -> None:
     reader = in_background(
         lambda: count.append(speech.read("Lesya", ["first", "second"], threading.Event()))
     )
+    wait_for(lambda: not reader.is_alive())
+    assert count == [0]  # it came while an alert was being said: that alert is the news
     actions.go.set()
     alert.join(5)
-    reader.join(5)
-    assert said(actions) == ["Evacuate the riverside", "first", "second"] and count == [2]
-
-
-def test_closing_stops_a_digest_between_sentences() -> None:
-    actions, closed = FakeActions(), threading.Event()
-    speech = Speech(actions)
-    closed.set()
     assert speech.claim()
-    assert speech.read("Lesya", ["first"], closed) == 0 and actions.calls == []
+    assert speech.read("Lesya", ["first", "second"], threading.Event()) == 2
+    assert said(actions) == ["Evacuate the riverside", "first", "second"]
+
+
+def test_closing_stops_a_digest_mid_sentence() -> None:
+    actions = LongSay()
+    speech = Speech(actions)
+    assert speech.claim()
+    reader = in_background(lambda: speech.read("Lesya", ["first"], threading.Event()))
+    assert actions.speaking.wait(5)
+    t0 = time.monotonic()
+    speech.close()
+    assert time.monotonic() - t0 < 1 and not reader.is_alive()
+    assert actions.calls == [("cut", "Lesya", "first")]
+    assert speech.claim() and speech.read("Lesya", ["again"], threading.Event()) == 0
+
+
+def fake_say(tmp_path: Path, monkeypatch, script: str) -> Path:
+    """A `say` that makes no sound, first on the PATH; it writes its process id to a file."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    say = bin_dir / "say"
+    say.write_text(f"#!/bin/sh\necho $$ > {tmp_path / 'pid'}\ncat > /dev/null\n{script}\n")
+    say.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return tmp_path / "pid"
+
+
+def test_say_is_stopped_at_once_and_doesnt_outlive_its_turn(tmp_path: Path, monkeypatch) -> None:
+    pid_file = fake_say(tmp_path, monkeypatch, "sleep 30")
+    stop = threading.Event()
+    threading.Timer(0.3, stop.set).start()
+    t0 = time.monotonic()
+    assert MacActions().speak_until("Daniel", "A long sentence.", stop.is_set) is False
+    assert time.monotonic() - t0 < 2
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+def test_say_that_ends_or_fails_says_so(tmp_path: Path, monkeypatch) -> None:
+    fake_say(tmp_path, monkeypatch, "echo 'Voice `Nobody` not found.' >&2; exit 1")
+    with pytest.raises(ActionError, match="Voice `Nobody` not found"):
+        MacActions().speak_until("Nobody", "Hello.", lambda: False)
+    (tmp_path / "bin" / "say").write_text("#!/bin/sh\ncat > /dev/null\n")
+    assert MacActions().speak_until("Daniel", "Hello.", lambda: False) is True
 
 
 def test_the_speaker_reads_in_the_alerts_voice_or_says_why_not(tmp_path: Path) -> None:
@@ -133,7 +265,7 @@ def test_the_speaker_reads_in_the_alerts_voice_or_says_why_not(tmp_path: Path) -
     speaker = Speaker(Speech(actions), lambda: voices, threading.Event())
 
     assert speaker.say(digest) is None
-    assert said(actions) == spoken(digest) and {c[1] for c in actions.calls} == {"Lesya"}
+    assert said(actions) == spoken(digest, EN) and {c[1] for c in actions.calls} == {"Lesya"}
 
     assert speaker.speech.claim()  # another digest is being read
     assert speaker.start(digest) == {
@@ -148,6 +280,11 @@ def test_the_speaker_reads_in_the_alerts_voice_or_says_why_not(tmp_path: Path) -
     assert speaker.say(digest) == (
         "no voice speaks en: give it one in alerts.toml, [speak.en], as for spoken alerts"
     )
+    no_say = Speaker(Speech(LogOnlyActions()), lambda: VOICES, threading.Event())
+    assert no_say.start(digest) == {
+        "started": False,
+        "error": "this machine has no speech to read it with (macOS `say`)",
+    }
     store.close()
 
 
@@ -178,8 +315,9 @@ def test_this_machine_can_have_a_digest_read_aloud(tmp_path: Path) -> None:
     try:
         status, out = post(web.server, {"language": "en", "speak": True})
         assert status == 200 and out["speech"] == {"started": True}
-        wait_for(lambda: len(actions.calls) == 2)
-        assert said(actions) == ["a: Water is cut tomorrow.", "b: Heavy rain this afternoon."]
+        wait_for(lambda: len(actions.calls) == 3)
+        assert said(actions)[0].startswith("Wavescribe summary of a, b, ")
+        assert said(actions)[1:] == ["a: Water is cut tomorrow.", "b: Heavy rain this afternoon."]
 
         status, out = post(web.server, {"language": "en", "speak": True}, FROM_LAN)
         assert (status, out["error"]) == (
@@ -209,7 +347,7 @@ def test_the_command_reads_aloud_or_says_why_not(tmp_path: Path, capsys) -> None
     try:
         assert main(["digest", "--url", url, "--language", "en", "--speak"]) == 0
         assert "- a: Water is cut tomorrow. [1]" in capsys.readouterr().out
-        wait_for(lambda: len(actions.calls) == 2)
+        wait_for(lambda: len(actions.calls) == 3)
 
         assert main(["digest", "--url", url, "--language", "uk", "--speak"]) == 1
         captured = capsys.readouterr()
@@ -241,7 +379,7 @@ def test_an_agent_may_read_a_digest_aloud_only_with_allow_control(tmp_path: Path
             assert tools[name]["annotations"] == {"readOnlyHint": False, "destructiveHint": False}
         failed, out = mcp.call("digest", language="en", speak=True)
         assert not failed and out["speech"] == {"started": True}
-        wait_for(lambda: len(actions.calls) == 2)
+        wait_for(lambda: len(actions.calls) == 3)
         failed, out = mcp.call("digest", language="en")
         assert not failed and "speech" not in out
         mcp.close()

@@ -490,14 +490,15 @@ class Digester:
     def alerts(self, request: Request, exports: Exports | None = None) -> list[dict[str, Any]]:
         """Alerts of the window, oldest first, as the store has them: those mentioned in it on
         one of its stations, at medium severity or above (low ones are only highlighted in the
-        transcript) and not announced by another alert. For another machine, without the
-        words of radio that stays here."""
+        transcript), not announced by another alert, and not still on their way (pending: it
+        speaks for itself once delivered). For another machine, without the words of radio
+        that stays here."""
         out = []
         wanted = set(request.stations)
         for a in self.store.alerts(limit=ALERT_ROWS):
             if not request.since <= (a["last_at"] or 0) <= request.until:
                 continue
-            if a["severity"] in ("low", None) or a["status"] == "covered":
+            if a["severity"] in ("low", None) or a["status"] in ("covered", "pending"):
                 continue
             if not wanted & set(a["stations"]):
                 continue
@@ -930,11 +931,11 @@ def parse_points(reply: str, count: int) -> Parsed:
         if not cited:
             uncited += m is not None  # a line of prose without numbers is no point
             continue
-        found.append((_sentences(text, POINT_CHARS), cited[:CITED]))
+        found.append((within(text, POINT_CHARS), cited[:CITED]))
     return Parsed(found, uncited, none and not found)
 
 
-def _sentences(text: str, limit: int) -> str:
+def within(text: str, limit: int) -> str:
     """``text`` up to the last sentence end within ``limit`` characters; cut at a word, with an
     ellipsis, when there is none."""
     if len(text) <= limit:

@@ -14,11 +14,14 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from typing import Protocol
 
 log = logging.getLogger(__name__)
 
 SAY_TIMEOUT_S = 180.0
+STOP_POLL_S = 0.05
 
 
 class ActionError(RuntimeError):
@@ -29,6 +32,10 @@ class Actions(Protocol):
     def notify(self, title: str, body: str, *, sound: bool = True) -> None: ...
 
     def speak(self, voice: str, text: str) -> None: ...
+
+    def speak_until(self, voice: str, text: str, stopped: Callable[[], bool]) -> bool:
+        """As ``speak``, cut off as soon as ``stopped()``; False when it was."""
+        ...
 
     def voices(self) -> set[str] | None:
         """Installed voice names, or None if unknown."""
@@ -46,17 +53,40 @@ class MacActions:
             raise ActionError(done.stderr.strip() or f"osascript exited {done.returncode}")
 
     def speak(self, voice: str, text: str) -> None:
-        # `say` obeys commands embedded in its text: "[[volm 0]]" mutes the rest of the alert
-        # and "[[slnc 60000]]" holds it back a minute. The text comes from the radio or from a
-        # translation of it, so the opening "[[" is split and read as plain brackets.
-        text = re.sub(r"\[(?=\[)", "[ ", text)
         # `say` reads stdin when no text is given, so text starting with "-" is safe.
         done = subprocess.run(
-            ["say", "-v", voice], input=text, capture_output=True, text=True,
+            ["say", "-v", voice], input=_plain(text), capture_output=True, text=True,
             timeout=SAY_TIMEOUT_S,
         )  # fmt: skip
         if done.returncode != 0:
             raise ActionError(done.stderr.strip() or f"say exited {done.returncode}")
+
+    def speak_until(self, voice: str, text: str, stopped: Callable[[], bool]) -> bool:
+        proc = subprocess.Popen(
+            ["say", "-v", voice],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            _, err = proc.communicate(_plain(text), timeout=STOP_POLL_S)
+        except subprocess.TimeoutExpired:
+            deadline = time.monotonic() + SAY_TIMEOUT_S
+            while proc.poll() is None:
+                if stopped() or time.monotonic() > deadline:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                    return False
+                time.sleep(STOP_POLL_S)
+            _, err = proc.communicate()
+        finally:
+            if proc.poll() is None:  # an exception on the way: `say` mustn't go on alone
+                proc.kill()
+                proc.wait()
+        if proc.returncode != 0:
+            raise ActionError(err.strip() or f"say exited {proc.returncode}")
+        return True
 
     def voices(self) -> set[str] | None:
         return installed_voices()
@@ -69,6 +99,9 @@ class LogOnlyActions:
         log.warning("%s %s: %s", "ALERT" if sound else "NOTE", title, body)
 
     def speak(self, voice: str, text: str) -> None:
+        raise ActionError("no text-to-speech on this platform")
+
+    def speak_until(self, voice: str, text: str, stopped: Callable[[], bool]) -> bool:
         raise ActionError("no text-to-speech on this platform")
 
     def voices(self) -> set[str] | None:
@@ -107,3 +140,11 @@ def parse_voices(listing: str) -> set[str]:
         names.add(name)
         names.add(name.split(" (")[0])  # "Daniel (English (UK))" answers to "Daniel"
     return names
+
+
+def _plain(text: str) -> str:
+    """``text`` as `say` reads it without obeying it. `say` obeys commands embedded in its
+    text: "[[volm 0]]" mutes the rest of the alert and "[[slnc 60000]]" holds it back a
+    minute. The text comes from the radio or from a translation of it, so the opening "[[" is
+    split and read as plain brackets."""
+    return re.sub(r"\[(?=\[)", "[ ", text)

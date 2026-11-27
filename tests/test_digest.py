@@ -519,6 +519,7 @@ def test_alerts_of_the_window_come_first_as_the_store_has_them(tmp_path: Path) -
     first = alert(store, "a", "high", NOW - 50 * MIN)
     alert(store, "a", "low", NOW - 40 * MIN)  # only highlighted in the transcript
     alert(store, "a", "high", NOW - 30 * MIN, status="covered")  # announced by another
+    alert(store, "a", "high", NOW - 20 * MIN, status="pending")  # still on its way
     alert(store, "a", "high", NOW - 3 * 60 * MIN)  # before the window
     alert(store, "c", "high", NOW - 30 * MIN)  # another station
     d = digester(store, FakeLlm("NONE: nothing."))

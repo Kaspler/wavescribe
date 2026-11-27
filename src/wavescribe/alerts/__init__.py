@@ -78,6 +78,8 @@ class Voice:
     voice: str
     fallback: str  # spoken when no checked translation is available
     intro: str = ""  # spoken before a translation, e.g. "Attention. The radio reports:"
+    summary: str = ""  # what a digest read aloud opens with (digest/speech.py)
+    earlier: str = ""  # how it names the alerts of its window
 
 
 @dataclass(frozen=True)
@@ -164,7 +166,13 @@ def parse_alerts(
     for lang, v in raw.get("speak", {}).items():
         if not isinstance(v, dict) or "voice" not in v or "fallback" not in v:
             raise ConfigError(f"{where} [speak.{lang}]: needs 'voice' and 'fallback'")
-        voices[lang] = Voice(v["voice"], v["fallback"], v.get("intro", ""))
+        voices[lang] = Voice(
+            v["voice"],
+            v["fallback"],
+            v.get("intro", ""),
+            v.get("summary", ""),
+            v.get("earlier", ""),
+        )
     actions: dict[str, tuple[str, ...]] = {}
     for severity, names in raw.get("actions", {}).items():
         if severity not in SEVERITIES:

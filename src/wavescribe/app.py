@@ -339,6 +339,7 @@ class App:
             self.llm_rules.close()
         self.outputs.close()
         self.hub.close()
+        self.speech.close()  # a digest being read aloud: its `say` mustn't outlive the app
 
     # -- node --------------------------------------------------------------------------------
 

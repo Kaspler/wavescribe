@@ -22,13 +22,6 @@ VOICES = {"en": Voice("Lesya", "An alert.")}
 TWO_POINTS = "- Water is cut tomorrow [1].\n- Heavy rain this afternoon [2]."
 
 
-class Screen(FakeActions):
-    """Notifications as shown, "show" for those without the alerts' sound."""
-
-    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
-        self.calls.append(("notify" if sound else "show", title, body))
-
-
 def shown(actions: FakeActions) -> list[tuple[str, str]]:
     return [(c[1], c[2]) for c in actions.calls if c[0] == "show"]
 
@@ -95,7 +88,7 @@ def test_a_station_the_schedule_names_must_be_set_up(tmp_path: Path) -> None:
             {"stations": ["a", "tfs"]},
             "alerts.toml",
             digester=digester(store),
-            speaker=Speaker(Speech(Screen()), lambda: VOICES, threading.Event()),
+            speaker=Speaker(Speech(FakeActions()), lambda: VOICES, threading.Event()),
             voices=VOICES,
             language="en",
             exports=lambda: exports(STATIONS),
@@ -202,7 +195,7 @@ def scheduled(store, llm, schedule: Schedule, actions, *, clock=None, submit=Non
 
 def test_a_scheduled_digest_is_shown_as_a_summary_and_its_points_read_aloud(tmp_path) -> None:
     store = stocked(tmp_path)
-    actions = Screen()
+    actions = FakeActions()
     digest = scheduled(store, FakeLlm(TWO_POINTS), Schedule(60, "en", speak=True), actions).tick()
     assert digest is not None and digest.request.stations == ("a", "b")
     assert actions.calls[0] == (
@@ -217,7 +210,7 @@ def test_a_scheduled_digest_is_shown_as_a_summary_and_its_points_read_aloud(tmp_
 
 def test_whatever_became_of_a_scheduled_digest_is_shown(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    actions = Screen()
+    actions = FakeActions()
     # Nothing of substance: said so, and nothing is read aloud.
     scheduled(store, FakeLlm("NONE: x."), Schedule(60, "en", speak=True), actions).tick()
     assert shown(actions)[-1][1].startswith("Nothing stood out in the 3 lines read of 6 said.\n")
@@ -253,7 +246,7 @@ def test_scheduled_digests_cover_the_time_between_them_whatever_was_skipped(tmp_
         run(llm)
         return True
 
-    actions = Screen()
+    actions = FakeActions()
     run = scheduled(store, llm, Schedule(60, "en"), actions, clock=lambda: clock[0], submit=submit)
     assert run.tick().request.since == NOW - 60 * MIN
     clock[0] += 60 * MIN
@@ -271,7 +264,7 @@ def test_scheduled_digests_cover_the_time_between_them_whatever_was_skipped(tmp_
 
 def test_a_run_that_cant_make_digests_says_so_once(tmp_path: Path) -> None:
     store = stocked(tmp_path)
-    actions, why = Screen(), ["a digest needs an LLM translator such as qwen3.5-9b"]
+    actions, why = FakeActions(), ["a digest needs an LLM translator such as qwen3.5-9b"]
     run = scheduled(
         store, FakeLlm(TWO_POINTS), Schedule(60, "en"), actions, unavailable=lambda: why[0]
     )
@@ -287,6 +280,6 @@ def test_a_schedule_reads_out_only_words_that_may_leave(tmp_path: Path) -> None:
     # On a station that may leave, under a class that may not: read out by nobody.
     add(store, "a", "Encontro secreto na ponte às dez", NOW - 15 * MIN, privacy="amateur")
     llm = FakeLlm(TWO_POINTS)
-    scheduled(store, llm, Schedule(60, "en"), Screen()).tick()
+    scheduled(store, llm, Schedule(60, "en"), FakeActions()).tick()
     assert "secreto" not in llm.prompts[0]
     store.close()

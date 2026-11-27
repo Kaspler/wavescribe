@@ -28,7 +28,15 @@ def test_since_takes_a_time_of_day_or_seconds() -> None:
 def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -> None:
     store = stocked(tmp_path)
     a = Alert(
-        "water", "high", ["a"], "pt-PT", "Corte de água amanhã", ["água"], NOW - 600, NOW - 600
+        "water",
+        "high",
+        ["a"],
+        "pt-PT",
+        "Corte de água amanhã",
+        ["água"],
+        NOW - 600,
+        NOW - 600,
+        status="delivered",
     )
     store.add_alert(a)
     store.add_alert_summaries(a, {"en": "Water cut tomorrow"}, "fake-mt")
