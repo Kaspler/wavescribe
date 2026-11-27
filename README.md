@@ -368,6 +368,10 @@ problem, see [SECURITY.md](SECURITY.md).
 
 Copyright 2026 Vitali Kaspler. Licensed under the [Apache License 2.0](LICENSE).
 
+The licence covers the code and documentation, not the Wavescribe name or logo (`assets/` and
+the page's icons). A modified version you distribute needs its own name and logo; saying it is
+based on Wavescribe is fine.
+
 Models aren't part of Wavescribe and are never shipped with it: you download each one from its
 publisher, under its own licence ([docs/LICENSING.md](docs/LICENSING.md)). The built web page
 bundles React and Lucide icons; their notices are in
