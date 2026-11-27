@@ -50,6 +50,7 @@ class CatchPrinter:
     ) -> None:
         self._lock = threading.Lock()
         self._names = names or {}
+        self._receiver = receiver
         self._overloaded = overloaded(receiver, "with --gain")
         self._told = 0.0  # when the overload was last said
         self.count = 0
@@ -77,11 +78,12 @@ class CatchPrinter:
 
     def hearing(self, h: Hearing) -> None:
         """A line when the watch goes deaf and one when it hears again: the command line has
-        no status to show it in."""
+        no status to show it in. A transmitter close by on none of the channels is said with
+        where it was: nothing was caught."""
         stamp = time.strftime("%H:%M:%S", time.localtime(h.t))
         said = h.warning or f"hearing again after {h.deaf_s:.0f} s"
         if h.warning is not None and h.reason == "overload":
-            said = self._overloaded
+            said = overloaded(self._receiver, "with --gain", h.off_channels or "")
         if h.warning is None and h.learnt:
             said += ", with that noise as the new floor"
         with self._lock:

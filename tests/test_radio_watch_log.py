@@ -381,6 +381,16 @@ def test_radio_watch_says_what_to_do_when_a_walkie_talkie_overloads_the_receiver
     printer.hearing(Hearing("watch", 1_014.0, None, 4.4, reason="overload"))
     err = capsys.readouterr().err
     assert err.count(said) == 1 and "] hearing again after 4 s\n" in err
+    # On none of the channels: where it was, and that nothing was caught.
+    where = ("It was at about 445.906 MHz, not on one of the channels of PMR446 walkie-talkies "
+             "(446.00625 to 446.19375 MHz), so nothing was caught.")  # fmt: skip
+    printer.hearing(Hearing("watch", 1_020.0, overloaded("Receiver A", also=where),
+                            reason="overload", off_channels=where))  # fmt: skip
+    assert capsys.readouterr().err.endswith(
+        "] A very strong signal nearby overloaded receiver A. It was at about 445.906 MHz, not on "
+        "one of the channels of PMR446 walkie-talkies (446.00625 to 446.19375 MHz), so nothing "
+        "was caught. Move the radio further away, or lower the gain with --gain.\n"
+    )
 
 
 # -- the routes --------------------------------------------------------------------------------

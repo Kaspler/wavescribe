@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 
 from wavescribe.config import SdrDevice, SdrTuning
-from wavescribe.dsp.activity import IqHistory
+from wavescribe.dsp.activity import OVERLOAD_DB, IqHistory
 from wavescribe.dsp.wfm import iq_from_u8
 from wavescribe.radio.watch import Catch, Watch
-from wavescribe.sources.watch import Catcher
+from wavescribe.sources.watch import SAY_DEAF_S, Catcher
 
 FS = 1_200_000
 BLOCK = FS * 256 // 1000  # what the dongle hands over at a time: 0.256 s
@@ -73,12 +73,18 @@ def catcher(
     spur_bin_hz: float = 0.0,
     max_active: int = 4,
     carrier_s: float = 120,
+    privacy: str = "private",
 ) -> Catcher:
     watch = Watch("pmr446", PMR, 12_500)
     device = SdrDevice("a", "00001234", centre, 30.0, FS)
     tuning = SdrTuning(device, PMR[7], mode="nfm", watch=watch)
     return Catcher(
-        tuning, spurs=spurs, spur_bin_hz=spur_bin_hz, max_active=max_active, carrier_s=carrier_s
+        tuning,
+        spurs=spurs,
+        spur_bin_hz=spur_bin_hz,
+        max_active=max_active,
+        carrier_s=carrier_s,
+        privacy=privacy,
     )
 
 
@@ -275,6 +281,8 @@ def keyed_close(
 
     def overload(t: np.ndarray) -> np.ndarray:
         on = (t >= start_s) & (t < stop_s)
+        if not on.any():
+            return np.zeros(len(t))  # quicker over a long air
         x = amp * np.exp(1j * (2 * np.pi * (freq_hz - centre) * t + 2 * np.sin(2e3 * np.pi * t)))
         x = x + rise * (rng.standard_normal(len(t)) + 1j * rng.standard_normal(len(t)))
         if intermod:
@@ -304,9 +312,10 @@ def test_a_walkie_talkie_overloading_the_receiver_is_caught_on_its_channel(
     said = {r.getMessage(): r.fields for r in caplog.records if r.getMessage().startswith("watch")}
     assert said["watch_deaf"]["reason"] == "overload" and said["watch_deaf"]["clipped"] > 0.1
     assert "mhz" not in said["watch_deaf"]  # walkie-talkies: the log keeps no frequency
+    assert said["watch_deaf"]["on_channel"] is True
     assert said["watch_hearing"]["reason"] == "overload" and not said["watch_hearing"]["learnt"]
     assert c.deaf_s is None and c.overload is not None
-    assert c.overload["freq_hz"] == PMR[3]
+    assert c.overload["freq_hz"] == PMR[3] and c.overload["on_channel"] is True
     assert c.overload["t"] == pytest.approx(T0 + 6.0, abs=0.1)
 
 
@@ -362,6 +371,143 @@ def test_a_window_rising_with_no_channel_on_top_stays_deaf() -> None:
 
     c = catcher()
     assert run(c, air(6.5, [], noise=0.01, extra=comb)) == [] and c.overload is None
+
+
+ASIDE = PMR[0] - 200_000  # a centre of our own, under the band like BELOW
+
+
+def product(freq_hz: int, start_s: float, stop_s: float, centre: int, amp: float = 0.25):
+    """One of a transmitter's products on another frequency (its own spurious emission, or the
+    receiver's mixing): what made a channel stand over the rest on the air while the transmitter
+    itself was on none of them."""
+
+    def copy(t: np.ndarray) -> np.ndarray:
+        on = (t >= start_s) & (t < stop_s)
+        phase = 2 * np.pi * (freq_hz - centre) * t + 2 * np.sin(2e3 * np.pi * t)
+        return on * amp * np.exp(1j * phase)
+
+    return copy
+
+
+def test_a_walkie_talkie_keyed_off_the_channels_at_the_centre_is_said_and_not_caught(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """On the air: a walkie-talkie keyed close by, a little under the receiver's centre, not on
+    one of the band's channels. The whole window rose, and one of its products stood over the
+    rest on channel 2: that channel was caught, as the transmitter close by, sending the speech
+    model nothing but noise."""
+    caplog.set_level("INFO", logger="wavescribe")
+    tx = ASIDE - 1_250
+    loud = keyed_close(tx, 2.0, 6.0, centre=ASIDE, intermod=False)
+    copy = product(PMR[1], 2.0, 6.0, ASIDE)
+    c = catcher(ASIDE)
+    got, on_top, reasons = [], [], set()
+    for iq, t_end in air(8.5, [], centre=ASIDE, noise=0.01, extra=lambda t: loud(t) + copy(t)):
+        got += c.feed(iq, t_end)
+        snr = c.detector.snr_db
+        on_top.append(float(snr[1] - snr[5:].max()))  # over every channel beyond its splatter
+        reasons.add(c.detector.deaf_reason)
+    assert max(on_top) > OVERLOAD_DB  # the product would have been caught as the transmitter
+    assert got == [] and c.detector.busy == []
+    assert reasons == {None, "interference", "overload"}  # sure of it after two frames
+    d = c.detector
+    assert d.overload_hz == 445_805_000 and d.overload_on_channel is False
+    assert c.overload is not None and c.overload["freq_hz"] == 445_805_000
+    assert c.overload["on_channel"] is False
+    assert c.overload["t"] == pytest.approx(T0 + 6.0, abs=0.1)
+    assert ("It was at about 445.805 MHz, not on one of the channels watched (446.00625 to "
+            "446.19375 MHz), so nothing was caught.") in str(c.overload["message"])  # fmt: skip
+    said = {r.getMessage(): r.fields for r in caplog.records if r.getMessage().startswith("watch")}
+    assert said["watch_deaf"]["reason"] == "overload" and said["watch_deaf"]["on_channel"] is False
+    assert "mhz" not in said["watch_deaf"]  # walkie-talkies: the log keeps no frequency
+    assert said["watch_hearing"]["reason"] == "overload"
+
+
+@pytest.mark.parametrize(
+    ("where", "tx", "named"),
+    [
+        ("between two channels", PMR[7] + 6_250, 446_100_000),
+        ("under the band", PMR[0] - 100_000, 445_906_000),
+        ("at the window's edge", PMR[-1] + 150_000, None),  # where signals from beyond fold in
+    ],
+)
+def test_a_walkie_talkie_off_the_channels_elsewhere_in_the_window_is_not_caught(
+    where: str, tx: int, named: int | None
+) -> None:
+    # With its copy 100 kHz up: under the band, that is channel 1, standing over the rest.
+    c = catcher(privacy="amateur")
+    assert run(c, air(8.0, [], noise=0.01, extra=keyed_close(tx, 2.0, 5.0))) == []
+    assert c.detector.overload_hz == named and c.detector.overload_on_channel is False
+    assert c.overload is not None and c.overload["freq_hz"] == named
+    words = "It was at about 446.1 MHz, not" if named == 446_100_000 else ""
+    assert words in str(c.overload["message"])
+
+
+def test_an_overload_off_the_channels_is_said_at_once(caplog: pytest.LogCaptureFixture) -> None:
+    # Too short to be said as deafness, and no catch says it: said all the same.
+    caplog.set_level("INFO", logger="wavescribe")
+    c = catcher(privacy="amateur")
+    warnings = []
+    for iq, t_end in air(4.0, [], noise=0.01, extra=keyed_close(PMR[0] - 100_000, 1.0, 2.0)):
+        c.feed(iq, t_end)
+        warnings.append(c.warning)
+    assert any(w and "It was at about 445.906 MHz" in w for w in warnings) and warnings[-1] is None
+    said = [(r.getMessage(), r.fields) for r in caplog.records if r.getMessage().startswith("w")]
+    assert [m for m, _ in said] == ["watch_deaf", "watch_hearing"]
+    assert said[0][1]["mhz"] == pytest.approx(445.906) and said[0][1]["on_channel"] is False
+    assert said[1][1]["deaf_s"] < SAY_DEAF_S
+
+
+@pytest.mark.parametrize("on_channel", [True, False])
+def test_two_key_ups_a_minute_apart_are_two_overloads(
+    on_channel: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """On the air, the second of two key-ups a minute apart left no trace in the log: shorter
+    than it takes to be said as deafness, it was only caught, on a product's channel."""
+    caplog.set_level("INFO", logger="wavescribe")
+    tx = PMR[3] if on_channel else PMR[0] - 100_000
+    first, second = keyed_close(tx, 1.0, 5.0), keyed_close(tx, 61.0, 63.0)
+    c = catcher(privacy="amateur")
+    got = run(c, air(64.5, [], noise=0.01, extra=lambda t: first(t) + second(t)))
+    said = [(r.getMessage(), r.fields) for r in caplog.records if r.getMessage().startswith("w")]
+    if on_channel:
+        # The second is said with its catch, as before: too short to be deafness.
+        assert [(g.freq_hz, g.reason) for g in got] == [(tx, "overload")] * 2
+        assert got[1].t_start == pytest.approx(T0 + 61.0, abs=0.1)
+        assert [m for m, _ in said] == ["watch_deaf", "watch_hearing"]
+    else:
+        assert got == []
+        assert [m for m, _ in said] == ["watch_deaf", "watch_hearing"] * 2
+        assert [f["mhz"] for m, f in said if m == "watch_deaf"] == [pytest.approx(445.906)] * 2
+    assert all(f["reason"] == "overload" for _, f in said)
+    assert c.overload is not None and c.overload["t"] == pytest.approx(T0 + 63.0, abs=0.1)
+
+
+def test_one_overload_is_one_transmitter_named_from_its_start(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A second transmitter close by keyed before the first's overload is over is part of it:
+    the first's channel is the one caught and named, in the log, the status and the catch, and
+    no other channel starts. Once it is over, the next overload is named afresh."""
+    caplog.set_level("INFO", logger="wavescribe")
+    keys = [keyed_close(PMR[3], 1.0, 4.0, intermod=False),
+            keyed_close(PMR[11], 3.5, 6.0, intermod=False),
+            keyed_close(PMR[11], 9.0, 11.0, intermod=False)]  # fmt: skip
+    c = catcher(privacy="amateur")
+    got, named, reasons = [], [], []
+    for iq, t_end in air(13.0, [], noise=0.01, extra=lambda t: sum(k(t) for k in keys)):
+        got += c.feed(iq, t_end)
+        named.append((round(t_end - T0, 1), c.detector.overload_hz))
+        reasons.append((round(t_end - T0, 1), c.detector.deaf_reason))
+    assert [(g.freq_hz, g.reason) for g in got] == [(PMR[3], "overload"), (PMR[11], "overload")]
+    assert got[1].t_start == pytest.approx(T0 + 9.0, abs=0.1)
+    assert {hz for t, hz in named if 1.5 < t < 8.5} == {PMR[3]}
+    assert {hz for t, hz in named if t > 9.5} == {PMR[11]}
+    # Overloaded all along once sure of it, though no channel stood over the rest while both
+    # were on: not interference halfway through.
+    assert {r for t, r in reasons if 1.5 < t < 6.0} == {"overload"}
+    deaf = [f for r in caplog.records if r.getMessage() == "watch_deaf" for f in [r.fields]]
+    assert deaf[0]["reason"] == "overload" and deaf[0]["mhz"] == pytest.approx(PMR[3] / 1e6)
 
 
 def test_the_history_gives_back_the_dongles_samples() -> None:

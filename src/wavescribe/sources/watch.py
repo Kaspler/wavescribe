@@ -42,6 +42,7 @@ from wavescribe.radio.watch import (
     Catch,
     Hearing,
     Watch,
+    off_channels,
     overload_report,
     overloaded,
     publish,
@@ -61,7 +62,9 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 # utterance ends with it instead of running into the next catch.
 CLOSING_S = 0.8
 QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, dropped and counted
-SAY_DEAF_S = 3.0  # interference across the window this long is logged and shown, not a click
+# Interference across the window this long is logged and shown, not a click. An overload by a
+# transmitter on none of the channels is said at once: no catch says it.
+SAY_DEAF_S = 3.0
 INTERFERENCE = "deaf: noise across the whole window; learnt as the new floor if it stays"
 
 
@@ -128,11 +131,19 @@ class Catcher:
 
     @property
     def deaf(self) -> str | None:
-        """Why the watch has been deaf for a few seconds, if it has: ``overload`` (one channel
-        towers over the rest: it is caught, and nothing else) or ``interference`` (none does)."""
-        if (self.deaf_s or 0) < SAY_DEAF_S:
+        """Why the watch has been deaf for a few seconds, if it has: ``overload`` (one
+        transmitter towers over the rest: caught on its channel, and nothing else; or on none of
+        them, said at once, and nothing caught) or ``interference`` (nothing towers)."""
+        d = self.detector
+        if d.deaf_s is None or (d.deaf_s < SAY_DEAF_S and not self._off_channels_now):
             return None
-        return self.detector.deaf_reason
+        return d.deaf_reason
+
+    @property
+    def _off_channels_now(self) -> bool:
+        """Deaf because of a transmitter close by on none of the channels."""
+        d = self.detector
+        return d.deaf_reason == "overload" and d.overload_on_channel is False
 
     @property
     def warning(self) -> str | None:
@@ -144,20 +155,30 @@ class Catcher:
 
     @property
     def overload(self) -> dict[str, object] | None:
-        """The watch's last overload, while it lasts and for ``OVERLOAD_SHOWN_S`` after: when
-        it was last seen (``t``, epoch seconds), the channel on top (``freq_hz``), and what to
-        do (``message``). Also one too short to be said as deafness: its catch is overloaded."""
-        at = self.detector.overloaded_at
-        if at is None:
+        """The watch's last overload, while it lasts and for ``OVERLOAD_SHOWN_S`` after
+        (``overload_report``): when it was last seen, where its transmitter was and whether
+        that was one of the channels, and what to do. Also one too short to be said as
+        deafness: its catch is overloaded."""
+        d = self.detector
+        if d.overloaded_at is None:
             return None
-        t = self._time(at)
+        t = self._time(d.overloaded_at)
         if self._anchor[1] - t > OVERLOAD_SHOWN_S:
             return None
-        return overload_report(t, self.detector.overload_hz,
-                               f"Receiver {receiver_name(self.tuning.device.id)}")  # fmt: skip
+        return overload_report(t, d.overload_hz, self._receiver, d.overload_on_channel,
+                               self._off_channels())  # fmt: skip
+
+    @property
+    def _receiver(self) -> str:
+        return f"Receiver {receiver_name(self.tuning.device.id)}"
+
+    def _off_channels(self) -> str:
+        """Where the last overload's transmitter was, when that was none of the channels."""
+        d = self.detector
+        return off_channels(self.watch, d.overload_hz) if d.overload_on_channel is False else ""
 
     def _overloaded(self) -> str:
-        return overloaded(f"Receiver {receiver_name(self.tuning.device.id)}")
+        return overloaded(self._receiver, also=self._off_channels())
 
     @property
     def active(self) -> list[int]:
@@ -191,21 +212,27 @@ class Catcher:
         return out
 
     def _say_deaf(self) -> None:
-        """One line in the log when interference across the window has made the watch deaf,
-        and one when it hears again; each also published (``Hearing``) for the command line."""
+        """One line in the log when interference or an overload across the window has made the
+        watch deaf (``deaf``), and one when it hears again; each also published (``Hearing``)
+        for the command line."""
         deaf, said = self.deaf_s, self._deaf
         now = self._anchor[1]
         if deaf is not None and said is not None:
             self._deaf = (max(said[0], deaf), said[1], said[2])
-        elif deaf is not None and deaf >= SAY_DEAF_S:
+        elif deaf is not None and self.deaf is not None:
             d = self.detector
             reason = d.deaf_reason
             self._deaf = (deaf, d.relearnt, reason)
-            on = d.overload_hz if reason == "overload" else None
-            where = self.where(mhz=on / 1e6) if on else {}
+            fields: dict[str, object] = {}
+            if reason == "overload":
+                fields["on_channel"] = d.overload_on_channel
+                if d.overload_hz:
+                    fields.update(self.where(mhz=d.overload_hz / 1e6))
             event(log, "watch_deaf", level=logging.WARNING, station=self.station_id,
-                  reason=reason, clipped=round(d.clipped, 4), **where)  # fmt: skip
-            publish(Hearing(self.station_id, now, self.warning, reason=reason))
+                  reason=reason, clipped=round(d.clipped, 4), **fields)  # fmt: skip
+            off = self._off_channels() if reason == "overload" else ""
+            publish(Hearing(self.station_id, now, self.warning, reason=reason,
+                            off_channels=off or None))  # fmt: skip
         elif deaf is None and said is not None:
             self._deaf = None
             learnt = self.detector.relearnt > said[1]  # the floors, afresh: the noise stayed

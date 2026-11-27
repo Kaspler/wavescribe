@@ -377,26 +377,50 @@ def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
 OVERLOAD_SHOWN_S = 600.0  # an overload stays in a receiver's status this long after it ended
 
 
-def overload_report(t: float, freq_hz: int | None, receiver: str) -> dict[str, object]:
+def overload_report(
+    t: float, freq_hz: int | None, receiver: str, on_channel: bool | None = None, also: str = ""
+) -> dict[str, object]:
     """What a status says of a receiver's last overload: when it was last seen (``t``, epoch
-    seconds), the channel on top (``freq_hz``; None where it isn't known, listening by hand)
-    and what to do (``message``)."""
-    return {"t": round(t, 2), "freq_hz": freq_hz, "message": overloaded(receiver)}
+    seconds); where its transmitter was (``freq_hz``): the channel it was caught on, or, off the
+    channels, its frequency to the kHz, None where that isn't clear or known (listening by
+    hand); whether that was one of the watch's channels (``on_channel``: true, false, or None
+    listening by hand); and what to do (``message``), with ``also`` said in it
+    (``off_channels``)."""
+    return {"t": round(t, 2), "freq_hz": freq_hz, "on_channel": on_channel,
+            "message": overloaded(receiver, also=also)}  # fmt: skip
 
 
-def overloaded(receiver: str, where: str = "in Settings → Receivers") -> str:
+def overloaded(receiver: str, where: str = "in Settings → Receivers", also: str = "") -> str:
     """What a watch says when a transmitter close by overloads its receiver: ``receiver`` as
-    the sentence names it ("Receiver A"), and ``where`` its gain is set."""
-    return (f"A very strong signal nearby overloaded {receiver}. Move the radio further away, "
-            f"or lower the gain {where}.")  # fmt: skip
+    the sentence names it ("Receiver A"), ``where`` its gain is set, and ``also`` a sentence
+    said before what to do (``off_channels``)."""
+    also = f"{also} " if also else ""
+    return (f"A very strong signal nearby overloaded {receiver}. {also}Move the radio further "
+            f"away, or lower the gain {where}.")  # fmt: skip
+
+
+def off_channels(watch: Watch, freq_hz: int | None) -> str:
+    """What a watch adds when the transmitter overloading its receiver was on none of its
+    channels, so nothing was caught: where it was (to the kHz, where that is clear), and the
+    channels the watch listens to, by its band's name and range."""
+    span = f"{mhz_text(watch.lo_hz / 1e6)} to {mhz_text(watch.hi_hz / 1e6)} MHz"
+    # A band by its name; a range in MHz is already its own name.
+    named = watch.label and isinstance(watch.spec, str)
+    channels = f"of {watch.label} ({span})" if named else f"watched ({span})"
+    if freq_hz:
+        where = f"It was at about {mhz_text(freq_hz / 1e6)} MHz, not on"
+    else:
+        where = "It wasn't on"
+    return f"{where} one of the channels {channels}, so nothing was caught."
 
 
 @dataclass(frozen=True)
 class Hearing:
     """A watch made deaf across its whole window (``warning`` says so), or hearing again
     (``warning`` None) after ``deaf_s``, with the noise learnt as the floor if it stayed.
-    ``reason``: "overload" (a transmitter close by, caught on its channel; nothing else is) or
-    "interference" (noise)."""
+    ``reason``: "overload" (a transmitter close by: caught on its channel, or on none of them;
+    nothing else is caught) or "interference" (noise). ``off_channels``: for an overload on none
+    of the channels, where it was (``off_channels()``)."""
 
     station_id: str
     t: float  # when (epoch seconds)
@@ -404,6 +428,7 @@ class Hearing:
     deaf_s: float = 0.0
     learnt: bool = False
     reason: str | None = None
+    off_channels: str | None = None
 
 
 # Who hears about catches: the store keeps them, the command line prints them. A catch is

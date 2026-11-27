@@ -134,13 +134,19 @@ stations), never one per item. `status()` shows it:
 - per station, `dropped: {"asr": n, "mt": n, "rules": n}`: utterances never written down, lines
   left untranslated and LLM rule checks that couldn't run, over the last ten minutes (any reason,
   a model that raised included);
-- per watch (`sources/watch.py`), while it has been deaf for 3 s or more, `warning` (a sentence)
-  and `deaf: "overload"|"interference"`; and from the moment a transmitter close by overloads its
+- per watch (`sources/watch.py`), while it has been deaf for 3 s or more (at once for an
+  overload on none of its channels), `warning` (a sentence) and
+  `deaf: "overload"|"interference"`; and from the moment a transmitter close by overloads its
   receiver until 10 minutes after the overload ended, `overload: {"t": epoch seconds of its last
-  moment, "freq_hz": the channel it was caught on, "message": "A very strong signal nearby
-  overloaded Receiver A. Move the radio further away, or lower the gain in Settings →
-  Receivers."}`, for the page to show in the watch's column and under Caught here (a kind of
-  radio that keeps nothing lists no catch there);
+  moment, "freq_hz": the channel it was caught on, or, on none of the channels, where it was to
+  the kHz (null where that isn't clear), "on_channel": true|false (null listening by hand),
+  "message": "A very strong signal nearby overloaded Receiver A. Move the radio further away, or
+  lower the gain in Settings → Receivers."}`, for the page to show in the watch's column and
+  under Caught here (a kind of radio that keeps nothing lists no catch there). With
+  `on_channel` false, nothing was caught, and `message` and `warning` say so before what to do:
+  "It was at about 445.906 MHz, not on one of the channels of PMR446 walkie-talkies (446.00625
+  to 446.19375 MHz), so nothing was caught." (`radio/watch.py`, `off_channels`; "It wasn't on
+  one of the channels of …" without a frequency; "the channels watched" for a range);
 - overall, `load: {"state": "ok"|"behind"|"overloaded", "reason": sentence|null}`. `overloaded`
   when an LLM rule check or an utterance was lost for lack of room in the last ten minutes, text
   is 2 minutes behind, an LLM rule check has waited 2 minutes, translation is 5 minutes behind,
@@ -856,13 +862,33 @@ top and no rise: the copies then land on a few channels of their own. A catch bu
 overload has `reason` `overload`, which wins over `carrier` and `stopped`. The margin is measured on
 synthetic IQ: a walkie-talkie overloading the receiver stands 26 to 48 dB over the rest where the
 converter clips (17.5 dB at worst without clipping); white, sloped and comb noise, USB clicks and a
-carrier clipping from outside the window never more than 12 dB in a frame. Deafness of 3 s or more
-is logged once (`watch_deaf` with `reason`, `overload` or `interference`, and the `clipped` share;
-`watch_hearing` with the same `reason`), shown as the station's `warning` (a sentence) and `deaf`
-(the reason) in the status, and published as a `Hearing` (with `reason`) each way, which
-`radio watch` prints; for an overload it prints what to do, with `--gain`, and an overloaded catch
-too short to make the watch deaf prints it with the catch. The status also carries `overload`
-(see `status()`, above). Listening by hand (`radio/live.py`) gives the same `overload` object in
+carrier clipping from outside the window never more than 12 dB in a frame. A transmitter close by on
+none of the channels (`_off_channels`) leaves only its products on them, and one of those can stand
+over the rest. So in every frame overloaded in that sense (the window risen, or clipping), the frame's
+FFT is searched for the strongest signal in the whole window: the power over the floor (so the
+dongle's spike at the centre, always there, is no signal) summed over a channel's width about each
+bin, its frequency the power-weighted middle of the strongest such window. When that is more than a
+quarter of a channel's width from every channel, stands 6 dB (`OFF_CHANNEL_DB`) over every other
+signal in the window beyond its reach (its splatter, its mirror and its third-order copy: one
+transmitter, not a comb of lines), and, with no channel on top beyond that reach, 15 dB over every
+channel beyond it, nothing starts. Two such frames in a row make it the overload's transmitter, off
+the channels, named to the kHz, or not named within 60 kHz of the window's edges, where signals from
+beyond fold in. On for 120 s, the floors are learnt afresh, as a carrier on a channel is learnt.
+Measured on synthetic IQ at 2.4 MS/s: such a transmitter stands 10 to 14 dB over every other signal
+with a product 10 dB under it on a channel, and 25 to 33 dB without; the same noise, slopes, combs,
+USB clicks and carrier clipping from outside the window never more than 2 dB; on-channel overloads,
+with the radio up to 3 kHz off its channel, never a frame off the channels. It costs 30 to 50 µs per overloaded frame (20 a second), a
+few per cent of the detector, and nothing otherwise. One overload is one transmitter: its channel
+(when it starts) or its frequency off the channels (when sure) is fixed until the overload is over,
+no other channel starts in it, and `deaf_reason` stays `overload` from then on, though a frame may
+have no channel on top. Deafness of 3 s or more, and an overload off the channels at once (no catch
+says it), is logged once (`watch_deaf` with `reason`, `overload` or `interference`, the `clipped`
+share, and for an overload `on_channel` and its `mhz` where the class keeps text; `watch_hearing`
+with the same `reason`), shown as the station's `warning` (a sentence) and `deaf` (the reason) in
+the status, and published as a `Hearing` (with `reason`, and `off_channels`, the sentence saying
+where it was) each way, which `radio watch` prints; for an overload it prints what to do, with
+`--gain`, and an overloaded catch too short to make the watch deaf prints it with the catch. The
+status also carries `overload` (see `status()`, above). Listening by hand (`radio/live.py`) gives the same `overload` object in
 its view while the dongle's converter clips 1% or more of the samples, and for 10 minutes after,
 with `freq_hz` null: it doesn't tell which signal on the window clipped it. A start opens a `NarrowbandDemodulator` for its channel fed
 from the history 0.3 s before the first frame above the floor (but never before the previous catch's

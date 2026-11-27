@@ -292,6 +292,9 @@ How it works:
   transmitter close by overloading the receiver, and the rest of the window rising is what it
   does to the receiver. That channel is caught and marked as overloaded, and nothing else is
   caught while it lasts (see [Testing with a walkie-talkie](#testing-with-a-walkie-talkie)).
+- A transmitter close by on none of the band's channels (on another frequency the receiver
+  hears, or at its centre) is said, not caught: the channels hear only its products, and the
+  strongest of them is no transmission. The status says where it was, when that is clear.
 - Up to four transmissions are demodulated at once. Transmissions on different channels at the
   same moment are transcribed one after the other, never mixed.
 
@@ -344,13 +347,22 @@ Limits:
   goes on, marked as overloaded too. Two transmitters that close at once, a few dB apart, leave
   no channel on top, and the watch is deaf while they last, as with interference. A single
   strong carrier that comes with noise across the window looks the same as a transmitter close
-  by, and is caught as one.
+  by, and is caught as one, or said as one if it is on none of the channels.
+- **One overload is one transmitter.** Its channel is fixed when the watch is first sure of it, and
+  a second transmitter close by, keyed on another channel before the first one's overload is over
+  (half a second after it), isn't caught. Replies on the same channel are.
+- **A transmitter close by on none of the band's channels is said, not caught**, even where it
+  is a transmission someone meant to send (a handheld on a frequency next to the band). One that
+  stays on for two minutes is taken as noise, like a stuck carrier on a channel.
 - **Tried on the air only briefly**, with an indoor whip on 2 m, where short transmissions on an
   amateur channel were caught and logged; before that on synthetic signals and with no antenna
   (no false catches in 10 minutes on PMR446 and on 2 m). A first try with a walkie-talkie a few
   metres from the antenna overloaded the receiver, and the watch, taking it for interference,
   caught nothing; it now catches such a transmission, as tried on synthetic signals, and says
-  the receiver was overloaded. Speech from a walkie-talkie at a sensible distance hasn't been
+  the receiver was overloaded. A second try, with a handheld keyed close by on a frequency near
+  the receiver's centre (on none of the channels), was caught on a channel its products landed
+  on, and a second key-up a minute later was in no log line; it is now said and not caught, as
+  tried on synthetic signals. Speech from a walkie-talkie at a sensible distance hasn't been
   tried yet.
 
 ### Testing with a walkie-talkie
@@ -379,6 +391,16 @@ and the log has `watch_deaf` with `reason=overload` for an overload of 3 s or mo
 the gain. Listening by hand (**Listen**) says it too, while the receiver clips and for ten minutes
 after. Distance helps more than gain: a walkie-talkie in the same room can overload the
 receiver even at a low gain, and a lower gain makes weak, distant transmissions harder to catch.
+
+A radio keyed close by on none of the band's channels (tuned elsewhere in the window, or near
+the receiver's centre) overloads the receiver the same way, but there is nothing to catch: the
+channels hear only its products. The watch catches nothing, and the sentence says where it was,
+for example "It was at about 445.906 MHz, not on one of the channels of PMR446 walkie-talkies
+(446.00625 to 446.19375 MHz), so nothing was caught.", before what to do. Where the frequency
+isn't clear (at the very edges of what the receiver hears) it says "It wasn't on one of the
+channels of …". With no catch to carry it, this is said at once, however short the key-up: in
+the status, in the log (`watch_deaf` with `reason=overload` and `on_channel=false`, then
+`watch_hearing`) and by `radio watch`.
 
 ## What Wavescribe does with each kind of radio
 

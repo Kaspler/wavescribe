@@ -428,10 +428,65 @@ def test_a_watch_overloaded_by_a_walkie_talkie_says_so_and_what_to_do() -> None:
     assert ("overload", said) in {(d, w) for d, w, _ in seen}
     deaf, warning, overload = seen[-1]
     assert deaf is None and warning is None
-    assert overload == {"t": pytest.approx(T0 + 6.0, abs=0.1), "freq_hz": PMR[5], "message": said}
+    assert overload == {"t": pytest.approx(T0 + 6.0, abs=0.1), "freq_hz": PMR[5],
+                        "on_channel": True, "message": said}  # fmt: skip
     assert [(h.reason, h.warning) for h in heard] == [("overload", said), ("overload", None)]
+    assert heard[0].off_channels is None
     caught = source._q.get_nowait()
     assert caught is not None and caught.freq_hz == PMR[5] and caught.reason == "overload"
+
+
+def test_a_watch_overloaded_from_off_its_channels_says_where_and_catches_nothing() -> None:
+    from tests.test_radio_watch_detect import keyed_close
+
+    station = watch_station()
+    source = WatchSource(station.id, station.sdr, device=FakeDevice([]))
+    said = ("A very strong signal nearby overloaded Receiver A. It was at about 445.906 MHz, not "
+            "on one of the channels of PMR446 walkie-talkies (446.00625 to 446.19375 MHz), so "
+            "nothing was caught. Move the radio further away, or lower the gain in Settings → "
+            "Receivers.")  # fmt: skip
+    seen = []
+    heard: list[watches.Hearing] = []
+    stop_listening = watches.subscribe_hearing(heard.append)
+    loud = keyed_close(PMR[0] - 100_000, 1.0, 2.5)  # under the band, too short to be deafness
+    try:
+        for i, (iq, t_end) in enumerate(air(5.0, [], noise=0.01, extra=loud)):
+            source._feed(iq, t_end, i == 0)
+            h = source.health
+            seen.append((h.deaf, h.warning, h.overload))
+    finally:
+        stop_listening()
+    assert ("overload", said) in {(d, w) for d, w, _ in seen}
+    deaf, warning, overload = seen[-1]
+    assert deaf is None and warning is None
+    assert overload == {"t": pytest.approx(T0 + 2.5, abs=0.1), "freq_hz": 445_906_000,
+                        "on_channel": False, "message": said}  # fmt: skip
+    assert [(h.reason, h.warning) for h in heard] == [("overload", said), ("overload", None)]
+    assert heard[0].off_channels is not None and heard[0].off_channels in said
+    assert source._q.empty()  # nothing caught: the channels heard only its products
+
+
+def test_an_overload_off_the_channels_names_the_watchs_own_band_and_range() -> None:
+    pmr, _, _ = plan_window("pmr446", "cept", rate=RATE)
+    assert watches.off_channels(pmr, 445_906_000) == (
+        "It was at about 445.906 MHz, not on one of the channels of PMR446 walkie-talkies "
+        "(446.00625 to 446.19375 MHz), so nothing was caught."
+    )
+    assert watches.off_channels(pmr, None) == (
+        "It wasn't on one of the channels of PMR446 walkie-talkies (446.00625 to 446.19375 MHz), "
+        "so nothing was caught."
+    )
+    # A range is its own name.
+    slice_, _, _ = plan_window((144.6, 145.4), "1", rate=RATE)
+    assert watches.off_channels(slice_, 145_612_000) == (
+        "It was at about 145.612 MHz, not on one of the channels watched (144.6 to 145.4 MHz), "
+        "so nothing was caught."
+    )
+    assert watches.overloaded("Receiver A", also=watches.off_channels(slice_, None)) == (
+        "A very strong signal nearby overloaded Receiver A. It wasn't on one of the channels "
+        "watched (144.6 to 145.4 MHz), so nothing was caught. Move the radio further away, or "
+        "lower the gain in Settings → Receivers."
+    )
 
 
 def test_the_page_hears_of_a_watchs_overload_in_its_status() -> None:
