@@ -15,10 +15,25 @@ from __future__ import annotations
 import os
 import secrets
 import tempfile
+import urllib.parse
 from pathlib import Path
 
 KEY_HEADER = "X-Wavescribe-Key"
 KEY_FILE = "control.key"
+DATA_DIR = Path("data")
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def is_local_url(url: str) -> bool:
+    """Whether ``url`` names a server on this machine, the only kind the key is sent to."""
+    return (urllib.parse.urlsplit(url).hostname or "") in LOCAL_HOSTS
+
+
+def headers_for(url: str, data_dir: Path | None = None) -> dict[str, str]:
+    """The key's header for requests to ``url`` when it is this machine's and a key is kept in
+    ``data_dir`` (``data/``); nothing otherwise (another machine never gets it)."""
+    key = load_key(data_dir or DATA_DIR) if is_local_url(url) else None
+    return {KEY_HEADER: key} if key else {}
 
 
 def load_key(data_dir: Path, *, create: bool = False) -> str | None:

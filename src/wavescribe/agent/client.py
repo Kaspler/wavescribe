@@ -59,8 +59,13 @@ class Client:
     """Requests to one Wavescribe: by default the one on this machine, which needs no token."""
 
     def __init__(self, url: str = DEFAULT_URL, token: str | None = None) -> None:
+        from wavescribe.control import headers_for
+
         self.url = url.rstrip("/")
         self.token = token
+        # This machine's control key, for a Wavescribe on this machine only: behind a proxy
+        # it is what tells this machine's requests from another's (wavescribe.control).
+        self._local = headers_for(self.url)
         # No redirects: the token would go wherever one points.
         self._opener = httpclient.opener(urllib.request.ProxyHandler({}))
 
@@ -79,7 +84,7 @@ class Client:
         header the page sends with every change and every question, which another website's
         form can't set. Raises ``Unreachable`` or ``Refused``."""
         url = self.url + path + (f"?{urllib.parse.urlencode(query)}" if query else "")
-        sent = {"User-Agent": f"wavescribe/{__version__}", **(headers or {})}
+        sent = {"User-Agent": f"wavescribe/{__version__}", **self._local, **(headers or {})}
         if self.token:
             sent["Authorization"] = f"Bearer {self.token}"
         if control:

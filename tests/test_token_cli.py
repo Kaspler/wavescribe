@@ -95,6 +95,40 @@ def test_token_refuses_another_machine_and_a_missing_key(
         main(["token", "--url", "http://localhost:9", "list"])
 
 
+def test_the_key_goes_to_this_machine_only(tmp_path: Path) -> None:
+    from wavescribe.control import headers_for
+
+    key = load_key(tmp_path, create=True)
+    for url in ("http://localhost:8765", "http://127.0.0.1:8790/", "http://[::1]:8765"):
+        assert headers_for(url, tmp_path) == {KEY_HEADER: key}, url
+    for url in ("http://192.0.2.7:8765", "http://localhost.example.org:8765",
+                "http://127.0.0.1@example.org/", "https://kitchen-mac.local:8765"):  # fmt: skip
+        assert headers_for(url, tmp_path) == {}, url
+    assert headers_for("http://localhost:8765", tmp_path / "elsewhere") == {}
+
+
+def test_agent_tools_reach_the_controls_behind_a_proxy_with_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from wavescribe import control
+    from wavescribe.agent.client import Client, Refused
+
+    node = Running(make_app(tmp_path))
+    data = tmp_path / "data"
+    url = node.url.replace("127.0.0.1", "localhost")
+    try:
+        node.server.behind_proxy = True
+        node.server.control_key = load_key(data, create=True)
+        with pytest.raises(Refused) as refused:  # run from a folder without the key
+            Client(url).open("GET", "/api/manage/outputs", control=True)
+        assert refused.value.status == 403
+        monkeypatch.setattr(control, "DATA_DIR", data)  # run from Wavescribe's folder
+        with Client(url).open("GET", "/api/manage/outputs", control=True) as resp:
+            assert resp.status == 200
+    finally:
+        node.close()
+
+
 @pytest.mark.parametrize("port", ["99999", "0", "-1", "http"])
 def test_serve_refuses_a_port_that_isnt_one(port: str, capsys) -> None:
     with pytest.raises(SystemExit) as e:

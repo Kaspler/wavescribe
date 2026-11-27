@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +24,9 @@ SCOPES = ("read", "push")
 def _client(args: argparse.Namespace) -> tuple[Any, dict[str, str]] | str:
     """A client for the server at ``--url`` and the control key's header, or why not."""
     from wavescribe.agent.client import Client
-    from wavescribe.control import KEY_HEADER, load_key
+    from wavescribe.control import KEY_HEADER, is_local_url, load_key
 
-    host = urllib.parse.urlsplit(args.url).hostname or ""
-    if host not in ("localhost", "127.0.0.1", "::1"):
+    if not is_local_url(args.url):
         return (f"{args.url} isn't this machine: tokens are made on the Wavescribe machine "
                 "itself, with --url pointing at its own address (localhost)")  # fmt: skip
     key = load_key(DATA_DIR)

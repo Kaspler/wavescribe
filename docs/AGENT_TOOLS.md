@@ -81,9 +81,12 @@ Its own messages go to stderr: stdout carries the protocol and nothing else.
 
 It talks to the Wavescribe at `http://localhost:8765`. `--url` points it at another one, such as
 `serve --port 8790` (`"--url", "http://localhost:8790"` in `args`), and `--token` gives the feed
-token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who may read*);
+token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who can read what*);
 `WAVESCRIBE_TOKEN` in the environment does the same without showing in the list of running
-processes. The control tools work only with the Wavescribe on the same Mac.
+processes. The control tools work only with the Wavescribe on the same Mac. Behind a proxy
+(`serve --behind-proxy`) they work too when `wavescribe mcp` runs in Wavescribe's folder, as
+the `--directory` above does: it sends the key in `data/control.key` to a Wavescribe on this
+Mac, and to no other ([FEED.md](FEED.md), *Who can read what*).
 
 Every tool returns one JSON object. A tool that can't do its job returns Wavescribe's reason as
 an error instead. Arguments that don't fit the tool's schema (one missing, unknown, of the wrong
@@ -231,7 +234,8 @@ alert. Both are in [FEED.md](FEED.md). `follow` and the MCP tools use the same r
 - Read tools change nothing. The control tools are offered only when `wavescribe mcp` is
   started with `--allow-control`.
 - Requests go straight to Wavescribe and never through a proxy set for the Mac, so they are
-  treated as this machine's own.
+  treated as this machine's own. Behind a proxy that takes the control key, which is sent to
+  `localhost`, `127.0.0.1` or `::1` only.
 - Control requests carry the same header the page sends, which a form on another website
   can't send.
 
