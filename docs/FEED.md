@@ -188,7 +188,8 @@ and isn't gets a 400.
   - `push`: `/feed/v1/ingest`.
 
   Send one as `Authorization: Bearer <token>`. A token is shown once and only its SHA-256 hash
-  is kept, in `config/ui.toml` (mode 0600).
+  is kept, in `config/ui.toml` (mode 0600). Deleting a token ends the streams opened with it
+  at once (the feed, the page's live events and audio), and its unused tickets stop working.
 - **Where a header can't be set** (a browser's EventSource), trade a `read` token for a stream
   ticket and put that in the URL: `POST /feed/v1/ticket` with the token in the
   `Authorization` header (never in the URL) returns `{"ticket": "wsk_…", "expires_in": 60}`,

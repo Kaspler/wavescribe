@@ -1205,6 +1205,7 @@ class App:
             d["feed_token"] = [t for t in d.get("feed_token", []) if t.get("id") != token_id]
 
         self.settings.update(mutate)
+        self.hub.revoke(token_id)  # its streams end now, and its unused tickets with them
 
     def tokens_required(self) -> bool:
         return bool(self.settings.get("feed_token"))

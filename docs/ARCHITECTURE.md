@@ -361,7 +361,8 @@ request through a proxy always (FEED.md, "Who can read what"); the machine itsel
 read, and a push always needs one. They go in the `Authorization` header;
 a client that can't set one trades a read token for a one-time, 60-second stream ticket
 (`POST /feed/v1/ticket`, `feed.Tickets`, kept in memory only) for `?ticket=`. `?token=` still
-works and is logged as a warning.
+works and is logged as a warning. A stream let in by a token is held by it (`WebHub.hold`):
+deleting the token (`WebHub.revoke`) ends those streams at once and voids its tickets.
 
 Remote text is checked field by field (`remote.read_utterance`) and then goes through
 `Pipeline.ingest` with the privacy class its events carry (never looser than a `privacy` the

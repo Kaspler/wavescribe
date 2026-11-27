@@ -60,6 +60,7 @@ STATUS_INTERVAL_S = 1.0
 # feed's event ids wait for (feed.Mark). One waiting longer, or past the count, isn't waited for.
 INFLIGHT_MAX = 1024
 INFLIGHT_MAX_S = 900.0
+REVOKED_MAX = 1024  # feed token ids remembered as revoked (ids are random, never reused)
 MAX_LISTENERS = 8  # audio listeners per station
 CONTROL_HEADER = "X-Wavescribe"  # required on changes: a cross-site form can't set it
 MAX_CATCHES = 500  # per request to /api/catches
@@ -141,6 +142,9 @@ class WebHub:
         self._lan_clients: set[queue.Queue[Any]] = set()  # other machines
         self._marked: set[queue.Queue[Any]] = set()  # feed streams: a final utterance has a Mark
         self._taps: dict[str, AudioTap] = {}
+        # Streams let in by a feed token: its id -> each stream's queue -> set when it is revoked
+        self._held: dict[str, dict[queue.Queue[Any], threading.Event]] = {}
+        self._revoked: OrderedDict[str, None] = OrderedDict()
         self._alerts: OrderedDict[int, dict[str, Any]] = OrderedDict()  # without a store
         self._closed = threading.Event()
 
@@ -268,6 +272,50 @@ class WebHub:
             self._clients.discard(q)
             self._lan_clients.discard(q)
             self._marked.discard(q)
+
+    # -- feed tokens --------------------------------------------------------------------------
+
+    def hold(self, token: str | None, q: queue.Queue[Any]) -> threading.Event | None:
+        """Tie a stream, which reads ``q``, to the feed token it was let in by (None: it needed
+        none). Revoking the token sets the event returned and wakes ``q`` with None; the stream
+        checks the event before each write, so it sends nothing more. None when the token was
+        revoked already: the stream must not start. ``let_go`` when it ends."""
+        ended = threading.Event()
+        if token is None:
+            return ended
+        with self._lock:
+            if token in self._revoked:
+                return None
+            self._held.setdefault(token, {})[q] = ended
+        return ended
+
+    def let_go(self, token: str | None, q: queue.Queue[Any]) -> None:
+        if token is None:
+            return
+        with self._lock:
+            held = self._held.get(token, {})
+            held.pop(q, None)
+            if not held:
+                self._held.pop(token, None)
+
+    def revoke(self, token_id: str) -> None:
+        """A feed token was deleted: end the streams opened with it at once, and void the
+        tickets made from it."""
+        with self._lock:
+            self._revoked[token_id] = None
+            while len(self._revoked) > REVOKED_MAX:
+                self._revoked.popitem(last=False)
+            held = self._held.pop(token_id, {})
+        self.tickets.void(token_id)
+        for q, ended in held.items():
+            ended.set()
+            _wake(q)
+        if held:
+            log.info("feed token %s revoked: %d stream(s) ended", token_id, len(held))
+
+    def revoked(self, token_id: str) -> bool:
+        with self._lock:
+            return token_id in self._revoked
 
     def publish(self, event: str, data: dict[str, Any]) -> None:
         text = to_json(data)
@@ -513,6 +561,7 @@ PAGE_ROOT_FILES = frozenset({
 class Handler(BaseHTTPRequestHandler):
     server: WebServer
     server_version = "wavescribe"
+    token_id: str | None = None  # the feed token this request was let in by (``_let_in``)
 
     def setup(self) -> None:
         # The base class applies it to every read and write on the connection. The streams (live
@@ -610,12 +659,8 @@ class Handler(BaseHTTPRequestHandler):
             self._page(path[1:])
         elif path.startswith("/api/manage/"):
             self._manage("GET", path, query)
-        elif feed.handle_get(self, path, query):
+        elif feed.handle_get(self, path, query) or self._refused_read(path, query):
             pass
-        elif (path in PAGE_READS or path.startswith(PAGE_READ_PREFIXES)) and (
-            feed.page_grant(self, query) is None
-        ):
-            self._unauthorised()
         elif path.startswith("/api/segments/") and path.endswith("/audio.wav"):
             self._wav(path[len("/api/segments/") : -len("/audio.wav")])
         elif path == "/api/state":
@@ -751,6 +796,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _refused_read(self, path: str, query: dict[str, str]) -> bool:
+        """For the page's data: whether this request was refused (and answered 401)."""
+        if path not in PAGE_READS and not path.startswith(PAGE_READ_PREFIXES):
+            return False
+        return not self._let_in(feed.page_grant(self, query))
+
+    def _let_in(self, grant: feed.Grant | None) -> bool:
+        """Whether ``grant`` lets this request go on (401 when not). A stream it opens is held
+        by the token it came with (``token_id``), and ends when that token is revoked."""
+        self.token_id = grant.token if grant is not None else None
+        if grant is None:
+            self._unauthorised()
+        return grant is not None
+
     def _ask_unavailable(self) -> str | None:
         """Why this request can't ask questions, or None when it can."""
         reason = self.server.hub.ask_unavailable()
@@ -808,6 +867,12 @@ class Handler(BaseHTTPRequestHandler):
         except TooManyViewers:
             self._busy("too many pages on other machines are following along; try again later")
             return
+        token = self.token_id
+        ended = hub.hold(token, q)  # revoking the token it came with ends it
+        if ended is None:
+            hub.unsubscribe(q)
+            self._unauthorised()
+            return
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -822,7 +887,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b": keepalive\n\n")
                     self.wfile.flush()
                     continue
-                if item is None:
+                if item is None or ended.is_set():
                     break
                 event, data = item
                 self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode())
@@ -831,6 +896,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             hub.unsubscribe(q)
+            hub.let_go(token, q)
 
     def _read_json(self) -> Any:
         length = int(self.headers.get("Content-Length") or 0)
@@ -1020,6 +1086,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.SERVICE_UNAVAILABLE, b"too many listeners", "text/plain")
             return
         q = tap.add_listener()
+        token = self.token_id
+        ended = hub.hold(token, q)  # revoking the token it came with ends it
+        if ended is None:
+            tap.remove_listener(q)
+            self._unauthorised()
+            return
         log.info("audio %s: listener joined (%s)", station_id, agent)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"audio/L16;rate={SAMPLE_RATE};channels=1")
@@ -1033,8 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
                     block = q.get(timeout=30)
                 except queue.Empty:
                     break  # no audio for 30 s: the station stalled; the page can retry
-                if block is None or self._hidden_here(station_id):
-                    break  # stopped, or retuned meanwhile to radio that stays on this machine
+                if block is None or ended.is_set() or self._hidden_here(station_id):
+                    break  # stopped, revoked, or retuned to radio that stays on this machine
                 self.wfile.write(block)
                 self.wfile.flush()
                 sent += len(block)
@@ -1042,6 +1114,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             tap.remove_listener(q)
+            hub.let_go(token, q)
             log.info("audio %s: listener left after %.0f s", station_id, sent / 2 / SAMPLE_RATE)
 
 
@@ -1075,6 +1148,17 @@ class _Deadline(io.RawIOBase):
         if not self.closed:
             self.raw.close()
         super().close()
+
+
+def _wake(q: queue.Queue[Any]) -> None:
+    """Put None on a stream's queue, making room if it is full, so its reader stops waiting."""
+    while True:
+        try:
+            q.put_nowait(None)
+            return
+        except queue.Full:
+            with contextlib.suppress(queue.Empty):
+                q.get_nowait()
 
 
 def _row_id(text: str) -> int | None:

@@ -97,6 +97,11 @@ class Tickets:
             got = self._open.pop(_digest(ticket), None)
         return got[1] if got is not None and got[0] > time.monotonic() else None
 
+    def void(self, token_id: str) -> None:
+        """Drop the tickets made from a token, unused: it was revoked."""
+        with self._lock:
+            self._open = {k: t for k, t in self._open.items() if t[1] != token_id}
+
 
 def _digest(ticket: str) -> str:
     return hashlib.sha256(ticket.encode()).hexdigest()
@@ -207,6 +212,8 @@ def _read_token(h: Handler, query: dict[str, str]) -> Grant | None:
     token_id = app.token_id(token_of(h, query), "read")
     if token_id is None:
         token_id = h.server.hub.tickets.take(query.get("ticket"))
+        if token_id is not None and h.server.hub.revoked(token_id):
+            token_id = None  # made just before its token went
     return Grant(token_id) if token_id is not None else None
 
 
@@ -246,8 +253,7 @@ def handle_get(h: Handler, path: str, query: dict[str, str]) -> bool:
         return True
     if path != "/metrics" and not path.startswith("/feed/v1/"):
         return False
-    if grant(h, query, "read") is None:
-        h._unauthorised()
+    if not h._let_in(grant(h, query, "read")):
         return True
     if path == "/metrics":
         body = metrics(h).encode()
@@ -466,6 +472,12 @@ def events(h: Handler, query: dict[str, str]) -> None:
     except TooManyViewers:
         h._busy("too many programs on other machines are following along; try again later")
         return
+    token = h.token_id
+    ended = hub.hold(token, q)  # revoking the token it came with ends it
+    if ended is None:
+        hub.unsubscribe(q)
+        h._unauthorised()
+        return
     leaving = hub.exports()
     try:
         mark = hub.mark(sync=True)
@@ -519,7 +531,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 item = q.get(timeout=max(0.1, min(5.0, wrote + KEEPALIVE_S - now)))
             except queue.Empty:
                 continue
-            if item is None:
+            if item is None or ended.is_set():
                 break
             name, text, queued_at = item
             if name == "utterance" and "utterance" in want:
@@ -551,6 +563,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
         pass
     finally:
         hub.unsubscribe(q)
+        hub.let_go(token, q)
 
 
 def _write(h: Handler, name: str, data: dict[str, Any], event_id: str | None = None) -> None:

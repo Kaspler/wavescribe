@@ -230,6 +230,57 @@ def test_asking_from_another_machine_is_off_unless_turned_on(tmp_path: Path, mon
         node.close()
 
 
+def test_revoking_a_token_ends_its_streams_and_voids_its_tickets(tmp_path: Path,
+                                                                 monkeypatch) -> None:  # fmt: skip
+    import numpy as np
+
+    from tests.test_app import Running, make_app
+
+    node = Running(make_app(tmp_path))
+    app, hub = node.app, node.app.hub
+    try:
+        made = app.create_token("viewer", ["read"])
+        kept = {"Authorization": f"Bearer {app.create_token('kept', ['read'])['token']}"}
+        bearer = {"Authorization": f"Bearer {made['token']}"}
+        node.server.behind_proxy = True  # the page's streams need a token too
+
+        def ticket() -> str:
+            return node.call("POST", "/feed/v1/ticket", headers=bearer)[1]["ticket"]
+
+        streams = [
+            FeedStream(node.server, bearer),
+            FeedStream(node.server, path=f"/feed/v1/events?ticket={ticket()}"),
+            FeedStream(node.server, path=f"/api/events?ticket={ticket()}"),
+        ]
+        other = FeedStream(node.server, kept)
+        monkeypatch.setattr(hub, "status", lambda: {"stations": {"a": {}}})
+        listening, conn = open_stream(node.server, "/audio/a.pcm", bearer)
+        unused = ticket()
+        assert [s.status for s in streams] == [200, 200, 200] and listening.status == 200
+        wait_for(lambda: hub.tap("a").listeners == 1)
+        hub.tap("a").feed(np.zeros(800, dtype=np.float32))
+        assert len(listening.read(1600)) == 1600
+
+        started = time.monotonic()
+        node.server.behind_proxy = False  # the page's controls: only this machine
+        assert node.call("DELETE", f"/api/manage/tokens/{made['id']}")[0] == 200
+        node.server.behind_proxy = True
+        assert all(s.ended() for s in streams)
+        assert listening.read() == b""
+        assert time.monotonic() - started < 5  # at once, not at the next keepalive
+        assert node.call("GET", f"/feed/v1/node?ticket={unused}")[0] == 401
+        assert node.call("GET", "/feed/v1/node", headers=bearer)[0] == 401
+
+        r = transcribed(hub, "a", "Bom dia.")  # another token's stream goes on
+        finish(hub, app.store, r, en="Good morning.")
+        assert other.next()[1]["text"] == "Bom dia."
+        for s in (*streams, other):
+            s.close()
+        conn.close()
+    finally:
+        node.close()
+
+
 def test_serve_says_at_start_who_can_read_and_ask() -> None:
     from wavescribe.web.server import access_line
 
