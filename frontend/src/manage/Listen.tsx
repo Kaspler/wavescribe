@@ -6,7 +6,7 @@ import { S } from "../lib/live";
 import { ActButton, Button, Field, Input, Lamp, Section, Segmented, Select, Table, act, cx, toast } from "../components/ui";
 import { ApiError, type Any, HANDOFF, del, knownLangs, post, refreshPage } from "./api";
 import { addedToast } from "./added";
-import { and, fmtMhz } from "./bands";
+import { and, bandLabel, fmtMhz } from "./bands";
 import { type LiveReceiver, bandAt, hears, usable } from "./dial";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
@@ -122,7 +122,7 @@ function BandChips({ radio, onBand }: { radio: Any; onBand: (mhz: number, mode: 
       <div className="lv-chips">
         {bands.map((b) => (
           <Button key={b.id} size="sm" variant="secondary" onClick={() => onBand(b.channels_mhz?.[0] ?? +(b.mode === "wfm" ? b.start_mhz + 0.1 : b.start_mhz).toFixed(5), b.mode)}>
-            {b.name}
+            {bandLabel(b)}
           </Button>
         ))}
       </div>
@@ -226,7 +226,7 @@ function ScanPanel({ st, radio, dev, view, stepKhz, onPoll }: { st: LiveReceiver
             <Field id="lv-src" label="Channels"
                    hint={source === "band" && inBand > lists.band.length ? `${lists.band.length} of the band's ${inBand} are in what the receiver hears now.` : undefined}>
               <Select id="lv-src" value={source} onChange={(e) => setSource(e.target.value)} options={[
-                ...(band ? [["band", `${band.name} · ${lists.band.length}`] as [string, string]] : []),
+                ...(band ? [["band", `${bandLabel(band)} · ${lists.band.length}`] as [string, string]] : []),
                 ["heard", `Heard here · ${heard.length}`],
                 ["view", `Every ${stepKhz} kHz ${view ? "in view" : "it hears"} · ${lists.view.length}`],
               ]} />

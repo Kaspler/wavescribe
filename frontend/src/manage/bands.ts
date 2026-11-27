@@ -1,6 +1,6 @@
 // The band plan as the page sees it (src/wavescribe/radio/bandplan.py): each band's record, one
-// plain line per band in words a newcomer knows (the band picker, Heard here and the tuner), and how
-// a frequency is written.
+// plain line per band in words a newcomer knows (the band picker, Heard here and the tuner), the
+// one set of names the page calls bands by, and how a frequency is written.
 
 /** A band of the plan for the chosen region, as `/api/manage/radio` sends it. */
 export interface Band {
@@ -146,6 +146,23 @@ const WORDS: Record<string, BandWords> = {
 
 /** The band's words for a newcomer; a band this page has none for is named as the plan names it. */
 export const bandWords = (b: { id: string; name: string }): BandWords => WORDS[b.id] || { name: b.name, what: bandLine(b.id) };
+
+/** A band's name where it is one among others (printed on the dial, a button, a choice, a row): the
+ * shorter one where the everyday name is long or shared ("Amateurs 2 m", "Amateurs 70 cm"). The
+ * plan's own name is the technical one, shown beside it only where the detail is asked for. */
+export const bandLabel = (b: { id: string; name: string }): string => {
+  const w = bandWords(b);
+  return w.label || w.name;
+};
+
+/** What a scan or a watch says a frequency is, with its band called as the page calls it. `label`
+ * is the plan's band name, then the channel where the band numbers its channels ("Marine VHF,
+ * channel 16"); `band` is that band's id. "" where it says nothing. */
+export function labelWords(e: { band?: string | null; label?: string | null }, bands: { id: string; name: string }[]): string {
+  const b = e.band ? bands.find((x) => x.id === e.band) : undefined;
+  if (!e.label || !b || !e.label.startsWith(b.name)) return e.label || "";
+  return bandLabel(b) + e.label.slice(b.name.length);
+}
 
 /** 98.6 for broadcast FM; 446.00625, 118.050 for channels (at least three decimals). */
 export const fmtMhz = (mhz: number, mode?: string | null) =>

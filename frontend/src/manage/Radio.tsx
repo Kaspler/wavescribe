@@ -9,7 +9,7 @@ import { Icon } from "../components/Icon";
 import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, del, get, knownLangs, listenTo, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
-import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
+import { type Band, and, bandLabel, bandLine, bandWords, fmtMhz, labelWords } from "./bands";
 import { Caught, WatchBand, useWatchesHere, watchWords } from "./Caught";
 import { talksNowAndThen } from "./catches";
 import { BandCard, DialBar, DialLegend, LiveView, ReceiverChip, ReceiverMarks, ReceiverWords, type RxStatus, heardIn, mhzText, rxStatus } from "./DialView";
@@ -258,12 +258,12 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   const hidden = signals.filter((s) => !real(s));
   const found = signals.filter(real);
   const shown = showAll ? signals : found;
-  // A label every row shares ("FM broadcast") is said once, in the line above the table.
+  // A label every row shares (FM radio's) is left out of the rows: the band is named above them.
   const common = shown.length > 1 && shown.every((s) => s.label === shown[0].label) ? shown[0].label : null;
   const stationAt = (s: Any) => v.heard.find((h: Any) => Math.abs(h.freq_hz - s.freq_hz) <= 6000 && h.station)?.station;
 
   const bandOptions: [string, string][] = [
-    ...v.bands.filter((b: Any) => b.mode && b.tunable).map((b: Any) => [b.id, `${b.name} · ${+b.start_mhz.toFixed(3)}–${+b.stop_mhz.toFixed(3)} MHz`] as [string, string]),
+    ...v.bands.filter((b: Any) => b.mode && b.tunable).map((b: Any) => [b.id, `${bandLabel(b)} · ${+b.start_mhz.toFixed(3)}–${+b.stop_mhz.toFixed(3)} MHz`] as [string, string]),
     ["all", "Everything the tuner reaches · 24–1766 MHz"],
     ["custom", "A range of my own…"],
   ];
@@ -572,7 +572,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
               </p>
             )}
           </Advanced>
-          {scanJob && !failed && !(scanJob.phase === "done" && !found.length) && <ScanProgress job={scanJob} />}
+          {scanJob && !failed && !(scanJob.phase === "done" && !found.length) && <ScanProgress job={scanJob} bands={v.bands} />}
           {onTheDial && chosen ? (
             <BandView v={v} band={chosen} me={me} live={liveHere} tuner={tuner} still={still} sweeping={sweeping} rows={inBand}
                       onAdd={onAdd} onListen={listen} onTry={tryOn} stationAt={stationAt} />
@@ -585,7 +585,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
               {(shown.length > 0 || running) && (
                 <Table caption="Signals found" empty="Nothing yet…"
                        cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise" }, { label: "", width: "1%" }]}>
-                  {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} />)}
+                  {shown.map((s) => <SignalRow key={s.freq_hz} s={s} bands={v.bands} station={stationAt(s)} onAdd={onAdd} common={common} />)}
                 </Table>
               )}
               {hidden.length > 0 && (
@@ -644,7 +644,7 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
        <div className="dl-found">
         <Table labelledBy="dl-found-h" empty="Nothing yet…"
                cols={[{ label: "MHz", num: true }, { label: "Name" }, { label: "What it is" }, { label: "Above noise" }, { label: "", width: "1%" }]}>
-          {shown.map((s) => <SignalRow key={s.freq_hz} s={s} station={stationAt(s)} onAdd={onAdd} common={common} onListen={onListen} />)}
+          {shown.map((s) => <SignalRow key={s.freq_hz} s={s} bands={v.bands} station={stationAt(s)} onAdd={onAdd} common={common} onListen={onListen} />)}
         </Table>
        </div>
       )}
@@ -682,15 +682,17 @@ function Region({ v, reload, held }: { v: Any; reload: () => Promise<void>; held
   );
 }
 
-function ScanProgress({ job }: { job: Any }) {
+function ScanProgress({ job, bands }: { job: Any; bands: Band[] }) {
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  // A band scanned is called as the page calls it; a range is said as the server says it.
+  const what = labelWords({ band: job.band, label: job.what }, bands);
   let text: string;
   switch (job.phase) {
     case "starting": text = "Starting…"; break;
-    case "sweep": text = `Sweeping ${job.what}: step ${job.done} of ${job.total}`; break;
-    case "watch": text = `Watching ${job.what}: ${mmss(job.done)} of ${mmss(job.total)} (${job.note || "sweeping"}), ${job.signals?.length || 0} found so far`; break;
+    case "sweep": text = `Sweeping ${what}: step ${job.done} of ${job.total}`; break;
+    case "watch": text = `Watching ${what}: ${mmss(job.done)} of ${mmss(job.total)} (${job.note || "sweeping"}), ${job.signals?.length || 0} found so far`; break;
     case "rds": text = `Reading station names: group ${job.done + 1} of ${job.total}`; break;
-    case "done": text = job.learn_spurs ? `Learnt ${job.spurs} of the receiver's own signals in ${job.seconds} s` : `${job.what}: ${job.signals.length} signals in ${job.seconds} s`; break;
+    case "done": text = job.learn_spurs ? `Learnt ${job.spurs} of the receiver's own signals in ${job.seconds} s` : `${what}: ${job.signals.length} signals in ${job.seconds} s`; break;
     default: text = job.error === "cancelled" ? "Scan stopped." : `The scan failed: ${job.error}`;
   }
   const busy = !["done", "error"].includes(job.phase);
@@ -717,7 +719,7 @@ function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (devic
       <p>
         {result.phase === "error"
           ? <>{who} couldn't scan: {result.error}.</>
-          : <>{who} heard nothing {result.what ? `on ${result.what}` : "in its last scan"}. Is its antenna connected?</>}
+          : <>{who} heard nothing {result.what ? `on ${labelWords({ band: result.band, label: result.what }, v.bands)}` : "in its last scan"}. Is its antenna connected?</>}
         {choices ? " Try another receiver:" : " Check the antenna and its cable, or raise the gain under Settings, Receivers."}
       </p>
       {choices && (
@@ -741,6 +743,9 @@ function NothingHeard({ v, result, onTry }: { v: Any; result: Any; onTry: (devic
 
 /** One signal a scan found, as far as this page decides on it; its other fields pass through. */
 interface Signal {
+  /** The band plan's id of its band, and what it is in the plan's words (labelWords). */
+  band?: string | null;
+  label?: string | null;
   spur?: boolean;
   /** Set with `spur` on a narrow line at a multiple of 2.4 MHz: another receiver's clock. */
   clock_hz?: number | null;
@@ -761,12 +766,12 @@ function foldedKinds(hidden: Signal[]): string {
   return kinds.length > 1 ? `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}` : kinds[0] || "";
 }
 
-function SignalRow({ s, station, onAdd, common, onListen = listenTo }: {
-  s: Signal; station?: string | null; onAdd: (t: Any) => void; common?: string | null; onListen?: (mhz: number, mode: string | null) => void;
+function SignalRow({ s, bands, station, onAdd, common, onListen = listenTo }: {
+  s: Signal; bands: Band[]; station?: string | null; onAdd: (t: Any) => void; common?: string | null; onListen?: (mhz: number, mode: string | null) => void;
 }) {
   const rds = s.rds || {};
   const name = s.user_name || rds.ps || "";
-  const what = [s.label !== common && (s.label || "Unlisted"), rds.pty && rds.pty_name].filter(Boolean).join(" · ");
+  const what = [s.label !== common && (labelWords(s, bands) || "Unlisted"), rds.pty && rds.pty_name].filter(Boolean).join(" · ");
   const clock = s.spur && s.clock_hz != null;
   return (
     <tr>
@@ -988,7 +993,7 @@ function AddFromAir({ v, pre, tuner, onDone }: { v: RadioView; pre: Any; tuner: 
     <Section id="rd-tune" title={`Add ${fmtMhz(f, effMode)} MHz as a station`}
              description="It runs all the time, beside the other stations, within what its kind of radio allows.">
       <p className="m-hint">
-        {band ? <><strong>{band.name}</strong>{band.channels_mhz?.length ? `, channel ${band.channels_mhz.findIndex((c: number) => Math.abs(c - f) < 0.002) + 1 || "off-raster"}` : ""}. {bandLine(band.id)} </> : "No band plan lists this frequency. "}
+        {band ? <><strong>{bandLabel(band)}</strong>{band.channels_mhz?.length ? `, channel ${band.channels_mhz.findIndex((c: number) => Math.abs(c - f) < 0.002) + 1 || "off-raster"}` : ""}. {bandLine(band.id)} </> : "No band plan lists this frequency. "}
         {cls && policyLine(cls, v.policies)}
       </p>
       <div className="m-mode">
@@ -1108,7 +1113,7 @@ export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
               const playing = playingMhz != null && Math.abs(playingMhz - e.mhz) < 0.003;
               const f = fmtMhz(e.mhz, e.mode);
               const name = e.user_name || e.name;
-              const label = e.label || "Unlisted";
+              const label = labelWords(e, v.bands) || "Unlisted";
               const kind = e.privacy !== "broadcast" && (CLASS_WORD[e.privacy] || e.privacy);
               return (
                 <li key={e.freq_hz} className={cx("ls-row", playing && "is-playing")}>
@@ -1157,7 +1162,7 @@ export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
             )}
             {!scanJob && <span className="m-hint">Broadcast FM, in about two minutes; stations name themselves.</span>}
           </div>
-          {scanJob && !failed && !(empty && !running) && <ScanProgress job={scanJob} />}
+          {scanJob && !failed && !(empty && !running) && <ScanProgress job={scanJob} bands={v.bands} />}
           {(failed || (empty && !running)) && <NothingHeard v={v} result={failed ? scanJob : scanJob || v.last_scan} onTry={tryOn} />}
         </>
       )}
@@ -1197,7 +1202,7 @@ function Heard({ v, onAdd, reload }: { v: Any; onAdd: (t: Any) => void; reload: 
               )}
             </td>
             <td>
-              <span className="rd-what">{[e.label || "Unlisted", e.rds?.pty && e.rds?.pty_name].filter(Boolean).join(" · ")}</span>
+              <span className="rd-what">{[labelWords(e, v.bands) || "Unlisted", e.rds?.pty && e.rds?.pty_name].filter(Boolean).join(" · ")}</span>
               {e.privacy !== "broadcast" && <Tag tone="muted">{CLASS_WORD[e.privacy] || e.privacy}</Tag>}
               {bandLine(e.band) && <span className="rd-sub">{bandLine(e.band)}</span>}
             </td>
@@ -1235,7 +1240,7 @@ function Spurs({ v, job, running, onJob }: { v: Any; job: Any; running: boolean;
   return (
     <Section id="rd-spurs" title="Learn them once"
              description="A receiver picks up a few signals of its own: its crystal's harmonics, the computer's USB noise. Disconnect the antenna and let Wavescribe learn them once; scans then mark them and leave them out.">
-      {learning && <ScanProgress job={learning} />}
+      {learning && <ScanProgress job={learning} bands={v.bands} />}
       <Table caption="Learnt spurs" cols={[{ label: "Receiver" }, { label: "Learnt" }, { label: "", width: "1%" }]}>
         {v.receivers.map((r: Any) => {
           const s = v.spurs[r.serial];

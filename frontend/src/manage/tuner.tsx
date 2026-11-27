@@ -7,7 +7,7 @@ import { A, stopAudio } from "../lib/audio";
 import { S } from "../lib/live";
 import { useTopics } from "../lib/store";
 import { ApiError, type Any, del, get, post, useEvery, useLoad } from "./api";
-import { and, bandLine, fmtMhz } from "./bands";
+import { and, bandLabel, bandLine, fmtMhz } from "./bands";
 import { type LiveReceiver, type Span, hears, usable } from "./dial";
 import { rxName } from "./Receivers";
 import { snap } from "./Scope";
@@ -325,7 +325,7 @@ export function TunedHead({ t, steps }: { t: Tuner; steps: Steps }) {
         <span id="lv-freq-unit" className="lv-unit">MHz</span>
       </label>
       <div className="lv-what">
-        {st.rds?.ps ? <strong className="lv-ps" dir="auto">{st.rds.ps.trim()}</strong> : <strong>{band ? band.name : "No band plan lists this frequency"}</strong>}
+        {st.rds?.ps ? <strong className="lv-ps" dir="auto">{st.rds.ps.trim()}</strong> : <strong>{band ? bandLabel(band) : "No band plan lists this frequency"}</strong>}
         {st.rds?.rt && <span className="lv-rt" dir="auto">{st.rds.rt}</span>}
         {!st.rds?.ps && bandLine(band?.id) && <span className="lv-rt">{bandLine(band?.id)}</span>}
         {!st.rds?.ps && band?.channels_mhz?.length > 0 && (() => {

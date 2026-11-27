@@ -9,7 +9,7 @@ import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { addedToast } from "./added";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
-import { type Band, and, bandWords, fmtMhz } from "./bands";
+import { type Band, and, bandWords, fmtMhz, labelWords } from "./bands";
 import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, groupCatches, voiceWord, windowWords } from "./catches";
 import { Refusal } from "./Refusal";
 import { type Refused, refused } from "./refusals";
@@ -244,7 +244,7 @@ export function Caught({ bands, watches, keptNothing, onAdd, onChooseBand }: {
         <p className="m-loading">{error ? `Couldn't load what was caught: ${error}` : "Loading…"}</p>
       ) : spots.length ? (
         <ul className="m-list cg-list">
-          {spots.map((s) => <SpotRow key={s.freq_hz} s={s} band={s.band ? name(s.band) : null} onAdd={onAdd} onNoted={reloadNotes} />)}
+          {spots.map((s) => <SpotRow key={s.freq_hz} s={s} label={labelWords(s, bands)} band={s.band ? name(s.band) : null} onAdd={onAdd} onNoted={reloadNotes} />)}
         </ul>
       ) : watches.length || all.length ? (
         <p className="m-empty">
@@ -269,7 +269,9 @@ export function Caught({ bands, watches, keptNothing, onAdd, onChooseBand }: {
 
 const FIRST = 3;
 
-function SpotRow({ s, band, onAdd, onNoted }: { s: Spot; band: string | null; onAdd: (t: Any) => void; onNoted: () => Promise<void> }) {
+/** `label`: what the frequency is, its band named as the page names it; `band`: the band alone,
+ * said under it where the label doesn't. */
+function SpotRow({ s, label, band, onAdd, onNoted }: { s: Spot; label: string; band: string | null; onAdd: (t: Any) => void; onNoted: () => Promise<void> }) {
   const [all, setAll] = useState(false);
   const [editing, setEditing] = useState(false);
   const edit = useRef<HTMLButtonElement>(null);
@@ -285,7 +287,7 @@ function SpotRow({ s, band, onAdd, onNoted }: { s: Spot; band: string | null; on
       <div className="m-item-head">
         <strong className="mono">{f} MHz</strong>
         {s.name && <strong dir="auto">{s.name}</strong>}
-        {s.label && <span className="m-muted">{s.label}</span>}
+        {label && <span className="m-muted">{label}</span>}
         {s.tags.map((t) => <Tag key={t}>{t}</Tag>)}
         <span className="m-spacer" />
         <Button size="sm" variant="ghost" icon="speaker" aria-label={`Listen there, ${f} MHz`} onClick={() => listenTo(s.mhz, s.mode)}>Listen there</Button>
@@ -294,7 +296,7 @@ function SpotRow({ s, band, onAdd, onNoted }: { s: Spot; band: string | null; on
           Add as a station
         </Button>
       </div>
-      <p className="m-item-sub">{[band, `caught ${n === 1 ? "once" : `${n} times`}`, `last ${whenLabel(s.last)}`].filter(Boolean).join(" · ")}</p>
+      <p className="m-item-sub">{[!label && band, `caught ${n === 1 ? "once" : `${n} times`}`, `last ${whenLabel(s.last)}`].filter(Boolean).join(" · ")}</p>
       {editing ? (
         <NoteForm s={s} f={f} onDone={async (saved) => { setEditing(false); if (saved) await onNoted(); }} />
       ) : (

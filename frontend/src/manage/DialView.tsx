@@ -7,7 +7,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import { agoWords } from "../lib/time";
 import type { Any } from "./api";
-import { type Band, and, bandWords } from "./bands";
+import { type Band, and, bandLabel, bandWords } from "./bands";
 import { type LiveReceiver, type Receiver, type Segment, type Span, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks, width as widthOf } from "./dial";
 import { rxName } from "./Receivers";
 import { type Marker, Scope } from "./Scope";
@@ -80,7 +80,7 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
     const order = segs.slice().sort((a, b) =>
       +(b.band.privacy === "broadcast" && b.kind === "text") - +(a.band.privacy === "broadcast" && a.kind === "text")
       || +(b.kind === "text") - +(a.kind === "text") || (b.x1 - b.x0) - (a.x1 - a.x0));
-    return labelRows(order.map((s) => ({ id: s.band.id, x0: s.x0, x1: s.x1, width: measure(label(s.band)) })), width, 2);
+    return labelRows(order.map((s) => ({ id: s.band.id, x0: s.x0, x1: s.x1, width: measure(bandLabel(s.band)) })), width, 2);
   }, [segs, width]);
   const marks = useMemo(() => (width ? ticks(scale, width) : []), [scale, width]);
   const found: number[] = useMemo(() => heard.filter((e) => e.privacy !== "digital").map((e) => e.mhz), [heard]);
@@ -105,7 +105,7 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
     const byStart = segs.slice().sort((a, b) => a.band.start_mhz - b.band.start_mhz || b.band.stop_mhz - a.band.stop_mhz);
     const named = new Map<string, number>();
     for (const s of byStart) named.set(bandWords(s.band).name, (named.get(bandWords(s.band).name) || 0) + 1);
-    return byStart.map((s) => ({ s, shown: (named.get(bandWords(s.band).name) || 0) > 1 ? label(s.band) : bandWords(s.band).name }));
+    return byStart.map((s) => ({ s, shown: (named.get(bandWords(s.band).name) || 0) > 1 ? bandLabel(s.band) : bandWords(s.band).name }));
   }, [segs]);
   // On a phone the card is below a long list: a tap brings it into view (keys keep their place).
   const tapped = (id: string) => {
@@ -151,7 +151,7 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
               return at ? (
                 <span key={s.band.id} className={cx("dl-name", `is-row${at.row}`, s.band.id === chosen && "is-chosen")} style={{ left: at.left }}
                       onClick={() => onChoose(s.band.id)}>
-                  {label(s.band)}
+                  {bandLabel(s.band)}
                 </span>
               ) : null;
             })}
@@ -182,12 +182,6 @@ export function DialBar({ bands, heard, chosen, onChoose, overlay, says, onBand,
     </div>
   );
 }
-
-/** The name printed on the dial: a shorter one where the everyday name is long. */
-const label = (b: Band) => {
-  const w = bandWords(b);
-  return w.label || w.name;
-};
 
 function BandButton({ s, chosen, tab, count, extra, onChoose }: { s: Segment<Band>; chosen: boolean; tab: boolean; count: number; extra?: string; onChoose: (id: string) => void }) {
   const b = s.band;
