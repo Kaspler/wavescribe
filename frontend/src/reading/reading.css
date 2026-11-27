@@ -852,6 +852,7 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
 .keys dl div { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .keys dt { display: flex; align-items: center; gap: 3px; color: var(--ink-3); }
 .keys dd { margin: 0; color: var(--ink-2); text-align: right; }
+.keys h3 { font-size: var(--t-sm); font-weight: 650; color: var(--ink-3); margin-bottom: var(--s4); }
 
 /* -- phones --------------------------------------------------------------------------------- */
 .phone { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s5) var(--s6) var(--s9); }

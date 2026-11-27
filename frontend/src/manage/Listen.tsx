@@ -12,10 +12,11 @@ import { and, bandLabel, fmtMhz } from "./bands";
 import { type LiveReceiver, bandAt, hears, usable } from "./dial";
 import { OnAirHere, Responsibility, useRadio } from "./Radio";
 import { RxSwitch, rxName } from "./Receivers";
-import { Scope, snap } from "./Scope";
+import { Scope } from "./Scope";
 import { SpokenField } from "./SpokenField";
 import { spokenFields, spokenLang, stationsOnAir } from "./spokenLang";
-import { Ask, TuneControls, TunedHead, type Tuner, remember, useLivePoll, useSteps, useTuner } from "./tuner";
+import { Ask, TuneControls, TunedHead, type Tuner, TuningKeys, remember, useLivePoll, useSteps, useTuner, useTuningKeys } from "./tuner";
+import { snap } from "./tuning";
 
 const ZOOMS = [
   { value: "full", label: "Whole band" },
@@ -162,6 +163,7 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
   useLivePoll(t, view);
 
   const steps = useSteps(t, view);
+  useTuningKeys(steps);
   const markers: Any[] = (radio?.receivers || []).find((r: Any) => r.id === dev)?.stations || [];
   const isNarrow = st.mode !== "wfm";
   // A transmitter close by, as the server says it, while it lasts and 10 minutes after; lighter
@@ -173,6 +175,7 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
         <RxSwitch ids={ids} value={dev} onChange={onRx}
                   note={st.holders?.length ? `Shared with ${st.holders.join(", ")}: a frequency outside its band, or another gain, needs it to itself.` : null} />
         <TunedHead t={t} steps={steps} />
+        <TuningKeys steps={steps} />
         {ovl && <OverloadNote o={ovl} />}
         <TuneControls t={t} steps={steps} play={play} />
         {blocked && <p className="m-trouble">The browser held the sound back: press Play.</p>}
@@ -185,7 +188,7 @@ function Tuned({ t, radio, ids, onRx, play, onKept }: TunedProps) {
                channelKhz={st.channel_khz} stepKhz={steps.stepKhz} band={band} markers={markers} onTune={steps.to} onStep={steps.step} />
         <div className="lv-under">
           <Segmented label="Zoom" value={zoom} onChange={setZoom} options={[...ZOOMS]} />
-          <span className="m-hint">Click to tune, scroll or use the arrow keys to step. Receiver {rxName(dev)} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz.</span>
+          <span className="m-hint">Click to tune, scroll to step. Receiver {rxName(dev)} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz.</span>
         </div>
         {st.paused?.length > 0 && (
           <p className="m-hint">

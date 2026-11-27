@@ -1,9 +1,11 @@
 // The scope: a receiver's spectrum and its waterfall on the instrument's dark band, with the
-// tuning drawn in the pointer's orange. It draws what it is given and reports clicks, steps and
-// the wheel; tuning, polling and zoom stay with whoever holds the receiver (Listen's tuner).
+// tuning drawn in the pointer's orange. It draws what it is given and reports clicks and the
+// wheel; tuning, its keys (tuner.tsx, useTuningKeys), polling and zoom stay with whoever holds the
+// receiver (Listen's tuner).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Band, fmtMhz } from "./bands";
 import type { Span } from "./dial";
+import { snap } from "./tuning";
 
 /** One picture of what a receiver hears: the power of each bin from start_hz to stop_hz. */
 export interface Spectrum {
@@ -41,25 +43,16 @@ export interface ScopeProps {
   band: Band | null;
   markers: Marker[];
   onTune: (mhz: number) => void;
-  /** Steps of the raster: the wheel and the arrow keys (ten with Shift). */
+  /** Steps of the raster, from the wheel. */
   onStep: (n: number) => void;
   /** Where the same signals are in words, for a screen reader: the pictures' text alternative. */
   inWords?: string;
 }
 
-/** The nearest channel: the band's channel list, else its raster from the band's start. */
-export function snap(mhz: number, stepKhz: number, band: Band | null): number {
-  if (band?.channels_mhz.length && band.start_mhz <= mhz && mhz <= band.stop_mhz)
-    return band.channels_mhz.reduce((p, c) => (Math.abs(c - mhz) < Math.abs(p - mhz) ? c : p));
-  const step = stepKhz / 1000;
-  const origin = band && band.step_khz && Math.abs(band.step_khz - stepKhz) < 1e-6 ? band.start_mhz : 0;
-  return +(origin + Math.round((mhz - origin) / step) * step).toFixed(5);
-}
-
 const niceStep = (span: number) => [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.25, 0.5, 1].find((s) => span / s <= 8) || 1;
 
 /** The spectrum and its waterfall, on the instrument's dark band. The orange line and shading
- * are the tuning and its channel; a click tunes, the wheel and arrow keys step. */
+ * are the tuning and its channel; a click tunes, the wheel steps. */
 export function Scope({ spectrum: s, span: edges, view, tunedMhz, mode, channelKhz, stepKhz, band, markers, onTune, onStep, inWords }: ScopeProps) {
   const spec = useRef<HTMLCanvasElement>(null);
   const fall = useRef<HTMLCanvasElement>(null);
@@ -120,11 +113,7 @@ export function Scope({ spectrum: s, span: edges, view, tunedMhz, mode, channelK
       <canvas ref={spec} className="lv-spectrum" tabIndex={0} role="img"
               aria-label={`Spectrum from ${range[0].toFixed(3)} to ${range[1].toFixed(3)} MHz, tuned to ${fmtMhz(tunedMhz, mode)} MHz. Arrow keys step the tuning.${inWords ? ` ${inWords}` : ""}`}
               onPointerMove={(e) => setHover(at(e.clientX))} onPointerLeave={() => setHover(null)}
-              onClick={(e) => onTune(snap(at(e.clientX), stepKhz, band))}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); onStep(e.shiftKey ? 10 : 1); }
-                if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); onStep(e.shiftKey ? -10 : -1); }
-              }} />
+              onClick={(e) => onTune(snap(at(e.clientX), stepKhz, band))} />
       <canvas ref={fall} className="lv-fall" width={1200} height={200} role="img" aria-label={`Waterfall: the spectrum over the last minute.${inWords ? ` ${inWords}` : ""}`} />
       <figcaption className="m-hint lv-readout">
         {hover != null ? <>Pointer at <span className="mono">{fmtMhz(snap(hover, stepKhz, band), mode)}</span> MHz · click to tune</> : s ? <>Noise floor {s.noise_db.toFixed(0)} dB</> : "Waiting for the receiver…"}

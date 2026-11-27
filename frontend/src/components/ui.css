@@ -66,6 +66,7 @@
   border-radius: 4px;
   font: 500 var(--t-xs) / 1 var(--font);
   color: var(--ink-3);
+  white-space: nowrap;
   background: var(--raised);
 }
 

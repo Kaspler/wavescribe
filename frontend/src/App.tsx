@@ -149,11 +149,20 @@ function Shortcuts({ onClose }: { onClose: () => void }) {
     [<Kbd>Esc</Kbd>, "Close the alerts, search, Ask, Listen, Find or Settings"],
     [<Kbd>?</Kbd>, "This list"],
   ];
+  // Listen's tuner takes these while a receiver is tuned by hand (manage/tuner.tsx, useTuningKeys).
+  const tuning: [React.ReactNode, string][] = [
+    [<><Kbd>↑</Kbd><Kbd>→</Kbd></>, "Step the frequency up"],
+    [<><Kbd>↓</Kbd><Kbd>←</Kbd></>, "Step it down"],
+    [<><Kbd>⇧</Kbd> with them</>, "Ten steps at once"],
+    [<><Kbd>Page Up</Kbd><Kbd>Page Down</Kbd></>, "Next or previous channel, else ten steps"],
+  ];
   return (
     <div className="scrim" onPointerDown={onClose}>
       <div ref={box} className="pop keys" role="dialog" aria-modal="true" aria-labelledby="keys-h" onPointerDown={(e) => e.stopPropagation()}>
         <h2 id="keys-h">{T.shortcuts}</h2>
         <dl>{rows.map(([k, v], i) => <div key={i}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+        <h3>Listen, tuning by hand</h3>
+        <dl>{tuning.map(([k, v], i) => <div key={i}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
         <Button variant="secondary" size="sm" onClick={onClose} autoFocus>Close</Button>
       </div>
     </div>

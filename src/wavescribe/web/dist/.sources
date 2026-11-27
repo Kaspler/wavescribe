@@ -10,11 +10,11 @@ a18cc0b1422bd25fb3feec5ac3919b2302831c66 frontend/public/icon-512.png
 20d67f44b86d8e82d5f8ffd89d95cf2eb608c060 frontend/public/icon-maskable-512.png
 c480ad0ffc8c3b901806751b47c26cefbde27006 frontend/public/manifest.webmanifest
 2f713d5a5af66c132a45bdc1b5dd9bb653559d42 frontend/scripts/notices.mjs
-314c237f1a6d0696689eff65c0afd40b6be36072 frontend/src/App.tsx
+6b9e1ca6432982a17ac880c020e6953ec1d0380d frontend/src/App.tsx
 938af0ba42364a8a08d3570f8ef90132e7f44165 frontend/src/components/ErrorBoundary.tsx
 145441aafc8558ff6d0424ec1cedf419aa8c710d frontend/src/components/Icon.tsx
 5414b097c05cc6e0635644215c1ddde548574634 frontend/src/components/Overload.tsx
-1e6f120c9bc22acd4fb55f3b8c1e498cd9f0ffa9 frontend/src/components/ui.css
+08f7b5c944b25b44a318ce3e0752b0353c8c7acb frontend/src/components/ui.css
 68e92a5c53727fc0e0baf59de27ab35209ab6ee9 frontend/src/components/ui.tsx
 4a3d400b065d135d842753dbd21c8cefcdfd75ed frontend/src/lib/alerts.ts
 fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
@@ -37,10 +37,10 @@ a9ae70f3b2f658def50af1f44826a46bf151f411 frontend/src/lib/startRefusal.ts
 93f482e04a82e2c4e14a0371863bbf57662acca1 frontend/src/main.tsx
 880e6e6edcfc4bf0d4429f96c92e65a6f7a1370d frontend/src/manage/AlertRules.tsx
 bc4745619c3c4c68660dde6f41a1967b23ddb91d frontend/src/manage/Caught.tsx
-fa75bbfa0c0044694b1353fb7c8564986d772abe frontend/src/manage/DialView.tsx
+271e49466eeaf420f4dce5a427dfcefd715f5391 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 dd8b9b2d3cba4c54cea6f144e724fbdba7fe82e8 frontend/src/manage/Internet.tsx
-61a867e15e98e669102dcf4eebaa3aa897abc9ab frontend/src/manage/Listen.tsx
+15d7cdfe91b8a9db0ae0acf3b6d90a76e1cc2e71 frontend/src/manage/Listen.tsx
 db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
@@ -50,7 +50,7 @@ dc4f8cf17da31768e9d65b42775df30addf1b571 frontend/src/manage/MoveStation.tsx
 0586b0ce3cb3eb7f1be3f173a6432b3c1946fe8d frontend/src/manage/Radio.tsx
 e8bf0386ccb363ae2e1df628660b7d150bb2002b frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
-cd5de548a3446e8c357b4130db350b6ebcfd41aa frontend/src/manage/Scope.tsx
+d6b4328d5ad20a75a99f0a145baebcce8d9a3e39 frontend/src/manage/Scope.tsx
 36acf6dd9b516377921a5c23340922e517b2d56d frontend/src/manage/SpokenField.tsx
 c138c9b65a912f941b656ac7dfd36410bbabe86e frontend/src/manage/Stations.tsx
 320011fa6e006b01df2831575dabeeb7b756a7ab frontend/src/manage/Status.tsx
@@ -62,12 +62,13 @@ cabf7ed2b330aee022d52d57ba8ffd0144165c18 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 f88889a0f0bab37d17d7448614e098d3a78e9c5d frontend/src/manage/dial.ts
 53a5306ec8d1d4780cf7474647b95870eebbf961 frontend/src/manage/drafts.ts
-5ac2545cab8bf3e71263ce87bc2ce1cf7cbdec7f frontend/src/manage/manage.css
+b7687812e8dd2cc139dd073cde464b23123f5730 frontend/src/manage/manage.css
 b4135c8031af912d1475337316b8ff30809ad83f frontend/src/manage/onair.ts
 d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts
 e6ed73dd60af45d78a3329145f07162df9edcd94 frontend/src/manage/spokenLang.ts
-f5e793910f621fcdfdf41b1adc9042d947e1d536 frontend/src/manage/tuner.tsx
+2bc8efafae7cf10ddeb34ed3c31158150dda6230 frontend/src/manage/tuner.tsx
+170792a2429d8508c2cd2980ae13ae792f829530 frontend/src/manage/tuning.ts
 fb0a5294c93a167651049804cde69afa4390cb38 frontend/src/reading/Alerts.tsx
 d61ab9fe9c7de350fc6584b6bc0d230b937d4e63 frontend/src/reading/Ask.tsx
 bbaa48818b130f26a3e83c4dc867e7574c39c40f frontend/src/reading/Column.tsx
@@ -86,7 +87,7 @@ fee9d1df9af77766a5aa5da33d32dced8d18a73e frontend/src/reading/aloud.ts
 cd13e6e1e44a731d3c09934f19f40af51a25e138 frontend/src/reading/channels.ts
 bc72f6b8db5ebb7b916cfffe4a61e8b5764490d8 frontend/src/reading/digest.ts
 9333e45065edd9626cff5ec0d896d60e395d3c30 frontend/src/reading/held.ts
-b80611973d220f1c4c4bbd2e5406e2109a34e666 frontend/src/reading/reading.css
+0ad2c474d2135c5218e94f96ac0e6e72b5ffd5fd frontend/src/reading/reading.css
 5490145121a1e522026dfbcd875afcc0fc1f198f frontend/src/reading/strings.ts
 d3c1eb143f85d51431c8fccc33e811d6825cd76d frontend/src/reading/summaries.ts
 e525eba01feec9afa78f202473013a94f6e268c7 frontend/src/reading/text.tsx
@@ -114,5 +115,6 @@ d984f6c5104858f54615228ae2fd61382b96950c frontend/tests/spokenLang.test.mjs
 352b4cb6a777fb575995ce51ae0ce8cbd9344f83 frontend/tests/startRefusal.test.mjs
 80b3c255b77e0c157f6e8ceb2aef9cc1f30d54d9 frontend/tests/tabs.test.mjs
 ef8340b9978505f33fddf27c20ae4482786bd7fd frontend/tests/time.test.mjs
+0c37192abb19b8a5b94b3d9ff52fb1779a488c83 frontend/tests/tuning.test.mjs
 8889f47e8563c6c78225cc7d23c0ce5ecec21f23 frontend/tsconfig.json
 c298394d2c428451ceaf6d1944442c8cc75fa5d4 frontend/vite.config.ts

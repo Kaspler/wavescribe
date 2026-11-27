@@ -249,7 +249,22 @@ div.m-trouble > p { margin: 0; }
 /* Listen: a receiver tuned by hand. The readout and the scope are the instrument; the rest is
    the quiet settings around it. */
 .lv-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--s5) var(--s8); margin-top: var(--s4); }
+.lv-tune { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); }
+.lv-chan { font-size: var(--t-lg); font-weight: 650; color: var(--ink-2); white-space: nowrap; }
 .lv-freq { display: inline-flex; align-items: baseline; gap: var(--s3); }
+/* The step buttons: one above the other beside the readout with a mouse; side by side and a
+   fingertip wide on a touch screen or a phone. Held down, they go on stepping: no callout. */
+.lv-steppers { display: inline-grid; grid-template-rows: 1fr 1fr; gap: 2px; }
+.lv-steppers .btn { width: 32px; height: 21px; padding: 0; touch-action: manipulation; -webkit-touch-callout: none; }
+.lv-step { display: inline-flex; align-items: center; gap: var(--s3); font-size: var(--t-ui); color: var(--ink-2); }
+.lv-step .select { width: auto; }
+.lv-seek { padding: 0 var(--s2); font-size: var(--t-ui); color: var(--ink-2); }
+.lv-keys { margin-top: var(--s3); }
+@media (hover: none) and (pointer: coarse) { .lv-keys { display: none; } }
+@media (pointer: coarse), (max-width: 720px) {
+  .lv-steppers { grid-template-rows: none; grid-auto-flow: column; gap: var(--s3); }
+  .lv-steppers .btn { width: 44px; height: 44px; }
+}
 .lv-freq-input {
   min-width: 5ch; padding: 0 2px; border: 0; border-bottom: 1px solid transparent; background: none;
   font: 600 40px/1.1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--ink);
@@ -261,6 +276,7 @@ div.m-trouble > p { margin: 0; }
 .lv-what strong { font-size: var(--t-lg); font-weight: 650; }
 .lv-ps { font-family: var(--mono); letter-spacing: 0.04em; }
 .lv-rt { font-size: var(--t-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: var(--t-sm); color: var(--ink-3); text-wrap: pretty; }
 .lv-meter-wrap { display: inline-flex; align-items: center; gap: var(--s4); }
 .lv-meter { position: relative; width: 140px; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
 .lv-meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); transition: width 200ms linear; }
@@ -291,6 +307,8 @@ tr.is-off td { color: var(--ink-3); }
 @media (max-width: 720px) {
   .lv-head { grid-template-columns: 1fr; }
   .lv-freq-input { font-size: 32px; }
+  .lv-chan { flex-basis: 100%; }
+  .lv-dot { display: none; }
 }
 
 /* Listen: the stations as one list to play. A whole row is the button; the one playing shows its

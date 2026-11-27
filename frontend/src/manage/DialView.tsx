@@ -13,7 +13,7 @@ import { type Band, and, bandLabel, bandWords } from "./bands";
 import { type LiveReceiver, type Receiver, type Segment, type Span, bandOfWindow, dragCentre, kindOf, labelRows, makeScale, marks, onDial, segments, ticks, width as widthOf } from "./dial";
 import { rxName } from "./Receivers";
 import { type Marker, Scope } from "./Scope";
-import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps } from "./tuner";
+import { TuneControls, TunedHead, type Tuner, useLivePoll, useSteps, useTuningKeys } from "./tuner";
 
 const NAME_FONT = 12; // px, as --t-sm
 const MIN_INNER_PX = 14; // a band inside another stays this wide
@@ -410,6 +410,8 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
   // Opened by a button that goes away with it (Look here, Pause and look): the focus goes on to
   // what can be done here, not back to the top of the page.
   const box = useRef<HTMLDivElement>(null);
+  // The arrow keys step while the focus is in this view; elsewhere they stay the page's.
+  useTuningKeys(steps, box);
   useEffect(() => {
     const a = document.activeElement;
     if (!a || a === document.body) box.current?.querySelector<HTMLElement>(".m-actions button")?.focus();
@@ -437,8 +439,8 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
              onTune={(mhz) => t.tune(steps.keep({ mhz: +mhz.toFixed(5) }), true)} onStep={steps.step}
              inWords="The table below lists what has been found in this band, strongest first." />
       <p className="m-hint">
-        Receiver {name} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz. Click a signal, or anywhere, to listen there; the arrow
-        keys step. Nothing heard here is kept until you add it as a station.
+        Receiver {name} hears {steps.heard[0].toFixed(2)} to {steps.heard[1].toFixed(2)} MHz. Click a signal, or anywhere, to listen there; while you are
+        in this view, the arrow keys step (ten with Shift). Nothing heard here is kept until you add it as a station.
         {st.paused?.length > 0 && ` ${and(st.paused)} ${st.paused.length === 1 ? "waits" : "wait"} until you let the receiver go.`}
       </p>
       <Advanced id="dl-tune" label="Tuning">
