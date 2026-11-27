@@ -67,7 +67,7 @@ def render(out: Mapping[str, Any]) -> str:
             a.get("quote") or "",
         )
         where = ", ".join(a.get("names") or a["stations"])
-        lines.append(f"! {a['severity']} {local_time(a['last_at'], '%H:%M')} {where}: {said}")
+        lines.append(f"! {a['severity']} {local_time(a['announced_at'], '%H:%M')} {where}: {said}")
     if out["alerts"]:
         lines.append("")
     lines.append(out["text"])

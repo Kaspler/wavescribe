@@ -501,6 +501,17 @@ def test_a_reply_that_cites_nothing_it_was_given_shows_no_points(tmp_path: Path)
     store.close()
 
 
+def kept(store: Store, a: Alert, announced_at: float | None = None) -> Alert:
+    """``a`` in the store as the alerter leaves it: announced at ``announced_at`` (by default
+    when it was first heard) when its status says somebody was told."""
+    store.add_alert(a)
+    if a.status in ("delivered", "partial"):
+        a.delivered_at = a.first_at if announced_at is None else announced_at
+        a.delivered_severity = a.severity
+        store.update_delivery(a)
+    return a
+
+
 def alert(
     store: Store,
     sid: str,
@@ -514,9 +525,33 @@ def alert(
     a = Alert(
         "water", severity, [sid], "pt-PT", quote, ["água"], at, at, status=status, privacy=[privacy]
     )
-    store.add_alert(a)
+    kept(store, a)
     store.add_alert_summaries(a, {"en": "Water cut tomorrow"}, "fake-mt")
     return store.alert(a.id)
+
+
+def test_an_incident_is_named_once_and_only_when_it_was_announced(tmp_path: Path) -> None:
+    store = stocked(tmp_path)
+
+    def incident(rule: str, first: float, last: float, announced: float | None, **kw) -> Alert:
+        a = Alert(rule, "high", ["a"], "pt-PT", "Corte", ["corte"], NOW - first, NOW - last, **kw)
+        a.mentions = 12
+        return kept(store, a, None if announced is None else NOW - announced)
+
+    # Announced hours ago and still mentioned (reminders, more mentions): not news of this hour.
+    incident("old", 3 * 60 * MIN, 5 * MIN, 3 * 60 * MIN, status="delivered")
+    told = incident("water", 50 * MIN, 5 * MIN, 50 * MIN, status="delivered")
+    worse = incident("fire", 2 * 60 * MIN, 10 * MIN, 20 * MIN, status="delivered")  # escalated
+    incident("logged", 30 * MIN, 30 * MIN, None, status="logged")  # nobody was told
+    incident("failed", 30 * MIN, 30 * MIN, None, status="failed")
+    incident("silence", 40 * MIN, 40 * MIN, 40 * MIN, status="delivered", kind="silence")
+    d = digester(store, FakeLlm("NONE: nothing."))
+    out = d.run(d.request({"minutes": 60})).payload()
+    assert [(a["rule"], a["announced_at"]) for a in out["alerts"]] == [
+        ("water", told.delivered_at),
+        ("fire", worse.delivered_at),
+    ]
+    store.close()
 
 
 def test_alerts_of_the_window_come_first_as_the_store_has_them(tmp_path: Path) -> None:
@@ -589,7 +624,7 @@ def test_another_machine_learns_no_name_of_radio_that_stays_here(tmp_path: Path)
         status="delivered",
         privacy=["broadcast", "private"],
     )
-    store.add_alert(a)
+    kept(store, a)
     leaving = exports(stations)
     d = digester(store, FakeLlm("- Water is cut [1]."), stations=stations)
     out = d.run(d.request({"minutes": 60}, leaving), leaving).payload()
@@ -640,7 +675,7 @@ def test_an_alert_heard_also_on_radio_that_stays_here_leaves_without_words(tmp_p
         status="delivered",
         privacy=["broadcast", "amateur"],
     )
-    store.add_alert(a)
+    kept(store, a)
     leaving = exports([*STATIONS, ham])
     d = digester(store, FakeLlm("NONE: nothing."), stations=[*STATIONS, ham])
     [shown] = d.run(d.request({"minutes": 60}, leaving), leaving).payload()["alerts"]

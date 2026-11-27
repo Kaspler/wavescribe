@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_agent import UTTERANCE_KEYS, Mcp, url_of
-from tests.test_digest import NOW, FakeLlm, stocked
+from tests.test_digest import NOW, FakeLlm, kept, stocked
 from tests.test_digest_web import Serving
 from wavescribe.alerts import Alert
 from wavescribe.cli import main
@@ -40,7 +40,7 @@ def test_the_command_prints_the_digest_and_its_sources(tmp_path: Path, capsys) -
         NOW - 600,
         status="delivered",
     )
-    store.add_alert(a)
+    kept(store, a)
     store.add_alert_summaries(a, {"en": "Water cut tomorrow"}, "fake-mt")
     web = Serving(store, FakeLlm("- Water is cut tomorrow [1].\n- Rain this afternoon [2]."))
     url = url_of(web.server)

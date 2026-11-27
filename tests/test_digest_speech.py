@@ -13,7 +13,7 @@ import tests.test_app
 from tests.test_agent import Mcp, url_of
 from tests.test_alerts import FakeActions
 from tests.test_app import make_app, wait_for
-from tests.test_digest import MIN, NOW, FakeLlm, digester, stocked
+from tests.test_digest import MIN, NOW, FakeLlm, digester, kept, stocked
 from tests.test_digest_web import FROM_LAN, Serving, post
 from wavescribe.alerts import Alert, Voice
 from wavescribe.alerts.actions import ActionError, LogOnlyActions, MacActions
@@ -68,7 +68,7 @@ def made(tmp_path: Path, reply: str = TWO_POINTS, minutes: float = 60, *alerts: 
         status="delivered",
     )
     for alert in (water, *alerts):
-        store.add_alert(alert)
+        kept(store, alert)
     store.add_alert_summaries(water, {"en": "Water cut tomorrow"}, "fake-mt")
     d = digester(store, FakeLlm(reply))
     return store, d.run(d.request({"minutes": minutes, "language": "en"}))
@@ -110,7 +110,8 @@ def test_a_station_alert_or_one_still_pending_is_not_named(tmp_path: Path) -> No
     )
     waiting = Alert("fire", "high", ["b"], "pt-PT", "Fogo", ["fogo"], NOW - 60, NOW - 60)
     store, digest = made(tmp_path, TWO_POINTS, 60, quiet, waiting)
-    assert [a["rule"] for a in digest.alerts] == ["silence", "water"]  # not one being delivered
+    # Neither a station's alert, whose end the store doesn't keep, nor one being delivered.
+    assert [a["rule"] for a in digest.alerts] == ["water"]
     assert spoken(digest, EN)[1] == "Earlier alerts, 1 in all: 11:50, water."
     store.close()
 
@@ -194,6 +195,20 @@ def test_an_alert_stops_a_digest_being_read_at_once() -> None:
         ("speak", "Lesya", "Evacuate the riverside"),
     ]
     assert count == [0] and speech.claim()  # the turn was given back
+
+
+def test_a_reminder_or_any_other_notification_leaves_a_digest_being_read() -> None:
+    actions = LongSay()
+    speech = Speech(actions)
+    assert speech.claim()
+    reader = in_background(lambda: speech.read("Lesya", ["first"], threading.Event()))
+    assert actions.speaking.wait(5)
+    # Only an announcement is spoken; a reminder (still being mentioned) is only shown.
+    speech.notify("REMINDER · water · a", "Still being mentioned: 12 times since 10:05")
+    time.sleep(0.2)
+    assert reader.is_alive() and not any(c[0] == "cut" for c in actions.calls)
+    speech.close()
+    reader.join(5)
 
 
 def test_a_digest_starts_once_an_alert_being_said_has_ended() -> None:

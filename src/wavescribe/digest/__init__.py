@@ -105,6 +105,7 @@ ANSWER_TOKENS = 500
 CHOICE_TOKENS = 60  # "3+9, 7, 1, 12, 5"
 MAX_JOIN = 3  # notes of one story in a choice; a longer "join" lumps unrelated notes together
 ALERT_ROWS = 500  # the newest alerts looked through for those in the window
+SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a receiver
 TIMEOUT_S = 240.0  # three prompts of notes and the choice, behind whatever backlog there is
 MAX_RUNNING = 2  # digests waiting for the model at once: each holds a connection meanwhile
 TIME_FORMAT = "%H:%M"
@@ -499,24 +500,24 @@ class Digester:
         return out
 
     def alerts(self, request: Request, exports: Exports | None = None) -> list[dict[str, Any]]:
-        """Alerts of the window, oldest first, as the store has them: those mentioned in it on
-        one of its stations, at medium severity or above (low ones are only highlighted in the
-        transcript), not announced by another alert, and not still on their way (pending: it
-        speaks for itself once delivered). For another machine, without the words of radio
-        that stays here."""
+        """The alerts announced in the window, oldest first, as the store has them, with when
+        (``announced_at``): each incident once, about what was said on one of its stations, at
+        medium severity or above. Not one announced before the window and only mentioned or
+        recalled in it, nor one nobody was told about, nor a station's own alert (no audio,
+        a traffic announcement), whose end the store doesn't keep. For another machine,
+        without the words of radio that stays here."""
         out = []
         wanted = set(request.stations)
         for a in self.store.alerts(limit=ALERT_ROWS):
-            if not request.since <= (a["last_at"] or 0) <= request.until:
-                continue
-            if a["severity"] in ("low", None) or a["status"] in ("covered", "pending"):
+            at = _announced(a, request)
+            if at is None or a["severity"] in ("low", None) or a["kind"] not in SAID_KINDS:
                 continue
             if not wanted & set(a["stations"]):
                 continue
             if exports is not None:  # radio that stays here: no words, and not even its name
                 a = {**exports.alert(a), "stations": [s for s in a["stations"] if s in wanted]}
-            out.append(a)
-        return sorted(out, key=lambda a: a["last_at"])
+            out.append({**a, "announced_at": at})
+        return sorted(out, key=lambda a: a["announced_at"])
 
     # -- making one ---------------------------------------------------------------------------
 
@@ -983,6 +984,20 @@ def _numbers(group: str) -> list[int]:
         elif len(ends) == 2 and ends[0] <= ends[1]:
             out += range(ends[0], min(ends[1], ends[0] + CITED) + 1)
     return out
+
+
+def _announced(alert: Mapping[str, Any], request: Request) -> float | None:
+    """When ``alert`` was announced in the window: its last announcement (the first, or a rise
+    in severity), else, when that came after the window, its first mention; None when it
+    wasn't announced in the window or nobody was told (the store keeps the last announcement
+    only, and only once it reached somebody)."""
+    delivered = alert.get("delivered_at")
+    if delivered is None or alert["status"] == "covered":
+        return None
+    for at in (delivered, alert["first_at"]):
+        if request.since <= at <= request.until and at <= delivered:
+            return float(at)
+    return None
 
 
 def within(text: str, limit: int) -> str:

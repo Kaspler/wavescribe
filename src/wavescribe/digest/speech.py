@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from wavescribe.digest import within
 from wavescribe.events import local_time
@@ -49,7 +49,6 @@ FIELDS = {
     "summary": "{stations}, {start}, {end}, {read} and {said}",
     "earlier": "{count} and {alerts}",
 }
-SAID_KINDS = ("keyword", "llm")  # alerts about what was said, not about a receiver
 
 
 class Speech:
@@ -150,10 +149,11 @@ def spoken(digest: Digest, voice: Voice, *, seconds: float = SECONDS) -> list[st
             SPOKEN_CHARS,
         )
     ]
-    alerts = told(digest.alerts)
+    alerts = digest.alerts  # each incident once, when it was announced
     if alerts:
         listed = "; ".join(
-            f"{local_time(a['last_at'], '%H:%M')}, {a['rule']}" for a in alerts[-EARLIER_LISTED:]
+            f"{local_time(a['announced_at'], '%H:%M')}, {a['rule']}"
+            for a in alerts[-EARLIER_LISTED:]
         )
         out.append(within(earlier.format(count=len(alerts), alerts=listed), SPOKEN_CHARS))
     left, points = seconds, []
@@ -164,13 +164,6 @@ def spoken(digest: Digest, voice: Voice, *, seconds: float = SECONDS) -> list[st
             break
         points.append(line)
     return out + points
-
-
-def told(alerts: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """The alerts a spoken digest names: those about what was said. A station's alert (no
-    audio, a receiver at its limit) may have ended since, which the store doesn't keep, and a
-    digest mustn't say that something is wrong that isn't."""
-    return [a for a in alerts if a.get("kind", "keyword") in SAID_KINDS]
 
 
 def phrases_of(voice: Voice, language: str) -> tuple[str, str] | None:
