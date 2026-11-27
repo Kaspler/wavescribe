@@ -361,7 +361,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   // A watch of the band, or of a slice of it.
   const ofBand = (w: Any) => w.watch === chosen?.id || (Array.isArray(w.watch) && !!chosen && w.watch[0] >= chosen.start_mhz && w.watch[1] <= chosen.stop_mhz);
   const watched = watchable ? watches.find((w) => w.running && ofBand(w)) : undefined;
-  const following = ((rx?.stations || []) as Any[]).filter((x) => x.running).map((x) => ({ id: x.id as string, name: x.name as string }));
+  const following: string[] = ((rx?.stations || []) as Any[]).filter((x) => x.running).map((x) => x.name);
   // With nothing found yet, one way in: FM, the easiest to hear, on a free receiver.
   const fresh = v.receivers.length > 0 && !!fm && !v.heard.length && !scanJob;
   const firstRx = v.receivers.find((r: Any) => !r.busy.length && !r.scanning) || v.receivers[0];
@@ -395,7 +395,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
           </Button>
         )}
         {watched ? (
-          <ActButton icon="stop" run={async () => { await post(`/stations/${watched.id}/stop`); await onWatched(); }}>
+          <ActButton id="rd-watch-stop" icon="stop" run={async () => { await post(`/stations/${watched.id}/stop`); await onWatched(); }}>
             Stop watching{Array.isArray(watched.watch) ? ` ${watchWords(watched, v.bands)}` : ""}{watched.device !== device ? ` with Receiver ${rxName(watched.device)}` : ""}
           </ActButton>
         ) : watchable && !watchAsk && (
@@ -456,8 +456,14 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
         <WatchBand band={chosen} device={device} holders={following} needsAck={!!v.policies?.[chosen.privacy]?.needs_ack}
                    free={rxs.find((r) => r.id !== device && r.state === "idle")?.id || null} others={rxs.filter((r) => r.id !== device).map((r) => r.id)}
                    byHand={byHand} letGo={(id) => (tuner.dev === id ? tuner.close() : del(`/live/${id}`))}
-                   watches={watches} receivers={v.receivers} bands={v.bands}
-                   onDone={async () => { setWatchAsk(false); await onWatched(); }} onCancel={() => {
+                   liveClosed={(id) => { if (tuner.dev === id) { tuner.stopPlayer(); tuner.setSt(null); } }}
+                   watches={watches} bands={v.bands}
+                   onDone={async () => {
+                     setWatchAsk(false);
+                     await onWatched();
+                     // The panel closes onto the button that stops what it started.
+                     requestAnimationFrame(() => document.getElementById("rd-watch-stop")?.focus());
+                   }} onCancel={() => {
                      setWatchAsk(false);
                      // The panel closes back onto the button that opened it.
                      requestAnimationFrame(() => document.getElementById("rd-watch-open")?.focus());

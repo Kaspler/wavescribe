@@ -1,7 +1,7 @@
 // "Caught here": what watches caught, grouped by frequency and filtered.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandsIn, filterCatches, groupCatches, fitsOneReceiver, hasSpeech, hearsWindow, talksNowAndThen, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
+import { bandsIn, filterCatches, groupCatches, hasSpeech, talksNowAndThen, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
 
 const NOW = 1_800_000_000;
 const caught = (id, freq_hz, ago, more = {}) => ({
@@ -65,19 +65,13 @@ test("a window in words", () => {
   assert.equal(windowWords([446, 446.1], names), "446.000–446.100 MHz");
 });
 
-test("a watch is tuned where the server would tune it, and the page knows whether it hears it", () => {
+test("a watch is moved back where the server would tune it", () => {
   const pmr = { start_mhz: 446, stop_mhz: 446.2, step_khz: null, channel_khz: 12.5, channels_mhz: Array.from({ length: 16 }, (_, i) => +(446.00625 + i * 0.0125).toFixed(5)) };
   const twoM = { start_mhz: 144, stop_mhz: 146, step_khz: 12.5, channel_khz: 12.5, channels_mhz: [] };
   const w = watchWindow(pmr, "pmr446");
   assert.deepEqual([w.lo, w.hi], [446.00625, 446.19375]);
   assert.equal(watchCentre(w, 2.4), 445.75625, "a narrow band: wholly above the centre");
-  assert.ok(hearsWindow(w, 445.75625, 2.4));
-  assert.ok(!hearsWindow(w, 145.00625, 2.4));
   const m = watchWindow(twoM, "2m");
   assert.equal(watchCentre(m, 2.4), 145.00625, "a wide one: between two channels near its middle");
-  assert.ok(hearsWindow(m, 145.00625, 2.4));
-  assert.ok(!hearsWindow(m, 144.5, 2.4), "its top channels out of reach");
   assert.deepEqual(watchWindow(pmr, [446.0, 446.1]).hi, 446.09375, "a slice: the band's channels inside it");
-  assert.ok(fitsOneReceiver(m, 2.4) && fitsOneReceiver(w, 2.4));
-  assert.ok(!fitsOneReceiver(watchWindow({ start_mhz: 118, stop_mhz: 137, step_khz: 25 / 3, channel_khz: 8.33, channels_mhz: [] }, "airband"), 2.4), "the airband is wider than one receiver hears");
 });

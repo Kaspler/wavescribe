@@ -140,16 +140,6 @@ export function watchCentre(w: WatchWindow, spanMhz: number): number {
   return +(w.lo + (k + 0.5) * w.step).toFixed(5);
 }
 
-/** Whether one receiver `spanMhz` wide can hear all of `w` at once: a wider band is refused by
- * the server, with a slice that fits. */
-export const fitsOneReceiver = (w: WatchWindow, spanMhz: number) => w.hi - w.lo + w.channel <= spanMhz - 2 * NARROW_MARGIN + 1e-9;
-
-/** Whether a receiver tuned to `centre` hears every channel of `w` (outside in radio/watch.py). */
-export const hearsWindow = (w: WatchWindow, centre: number, spanMhz: number) => {
-  const reach = spanMhz / 2 - NARROW_MARGIN - w.channel / 2;
-  return Math.abs(w.lo - centre) <= reach + 1e-9 && Math.abs(w.hi - centre) <= reach + 1e-9;
-};
-
 /** A watch's window in words: a band's name, or "446.000–446.100 MHz". */
 export function windowWords(spec: string | number[], bandName: (id: string) => string | null): string {
   if (typeof spec === "string") return bandName(spec) || spec;

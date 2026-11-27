@@ -11,7 +11,7 @@ import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, and, bandWords, fmtMhz } from "./bands";
-import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, fitsOneReceiver, groupCatches, hearsWindow, voiceWord, watchCentre, watchWindow, windowWords } from "./catches";
+import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, groupCatches, voiceWord, windowWords } from "./catches";
 import { Refusal } from "./Refusal";
 import { type Refused, refused } from "./refusals";
 import { rxName } from "./Receivers";
@@ -65,78 +65,79 @@ const sameWindow = (a: string | number[], b: string | number[]) =>
 interface Want { dev: string; spec: string | [number, number] }
 
 /** The second action on a band whose channels talk now and then: watch it with a receiver.
- * Asks what it needs first (the confirmation, a receiver following stations or tuned by hand).
- * A receiver that doesn't hear the window is moved where it does, and the server asks before
- * that leaves stations out. Then the watch station is made and started, or the one already made
- * for this band (or slice) and receiver is started again. A refusal is said in words. */
-export function WatchBand({ band, device, holders, byHand, letGo, free, others, needsAck, watches, receivers, bands, onDone, onCancel }: {
+ * Asks for the confirmation the kind of radio needs, and lets a receiver tuned by hand go. The
+ * server makes the watch station and starts it, beside the stations the receiver hears: it moves
+ * a receiver that doesn't hear the band, and asks first when that leaves stations out. A watch
+ * made before for this band (or slice) and receiver is started again. A refusal is said in words. */
+export function WatchBand({ band, device, holders, byHand, letGo, liveClosed, free, others, needsAck, watches, bands, onDone, onCancel }: {
   band: Band;
   device: string;
-  /** Running stations on the receiver, which watching stops: ids and names. */
-  holders: { id: string; name: string }[];
+  /** Running stations on the receiver, by name. */
+  holders: string[];
   /** The receiver is tuned by hand: listening that way ends first (`letGo`). */
   byHand: boolean;
   letGo: (dev: string) => Promise<unknown>;
+  /** The server ended listening by hand on `dev` to make the watch. */
+  liveClosed: (dev: string) => void;
   /** An idle receiver to offer instead. */
   free: string | null;
   /** Every other receiver, for when this one can't watch. */
   others: string[];
   needsAck: boolean;
   watches: Any[];
-  /** The receivers as GET /radio gives them: where each is set and how much it hears. */
-  receivers: Any[];
   bands: Band[];
   onDone: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [ack, setAck] = useState(false);
+  // The kind of radio to confirm: the band's, or the one the server names when it asks.
+  const [ackFor, setAckFor] = useState<string | null>(needsAck ? band.privacy : null);
   const [trouble, setTrouble] = useState<Refused | null>(null);
   // The server's question before a move leaves stations out; nothing has changed while it is asked.
   const [asked, setAsked] = useState<(Want & { question: string; stops: string[] }) | null>(null);
   const box = useRef<HTMLDivElement>(null);
   // The panel replaces the button that opened it: the focus moves into it.
   useEffect(() => { box.current?.querySelector<HTMLElement>("input, button")?.focus(); }, []);
+  // The question's answers, or the slice offered, replace the buttons, and the other way round:
+  // the focus goes along.
+  const actions = useRef<HTMLDivElement>(null);
+  const opened = useRef(false);
+  const sliced = !!trouble?.slice;
+  useEffect(() => {
+    if (opened.current) (sliced ? box.current?.querySelector<HTMLElement>(".m-trouble button") : actions.current?.querySelector<HTMLElement>("button"))?.focus();
+    opened.current = true;
+  }, [!!asked, sliced]);
   const name = bandWords(band).name;
-  /** `stops`: the stations a move the person agreed to has stopped already. */
-  const start = async ({ dev, spec, stops: gone = [] }: Want & { stops?: string[] }, confirmed = false) => {
+  const start = async ({ dev, spec }: Want, confirmed = false) => {
     setTrouble(null);
     setAsked(null);
-    const rx = receivers.find((r) => r.id === dev);
-    const win = watchWindow(band, spec);
-    // A window one receiver can't hear whole goes to the server as it is, which answers with a slice.
-    if (rx && fitsOneReceiver(win, rx.span_mhz) && !hearsWindow(win, rx.center_mhz, rx.span_mhz)) {
-      try {
-        await post(`/receivers/${dev}`, { center_mhz: watchCentre(win, rx.span_mhz), retune: confirmed });
-      } catch (e) {
-        if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ dev, spec, question: e.message, stops: e.data.holders || [] }); return; }
-        setTrouble(e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message));
-        return;
-      }
-    }
     const mine = watches.find((w) => w.device === dev && sameWindow(w.watch, spec));
-    const stopped = dev === device ? holders : [];
+    let made: Any = null;
     try {
       if (dev === device && byHand) await letGo(dev);
-      // A move the person agreed to has stopped those it left out already.
-      for (const h of stopped) if (!gone.includes(h.name)) await post(`/stations/${h.id}/stop`);
       if (mine) await post(`/stations/${mine.id}/start`);
       else {
-        await post("/stations", {
+        made = await post("/stations", {
           name: typeof spec === "string" ? name : `${name} ${spec[0]}–${spec[1]}`, device: dev, watch: spec, language: "auto", start: true,
-          ...(needsAck ? { acknowledge: band.privacy } : {}),
+          retune: confirmed, ...(ackFor && ack ? { acknowledge: ackFor } : {}),
         });
       }
     } catch (e) {
-      for (const h of stopped) await post(`/stations/${h.id}/start`).catch(() => {});
-      setTrouble(e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message));
+      const no = e instanceof ApiError ? refused(e.message, e.data) : refused((e as Error).message);
+      if (no.code === "retune" && !confirmed) { setAsked({ dev, spec, question: no.text, stops: no.stops }); return; }
+      if (no.privacy && no.privacy !== ackFor) { setAckFor(no.privacy); setAck(false); }
+      setTrouble(no);
       return;
     }
-    toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
+    if (made?.live_closed) liveClosed(dev);
+    if (made?.start_error) toast(`${made.name} was added and didn't start: ${made.start_error}`, true);
+    else toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
     await onDone();
   };
   const other = free || others[0] || null;
   const width = +(band.stop_mhz - band.start_mhz).toFixed(1);
-  const stops = [...(byHand ? ["listening by hand"] : []), ...holders.map((h) => h.name)];
+  const busy = byHand || holders.length > 0;
+  const unconfirmed = !!ackFor && !ack;
   return (
     <div ref={box} className="m-panel rd-retune" role="group" aria-labelledby="rd-watch-h"
          onKeyDown={(e) => {
@@ -144,13 +145,14 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
            if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
          }}>
       <p id="rd-watch-h" className="m-line">{WHAT_IT_DOES}</p>
-      {stops.length > 0 && (
+      {busy && (
         <p className="m-line">
-          Receiver {rxName(device)} is {and([...(byHand ? ["tuned by hand"] : []), ...(holders.length ? [`following ${and(holders.map((h) => h.name))}`] : [])])}.
-          Watching with it stops {!byHand && holders.length === 1 ? "that station" : and(stops)}.
+          Receiver {rxName(device)} is {and([...(byHand ? ["tuned by hand"] : []), ...(holders.length ? [`following ${and(holders)}`] : [])])}.
+          {byHand && " Watching with it ends listening by hand."}
+          {holders.length > 0 && ` ${holders.length === 1 ? "It keeps running" : "They keep running"} beside the watch; if the receiver has to move away from ${holders.length === 1 ? "it" : "them"}, you're asked first.`}
         </p>
       )}
-      {needsAck && (
+      {ackFor && (
         <p className="m-line">
           <Check checked={ack} onChange={setAck}>
             I've checked that I may receive this where I am, and I'm responsible for how I use what's heard.
@@ -162,17 +164,19 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
       {trouble && (
         trouble.slice ? (
           <Refusal raw={trouble.text} said={`${name} is ${width} MHz wide, more than one receiver hears at once. Watch a slice of it instead:`}>
-            <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: device, spec: trouble.slice! })}>
+            <ActButton size="sm" variant="secondary" disabled={unconfirmed} run={() => start({ dev: device, spec: trouble.slice! })}>
               Watch {trouble.slice[0].toFixed(3)}–{trouble.slice[1].toFixed(3)} MHz
             </ActButton>
           </Refusal>
         ) : (
           <Refusal raw={trouble.text}>
-            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: other, spec: band.id })}>Use Receiver {rxName(other)}</ActButton>}
+            {other && trouble.code !== "acknowledge" && (
+              <ActButton size="sm" variant="secondary" disabled={unconfirmed} run={() => start({ dev: other, spec: band.id })}>Use Receiver {rxName(other)}</ActButton>
+            )}
           </Refusal>
         )
       )}
-      <div className="m-actions">
+      <div ref={actions} className="m-actions">
         {asked ? (
           <>
             <ActButton variant="primary" icon="antenna" run={() => start(asked, true)}>
@@ -183,12 +187,12 @@ export function WatchBand({ band, device, holders, byHand, letGo, free, others, 
         ) : (
           <>
             {!trouble?.slice && (
-              <ActButton variant="primary" icon="antenna" disabled={needsAck && !ack} run={() => start({ dev: device, spec: band.id })}>
-                {stops.length ? `Stop ${and(stops)} and watch` : "Start watching"}
+              <ActButton variant="primary" icon="antenna" disabled={unconfirmed} run={() => start({ dev: device, spec: band.id })}>
+                {byHand ? "Let it go and watch" : "Start watching"}
               </ActButton>
             )}
-            {free && stops.length > 0 && (
-              <ActButton variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: free, spec: band.id })}>Watch with Receiver {rxName(free)}, which is free</ActButton>
+            {free && busy && (
+              <ActButton variant="secondary" disabled={unconfirmed} run={() => start({ dev: free, spec: band.id })}>Watch with Receiver {rxName(free)}, which is free</ActButton>
             )}
             <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           </>
