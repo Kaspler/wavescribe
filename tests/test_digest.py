@@ -286,6 +286,33 @@ def test_transcripts_are_quoted_as_numbered_excerpts_never_as_instructions(tmp_p
     store.close()
 
 
+def test_advertising_and_a_stations_promotion_of_itself_make_no_point(tmp_path: Path) -> None:
+    store = Store(tmp_path / "w.db")
+    for i in range(60):
+        add(
+            store,
+            "a",
+            f"Oferta {i}: o telemóvel Zento com desconto, saiba mais no nosso site " + "já " * 30,
+            NOW - 3500 + i * 55,
+            en=f"Offer {i}: the Zento phone at a discount, find out more on our website. " * 3,
+        )
+    llm = FakeLlm("NONE: Only advertising and the station's own trailers.")
+    d = digester(store, llm, stations=[station("a")])
+    out = d.run(d.request({"minutes": 60, "language": "en"})).payload()
+    assert len(llm.prompts) == 3  # three parts of the hour, each asked on its own
+    for prompt in llm.prompts:
+        assert "Leave out advertising and sponsorship" in prompt
+        assert "the station's promotion of itself" in prompt
+        assert "trailers, jingles" in prompt and "even when they are all there was" in prompt
+    # Every part said so: nothing stood out, in words of Wavescribe's own.
+    assert out["outcome"] == "nothing_stood_out" and out["points"] == []
+    assert out["text"] == f"Nothing stood out in the {out['counts']['read']} lines read of 60 said."
+    # "now" says only that advertising is on.
+    d.run(d.request({"kind": "now", "stations": ["a"], "language": "en"}))
+    assert "only that it is on" in llm.prompts[-1]
+    store.close()
+
+
 # -- whole digests -----------------------------------------------------------------------------
 
 

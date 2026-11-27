@@ -212,7 +212,10 @@ to its end, and the second line says so ("140 of 512 lines, spread evenly", or "
 of 259,200 lines" when it is thin). A small model asked about a long stretch at once writes
 about what it reads first, so a digest asks about it a part at a time (three parts for a busy
 station) and then chooses the points that matter most, the latest first when two matter as
-much. The alerts announced in that time (notified or spoken, not only logged)
+much. The model is told to leave out advertising and a station's promotion of itself (its
+programmes, trailers, jingles, contests), and to say that nothing stood out when that is all
+there was; it mostly does, but nothing checks it, so an advert can still slip in as a point.
+The alerts announced in that time (notified or spoken, not only logged)
 come first, each once, in the words they were announced in. A point the model gave without the
 moments it rests on isn't shown, nor one that shares no word with the moments it cites (a cheap
 check: it catches a point that cites another story, not one that gets a detail wrong). A point
@@ -228,7 +231,8 @@ day. The first line then says so: "yesterday 02:50 to today 02:43".
 With no points, the digest says why in Wavescribe's own words: nothing was said, or nothing
 said was written down because the station played music (a voice over a song goes with it);
 only music, idents and repeats were written down; a station keeps no text (walkie-talkies,
-digital voice) or isn't running; nothing stood out in the lines it read; or the model's reply
+digital voice) or isn't running; nothing stood out in the lines it read (only advertising and
+the station's own promotion, say); or the model's reply
 cited nothing it read, or nothing that backs its points. When the time asked for starts before
 Wavescribe was started, it says that too ("Wavescribe started at 14:55: before then, nothing
 was heard unless an earlier run was listening").

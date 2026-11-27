@@ -320,7 +320,12 @@ hours for another machine); `now` takes none. Steps (`digest/__init__.py`):
    minutes), and reading a prompt in three calls costs about what one does. A part asks for a
    few one-line points (notes) in the reader's language, the most important first, each
    citing the excerpts it rests on as `[n]`; the stations a point names come from those
-   excerpts, never from the model's words. A range (`[1-23]`) is read whole. A point that cites none of them is
+   excerpts, never from the model's words. It is told to leave out advertising and sponsorship
+   and the station's promotion of itself (programmes and when they are on, trailers, jingles,
+   contests), which fill much of a station's airtime and read like news to a small model, and
+   to answer `NONE` when that is all there was. Nothing checks it: no cheap test tells an
+   advert from news (the existing ones, idents of under three words and the ASR's junk
+   phrases, catch almost none of them). A range (`[1-23]`) is read whole. A point that cites none of them is
    dropped and counted, and so is one that shares no word with any of those it cites (`sourced`:
    folded words of four letters or more, compared by their first six, numbers, and pairs of
    characters in scripts written without spaces; checked only when one of the lines has text in

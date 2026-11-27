@@ -11,7 +11,10 @@ numbered excerpts the way Ask quotes them. The model writes a few points and cit
 excerpts each rests on; a point that cites nothing it was given, or nothing that shares a word
 with it (``sourced``), is dropped (and counted), and two that cite the same excerpts are one,
 so every point shown can be checked against what was said, and the stations a point names are
-those of its sources, never the model's word for them. Nothing else the model writes is shown:
+those of its sources, never the model's word for them. It is told to leave out advertising
+and the stations' promotion of themselves (``SUBSTANCE``), which no check here can tell from
+news, and to say that nothing stood out when that is all there was. Nothing else the model
+writes is shown:
 when it finds nothing of substance, the digest says so in words of its own, with how much was
 read, as a sentence of the model's backed by no source could say anything at all, including
 what a transcript told it to. Alerts raised in the window come first, as the store has them:
@@ -158,6 +161,19 @@ RULES = (
 ORDER = (
     "each story once however often it was told, the most important first: warnings and "
     "dangers, then decisions and events that touch many people, then the rest"
+)
+# What a digest is about, and what it leaves out however much of it there is: a station's
+# advertising and its promotion of itself fill much of its airtime and read like news to a
+# small model (a bank's offer, "our special edition at 17:30"). No check here can tell them
+# apart, so the prompt says it, by examples a model knows in any language.
+SUBSTANCE = (
+    "- News, warnings, public notices, decisions and events, and what guests and callers said "
+    "about them.\n"
+    "- Leave out advertising and sponsorship (products, offers, prices, shops, banks, "
+    "websites to visit) and the station's promotion of itself (its name, its programmes and "
+    "when they are on, trailers, jingles, contests, its own events and partners), and music, "
+    "greetings and small talk. Never make a point of them, even when they are all there was: "
+    "then nothing of substance was said."
 )
 _POINT = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")  # "- ", also "* ", "1. "
 _CITATION = re.compile(r"\[\s*(\d+(?:\s*[-\u2013,;]\s*\d+)*)\s*\]")
@@ -1160,16 +1176,15 @@ def excerpt_messages(
         task = (
             f"In {language}, say what {shown} is on about right now; the last excerpt is the "
             f"most recent.\n- One or two lines, each {line}\n- The first line says what is on (a "
-            "news bulletin, a report, an interview, a discussion, a phone-in or music) and what "
-            "it is about. A second line, if any, gives the main thing said, and by whom when "
-            f"the excerpts name them.\n{rules}"
+            "news bulletin, a report, an interview, a discussion, a phone-in, advertising or "
+            "music) and what it is about (of advertising or the station's promotion of itself, "
+            "only that it is on). A second line, if any, gives the main thing said, and by whom "
+            f"when the excerpts name them.\n{rules}"
         )
     else:
         task = (
             f"Write in {language} what mattered, for someone who missed it.\n- At most "
-            f"{points} points, {ORDER}.\n- A point is one line: {line}\n- News, warnings, "
-            "announcements, decisions and events. Leave out music, advertisements, station "
-            f"idents, programme trailers, greetings and small talk.\n{rules}"
+            f"{points} points, {ORDER}.\n- A point is one line: {line}\n{SUBSTANCE}\n{rules}"
         )
     content = f"{head}\n\nExcerpts:\n\n" + "\n\n".join(blocks) + f"\n\n{task}"
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
