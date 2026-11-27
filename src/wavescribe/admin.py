@@ -324,7 +324,7 @@ _monitors: dict[str, Any] = {}
 
 
 def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
-    from wavescribe.radio.service import span_mhz
+    from wavescribe.radio.service import reach_center_mhz, span_mhz
     from wavescribe.sources import sdr
 
     status = app.pipeline.status()["stations"]
@@ -350,6 +350,7 @@ def receivers_view(app: App, scan: bool = False) -> dict[str, Any]:
                 "clipped": status.get(s.id, {}).get("clipped"),
                 # Why the receiver, tuned as it is, doesn't hear it; None when it does.
                 "out_of_reach": s.out_of_reach,
+                "reach_center_mhz": reach_center_mhz(s),  # where it hears it again
             } for s in stations],
         })  # fmt: skip
     out: dict[str, Any] = {"devices": devices, "rtl_sdr": _which("rtl_sdr")}

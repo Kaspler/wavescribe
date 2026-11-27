@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wavescribe.config import ConfigError, radio_policy
@@ -111,7 +111,8 @@ class RadioService:
                 "center_mhz": d.center_hz / 1e6, "span_mhz": span_mhz(d),
                 "busy": busy, "busy_code": code, "scanning": scanning,
                 "stations": [{"id": s.id, "name": s.name, "mhz": s.sdr.freq_hz / 1e6,
-                              "running": s.id in running, "out_of_reach": s.out_of_reach}
+                              "running": s.id in running, "out_of_reach": s.out_of_reach,
+                              "reach_center_mhz": reach_center_mhz(s)}
                              for s in on if s.sdr],
             })  # fmt: skip
         return out
@@ -665,33 +666,20 @@ class RadioService:
 
     def _centre_for_station(self, s: Any, by_hand: int | None,
                             running: set[str]) -> tuple[int, list[Any]]:  # fmt: skip
-        """``_centre_for`` for a station as it would be made (``heard_by``): a watch from where
-        a watch is tuned (``plan_centre``), then every kHz from which it hears the whole window;
-        another station from the usual place for its frequency."""
+        """``_centre_for`` for a station as it would be made (``heard_by``), from the places
+        ``_station_places`` gives it."""
         from wavescribe.config import heard_by
-        from wavescribe.dsp import DEFAULT_CHANNEL_HZ, NARROW_MARGIN_HZ
-        from wavescribe.radio.watch import plan_centre
 
-        t = s.sdr
-        d = t.device
-        if t.watch is not None:
-            width = t.channel_hz or DEFAULT_CHANNEL_HZ[t.mode]
-            usual = plan_centre(t.watch, width, d.sample_rate)
-            reach = int(d.sample_rate / 2 - NARROW_MARGIN_HZ - width / 2)
-            grid = range(t.watch.hi_hz - reach, t.watch.lo_hz + reach + 1, 1000)
-            what = t.watch.label
-        else:
-            usual = t.freq_hz - OFF_CENTRE_HZ[t.mode]
-            reach = int(d.sample_rate / 2 - margin_hz(t.mode))
-            grid = range(t.freq_hz - reach, t.freq_hz + reach + 1, 1000)
-            what = f"{mhz_text(t.freq_hz / 1e6)} MHz"
-        return self._place(d, lambda at: heard_by(s, at), usual, grid, by_hand, running, what)
+        usual, grid, what = _station_places(s)
+        return self._place(s.sdr.device, lambda at: heard_by(s, at), usual, grid, by_hand,
+                           running, what)  # fmt: skip
 
     def _place(self, d: Any, hears_it: Callable[[Any], bool], usual: int, grid: range,
                by_hand: int | None, running: set[str],
                what: str) -> tuple[int, list[Any]]:  # fmt: skip
-        """The planner of ``_centre_for``: the first place, in its order, from which receiver
-        ``d`` hears the new station (``hears_it``) and every station it has; else the best."""
+        """The planner of ``_centre_for``: the first place, in its order (``_candidates``), from
+        which receiver ``d`` hears the new station (``hears_it``) and every station it has;
+        else the best."""
         from dataclasses import replace
 
         from wavescribe.config import heard_by
@@ -700,9 +688,7 @@ class RadioService:
                   if s.sdr and s.sdr.device.id == d.id and not s.disabled
                   and not s.out_of_reach]  # fmt: skip
         best: tuple[tuple[int, int], int, list[Any]] | None = None
-        for c in (d.center_hz, by_hand, usual, *sorted(grid, key=lambda c: abs(c - usual))):
-            if c is None or not TUNER_RANGE_HZ[0] <= c <= TUNER_RANGE_HZ[1]:
-                continue
+        for c in _candidates(d, by_hand, usual, grid):
             at = replace(d, center_hz=c)
             if not hears_it(at):
                 continue
@@ -717,6 +703,64 @@ class RadioService:
                              "out_of_band")  # fmt: skip
         _, c, kept = best
         return c, [s for s in others if s not in kept]
+
+
+def _candidates(d: Any, by_hand: int | None, usual: int, grid: range) -> Iterator[int]:
+    """The centres the planner tries for receiver ``d``, in its order and within the tuner's
+    range: where it is, where the hand tuner has it, the usual place, then every place of
+    ``grid``, nearest the usual place first."""
+    for c in (d.center_hz, by_hand, usual):
+        if c is not None and TUNER_RANGE_HZ[0] <= c <= TUNER_RANGE_HZ[1]:
+            yield c
+    for c in sorted(grid, key=lambda c: abs(c - usual)):
+        if TUNER_RANGE_HZ[0] <= c <= TUNER_RANGE_HZ[1]:
+            yield c
+
+
+def _station_places(s: Any) -> tuple[int, range, str]:
+    """Where the receiver of station ``s`` may go to hear it: the usual place (for a watch,
+    where a watch is tuned, ``plan_centre``; else a little below its frequency, clear of the
+    centre's spike), every kHz from which it may hear it, and what to call it in a refusal."""
+    from wavescribe.dsp import DEFAULT_CHANNEL_HZ, NARROW_MARGIN_HZ
+    from wavescribe.radio.watch import plan_centre
+
+    t = s.sdr
+    d = t.device
+    if t.watch is not None:
+        width = t.channel_hz or DEFAULT_CHANNEL_HZ[t.mode]
+        reach = int(d.sample_rate / 2 - NARROW_MARGIN_HZ - width / 2)
+        return (plan_centre(t.watch, width, d.sample_rate),
+                range(t.watch.hi_hz - reach, t.watch.lo_hz + reach + 1, 1000),
+                t.watch.label)  # fmt: skip
+    reach = int(d.sample_rate / 2 - margin_hz(t.mode))
+    return (t.freq_hz - OFF_CENTRE_HZ[t.mode],
+            range(t.freq_hz - reach, t.freq_hz + reach + 1, 1000),
+            f"{mhz_text(t.freq_hz / 1e6)} MHz")  # fmt: skip
+
+
+def reach_centre(s: Any) -> int | None:
+    """Where station ``s``'s receiver, which doesn't hear it where it is tuned (``out_of_reach``),
+    hears it again: the planner's answer for it (``_place``: the same places in the same order,
+    ``heard_by``), whatever other stations that leaves out, and leaving the hand tuner aside.
+    None when the station is heard, switched off (in nobody's way, and its reach says nothing),
+    or no centre hears it. The page shows it as ``reach_center_mhz``; starting the station
+    (``RadioService.start_station``) moves there, or asks first when that leaves others out."""
+    from dataclasses import replace
+
+    from wavescribe.config import heard_by
+
+    if s.sdr is None or not s.out_of_reach or s.disabled:
+        return None
+    d = s.sdr.device
+    usual, grid, _ = _station_places(s)
+    return next((c for c in _candidates(d, None, usual, grid)
+                 if heard_by(s, replace(d, center_hz=c))), None)  # fmt: skip
+
+
+def reach_center_mhz(s: Any) -> float | None:
+    """``reach_centre`` in MHz, as the page gets it."""
+    c = reach_centre(s)
+    return c / 1e6 if c is not None else None
 
 
 def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: set[str], *,

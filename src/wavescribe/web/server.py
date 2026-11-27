@@ -547,9 +547,12 @@ class WebHub:
 def _radio_fields(s: Station) -> dict[str, Any]:
     """What ``/api/state`` says of a station's radio: its receiver (``device``), the band id or
     ``[lo_mhz, hi_mhz]`` it watches (``watch``) and the languages a watch or a station in
-    language ``auto`` transcribes (an empty list: any it tells), its privacy class, and why its
-    receiver doesn't hear it where that is tuned (``out_of_reach``). None where they don't
-    apply (a stream, a fixed frequency, a station in one language)."""
+    language ``auto`` transcribes (an empty list: any it tells), its privacy class, why its
+    receiver doesn't hear it where that is tuned (``out_of_reach``) and the centre that brings it
+    back (``reach_center_mhz``, radio/service.py ``reach_centre``). None where they don't apply
+    (a stream, a fixed frequency, a station in one language)."""
+    from wavescribe.radio.service import reach_center_mhz
+
     t = s.sdr
     watch = t.watch if t is not None else None
     spec = None
@@ -562,6 +565,7 @@ def _radio_fields(s: Station) -> dict[str, Any]:
         "privacy": s.privacy,
         # A station switched off is in nobody's way, and its reach says nothing until it is on.
         "out_of_reach": None if s.disabled else s.out_of_reach,
+        "reach_center_mhz": reach_center_mhz(s),
     }
 
 

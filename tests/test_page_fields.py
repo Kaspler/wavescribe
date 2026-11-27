@@ -328,6 +328,35 @@ def test_each_receiver_says_in_a_word_what_holds_it(
         r.close()
 
 
+def test_every_view_of_a_station_says_where_its_receiver_hears_it_again(tmp_path: Path) -> None:
+    off = {**FAR, "id": "off", "name": "Off"}
+    r = running(tmp_path, stations(98.0, FAR, off, {**RPT, "mhz": 98.5}))
+    try:
+        r.app.update_station("off", {"disabled": True})
+        expected = {"stream": None, "rpt": None, "off": None,  # heard, a stream, switched off
+                    "far": 432.25, "ham2m": two_metres_centre()}  # fmt: skip
+        state = r.call("GET", "/api/state")[1]["stations"]
+        assert {s["id"]: s["reach_center_mhz"] for s in state} == expected
+        view = r.call("GET", "/api/manage/stations")[1]["stations"]
+        assert {s["id"]: s["reach_center_mhz"] for s in view} == expected
+        assert {s["id"]: s["out_of_reach"] for s in view} == {
+            s["id"]: s["out_of_reach"] for s in state}  # fmt: skip
+        [rx] = r.call("GET", "/api/manage/radio")[1]["receivers"]
+        [dev] = r.call("GET", "/api/manage/receivers")[1]["devices"]
+        on_rx = {k: v for k, v in expected.items() if k != "stream"}
+        assert {s["id"]: s["reach_center_mhz"] for s in rx["stations"]} == on_rx
+        assert {s["id"]: s["reach_center_mhz"] for s in dev["stations"]} == on_rx
+
+        # It is where starting the station moves the receiver, asking first if that leaves
+        # others out (the repeater here), whatever the others.
+        status, ask = r.call("POST", "/api/manage/stations/far/start")
+        assert status == 400 and ask["center_mhz"] == 432.25 and ask["holders"] == []
+        status, ask = r.call("POST", "/api/manage/stations/ham2m/start")
+        assert status == 400 and ask["center_mhz"] == two_metres_centre()
+    finally:
+        r.close()
+
+
 def test_every_view_of_a_receiver_gives_what_it_takes_in_as_lo_and_hi(tmp_path: Path) -> None:
     raw = stations(98.0)
     raw["station"] = [s for s in raw["station"] if s["id"] != "ham2m"]  # wider than 1.92 MS/s

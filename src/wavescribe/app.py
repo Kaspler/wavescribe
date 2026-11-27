@@ -487,6 +487,8 @@ class App:
         return ids | {sid for sid, f in self.followers.items() if not f.closed}
 
     def stations_view(self) -> list[dict[str, Any]]:
+        from wavescribe.radio.service import reach_center_mhz
+
         page_ids = {s.get("id") for s in self.settings.get("station") or []}
         overrides = self.settings.get("overrides") or {}
         file = {s.id: s for s in self.base.stations}
@@ -514,6 +516,9 @@ class App:
                 "privacy": s.privacy,
                 # Kept stricter after a change of region, until confirmed (radio/service.py).
                 "privacy_region": s.privacy_region,
+                # As /api/state says them: why its receiver doesn't hear it, and where it would.
+                "out_of_reach": None if s.disabled else s.out_of_reach,
+                "reach_center_mhz": reach_center_mhz(s),
                 "error": self.config_errors.get(s.id),
                 "asr_model": planned[0].id if planned else None,
                 "asr_choice": s.asr_model,
