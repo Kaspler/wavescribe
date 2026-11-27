@@ -21,7 +21,7 @@ from wavescribe.rules import SEVERITIES
 class _Silent:
     """Actions that do nothing: a replay must never reach a person."""
 
-    def notify(self, title: str, body: str) -> None:
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
         pass
 
     def speak(self, voice: str, text: str) -> None:

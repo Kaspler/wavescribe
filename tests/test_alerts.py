@@ -36,12 +36,14 @@ EN = "Water will be cut tomorrow in the city centre because of pipe repairs."
 class FakeActions:
     def __init__(self, fail: set[str] = frozenset()) -> None:
         self.calls: list[tuple] = []
+        self.sounds: list[str | None] = []
         self.fail = fail
 
-    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
         if "notify" in self.fail:
             raise ActionError("notifications are off")
-        self.calls.append(("notify" if sound else "show", title, body))
+        self.calls.append(("show" if sound == "" else "notify", title, body))  # "": no sound
+        self.sounds.append(sound)
 
     def speak(self, voice: str, text: str) -> None:
         if "speak" in self.fail:
@@ -66,8 +68,8 @@ class Clock:
         return self.now
 
 
-def make(tmp_path, translations=None, *, fail=frozenset(), store=None, wait=2.0):
-    raw = {**CONFIG, "delivery": {**CONFIG["delivery"], "translation_wait_s": wait}}
+def make(tmp_path, translations=None, *, fail=frozenset(), store=None, wait=2.0, **delivery):
+    raw = {**CONFIG, "delivery": {**CONFIG["delivery"], "translation_wait_s": wait, **delivery}}
     config = parse_alerts(raw, None, pack(tmp_path))
     actions, clock, seen = FakeActions(fail), Clock(), []
     alerter = Alerter(config, store=store, actions=actions, clock=clock, on_alert=seen.append,
@@ -427,6 +429,35 @@ def test_actions_written_as_one_string_are_refused(tmp_path: Path) -> None:
     raw = {**CONFIG, "actions": {"critical": "notify"}}  # read as a list: "n", "o", "t", ...
     with pytest.raises(ConfigError, match=r"\[actions\]: critical must be a list of actions"):
         parse_alerts(raw, Path("alerts.toml"), pack(tmp_path))
+
+
+def test_notifications_play_the_sound_set_and_none_when_it_is_empty(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import subprocess
+
+    from wavescribe.alerts.actions import MacActions
+
+    alerter, actions, _, _, _ = make(tmp_path, {"en": EN, "uk": UK}, notify_sound="")
+    alerter.on_transcript(result("a", "Corte de água em Vila Nova amanhã.", 1000.0))
+    settle(alerter)
+    assert actions.sounds == [""] and actions.calls[0][0] == "show"  # shown, without a sound
+    with pytest.raises(ConfigError, match="notify_sound must be a sound's name"):
+        parse_alerts({**CONFIG, "delivery": {"notify_sound": False}}, None, tmp_path)
+
+    ran: list[list[str]] = []
+
+    def run(cmd, **_kwargs):  # no real notification in a test
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    for sound in (None, "Ping", ""):
+        MacActions().notify("HIGH · water", "Corte de água", sound=sound)
+    default, ping, silent = ran
+    assert default[-3:] == ["HIGH · water", "Corte de água", "Glass"]  # unset: the Mac's own
+    assert ping[-1] == "Ping" and "sound name (item 3 of argv)" in " ".join(ping)
+    assert silent[-2:] == ["HIGH · water", "Corte de água"] and "sound" not in " ".join(silent)
 
 
 def test_speech_commands_in_the_text_are_not_obeyed(monkeypatch) -> None:

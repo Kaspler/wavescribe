@@ -271,6 +271,12 @@ languages as well, for everyone reading the page or receiving webhooks, give the
 `alert_languages = ["es", "fr"]` in `config/stations.toml`. Alerts above *low* are translated
 into them.
 
+**Quiet notifications:** a notification plays the Mac's *Glass* sound. To keep the notifications
+but lose the sound (for the night, say), set `notify_sound = ""` under `[delivery]` in
+`config/alerts.toml`, then start Wavescribe again; another name from `/System/Library/Sounds`
+(`"Ping"`, `"Submarine"`) plays that sound instead. Spoken alerts still speak: to quiet them
+too, take the voices out of **What happens on an alert**.
+
 Check that notifications and voices work: `uv run wavescribe alerts test`. Spoken alerts use
 macOS voices; download more in System Settings → Accessibility → Spoken Content → System voice
 → Manage voices.

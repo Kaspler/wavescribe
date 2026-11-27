@@ -29,7 +29,10 @@ class ActionError(RuntimeError):
 
 
 class Actions(Protocol):
-    def notify(self, title: str, body: str, *, sound: bool = True) -> None: ...
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
+        """``sound``: the name of the platform's sound to play with it, "" for none (a digest
+        is no alert), None for the platform's alert sound."""
+        ...
 
     def speak(self, voice: str, text: str) -> None: ...
 
@@ -43,11 +46,16 @@ class Actions(Protocol):
 
 
 class MacActions:
-    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
+    DEFAULT_SOUND = "Glass"  # in /System/Library/Sounds, as the names notify takes
+
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
+        sound = self.DEFAULT_SOUND if sound is None else sound
         # Text goes in as arguments, never spliced into the script, so quotes can't break it.
         shown = "display notification (item 2 of argv) with title (item 1 of argv)"
-        script = ["on run argv", shown + (' sound name "Glass"' if sound else ""), "end run"]
-        cmd = ["osascript"] + [a for line in script for a in ("-e", line)] + [title, body[:1000]]
+        script = ["on run argv", shown + (" sound name (item 3 of argv)" if sound else ""),
+                  "end run"]  # fmt: skip
+        argv = [title, body[:1000], *([sound] if sound else [])]
+        cmd = ["osascript"] + [a for line in script for a in ("-e", line)] + argv
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if done.returncode != 0:
             raise ActionError(done.stderr.strip() or f"osascript exited {done.returncode}")
@@ -95,8 +103,8 @@ class MacActions:
 class LogOnlyActions:
     """Portable fallback: notifications are logged; there is no speech."""
 
-    def notify(self, title: str, body: str, *, sound: bool = True) -> None:
-        log.warning("%s %s: %s", "ALERT" if sound else "NOTE", title, body)
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
+        log.warning("%s %s: %s", "NOTE" if sound == "" else "ALERT", title, body)
 
     def speak(self, voice: str, text: str) -> None:
         raise ActionError("no text-to-speech on this platform")

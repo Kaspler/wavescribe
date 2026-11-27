@@ -63,12 +63,12 @@ class Speech:
         self._closing = False
         self._digest = threading.Lock()  # one digest read aloud at a time
 
-    def notify(self, title: str, body: str) -> None:
-        self.actions.notify(title, body)
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
+        self.actions.notify(title, body, sound=sound)
 
     def show(self, title: str, body: str) -> None:
         """A notification without the alerts' sound: a digest is no alert."""
-        self.actions.notify(title, body, sound=False)
+        self.actions.notify(title, body, sound="")
 
     def voices(self) -> set[str] | None:
         return self.actions.voices()

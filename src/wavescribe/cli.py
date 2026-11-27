@@ -496,8 +496,10 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         config, _ = _alert_config(args.alerts, args.settings)  # with the page's voices
         actions = platform_actions()
         installed = actions.voices()
-        actions.notify("Wavescribe test", "Alerts can reach this screen.")
-        print("notification sent (check the top right of the screen)")
+        sound = config.notify_sound if config else None
+        actions.notify("Wavescribe test", "Alerts can reach this screen.", sound=sound)
+        quiet = " (without a sound: notify_sound is empty)" if sound == "" else ""
+        print(f"notification sent{quiet} (check the top right of the screen)")
         for lang, voice in config.voices.items() if config else []:
             if args.language and lang != args.language:
                 continue

@@ -88,6 +88,7 @@ class AlertConfig:
     actions: dict[str, tuple[str, ...]]  # severity -> actions
     voices: dict[str, Voice]  # language -> voice
     notify_language: str | None = None
+    notify_sound: str | None = None  # "" for silent notifications; None: the platform's sound
     translation_wait_s: float = 10.0
     cooldown_s: float = 900.0  # a quiet period this long ends an incident
     remind_s: float = 3600.0  # "still being mentioned" at most this often; 0: never
@@ -188,6 +189,10 @@ def parse_alerts(
                 raise ConfigError(f"{where} [actions]: unknown action {name!r}")
         actions[severity] = tuple(names)
     delivery = raw.get("delivery", {})
+    sound = delivery.get("notify_sound")
+    if sound is not None and not isinstance(sound, str):
+        raise ConfigError(f"{where} [delivery]: notify_sound must be a sound's name, e.g. "
+                          '"Glass", or "" for silent notifications')  # fmt: skip
     for r in rules.rules:
         if r.origin == "page":
             continue
@@ -199,6 +204,7 @@ def parse_alerts(
         actions=actions,
         voices=voices,
         notify_language=delivery.get("notify_language"),
+        notify_sound=sound,
         translation_wait_s=_amount(delivery, "translation_wait_s", 10, where),
         cooldown_s=_amount(delivery, "cooldown_minutes", 15, where) * 60,
         remind_s=_amount(delivery, "remind_minutes", 60, where) * 60,
@@ -844,7 +850,7 @@ class Alerter:
                     rules = alert.rule_id + (f" + {', '.join(covers)}" if covers else "")
                     label = "BACK" if back else severity.upper()
                     title = f"{label} · {rules} · {', '.join(names)}"
-                    self.actions.notify(title, body or text)
+                    self.actions.notify(title, body or text, sound=self.config.notify_sound)
                 elif kind == "speak":
                     self._speak(lang, alert, text, checked)
                 elif kind == "log":
@@ -917,7 +923,7 @@ class Alerter:
             try:
                 if action == "notify":
                     title = f"STILL {severity.upper()} · {alert.rule_id} · {', '.join(names)}"
-                    self.actions.notify(title, body)
+                    self.actions.notify(title, body, sound=self.config.notify_sound)
                 elif action == "log":
                     words = "(not logged: kept only for days)" if alert.short_lived else said
                     event(log, "alert", alert=alert.id,

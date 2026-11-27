@@ -195,7 +195,7 @@ class Run:
 
 
 class _NoActions:
-    def notify(self, title: str, body: str) -> None:
+    def notify(self, title: str, body: str, *, sound: str | None = None) -> None:
         pass
 
     def speak(self, voice: str, text: str) -> None:
