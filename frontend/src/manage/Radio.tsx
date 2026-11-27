@@ -127,9 +127,15 @@ export function OnTheAir() {
   useEvery(10000, reloadStations, canWatch);
   if (!v) return loading(error);
   const watches: Any[] = ((st?.stations || []) as Any[]).filter((s) => s.watch != null);
+  // The form is further down the page: it is brought into view, and the focus goes to its first
+  // field, so the keyboard continues where the eyes go.
   const openAdd = (t: Any) => {
     setAdd(t);
-    requestAnimationFrame(() => document.getElementById("rd-tune")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
+    requestAnimationFrame(() => {
+      const h = document.getElementById("rd-tune");
+      h?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+      h?.closest("section")?.querySelector<HTMLElement>("input:not([disabled]), select, textarea")?.focus({ preventScroll: true });
+    });
   };
   // A first watch: the narrowest band that can be watched, which one receiver hears whole.
   const firstWatch = () => {
@@ -335,6 +341,14 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
   // What the receiver in view sees: live while it is tuned by hand on this band; else a still
   // picture of the band from the newest scan that covered it, or the scan sweeping it now.
   const liveHere = !!me && me.state === "hand" && tuner.dev === device && !!tuner.st?.open && onTheDial && bandOfWindow(v.bands, me.lo, me.hi)?.id === band;
+  // Letting the receiver go takes the live view away with the button pressed: the focus goes to
+  // Look here, which takes its place, not back to the top of the page.
+  const wasLive = useRef(liveHere);
+  useEffect(() => {
+    const a = document.activeElement;
+    if (wasLive.current && !liveHere && (!a || a === document.body)) document.getElementById("rd-look")?.focus();
+    wasLive.current = liveHere;
+  }, [liveHere]);
   const stretch: [number, number] | null = liveHere && me ? [me.lo, me.hi] : onTheDial && chosen ? [chosen.start_mhz, chosen.stop_mhz] : null;
   const { data: still } = useLoad<Any | null>(
     () => (stretch ? get(`/radio/scans?lo=${stretch[0].toFixed(3)}&hi=${stretch[1].toFixed(3)}`).then((x) => x.scan) : Promise.resolve(null)),
@@ -390,7 +404,7 @@ function Finder({ v, job, running, onJob, onAdd, reload, tuner, watches, want, o
           </ActButton>
         )}
         {chosen && onTheDial && me && me.state !== "scanning" && !liveHere && (
-          <Button variant={kindOf(chosen) === "text" ? "secondary" : "primary"} icon="eye" onClick={() => lookHere(chosen)}>
+          <Button id="rd-look" variant={kindOf(chosen) === "text" ? "secondary" : "primary"} icon="eye" onClick={() => lookHere(chosen)}>
             Look here with Receiver {rxName(device)}
           </Button>
         )}

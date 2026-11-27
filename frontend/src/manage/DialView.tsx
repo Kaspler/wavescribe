@@ -3,7 +3,7 @@
 // fine tick under them. A band chosen on it is explained underneath (BandCard), receivers stand
 // on it (ReceiverMarks), and one tuned by hand shows what it sees live (LiveView). The geometry
 // lives in dial.ts.
-import { type KeyboardEvent, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActButton, Advanced, Button, Lamp, cx } from "../components/ui";
 import type { Any } from "./api";
 import { type Band, and, bandWords } from "./bands";
@@ -392,8 +392,15 @@ export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[];
   const steps = useSteps(t, null);
   const name = rxName(t.dev);
   const play = () => { t.stopPlayer(); t.startPlayer(st.audio); };
+  // Opened by a button that goes away with it (Look here, Pause and look): the focus goes on to
+  // what can be done here, not back to the top of the page.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) box.current?.querySelector<HTMLElement>(".m-actions button")?.focus();
+  }, []);
   return (
-    <div className="dl-view" role="group" aria-label={`What Receiver ${name} hears now`}>
+    <div className="dl-view" role="group" aria-label={`What Receiver ${name} hears now`} ref={box}>
       <TunedHead t={t} steps={steps} />
       <div className="m-actions">
         {t.playing

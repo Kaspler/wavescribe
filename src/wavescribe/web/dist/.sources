@@ -33,7 +33,7 @@ fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 3399dfa595316878212c801483cc26222f1eecd1 frontend/src/manage/AlertRules.tsx
 21768436394dd3d9b93a33754178b63d5288f963 frontend/src/manage/Caught.tsx
-5f63524d4a72ed1cd3766799d9b17e45b168edcd frontend/src/manage/DialView.tsx
+5ba0484f8d3cdfd54707ba73a079b8d81ab0f378 frontend/src/manage/DialView.tsx
 970e81a002dd17f0717ef1991e9c9ce890ea601d frontend/src/manage/FeedApi.tsx
 709b343b531273c53b5e6f6af8ae6e0e3e21f4e8 frontend/src/manage/Internet.tsx
 c56a60c2666be43a85d0763591eda48792cda265 frontend/src/manage/Listen.tsx
@@ -41,7 +41,7 @@ db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-cb2203b348a0805476c762a34190aa01394006b5 frontend/src/manage/Radio.tsx
+4b11b549287d20b188a9ba6e4464afa34245bbbc frontend/src/manage/Radio.tsx
 b79c48adeb4c1af720ede7fdbfd952b9f567f39b frontend/src/manage/Receivers.tsx
 b94eb893c28a23ecd084271dabadfe830d407d30 frontend/src/manage/Refusal.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
