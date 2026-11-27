@@ -9,7 +9,7 @@ import subprocess
 import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from functools import cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -419,6 +419,15 @@ def _lookup_auto(hz: float, width_hz: float | None = None) -> Band | None:
         return replace(base, privacy=strictest)
     # Nothing here in the locale's plan: the band of that class another region's channel reached.
     return _reaching(None, hz, width_hz, [b for b in bands() if b.privacy == strictest])
+
+
+@lru_cache(maxsize=4096)  # bounded: a page of history asks for the same few channels
+def channel_label(hz: int | None, region: str) -> str | None:
+    """What a frequency is called, as a watch's catches name it: its band's name, with the
+    channel number where the band has a channel list ("PMR446, channel 1"). None for no
+    frequency (a stream) and for one no band plan lists."""
+    band = lookup(hz, region) if hz else None
+    return band.label(hz) if band is not None and hz else None
 
 
 def privacy_of(hz: float, region: str, width_hz: float | None = None) -> str:

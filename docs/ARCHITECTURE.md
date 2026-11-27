@@ -249,7 +249,12 @@ and in every translation, ignoring case and accents, at the start of a word (`*w
 inside one, `"a phrase"` in order; below, *Search*), and highlights the matches. A paragraph's timestamp, and each search hit, plays the archived speech
 (`GET /api/segments/<id>/audio.pcm`) through the same Web Audio player as **Listen**. Live
 payloads carry the stored segment id, so the live stream and history merge into one list on the
-page. `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
+page. Each utterance, live or from `/api/history` and `/api/search`, also says where it was
+heard: `freq_hz`, the channel a watch caught it on or a radio station's own frequency
+(`segments.freq_hz`; null for a stream or another machine's station), and `label`, what the band
+plan in effect calls that frequency, with the channel number where the band has a list
+(`bandplan.channel_label`: "PMR446 walkie-talkies, channel 1", as a watch's catches name it; null
+without a frequency or for one no plan lists). `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
 
 **Ask.** Above the search box, a question in any language goes to
 `POST /api/ask`, which streams Server-Sent Events back: `plan` (stations, time range, search

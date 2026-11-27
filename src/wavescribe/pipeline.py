@@ -119,6 +119,14 @@ class Result:
     # Whisper is to listen again (asr/recheck.py): what judges the words waits for on_rechecked.
     rechecking: bool = False
 
+    @property
+    def freq_hz(self) -> int | None:
+        """Where it was heard: the channel a watch caught it on, or a radio station's own
+        frequency; None for a stream or another machine's station (``segments.freq_hz``)."""
+        sdr = self.station.sdr
+        own = sdr.freq_hz if sdr is not None and sdr.watch is None else None
+        return self.utterance.freq_hz or own
+
 
 def fan_out(*callbacks: Callable[..., object] | None) -> Callable[..., None]:
     """One observer that calls several in order; one failing never stops the others."""

@@ -205,7 +205,18 @@ class WebHub:
 
     def _payload(self, result: Result, *, final: bool) -> dict[str, Any]:
         archived = self.store is not None and self.store.archive is not None
-        return _payload(result, final=final, mt=self.plan.mt is not None, audio=archived)
+        payload = _payload(result, final=final, mt=self.plan.mt is not None, audio=archived)
+        return self.labelled([payload])[0]
+
+    def labelled(self, utterances: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Utterances with the ``label`` of where each was heard (``freq_hz``), as the band plan
+        in effect names it (``bandplan.channel_label``, as a watch's catches have it)."""
+        from wavescribe.radio.bandplan import AUTO, channel_label
+
+        region = self.config.radio_region or AUTO
+        for u in utterances:
+            u["label"] = channel_label(u.get("freq_hz"), region)
+        return utterances
 
     def on_alert(self, alert: dict[str, Any]) -> None:
         """Alerter observer: a new alert, a new mention, a translation or a delivery outcome."""
@@ -476,12 +487,13 @@ class WebHub:
         ids = [station_id] if station_id else [s.id for s in self.config.stations]
         if self.store is not None:
             if around_id is not None and station_id:
-                return self.store.around(station_id, around_id, limit=limit, exports=exports)
-            return [
+                rows = self.store.around(station_id, around_id, limit=limit, exports=exports)
+                return self.labelled(rows)
+            return self.labelled([
                 u
                 for sid in ids
                 for u in self.store.recent(sid, limit=limit, before_id=before_id, exports=exports)
-            ]
+            ])  # fmt: skip
         with self._lock:
             return [
                 u
@@ -573,6 +585,7 @@ def _payload(result: Result, *, final: bool, mt: bool, audio: bool = False) -> d
         "pending": [] if final or not mt else targets,
         "final": final,
         "latency_ms": round(result.timings["total_ms"]) if "total_ms" in result.timings else None,
+        "freq_hz": result.freq_hz,  # where it was heard (radio); the hub adds its ``label``
     }
 
 
@@ -1030,7 +1043,8 @@ class Handler(BaseHTTPRequestHandler):
         if store is None:
             self._json({"error": "search needs the store (started with --no-store)"}, 409)
             return
-        self._json(store.search(q[:200], station_id=station_id, limit=60, exports=self._exports()))
+        found = store.search(q[:200], station_id=station_id, limit=60, exports=self._exports())
+        self._json(self.server.hub.labelled(found))
 
     def _catches(self, query: dict[str, str]) -> None:
         """What watches caught and kept (radio/watch.py), newest first, with their words. For

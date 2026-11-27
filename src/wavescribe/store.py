@@ -589,8 +589,6 @@ class Store:
             # The class goes on every row. How long the words are kept and whether they may
             # leave the machine is decided by the class they were heard under, whatever the
             # station's id means after a restart, a retune or its deletion.
-            sdr = result.station.sdr
-            freq = u.freq_hz or (sdr.freq_hz if sdr is not None and sdr.watch is None else None)
             cur = db.execute(
                 "INSERT INTO segments (station_id, t_start, t_end, privacy, freq_hz) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -599,7 +597,7 @@ class Store:
                     u.t_start,
                     u.t_start + u.duration,
                     class_of(result.station),
-                    freq,
+                    result.freq_hz,
                 ),
             )
             segment_id = int(cur.lastrowid or 0)
@@ -1212,8 +1210,8 @@ class Store:
         db = db or self._db
         marks = ",".join("?" * len(ids))
         rows = db.execute(
-            f"SELECT s.id, s.station_id, s.t_start, s.t_end, s.audio_path, s.privacy, t.lang, "
-            f"t.text, t.latency_ms, t.flags FROM segments s "
+            f"SELECT s.id, s.station_id, s.t_start, s.t_end, s.audio_path, s.privacy, s.freq_hz, "
+            f"t.lang, t.text, t.latency_ms, t.flags FROM segments s "
             f"JOIN transcripts t ON t.segment_id = s.id WHERE s.id IN ({marks})",
             ids,
         ).fetchall()
@@ -1253,6 +1251,7 @@ class Store:
                 "audio": r["audio_path"] is not None,
                 "flags": [f for f in r["flags"].split(",") if f],
                 "hits": hits.get(r["id"], []),
+                "freq_hz": r["freq_hz"],  # the hub adds its label (``WebHub.history``)
             }
             for r in rows
         }
