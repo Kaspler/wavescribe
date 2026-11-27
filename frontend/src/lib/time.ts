@@ -16,6 +16,17 @@ export const isoTime = (t: When) => (known(t) ? new Date(t * 1000).toISOString()
 export const ago = (s: number) =>
   s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
 
+/** How long before `now` a time was, in words: "5 min ago", "3 h ago", "2 days ago". Null for a
+ * time that isn't known (missing, zero, not finite), so the caller leaves the age out instead
+ * of printing a made-up one. A time ahead of this machine's clock counts as just now. */
+export function agoWords(t: When, now = Date.now() / 1000): string | null {
+  if (!known(t) || t <= 0) return null;
+  const min = Math.max(0, now - t) / 60;
+  if (min < 59.5) return `${Math.max(1, Math.round(min))} min ago`;
+  const h = min / 60;
+  return h < 47.5 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} days ago`;
+}
+
 /** A time today as 14:05, an older one with its date. */
 export function whenLabel(t: When): string {
   if (!known(t)) return "?";

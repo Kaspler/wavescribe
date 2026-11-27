@@ -27,7 +27,7 @@ fbb148f81f3b1588e2a5ff01944d530a43480ac6 frontend/src/lib/audio.ts
 9e92c8bf88044308bd8523032c630894e05d1d46 frontend/src/lib/station.ts
 3d86f63457b8be9c677f79282bd7a73479d07e77 frontend/src/lib/store.ts
 1c27bea7df915d4bc19a165dcb6b50698ccc6cad frontend/src/lib/tabs.ts
-f4c6f1d9f15c6da1efc19a774217d08cf245be5e frontend/src/lib/time.ts
+5b5f12f3274ddcd6310d6bd84136dd56f4461959 frontend/src/lib/time.ts
 91c31a7c05beac46d1edb4e8b1a016d17cceed69 frontend/src/lib/types.ts
 30a5c1b607d8d9115174a21b9d2f4add5cd38d18 frontend/src/lib/view.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
@@ -41,7 +41,7 @@ db4e9ef760b11a3b52bbc12aeccb2b5d932dafa7 frontend/src/manage/ListenPage.tsx
 290397cbf1d60a6c7e2636fc1426c80cc603fc50 frontend/src/manage/Manage.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 8ce3b4bb6441d1c88f403140cf8fd131cc6955a0 frontend/src/manage/Outputs.tsx
-d02f7d0610dd0cbbf1c7db6304bd67b2e054799f frontend/src/manage/Radio.tsx
+84241a64cab94b92ee86090114e309b945c6e790 frontend/src/manage/Radio.tsx
 543cc4abfbaa7ede564ccb5ed43d671b20a88ca2 frontend/src/manage/Receivers.tsx
 39c23454e4443e92df472a27326cd67cdb5e8529 frontend/src/manage/Scope.tsx
 d02e044e5d00361086d6b14eed043adc62776a2f frontend/src/manage/Stations.tsx
@@ -83,6 +83,6 @@ f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 099074d82639e218cd4ebf60cf7a5f9b8421a9a5 frontend/tests/langs.test.mjs
 d010ad380d164c82fb88fbb297e703e1e79e7805 frontend/tests/router.test.mjs
 80b3c255b77e0c157f6e8ceb2aef9cc1f30d54d9 frontend/tests/tabs.test.mjs
-74db4f79af17f30038dc8db92e26d1bd0832fb95 frontend/tests/time.test.mjs
+ef8340b9978505f33fddf27c20ae4482786bd7fd frontend/tests/time.test.mjs
 8889f47e8563c6c78225cc7d23c0ce5ecec21f23 frontend/tsconfig.json
 c298394d2c428451ceaf6d1944442c8cc75fa5d4 frontend/vite.config.ts

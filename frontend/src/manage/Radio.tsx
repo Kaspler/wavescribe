@@ -4,6 +4,7 @@
 // (src/wavescribe/radio/service.py).
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
+import { agoWords } from "../lib/time";
 import { ActButton, Advanced, Button, Check, ConfirmButton, Field, Fold, Input, LangChips, LangPicker, Section, Segmented, Select, Switch, Table, Tag, act, cx, toast } from "../components/ui";
 import { type Any, docUrl, ApiError, del, get, knownLangs, listenTo, localLang, post, readerLang, refreshPage, useEvery, useLoad } from "./api";
 import { type Band, and, bandLine, bandWords, fmtMhz } from "./bands";
@@ -101,6 +102,11 @@ const fmBand = (v: Any): Any | undefined => v.bands.find((b: Any) => b.mode === 
  * saved before scans named their receiver). */
 const scanRx = (v: Any, scan: Any): Any | undefined =>
   scan && (v.receivers.find((r: Any) => scan.device && r.id === scan.device) || v.receivers.find((r: Any) => r.serial === scan.serial));
+
+/** When a scan was made: a saved scan carries its time (`t`); the scan this page started is the
+ * scan job, which has when it started and, once done, how long it took. Null when neither says. */
+const scanTime = (scan: Any): number | null =>
+  scan.t ?? (scan.started != null && scan.phase === "done" ? scan.started + (scan.seconds || 0) : null);
 
 /** The receiver a scan starts on: the one that scanned last (most likely the one with an antenna;
  * if it's busy, the button says what the scan pauses), else a free one. Switching stays one press. */
@@ -546,9 +552,10 @@ function BandView({ v, band, me, live, tuner, still, sweeping, rows, onAdd, onLi
   const picture = sweeping?.spectrum ? sweeping : still?.spectrum ? still : null;
   const scanner = picture && scanRx(v, picture);
   const running = !!sweeping && !["done", "error"].includes(sweeping.phase);
+  const age = picture ? agoWords(scanTime(picture)) : null;
   const heading = live ? `What Receiver ${rxName(tuner.dev)} hears, live`
     : picture === sweeping && running ? `${scanner ? `Receiver ${rxName(scanner.id)}` : "A receiver"} is sweeping ${name}`
-    : picture ? `${name} at the last scan, ${ago(picture.t)}` : null;
+    : picture ? `${name} at the last scan${age ? `, ${age}` : ""}` : null;
   return (
     <>
       {heading && <h4 className="m-sub-h">{heading}</h4>}
@@ -936,11 +943,6 @@ function AddFromAir({ v, pre, onDone }: { v: Any; pre: Any; onDone: () => Promis
 
 // -- what this machine has heard ---------------------------------------------------------------
 
-const ago = (t: number) => {
-  const h = (Date.now() / 1000 - t) / 3600;
-  return h < 1 ? `${Math.max(1, Math.round(h * 60))} min ago` : h < 48 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} days ago`;
-};
-
 /** Broadcast first, then the named, then what the last scan heard again, then by frequency. */
 const byInterest = (a: Any, b: Any) =>
   +(a.privacy !== "broadcast") - +(b.privacy !== "broadcast")
@@ -1006,7 +1008,7 @@ export function OnAirHere({ radio, playingMhz, onPlay, onStop, onReceiver }: {
                       <span className={cx("ls-name", !name && "is-unnamed")} dir="auto">{name || label}</span>
                       <span className="ls-sub">
                         {[name && label, kind && !label.toLowerCase().includes(kind) && kind,
-                          playing ? "playing" : e.missing ? "not in the last scan" : `heard ${ago(e.last_heard)}`].filter(Boolean).join(" · ")}
+                          playing ? "playing" : e.missing ? "not in the last scan" : agoWords(e.last_heard) && `heard ${agoWords(e.last_heard)}`].filter(Boolean).join(" · ")}
                       </span>
                     </span>
                     <Icon name={playing ? "stop" : "play"} />
@@ -1087,7 +1089,7 @@ function Heard({ v, onAdd, reload }: { v: Any; onAdd: (t: Any) => void; reload: 
               {bandLine(e.band) && <span className="rd-sub">{bandLine(e.band)}</span>}
             </td>
             <td className="num-cell" title={`Heard in ${e.times} ${e.times === 1 ? "scan" : "scans"}`}>
-              {ago(e.last_heard)}{e.missing && <span className="m-muted"> · not in the last scan</span>}
+              {agoWords(e.last_heard) || <span className="m-muted">–</span>}{e.missing && <span className="m-muted"> · not in the last scan</span>}
             </td>
             <td className="rd-act">
               {e.station ? <a href="#/" className="rd-link">On the page</a> : (
