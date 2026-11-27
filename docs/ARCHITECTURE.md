@@ -286,7 +286,8 @@ words; catches and scan rows carry `channel` beside their `band` and `label` too
 **Ask.** Above the search box, a question in any language goes to
 `POST /api/ask`, which streams Server-Sent Events back: `plan` (stations, time range, search
 words), `sources` (the numbered excerpts), `text` (the answer as the model writes it), then
-`done` with timings, or `error`. LAN viewers may ask too: asking only reads. Steps (`ask.py`):
+`done` with timings, or `error`. Another machine may ask only when `serve` runs with
+`--allow-remote-ask` (above); without it the answer is 403. Steps (`ask.py`):
 
 1. **Plan.** The translation LLM (Qwen3.5-9B) turns the question into one line of JSON:
    stations, from/to, 3–8 search words, and whether it is an overview with no topic. The prompt
@@ -1159,8 +1160,10 @@ FTS5 frees index pages only when it merges segments (even with `secure-delete`, 
 so the file size lags behind deletions and a "delete until under N GB" loop over-deletes. Speech
 audio is kept for `--audio-days` (default 7) and capped at `--audio-max-gb` (default 2 GB), oldest
 first. Both are checked every ten minutes, as utterances arrive and in the background. Settings →
-Storage on the page changes all three while running (saved in `config/ui.toml`): 0 audio days stops
-recording; 0 text days keeps text with no age limit, so watch the disk figure next to it. Alerts are
+Storage and privacy on the page changes all three while running (saved in `config/ui.toml`): 0 audio days stops
+recording; 0 text days keeps text with no age limit, so watch the disk figure next to it. That is
+the opposite of `text_days = 0` in `[radio.policy.<class>]`, which keeps no text at all
+([RADIO.md](RADIO.md), *You decide what is kept*). Alerts are
 kept with their quote (at most one per rule per cooldown, so they stay small). Music is never stored: the gate drops it before ASR.
 
 ## Key decisions (with rationale)

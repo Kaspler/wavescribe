@@ -787,7 +787,8 @@ def add_store_args(p: argparse.ArgumentParser) -> None:
         "--text-days",
         type=float,
         default=365.0,
-        help="keep text and translations this long (about 12 GB a year for 4 talk stations)",
+        help="keep text and translations this long (0: no age limit; about 11 GB a year for 4 talk "
+        "stations)",
     )
 
 

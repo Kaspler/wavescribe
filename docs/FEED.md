@@ -205,6 +205,11 @@ an EventSource on such a page.
   may ask only when `serve --allow-remote-ask` lets it. Otherwise the page there shows Ask as
   unavailable (`ask` in `/api/state` says why, `ask_code` is `remote_off`) and `POST /api/ask`
   is 403; digests likewise (`digest` and `digest_code`).
+- **The `X-Wavescribe` header.** Every request that asks, makes or cancels a digest, or uses a
+  control must carry the header `X-Wavescribe: 1`, from this machine too. Without it the answer
+  is 403 with `{"error": "missing X-Wavescribe header"}`. A form on another website can't set
+  it, so a page open in your browser can't spend the model or press a control. The feed
+  (`/feed/v1`) doesn't need it.
 - **Through a proxy.** A request carrying `Forwarded`, `X-Forwarded-For`, `X-Real-IP` or `Via`
   came through a proxy, so it is another machine's even when it connects from this one: it is
   read-only, counts against the limits for other machines, and needs a token as in the table.

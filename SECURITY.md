@@ -24,15 +24,16 @@ the maintainers can give one; this is a volunteer project, so there is no fixed 
   audio decodes at a time; a connection that sends or takes nothing for 30 s is closed. Text of
   stations no longer configured is not given to other machines, and their alerts reach them
   without the words.
-- **Feed tokens.** Every push to `/feed/v1/ingest` needs a token made in the control centre, from
-  this machine too. Reading `/feed/v1` from another machine needs one as soon as the first token
+- **Feed tokens.** Every push to `/feed/v1/ingest` needs a token, from this machine too. Tokens
+  are made on the Wavescribe machine only: on the page (Settings → Connections → *For other
+  programs*) or with `wavescribe token make`. Reading `/feed/v1` from another machine needs one as soon as the first token
   exists; until then, under `--lan`, the LAN reads the feed as it reads the page
   ([docs/FEED.md](docs/FEED.md)). Only the tokens' hashes are stored. A push token can add text
   only to stations that pushes created (25 per sender, 100 in all), and every value it sends is
   checked before it is stored.
 - **Behind a proxy or tunnel:** a proxy on the same machine makes its visitors look local. Start
   Wavescribe with `serve --behind-proxy` so every request counts as another machine's and the
-  feed always needs a token, set the proxy's public name as the public URL (page, *Outputs*),
+  feed always needs a token, set the proxy's public name as the *Public URL* (Settings → Connections → *For other programs*),
   and put TLS and authentication on the proxy: Wavescribe has none of its own beyond the feed
   tokens. Requests that carry `Forwarded`, `X-Forwarded-For`, `X-Real-IP` or `Via` are treated
   as another machine's even without the option.

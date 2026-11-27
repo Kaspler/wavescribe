@@ -40,7 +40,8 @@ Choose a band to read what it is, when it is busy and the antenna it wants. Then
   is listed under the dial, strongest first, and kept under *Heard here*.
 - **Look here with Receiver A** tunes the receiver by hand to the strongest station heard in the
   band (with nothing heard yet, a channel at its middle) and shows the slice of the band around
-  it, about 2.4 MHz wide (what one receiver hears at once; a wider band takes several looks),
+  it that the receiver takes in, 2.4 MHz wide (it hears stations in the middle 2.2 MHz of it,
+  see [Known limits](#known-limits); a wider band takes several looks),
   as spectrum and waterfall live, with what was heard marked by name. Click a signal, or
   **Listen** in the list, to hear it there. You can also drag a receiver's letter along the dial.
   A receiver that is following stations and has to move for it asks first, says which would
@@ -75,14 +76,14 @@ A scan works like this:
 
 1. `rtl_power` sweeps the range and gives one power spectrum. The resolution follows the band:
    about a twentieth of an FM channel and a fifth of a narrow channel. The dongle sees a spike
-   at the centre of each 2 MHz it tunes, which hides whatever is right there; for narrow
+   at the centre of each stretch it tunes, which hides whatever is right there; for narrow
    channels a second, shorter sweep with the dongle tuned elsewhere fills those spots in (about
    2 s more).
 2. Signals are the peaks a margin (8 dB by default) above the local noise floor. Each is snapped
    to its band's channel raster (100 kHz for FM, 8.33 kHz in the airband, the PMR446 channel
    list), and the band plan says what it is.
-3. For FM, a few seconds of the band are recorded per 2 MHz and every station in it is
-   demodulated at once. Its **RDS** gives the station's name, programme type and radiotext.
+3. For FM, a few seconds are recorded of each stretch of the band one receiver hears at once
+   (about 2.2 MHz), and every station in it is demodulated at once. Its **RDS** gives the station's name, programme type and radiotext.
 4. Everything found goes to `data/radio/heard.json`, merged with earlier scans. A station not
    heard in a later scan is kept, marked with when it was last heard.
 
@@ -106,9 +107,9 @@ antenna, then run `uv run wavescribe radio spurs a --learn` (or *Learn* under
 *Each receiver's own signals* on the Receivers page). It sweeps in steps of about 5 kHz, fine
 enough to see narrow lines, in about a minute for the whole range. Lines seen in
 both of two sweeps are kept for that receiver's serial (`data/radio/spurs.json`), and later
-scans mark them and leave them out. Spurs learnt with versions up to 0.1.0a1 were learnt in
-steps of about 87 kHz, which hide narrow lines (their entries in `spurs.json` have no
-`bin_hz`): learn them again. A signal that disappears when only the antenna is
+scans mark them and leave them out. Spurs learnt before the sweep was this fine were learnt in
+steps of about 87 kHz, which hide narrow lines. Their entries in `spurs.json` have no `bin_hz`,
+and `radio spurs a` says so: learn them again. A signal that disappears when only the antenna is
 disconnected comes in through the antenna: it is either real or interference near it. Narrow
 lines that sit on multiples of 2.4 MHz are another receiver's clock; the scan marks them and
 keeps them under Show more, and `radio scan` lists them marked but counts them, and spurs,
@@ -182,7 +183,7 @@ under Settings → **Stations** on a receiver tuned elsewhere. On the dial, the 
 such stations, and the card of each one's band names it with **Move Receiver A there** (so does
 Settings → **Stations**), which moves the receiver back and starts it, asking first if that
 leaves others out. A station that is switched off is never in the way. A receiver can't hear a
-station when the frequency is outside the 2.4 MHz or so it hears, or (narrowband) on its very
+station when the frequency is outside the 2.2 MHz or so it hears, or (narrowband) on its very
 centre, where every dongle has a spike of its own; for a watch, when any channel of its window
 is outside.
 
@@ -325,8 +326,8 @@ what a watch hears most of the time.
 
 Limits:
 
-- **A watch covers what one receiver hears at once**, about 2.25 MHz from the first channel to
-  the last (at 2.4 MS/s). A wider band is refused with a slice that fits: the one with the most
+- **A watch covers what one receiver hears at once**, about 2.2 MHz (2.25 MHz from the first
+  channel to the last, at 2.4 MS/s). A wider band is refused with a slice that fits: the one with the most
   of the band's own channels, so marine VHF's slice is the ships' channels, not the business and
   public-service radio in its middle. The refusal also says which parts of the band are another kind of radio:
   a watch is kept as the strictest kind in it.
@@ -462,6 +463,10 @@ export = false          # let the text leave this machine (feed, webhooks, follo
 quote_in_alerts = true  # alerts carry the words heard
 ```
 
+`text_days = 0` here means the text is never kept. For broadcast stations it is the other way
+round: `--text-days 0`, and 0 under *How long it's kept* on the page, keep text with no age
+limit.
+
 The page's changes are laid over the file's. They apply at once, also to what is already kept:
 a shorter time removes older text, and the words kept in alerts, within a minute, also while
 nothing is being received.
@@ -551,6 +556,11 @@ Corrections and pull requests on any of these are welcome.
   TETRA or other digital voice.
 - **Speech recognition on aircraft and handheld radio audio is likely poor:** the models were
   trained on cleaner speech.
+- **About 2.2 MHz per receiver.** A dongle takes in 2.4 MHz at a time (2.4 million samples a
+  second) and its filter fades the edges, so Wavescribe follows stations in the middle of it:
+  broadcast FM up to 1.08 MHz either side of the receiver's centre (2.16 MHz), narrow channels
+  up to 1.14 MHz (2.28 MHz; a watch, 2.25 MHz from its first channel to its last). Stations
+  further apart need another receiver.
 - **24-1766 MHz only.** Medium wave and shortwave (below 24 MHz) need the V4's built-in HF
   upconverter and a long wire antenna; Wavescribe doesn't support them (nor the V3's direct
   sampling).

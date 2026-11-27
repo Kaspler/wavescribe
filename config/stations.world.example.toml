@@ -20,7 +20,8 @@
 # ASR. Parakeet-TDT-0.6B-v3 (first in the default chain) covers every language here except
 # Hebrew, which falls through to Whisper large-v3-turbo, the chain's second model. Fetch it once:
 #   uv run wavescribe models fetch whisper-large-v3-turbo
-# Without it, kan-bet shows as unavailable and the other stations run as usual.
+# Without it, kan-bet plays without text until the model is there, and the other stations run
+# as usual.
 #
 # Stream URLs are the broadcasters' own endpoints (or their official CDN), each verified on
 # 2026-11-21 by pulling 10 s with ffmpeg and transcribing a minute of each. Broadcasters move and

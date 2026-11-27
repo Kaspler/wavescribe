@@ -41,7 +41,7 @@ Numbers from other Macs are welcome: open an issue with the figures from Setting
 | Setup | What it does | Rough cost |
 |---|---|---|
 | **Nothing** | Internet radio stations only | €0 |
-| **One dongle and its antenna** | Two to five FM stations that sit within about 2 MHz of each other, or finding stations and listening to any frequency by hand | €40–60 |
+| **One dongle and its antenna** | Two to five FM stations that sit within about 2.2 MHz of each other, or finding stations and listening to any frequency by hand | €40–60 |
 | **Three dongles in one box** (the reference kit, experimental) | Two windows of FM stations around the clock, plus a third receiver for scanning, walkie-talkies, aircraft or radio amateurs. One antenna, one cable to the Mac | €150–250 |
 
 The one-dongle setup is the place to start: everything else is the same dongle, more times.
@@ -117,8 +117,10 @@ an **SMA-male to F-male pigtail** for each dongle and an adapter for the antenna
 
 - **Macs with Apple Silicon only.** Not Linux, Intel Macs or Windows.
 - **RTL-SDR dongles only.** Airspy, HackRF and SoapySDR devices aren't supported.
-- **A 2 MHz window per dongle.** At 2.4 million samples a second (above that, RTL-SDR dongles tend
-  to drop samples), one dongle hears about 2 MHz at once: stations further apart need more dongles.
+- **A window of about 2.2 MHz per dongle.** At 2.4 million samples a second (above that, RTL-SDR
+  dongles tend to drop samples) a dongle takes in 2.4 MHz, and its filter fades the edges.
+  Wavescribe follows FM stations up to 1.08 MHz either side of the dongle's centre (2.16 MHz)
+  and narrow channels up to 1.14 MHz (2.28 MHz): stations further apart need more dongles.
 - **24–1766 MHz.** Medium wave and shortwave (below 24 MHz) aren't received.
 - **No digital radio:** DAB, DMR and other digital voice aren't implemented, and protected
   services (TETRA) are never decoded or decrypted.
@@ -160,7 +162,7 @@ you are; add an outdoor antenna only if measurements show weak signals.
 
 | Item | Role |
 |---|---|
-| **3 × RTL-SDR Blog V4L** (R828S, 1 ppm TCXO, HF upconverter, bias tee, aluminium case, USB-A plug) | **A** and **B** each park on one ~2 MHz FM cluster. **C** is the flexible one: PMR446, 2 m/70 cm, or a third FM cluster. Identical devices, one driver. Buy from rtl-sdr.com's official reseller list: **most marketplace "RTL-SDR Blog" units are fakes.** |
+| **3 × RTL-SDR Blog V4L** (R828S, 1 ppm TCXO, HF upconverter, bias tee, aluminium case, USB-A plug) | **A** and **B** each park on one FM cluster about 2.2 MHz wide. **C** is the flexible one: PMR446, 2 m/70 cm, or a third FM cluster. Identical devices, one driver. Buy from rtl-sdr.com's official reseller list: **most marketplace "RTL-SDR Blog" units are fakes.** |
 | Bus-powered USB hub, USB-C upstream, 4 × USB-A, over-current protection | One cable to the computer |
 | 3 × short USB-A extensions (~15 cm) | The dongles are too wide for adjacent hub ports; the extensions also space them apart for heat and USB noise |
 | 4-way splitter, 5–2400 MHz, F connectors | One antenna feeds all three receivers. ~6.7 dB insertion loss at 40–1000 MHz, harmless for strong FM. Doesn't pass MW |
@@ -201,13 +203,13 @@ images around FM, so it's a poor fit.
 
 ## Planning frequencies
 
-An RTL-SDR at 2.4 MS/s hears a window of ~2 MHz, so group the stations you care about into ~2 MHz
-clusters and give each cluster a receiver:
+An RTL-SDR at 2.4 MS/s hears a window of about 2.2 MHz, so group the stations you care about into
+clusters that wide and give each cluster a receiver:
 
 1. List your priority stations and their local FM frequencies: scan the band
    (`uv run wavescribe radio scan a fm`, or Find → On the air; [RADIO.md](RADIO.md)), or look them up on
    the broadcasters' sites.
-2. Find the windows of ~2 MHz that hold the most priority stations; park receiver A and B on
+2. Find the windows of about 2.2 MHz that hold the most priority stations; park receiver A and B on
    their centres.
 3. Give receiver C whatever is left: a third cluster, PMR446 (446.0–446.2 MHz) or the amateur
    bands.
@@ -222,7 +224,7 @@ clusters and give each cluster a receiver:
 ## RF and driver notes
 
 - Use **manual gain, not AGC**: strong FM overloads 8-bit dongles.
-- An RTL-SDR at **2.4 MS/s** gives ~2.0–2.2 MHz usable, which is 2–5 real stations per dongle.
+- An RTL-SDR at **2.4 MS/s** gives about 2.2 MHz usable ([Limits today](#limits-today)), which is 2–5 real stations per dongle.
 - **librtlsdr 2.0.3 or newer** is needed for the V4L/V4Lc's R828S. Osmocom added V4L support in
   May 2026 and released it in 2.0.3 (August 2026); the Homebrew bottle is 2.0.3, so no source build
   is needed on macOS (rtl-sdr.com's V4L guide still describes one; it predates the release).

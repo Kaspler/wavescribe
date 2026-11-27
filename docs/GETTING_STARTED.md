@@ -61,8 +61,10 @@ Your browser opens Wavescribe's page at <http://localhost:8765>. It keeps runnin
 this Terminal window does; press **Ctrl-C** there to stop it.
 
 Until you choose your own stations, it shows an example list (four national stations of one
-country). Press **Start** beside one to start it and listen right away: until the models are
-downloaded (next step) it plays without text, and its text starts by itself once they are.
+country). Press **Start** beside one to start it. Start alone plays no sound: to hear the
+station, press **Listen** at the top of its column, or play it from **Listen** at the top of the
+page. Until the models are downloaded (next step) a station has no text yet, and its text
+starts by itself once they are.
 Stations that were running when you stopped Wavescribe start again next time. To start some
 from the Terminal, name them: `uv run wavescribe serve <station id> …` (the ids are in the
 station list, or in `config/stations.example.toml`).
@@ -107,8 +109,9 @@ is where stations are found and added:
 - **On the internet → Station directory:** search thousands of internet stations by name,
   country or language ([Radio Browser](https://www.radio-browser.info), a public directory).
   **Download the directory** once and you can search it offline too.
-- **On the internet → By address:** paste a station's stream address. **Check** plays a few
-  seconds to make sure it works and can identify the language.
+- **On the internet → By address:** paste a station's stream address. **Check** tries it and
+  says whether it plays. Tick **Also identify the language** first to have Whisper listen for
+  20 seconds and name the language; that needs a Whisper model.
 - **On the internet → Other ways to add:** an `.m3u` or `.pls` playlist, or a station that
   another machine transcribes ([FEED.md](FEED.md)).
 - **On the air:** what your receiver finds; see [section 9](#9-use-a-radio-receiver-sdr).
@@ -140,11 +143,13 @@ rewritten.
 
 - **The station list** (left) shows each station's state with a lamp. **Start** starts a
   stopped one.
-  Choose a station to read only that one, or **All live** (key `0`) for every running station
-  side by side. **Edit list** chooses which stations this device shows.
-- **Listen** at the top lists your stations to play: one click plays a station, starting it
-  first if it is off, and one volume serves them all. Below them, **On the air here** lists what
-  your receivers have found, each a click from playing.
+  Choose a station to read only that one, or **All live** (key `0`) for the running stations
+  side by side: one column each, as many as fit, four at most. **Edit list** chooses which
+  stations this device shows.
+- **Listen** at the top of a station's column plays it. **Listen** at the top of the page lists
+  all your stations to play: one click plays a station, starting it first if it is off, and one
+  volume serves them all. Below them, **On the air here** lists what your receivers have found,
+  each a click from playing.
 - **The transcript** shows what was said, with its translation. Lines dimmed as another
   language are usually songs or a guest speaking another language. Music is shown as *music*
   and skipped.
@@ -277,7 +282,8 @@ translation can't hide an alert.
 Alerts are a help, not a warning system: one can be missed, come late or be raised for
 something that wasn't said. In an emergency, follow official warnings and the emergency services.
 
-**The simplest rule:** Settings → **Alerts** → **Words to listen for**. Name it, type the
+**The simplest rule:** Settings → **Alerts** → **Words to listen for**. Give it an **Id** (a
+short name in lowercase letters, digits and dashes, such as `road-closed`), type the
 **words and phrases** to watch for in your language (*evacuation*, *boil water*, *road
 closed*), and press **Suggest in each language**: the local model proposes the same terms in
 each station's language. Read them, fix any that are wrong, and save.
@@ -309,8 +315,9 @@ each station's language. Read them, fix any that are wrong, and save.
 **A story told again and again is one alert.** Further mentions add to it (the page counts
 them) and are not announced again, unless it gets more serious. After 15 minutes without a
 mention (`cooldown_minutes`) it is over, and the next mention is a new alert. While it goes on,
-you get a "still being mentioned" notification at most once an hour (`remind_minutes` under
-`[delivery]`; 0 turns it off). Reminders are never spoken.
+you get a reminder notification at most once an hour, titled with its severity, rule and
+stations ("STILL HIGH · water · …") and saying how often it was mentioned since when
+(`remind_minutes` under `[delivery]`; 0 turns it off). Reminders are never spoken.
 
 **When a station goes silent:** the example rules (`config/alerts.example.toml`) have one
 (`kind = "silence"`): a station that sends no audio, or only silence, for 5 minutes raises an
@@ -379,8 +386,8 @@ For a language other than English, give its `[speak.<lang>]` a `summary` and an 
 sentence, as `alerts.example.toml` shows. Digests keep to the clock on the days it changes too.
 Restart Wavescribe after changing the table.
 
-**Elsewhere:** **Webhooks and pushes** send alerts to your own automations, a chat bot or a
-home-automation system ([FEED.md](FEED.md)).
+**Elsewhere:** Settings → **Connections** → **Webhooks and live pushes** sends alerts to your
+own automations, a chat bot or a home-automation system ([FEED.md](FEED.md)).
 
 ## 8. Read along on your phone
 
@@ -414,10 +421,14 @@ left alone.
 
 1. **Plug it in.** macOS asks **"Allow accessory to connect?"**: allow it. Until you do, the
    dongle is invisible.
-2. **Find** → **On the air**. The dongle is listed; **Use it** makes it a receiver.
-3. **Find FM stations with Receiver A**, above the dial. In about two minutes you get the
-   stations it hears, on the dial and in a list, named from their own broadcast data (RDS) when
-   the signal is good enough.
+2. **Find** → **On the air**. It says a dongle is plugged in and not in use yet: **Use it and
+   find stations here** makes it a receiver (Receiver A) and scans the FM band with it, in one
+   press. With several dongles plugged in, **Choose by serial** leads to Settings →
+   **Receivers**, which lists them, each with its own **Use it**.
+3. In about two minutes you get the stations it hears, on the dial and in a list, named from
+   their own broadcast data (RDS) when the signal is good enough. A receiver made under
+   Settings → **Receivers** hasn't scanned yet: **Find FM stations with Receiver A**, above the
+   dial, does it.
 4. **Listen** beside a station tunes the receiver to it, there on the page: a spectrum and
    waterfall show what the receiver hears, with the stations marked by name, and a click on a
    signal tunes it. **Listen** → **Tune by hand** has the same receiver, with seek and a
@@ -431,7 +442,7 @@ walkie-talkies or the 2 m amateur band, **Watch this band** writes down whatever
 of its channels and lists it under **Caught here**
 ([RADIO.md](RADIO.md#catching-radio-that-only-talks-now-and-then)).
 
-One dongle hears a window about 2 MHz wide, so it can carry two to five FM stations that sit
+One dongle hears a window about 2.2 MHz wide, so it can carry two to five FM stations that sit
 close together. For stations spread across the band, use more dongles
 ([HARDWARE.md](HARDWARE.md#planning-frequencies)).
 
@@ -531,8 +542,8 @@ safe to run while Wavescribe is running.
 |---|---|
 | The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. `uv run wavescribe doctor` says whether another program holds the port; if so, start it with another, e.g. `--port 8780`. |
 | The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that (`uv run wavescribe doctor` helps), then `uv run wavescribe service install` again. |
-| A station plays without text and says it's waiting for a model | Download it under Settings → **Languages and models**; the text starts when it finishes. |
-| No sound | Press **Start** beside the station, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
+| A station says *No text yet* | Its speech model isn't downloaded. Download it under Settings → **Languages and models**; the text starts when it finishes. Meanwhile the station can be played. |
+| No sound | **Start** only starts a station. Press **Listen** at the top of its column, or play it from **Listen** at the top of the page, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
 | Nonsense text, or the wrong language | Check the station's language under Settings → **Stations**. Some songs still get through the music filter; heavy accents, phone-ins and weak signals transcribe worse. |
 | The dongle isn't found | Allow it in System Settings → Privacy & Security → *Allow accessories to connect*, then unplug it and plug it in again. `uv run wavescribe doctor` lists the dongles macOS sees, with their serials, and says whether each receiver in your settings is plugged in. |
 | The dongle is found but busy | Only one program can use a dongle at a time. Close other radio programs (GQRX, SDR++), and stop any `rtl_fm` or `rtl_power` left running. |

@@ -38,7 +38,8 @@ they agree, and the word error rate once a speaker of the language has corrected
 file it writes.
 
 **Language identification:** Whisper's built-in language ID identifies a new stream's language
-when a station is added (its **Check**). It also gives a second opinion on lines the ASR checks
+when a station is added by its address, if **Also identify the language** is ticked beside
+**Check** (it listens for 20 seconds; off by default). It also gives a second opinion on lines the ASR checks
 flagged as another language than the station's (`asr/recheck.py`): Parakeet can't be told the
 language and sometimes renders the station's speech in English. Whisper's language ID (one
 encoder pass and one decoder step, `MlxAudioTranscriber.identify_language`) listens to the
