@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from typing import IO
 
@@ -58,9 +59,17 @@ class RtlSdrDevice:
         backoff_initial: float = 1.0,
         backoff_max: float = 30.0,
         clock: Callable[[], float] = time.time,
+        command_line: bool = False,
     ) -> None:
+        """A dongle that gives nothing when first started (another program has it, it isn't
+        plugged in) is tried again with backoff, as a server must. ``command_line`` is for a
+        command that says itself what goes wrong (``radio watch``): such a dongle stops the
+        device instead, its stations end, and ``unopened`` says what rtl_sdr said; rtl_sdr's
+        words and the reconnects go to the log, not to the terminal."""
         self.config = config
         self._command = command
+        self._command_line = command_line
+        self._trouble_level = logging.INFO if command_line else logging.WARNING
         # Whole 16 kHz output samples per block, so every station's audio comes out in step.
         per_out = config.sample_rate // SAMPLE_RATE
         self._chunk_bytes = 2 * per_out * max(1, round(chunk_seconds * SAMPLE_RATE))
@@ -75,6 +84,9 @@ class RtlSdrDevice:
         self._proc: subprocess.Popen[bytes] | None = None
         self.connected = False
         self.reconnects = 0
+        self.heard_at: float | None = None  # when the dongle first sent anything
+        self.said: deque[str] = deque(maxlen=20)  # rtl_sdr's last words on stderr, this run's
+        self.unopened: str | None = None  # what rtl_sdr said when it gave up (command_line)
         self.clipped: float | None = None  # share of IQ samples at the ADC's limits (overload)
         # The spectrum is computed only while someone looks at it (the receivers panel asks
         # again every half second), so a dongle nobody watches costs nothing extra.
@@ -132,12 +144,19 @@ class RtlSdrDevice:
                 ch._disconnected(self.reconnects)
             if stop.is_set():
                 break
+            if self.heard_at is None and self._command_line:
+                self.unopened = "\n".join(self.said) or "it said nothing"
+                event(log, "source_unopened", device=self.config.id,
+                      serial=self.config.serial, said=self.unopened)  # fmt: skip
+                for ch in self._snapshot():  # their iterators end: their stations stop
+                    ch.close()
+                break
             delay = min(self._backoff_max, self._backoff_initial * 2 ** min(failures, 16))
             failures += 1
             event(
                 log,
                 "source_reconnect",
-                level=logging.WARNING,
+                level=self._trouble_level,
                 device=self.config.id,
                 serial=self.config.serial,
                 delay_s=delay,
@@ -165,12 +184,14 @@ class RtlSdrDevice:
         with self._lock:
             self._proc = proc
         assert proc.stdout is not None and proc.stderr is not None
-        threading.Thread(
+        self.said.clear()
+        drain = threading.Thread(
             target=_drain_stderr,
-            args=(proc.stderr, self.config.serial),
+            args=(proc.stderr, self.config, self.said, self._trouble_level),
             daemon=True,
-            name=f"rtl_sdr-stderr-{self.config.serial}",
-        ).start()
+            name=f"rtl_sdr-stderr-{self.config.id}",
+        )
+        drain.start()
         event(
             log,
             "source_connect",
@@ -205,12 +226,14 @@ class RtlSdrDevice:
                     self.connected, got = True, True
                     iq = iq_from_u8(raw)
                     now = self._clock()
+                    if self.heard_at is None:
+                        self.heard_at = now
                     for ch in self._snapshot():
                         try:
                             ch._feed(iq, now, first)
                         except Exception:  # one broken channel must not silence the others
-                            log.exception("sdr %s: a channel failed; it is detached",
-                                          self.config.serial)  # fmt: skip
+                            log.exception("receiver %s: a channel failed; it is detached",
+                                          receiver_name(self.config.id))  # fmt: skip
                             self.detach(ch)  # type: ignore[arg-type]
                             with contextlib.suppress(Exception):
                                 ch.close()
@@ -230,6 +253,7 @@ class RtlSdrDevice:
                 proc.kill()
             proc.wait()
             proc.stdout.close()
+            drain.join(2)  # all it said, for ``said``
             with self._lock:
                 if self._proc is proc:
                     self._proc = None
@@ -531,12 +555,23 @@ class SdrChannelSource:
         self._discontinuity = True
 
 
-def _drain_stderr(stream: IO[bytes], serial: str) -> None:
-    # Keeps rtl_sdr from blocking on a full stderr pipe, and puts its messages in our log.
+def claimed(text: str) -> bool:
+    """Whether an rtl tool's stderr says another program has the dongle open."""
+    t = text.lower()
+    return "usb_claim_interface" in t or "claimed by second instance" in t
+
+
+def _drain_stderr(
+    stream: IO[bytes], config: SdrDevice, said: deque[str], trouble: int = logging.WARNING
+) -> None:
+    # Keeps rtl_sdr from blocking on a full stderr pipe, and puts its messages in our log (what
+    # sounds like trouble at ``trouble``) and in ``said``, the account of a run that gave nothing.
     noisy = ("error", "failed", "no matching", "no supported", "lost", "not locked", "usb_")
     with stream:
         for line in stream:
             text = line.decode("utf-8", "replace").strip()
             if text:
-                level = logging.WARNING if any(w in text.lower() for w in noisy) else logging.INFO
-                event(log, "rtl_sdr", level=level, serial=serial, stderr=text)
+                said.append(text)
+                level = trouble if any(w in text.lower() for w in noisy) else logging.INFO
+                event(log, "rtl_sdr", level=level, device=config.id, serial=config.serial,
+                      stderr=text)  # fmt: skip

@@ -229,8 +229,25 @@ def test_radio_catches_prints_the_log_and_its_json(
     assert row["name"] == "calling channel" and row["utterances"][0]["text"] == "CQ CQ"
 
 
+@pytest.fixture
+def no_dongle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`radio watch` with no model and no dongle: nothing holds the receiver as far as the USB
+    registry tells (tests/test_radio_watch_cli.py runs one with a stand-in rtl_sdr)."""
+    from wavescribe.radio import holders
+
+    monkeypatch.setattr(holders, "held_elsewhere", dict)
+
+
+def heard(args: argparse.Namespace) -> int:
+    """What `listen` leaves behind once the receiver has sent something."""
+    from wavescribe.sources.sdr import find_device
+
+    find_device(args.tuned_stations[0].sdr.device.serial).heard_at = time.time()
+    return 0
+
+
 def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_dongle
 ) -> None:
     from wavescribe import cli
     from wavescribe.cli import build_parser
@@ -238,7 +255,7 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
 
     monkeypatch.chdir(tmp_path)
     ran: list[argparse.Namespace] = []
-    monkeypatch.setattr(cli, "cmd_listen", lambda a: ran.append(a) or 0)
+    monkeypatch.setattr(cli, "cmd_listen", lambda a: ran.append(a) or heard(a))
     monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
     monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: RX)
     argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--minutes", "10"]
@@ -258,14 +275,14 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
 
 
 def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_dongle
 ) -> None:
     from wavescribe import cli
     from wavescribe.cli import build_parser
     from wavescribe.radio import cli as radio_cli
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "cmd_listen", lambda _a: 0)
+    monkeypatch.setattr(cli, "cmd_listen", heard)
     monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
     monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: RX)
     (tmp_path / "data" / "radio").mkdir(parents=True)
@@ -278,17 +295,17 @@ def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
 
 
 def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_dongle
 ) -> None:
     from wavescribe import cli
     from wavescribe.cli import build_parser
     from wavescribe.radio import cli as radio_cli
     from wavescribe.radio import watch as watches
 
-    def listen(_args: argparse.Namespace) -> int:  # what the watch says while it runs
+    def listen(args: argparse.Namespace) -> int:  # what the watch says while it runs
         watches.publish(watches.Hearing("watch", 1_000.0, "deaf: noise across the whole window"))
         watches.publish(watches.Hearing("watch", 1_017.0, None, deaf_s=17.2, learnt=True))
-        return 0
+        return heard(args)
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "cmd_listen", listen)

@@ -40,7 +40,7 @@ from wavescribe.radio.bandplan import (
     lookup,
     region_bands,
 )
-from wavescribe.sources.sdr import device_arg, ppm_args
+from wavescribe.sources.sdr import claimed, device_arg, ppm_args
 
 log = logging.getLogger(__name__)
 
@@ -211,11 +211,6 @@ def hop_count(start_hz: float, stop_hz: float) -> int:
     return next(n for n in range(1, 1500) if int(span // n / (1 - CROP)) <= MAX_RATE_HZ)
 
 
-def _busy(text: str) -> bool:
-    t = text.lower()
-    return "usb_claim_interface" in t or "claimed by second instance" in t
-
-
 def sweep(
     serial: str,
     start_hz: float,
@@ -269,7 +264,7 @@ def sweep(
     rows, err = run(start_hz, stop_hz, 0, integrate_s)
     text = "".join(err)
     if not rows:
-        if _busy(text):
+        if claimed(text):
             raise Busy()
         raise ScanError(f"rtl_power found nothing to report: {text.strip()[-300:] or 'no output'}")
     sw = _assemble(rows, start_hz, stop_hz, bin_hz, 0.0)
@@ -289,8 +284,8 @@ def sweep(
                 sw.warnings += [w for w in second.warnings if w not in sw.warnings]
                 event(log, "scan_centres", serial=serial, hops=len(rows), filled=filled)
     sw.seconds = time.time() - t0
-    for w in sw.warnings:
-        log.warning("dongle %s: %s", serial, w)
+    for w in sw.warnings:  # for the log: the command line and the page say them themselves
+        event(log, "scan_warning", serial=serial, warning=w)
     return sw
 
 
@@ -723,7 +718,7 @@ def name_fm(
             if proc.poll() is None:
                 proc.kill()
             proc.wait()
-        if got == 0 and _busy(err.decode(errors="replace")):
+        if got == 0 and claimed(err.decode(errors="replace")):
             raise Busy()
         for f in members:
             info = decoders[f].info

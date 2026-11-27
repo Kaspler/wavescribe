@@ -48,6 +48,7 @@ class Receiver(NamedTuple):
     gain_db: float
     ppm: int
     name: str  # how output names it: "receiver A", never by its serial (people paste output)
+    id: str = ""  # its id in the config; "" for a dongle no receiver uses
 
 
 def resolve_receiver(name: str, config: Any) -> Receiver:
@@ -55,7 +56,8 @@ def resolve_receiver(name: str, config: Any) -> Receiver:
     if config is not None:
         for d in config.devices:
             if name in (d.id, d.serial):
-                return Receiver(d.serial, d.gain_db, d.ppm, f"receiver {receiver_name(d.id)}")
+                return Receiver(d.serial, d.gain_db, d.ppm, f"receiver {receiver_name(d.id)}",
+                                d.id)  # fmt: skip
     from wavescribe.sources.sdr import list_dongles
 
     serials = [d["serial"] for d in list_dongles()]
@@ -332,8 +334,8 @@ def cmd_rds(args: argparse.Namespace) -> int:
     from wavescribe.dsp import OFF_CENTRE_HZ
     from wavescribe.dsp.rds import RdsDecoder
     from wavescribe.dsp.wfm import WfmDemodulator, iq_from_u8
-    from wavescribe.radio.scan import ScanError, _busy
-    from wavescribe.sources.sdr import device_arg, ppm_args
+    from wavescribe.radio.scan import ScanError
+    from wavescribe.sources.sdr import claimed, device_arg, ppm_args
 
     config = _config(args)
     rx = resolve_receiver(args.receiver, config)
@@ -382,7 +384,7 @@ def cmd_rds(args: argparse.Namespace) -> int:
     if not got:
         listener.join(2)
         text = said.decode(errors="replace").strip()
-        if _busy(text):
+        if claimed(text):
             raise busy(rx, "Listen → Tune by hand shows its RDS")
         raise ScanError(f"rtl_sdr gave no samples: {text[-300:] or 'and no reason'}")
     info = dec.info

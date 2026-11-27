@@ -150,7 +150,11 @@ RTL2832U takes: 0.24, or 0.96 to 3.12 MS/s; 2.4 MS/s by default); a station that
 the band (±1.08 MHz at 2.4 MS/s), and then the SDR is used instead of the stream. `RtlSdrDevice`
 runs `rtl_sdr -d <serial>` (GPL, so a subprocess) on a thread in the main process, restarts it with
 backoff when it exits or stalls for 5 s, and hands each 0.256 s block of IQ to every station on
-the dongle. Each `SdrChannelSource` demodulates its station in numpy/scipy (`dsp/wfm.py`): mix to
+the dongle. `radio watch` makes its device with `command_line=True`: a dongle that gives nothing
+when first started stops it and ends its stations, with what `rtl_sdr` said (`unopened`), and
+`rtl_sdr`'s words go to the log only; the command reads `heard_at` and `reconnects` to say when
+the dongle stopped sending, and before it opens anything it asks the USB registry what holds the
+dongle (`radio/holders.py`), so a busy receiver is refused at once. Each `SdrChannelSource` demodulates its station in numpy/scipy (`dsp/wfm.py`): mix to
 0 Hz → two Kaiser-window FIR stages down to 240 kHz (flat to ±90 kHz, 60 dB down from ±120 kHz, so
 a neighbour can't fold in) → phase discriminator → 48 kHz → de-emphasis (`deemphasis_us`, 50 µs
 by default, 75 µs in the Americas) → 7 kHz low-pass → 16 kHz. Every stage keeps its state, so the

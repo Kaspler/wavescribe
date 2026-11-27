@@ -8,6 +8,8 @@ Environment:
     FAKE_RTL_MISSING   if set, behave like a dongle that isn't plugged in
     FAKE_RTL_BUSY      if set, behave like a dongle another program holds
     FAKE_RTL_AUDIO     float32 16 kHz mono file: broadcast it once on the first station, then exit
+    FAKE_RTL_THEN      what every start after the first does (needs FAKE_RTL_SPAWNS): "missing"
+                       or "busy" as above, "stream" to write without FAKE_RTL_MAX_BYTES' limit
 """
 
 import argparse
@@ -48,13 +50,16 @@ def main() -> int:
     p.add_argument("-n", type=int)
     p.add_argument("out")
     args = p.parse_args()
+    then = ""
     if spawns := os.environ.get("FAKE_RTL_SPAWNS"):
         with open(spawns, "a") as f:
             f.write(" ".join(sys.argv[1:]) + "\n")
-    if os.environ.get("FAKE_RTL_MISSING"):
+        with open(spawns) as f:
+            then = os.environ.get("FAKE_RTL_THEN", "") if len(f.readlines()) > 1 else ""
+    if os.environ.get("FAKE_RTL_MISSING") or then == "missing":
         print("No matching devices found.", file=sys.stderr)
         return 1
-    if os.environ.get("FAKE_RTL_BUSY"):
+    if os.environ.get("FAKE_RTL_BUSY") or then == "busy":
         print("usb_claim_interface error -6\nFailed to open rtlsdr device #0.", file=sys.stderr)
         return 1
     print(f"Found 1 device(s):\n  0:  RTLSDRBlog, Blog V4L, SN: {args.d}", file=sys.stderr)
@@ -79,6 +84,8 @@ def main() -> int:
     block = np.clip(np.round(iq * 128 + 127.4), 0, 255).astype(np.uint8).tobytes()
 
     limit = int(os.environ.get("FAKE_RTL_MAX_BYTES", "0")) or (2 * args.n if args.n else None)
+    if then == "stream":
+        limit = None
     written = 0
     out = sys.stdout.buffer
     try:

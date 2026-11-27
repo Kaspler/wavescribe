@@ -8,10 +8,13 @@ import argparse
 import sys
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
 from wavescribe.radio.watch import Catch, Hearing, on_raster, with_notes
+
+if TYPE_CHECKING:
+    from wavescribe.sources.sdr import RtlSdrDevice
 
 
 def _window(spec: str) -> str | tuple[float, float]:
@@ -60,13 +63,84 @@ class CatchPrinter:
             print(f"# [{stamp}] {said}", file=sys.stderr, flush=True)
 
 
+class Receiving:
+    """Whether the receiver sends, while a watch runs from the command line: a line when it
+    stops and one when it is back (it is tried again as under serve), and at the end how long
+    the band wasn't heard. A watch that didn't hear the band all along says so, and fails."""
+
+    def __init__(self, device: RtlSdrDevice, name: str) -> None:
+        self.device, self.name = device, name
+        self.down_since: float | None = None  # when it stopped sending, while it doesn't
+        self.lost_s = 0.0  # time it didn't send, before it was back
+        self._reconnects = 0
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="watch-receiving")
+
+    def __enter__(self) -> Receiving:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._done.set()
+        self._thread.join(2)
+        self.check()  # a drop since the last look (stopping on purpose isn't one)
+
+    def _run(self) -> None:
+        while not self._done.wait(0.25):
+            self.check()
+
+    def check(self) -> None:
+        d, now = self.device, time.time()
+        if d.reconnects > self._reconnects:  # a run of rtl_sdr ended on its own
+            self._reconnects = d.reconnects
+            if self.down_since is None and d.heard_at is not None:
+                self.down_since = now
+                why = next((w for w in reversed(d.said) if _trouble(w)), "")
+                why = f" ({_masked(why)})" if why else ""
+                _say(f"{self.name} stopped sending{why}; trying again", now)
+        if self.down_since is not None and d.connected:
+            gap, self.down_since = now - self.down_since, None
+            self.lost_s += gap
+            _say(f"{self.name} is sending again, after {gap:.0f} s", now)
+
+    def summary(self, printer: CatchPrinter) -> tuple[str, bool]:
+        """The last line, and whether the band was heard all along."""
+        line = f"# {printer.count} caught, {printer.spoken} with speech"
+        if self.down_since is not None:
+            stamp = time.strftime("%H:%M:%S", time.localtime(self.down_since))
+            line += f"; {self.name} stopped sending at {stamp} and wasn't heard after that"
+            return line, False
+        if self.lost_s:
+            return f"{line}; {self.name} wasn't heard for {self.lost_s:.0f} s", False
+        return line, True
+
+
+def _say(text: str, t: float) -> None:
+    print(f"# [{time.strftime('%H:%M:%S', time.localtime(t))}] {text}", file=sys.stderr, flush=True)
+
+
+def _trouble(line: str) -> bool:
+    low = line.lower()
+    return any(w in low for w in ("error", "failed", "no matching", "lost", "usb_"))
+
+
+def _masked(text: str) -> str:
+    """rtl_sdr's words with any serial in them cut to its last digits (radio/words.py)."""
+    from wavescribe.log import _SN
+    from wavescribe.radio.words import masked_serial
+
+    return _SN.sub(lambda m: m[1] + masked_serial(m[2]), text)
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
     from wavescribe.cli import cmd_listen
     from wavescribe.config import DEFAULT_SAMPLE_RATE, build_device, build_station, radio_policy
     from wavescribe.radio.catalog import Catalog
-    from wavescribe.radio.cli import _config, _old_spurs, _region, resolve_receiver
+    from wavescribe.radio.cli import _config, _old_spurs, _region, busy, holder, resolve_receiver
+    from wavescribe.radio.scan import ScanError
     from wavescribe.radio.watch import plan_centre, plan_window, subscribe, subscribe_hearing
+    from wavescribe.sources.sdr import claimed, forget_device, shared_device
 
     config = _config(args)
     region = _region(args, config)
@@ -82,9 +156,10 @@ def cmd_watch(args: argparse.Namespace) -> int:
     radio_policy(
         strictest, mode, region, args.acknowledge, "radio watch", width, "Pass --acknowledge"
     )
+    dev_id = rx.id or "cli"
     device = build_device(
         {
-            "id": "cli",
+            "id": dev_id,
             "serial": rx.serial,
             "center_mhz": centre / 1e6,
             "gain_db": args.gain if args.gain is not None else rx.gain_db,
@@ -103,13 +178,16 @@ def cmd_watch(args: argparse.Namespace) -> int:
         if args.translate is not None
         else list(defaults.get("translate_to", ())),
         "alert_languages": list(defaults.get("alert_languages", ())),
-        "device": "cli",
+        "device": dev_id,
         "watch": list(spec) if isinstance(spec, tuple) else spec,
         "mode": mode,
         "threshold_db": args.threshold,
         "acknowledge": args.acknowledge,
     }
-    station = build_station(d, "radio watch", {"cli": device}, region)
+    station = build_station(d, "radio watch", {dev_id: device}, region)
+    held = holder(rx)  # read without opening it, so a held receiver is refused at once
+    if held is not None:
+        raise busy(rx, None, held)
     policy = POLICIES[station.privacy]
     if policy.text_days == 0:
         args.no_store = True
@@ -129,17 +207,38 @@ def cmd_watch(args: argparse.Namespace) -> int:
     catalog = Catalog()
     _old_spurs(catalog, rx, args.receiver)  # a watch doesn't use such a list
     printer = CatchPrinter(catalog.notes())
-    stop_printing = subscribe(printer)
-    stop_hearing = subscribe_hearing(printer.hearing)
     args.stations, args.source, args.tuned_stations = ["watch"], None, [station]
     args.realtime = False
     args.duration = args.minutes * 60 if args.minutes else None
+    # The watch's source finds this device and its settings: a receiver that gives nothing
+    # when first started ends the watch at once, instead of being tried again and again.
+    sdr = shared_device(device, command_line=True)
+    stop_printing = subscribe(printer)
+    stop_hearing = subscribe_hearing(printer.hearing)
+    receiving = Receiving(sdr, rx.name)
     try:
-        return cmd_listen(args)
+        with receiving:
+            cmd_listen(args)
+    except KeyboardInterrupt:
+        if sdr.heard_at is not None:
+            print(receiving.summary(printer)[0], file=sys.stderr)
+        raise
     finally:
         stop_printing()
         stop_hearing()
-        print(f"# {printer.count} caught, {printer.spoken} with speech", file=sys.stderr)
+        forget_device(rx.serial)
+    if sdr.unopened is not None:
+        if claimed(sdr.unopened):
+            raise busy(rx, None)
+        said = _masked(sdr.unopened.splitlines()[-1])
+        raise ScanError(f"{rx.name} sent nothing, so nothing was watched: {said}")
+    if sdr.heard_at is None:
+        print(f"# nothing was watched: the time was up before {rx.name} sent anything",
+              file=sys.stderr)  # fmt: skip
+        return 1
+    line, whole = receiving.summary(printer)
+    print(line, file=sys.stderr)
+    return 0 if whole else 1
 
 
 def cmd_catches(args: argparse.Namespace) -> int:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -34,13 +35,27 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False, default=str)
 
 
+_SN = re.compile(r"(SN:\s*)(\S+)")  # how the rtl tools list a dongle's serial
+
+
 class ConsoleFormatter(logging.Formatter):
+    """A line per event for the terminal, whose output people paste anywhere: a receiver is
+    named by its id (``device``), never by its serial, and a serial without a receiver to name
+    it by shows its last digits only. The JSON log keeps them whole."""
+
     def format(self, record: logging.LogRecord) -> str:
+        from wavescribe.radio.words import masked_serial
+
         stamp = time.strftime("%H:%M:%S", time.localtime(record.created))
         text = f"{stamp} {record.levelname.lower():7} {record.name}: {record.getMessage()}"
-        fields = getattr(record, "fields", None)
+        fields = dict(getattr(record, "fields", None) or {})
+        if "serial" in fields:
+            serial = str(fields.pop("serial"))
+            if "device" not in fields:
+                fields["serial"] = masked_serial(serial)
         if fields:
             text += " " + " ".join(f"{k}={v}" for k, v in fields.items())
+        text = _SN.sub(lambda m: m[1] + masked_serial(m[2]), text)
         if record.exc_info:
             text += "\n" + self.formatException(record.exc_info)
         return text
