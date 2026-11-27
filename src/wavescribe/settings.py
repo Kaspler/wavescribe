@@ -60,7 +60,7 @@ OVERRIDE_KEYS = {
     "name", "language", "translate_to", "alert_languages", "priority", "asr_model", "disabled",
     "device", "fm_mhz", "stream", "stream_hls", "deemphasis_us",
     "mhz", "mode", "channel_khz", "squelch_db", "acknowledge", "transcribe", "translate",
-    "mt_model", "privacy_floor",
+    "mt_model", "privacy_floor", "languages",  # languages: only with language "auto"
 }  # fmt: skip
 DEVICE_OVERRIDE_KEYS = {"center_mhz", "gain_db", "sample_rate", "ppm"}
 

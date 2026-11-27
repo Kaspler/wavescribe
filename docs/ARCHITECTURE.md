@@ -391,7 +391,10 @@ reads a playlist or follows another Wavescribe.
 **Settings** opens on Stations:
 
 - **Stations:** listen only, transcribe, or transcribe and translate; edit languages, order and
-  the speech and translation models; switch off or delete. *Add a station* opens Find.
+  the speech and translation models; switch off or delete. *Add a station* opens Find. An edit
+  (`POST /api/manage/stations/<id>`) may change `languages`, the ones a station in language
+  `auto` may be; a station in one language refuses them (send `languages: []` with a change
+  away from `auto` that had some).
 - **Languages and models:** each model's licence tier, size, fit on this Mac and speed
   estimate, whether it was tested for Wavescribe, installed and in use; download, accept a
   licence, reorder the chains; search Hugging Face; the translation languages.
@@ -749,7 +752,8 @@ only when the page sends `pause: true`, and start again when listening ends; a b
 takes the dongle back the same way. The privacy classes apply as for stations: utility, private
 and digital need the acknowledgement once per receiver. A receiver nobody polls or listens to
 closes after 60 s. **Keep** turns what is tuned into a page station (`radio.tune`, as above),
-listen-only or transcribed. A tune may say which view it comes from (`from`: `find` or
+listen-only or transcribed, with the name, language, `languages` (those language `auto` may
+be) and translation languages it is given, as a tune takes them. A tune may say which view it comes from (`from`: `find` or
 `listen`), so that a station refused because the receiver is tuned by hand says where to let it
 go.
 

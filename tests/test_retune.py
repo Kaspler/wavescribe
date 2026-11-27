@@ -371,3 +371,34 @@ def test_keep_it_as_a_station_under_listen_asks_without_letting_go(tmp_path: Pat
     finally:
         r.app.live.close_all()
         r.close()
+
+
+@pytest.mark.usefixtures("fake_rtl")
+def test_the_languages_of_a_station_in_language_auto_are_kept_and_can_be_changed(
+    tmp_path: Path,
+) -> None:
+    r = hand_tuned(tmp_path)
+    try:
+        r.call("POST", "/api/manage/live/x", {"mhz": 99.5, "from": "listen"})
+        keep = {"does": "listen", "language": "auto", "languages": ["fr-FR", "en"]}
+        status, added = r.call("POST", "/api/manage/live/x/station", keep)
+        assert status == 200 and added["languages"] == ["fr-FR", "en"], added
+        assert r.app.config.get(added["id"]).languages == ("fr-FR", "en")
+
+        # Changed on the page: a page station in place, a file station by an override.
+        path = f"/api/manage/stations/{added['id']}"
+        status, changed = r.call("POST", path, {"languages": ["fr-FR"]})
+        assert status == 200 and changed["languages"] == ["fr-FR"], changed
+        status, changed = r.call("POST", "/api/manage/stations/s",
+                                 {"language": "auto", "languages": ["fr-FR", "de-DE"]})  # fmt: skip
+        assert status == 200 and changed["languages"] == ["fr-FR", "de-DE"], changed
+        assert changed["overridden"] == ["language", "languages"]
+        status, back = r.call("POST", "/api/manage/stations/s",
+                              {"language": "fr-FR", "languages": []})  # fmt: skip
+        assert status == 200 and back["language"] == "fr-FR" and back["languages"] is None, back
+        # They narrow language auto only: a station in one language refuses them, as ever.
+        status, err = r.call("POST", "/api/manage/stations/s", {"languages": ["de-DE"]})
+        assert status == 400 and "'languages' narrows language 'auto'" in err["error"], err
+    finally:
+        r.app.live.close_all()
+        r.close()

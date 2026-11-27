@@ -811,7 +811,9 @@ class App:
         if (
             planned is None
             or prev is None
-            or (prev.language, prev.asr_model) != (s.language, s.asr_model)
+            # languages: the model for language "auto" must know each of them
+            or (prev.language, prev.languages, prev.asr_model)
+            != (s.language, s.languages, s.asr_model)
         ):
             planned = None
             if self.plan.vad is None:

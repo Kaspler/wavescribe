@@ -560,7 +560,8 @@ class LiveService:
             "device": device_id, "mhz": t.freq_hz / 1e6, "mode": t.mode,
             "acknowledge": True,  # given when this frequency was tuned here
             "retune": bool(raw.get("retune")),
-            **{k: raw[k] for k in ("name", "language", "translate_to") if raw.get(k)},
+            # languages: those language "auto" may be, as /radio/tune takes them
+            **{k: raw[k] for k in ("name", "language", "languages", "translate_to") if raw.get(k)},
         }  # fmt: skip
         if t.squelch_db is not None:
             tune["squelch_db"] = t.squelch_db
