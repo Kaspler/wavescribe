@@ -285,8 +285,11 @@ what a watch hears most of the time.
 
 Limits:
 
-- **A watch covers what one receiver hears at once**, about 2.2 MHz. A wider band is refused
-  with a slice that fits.
+- **A watch covers what one receiver hears at once**, about 2.25 MHz from the first channel to
+  the last (at 2.4 MS/s). A wider band is refused with a slice that fits: the one with the most
+  of the band's own channels, so marine VHF's slice is the ships' channels, not the land mobile
+  radio in its middle. The refusal also says which parts of the band are another kind of radio:
+  a watch is kept as the strictest kind in it.
 - **NFM and AM only**: no broadcast FM, which talks all the time anyway.
 - **Up to four transmissions at once.** A fifth while four are running isn't caught; the log
   (`data/logs`) counts it as `watch_missed`, without its frequency for a class that keeps

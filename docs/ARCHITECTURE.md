@@ -723,7 +723,10 @@ re-check has them), narrowed to the station's `languages` unless those together 
 the station is replaced by one in that language for the checks, translation, alerts and the store.
 `plan_centre` puts a window narrower than about 0.9 MHz wholly above the centre (lowest channel −
 250 kHz), so its mirror falls outside; a wider one is centred between two channels, and a window is
-planned as it will be tuned, so a slice suggested for a band too wide fits after centring. The class
+planned as it will be tuned, so a slice suggested for a band too wide fits after centring. That
+slice is the longest run of the band's own class of channels, with none of another between them,
+that fits (nearest the middle among equals), and the refusal names the parts of another class
+(`other_kinds`). The class
 of a watch is its strictest channel's, each channel's being the strictest its edges reach at the
 watch's channel width, under whatever region is chosen (`SdrTuning.policed`).
 

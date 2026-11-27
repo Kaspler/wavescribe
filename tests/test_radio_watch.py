@@ -21,6 +21,7 @@ from wavescribe.config import ConfigError, SdrDevice, Station, build_station
 from wavescribe.events import station_ref
 from wavescribe.pipeline import Pipeline, Plan, Result
 from wavescribe.radio import watch as watches
+from wavescribe.radio.bandplan import privacy_of
 from wavescribe.radio.watch import Catch, WatchError, plan_centre, plan_window
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
 from wavescribe.settings import station_dict
@@ -59,18 +60,56 @@ def test_a_wide_band_is_centred_between_two_channels() -> None:
     assert all(abs(c - centre) <= RATE / 2 - 60_000 - width / 2 for c in w.channels)
 
 
-@pytest.mark.parametrize("band", ["airband", "airband-25", "70cm-wide"])
-def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits(band: str) -> None:
+def suggested(e: pytest.ExceptionInfo[WatchError]) -> tuple[float, float]:
+    import re
+
+    found = re.search(r"e\.g\. ([\d.]+):([\d.]+) \((\d+) channels\)", str(e.value))
+    assert found, str(e.value)
+    return float(found[1]), float(found[2])
+
+
+@pytest.mark.parametrize(("band", "region"), [("airband", "1"), ("airband-25", "2"),
+                                               ("70cm-wide", "2")])  # fmt: skip
+def test_a_window_wider_than_one_receiver_is_refused_with_a_slice_that_fits(
+    band: str, region: str
+) -> None:
     from wavescribe.radio.watch import outside
 
-    with pytest.raises(WatchError, match=r"about 2\.2 MHz: watch a slice of it, e\.g\. ") as e:
-        plan_window(band, "1", rate=RATE)
-    a, b = (float(x) for x in str(e.value).rsplit(" ", 1)[1].split(":"))
+    with pytest.raises(WatchError, match=r"about 2\.25 MHz: watch a slice of it, e\.g\. ") as e:
+        plan_window(band, region, rate=RATE)
+    a, b = suggested(e)
     # The slice as a watch has it: planned, then centred between two of its channels.
-    w, _, width = plan_window((a, b), "1", rate=RATE)
-    assert w.channels
+    w, _, width = plan_window((a, b), region, rate=RATE)
+    assert w.channels and f"({len(w.channels)} channels)" in str(e.value)
     assert outside(w, plan_centre(w, width, RATE), RATE, width) == []
-    assert b - a > 2.0  # and no narrower than it needs to be
+    assert b - a > 2.2  # and no narrower than it needs to be: about 2.25 MHz is true
+    assert "kind of radio" not in str(e.value)  # one class all through
+
+
+@pytest.mark.parametrize(
+    ("band", "region", "kind", "other"),
+    [
+        ("marine", "1", "utility", "157.45-160.6 MHz is Land mobile radio (VHF), private radio"),
+        ("70cm", "1", "amateur",
+         "433.05-434.7875 MHz is 433 MHz short-range devices, private radio"),
+    ],
+)  # fmt: skip
+def test_a_band_of_two_classes_suggests_the_slice_with_most_of_its_own_channels(
+    band: str, region: str, kind: str, other: str
+) -> None:
+    """Marine VHF's middle is land mobile radio: private, so a slice there would keep nothing,
+    and the old slice about the middle was mostly that."""
+    with pytest.raises(WatchError) as e:
+        plan_window(band, region, rate=RATE)
+    a, b = suggested(e)
+    w, _, width = plan_window((a, b), region, rate=RATE)
+    assert all(privacy_of(c, region, width) == kind for c in w.channels)
+    if band == "marine":
+        assert (a, b) == (156.0, 157.425) and len(w.channels) == 58  # the ships' channels
+    assert str(e.value).endswith(
+        f" Part of it is another kind of radio: {other}. A watch is kept as the strictest "
+        "kind of radio in it."
+    )
 
 
 def test_a_range_takes_the_raster_and_mode_of_its_band() -> None:

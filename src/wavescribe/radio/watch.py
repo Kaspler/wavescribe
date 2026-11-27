@@ -2,7 +2,7 @@
 """Watches: a station that listens to every channel of one window of spectrum and keeps
 whatever is said on any of them (docs/RADIO.md, "Catching radio that only talks now and then").
 
-A watch is one dongle's window at a time (about 2.2 MHz at 2.4 MS/s): all of PMR446, the 2 m
+A watch is one dongle's window at a time (about 2.25 MHz at 2.4 MS/s): all of PMR446, the 2 m
 amateur band, or a slice of anything else. ``dsp/activity.py`` notices transmissions in it and
 ``sources/watch.py`` demodulates each one, from just before it was noticed, into a catch.
 Each catch's audio then goes through the VAD, the gate and ASR as the watch's own, and the
@@ -15,7 +15,7 @@ import logging
 import math
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -25,6 +25,7 @@ from wavescribe.dsp.activity import THRESHOLD_DB
 from wavescribe.radio.bandplan import (
     AUTO,
     STRICTNESS,
+    Band,
     find,
     lookup,
     mhz_text,
@@ -85,31 +86,88 @@ def plan_window(
     hears at once is refused, with a slice that fits."""
     watch, planned, width = _plan(spec, region, mode, channel_hz, threshold_db)
     if not _fits(watch, width, rate):
-        a, b = _slice(watch, width, region, rate, mode, channel_hz)
+        a, b, n = _slice(watch, width, region, rate, mode, channel_hz)
         span = watch.hi_hz - watch.lo_hz + width
+        others = other_kinds(watch, region, width)
         raise WatchError(
             f"{watch.label} is {span / 1e6:.2f} MHz wide, and a watch covers what one receiver "
-            f"hears at once, about {usable_mhz(rate)} MHz: watch a slice of it, "
-            f"e.g. {a:.3f}:{b:.3f}"
-        )
+            f"hears at once, about {usable_mhz(rate):g} MHz: watch a slice of it, "
+            f"e.g. {a:.3f}:{b:.3f} ({n} channels)."
+            + (f" Part of it is another kind of radio: {others}. A watch is kept as the "
+               "strictest kind of radio in it." if others else "")
+        )  # fmt: skip
     return watch, planned, width
 
 
 def usable_mhz(rate: int) -> float:
-    """How wide a window can be, rounded down (2.2 MHz at 2.4 MS/s): what one receiver hears,
-    less the edges its filter rolls off."""
-    return math.floor(2 * (rate / 2 - NARROW_MARGIN_HZ) / 1e5) / 10
+    """How wide a window can be, START to STOP, rounded down to 50 kHz (2.25 MHz at 2.4 MS/s):
+    what one receiver hears, less the edges its filter rolls off, less a narrow channel's width
+    and the half step the centre may sit off the middle."""
+    return math.floor((2 * (rate / 2 - NARROW_MARGIN_HZ) - 25_000) / 50_000) * 0.05
 
 
 def _fits(watch: Watch, width: float, rate: int) -> bool:
     return not outside(watch, plan_centre(watch, width, rate), rate, width)
 
 
+def _asked(watch: Watch, region: str) -> Band | None:
+    """The band a window was asked as: the band of that id, or the band of a range's middle."""
+    if isinstance(watch.spec, str):
+        return next((b for b in region_bands(region) if b.id == watch.spec), None) or find(
+            watch.spec
+        )
+    return lookup(watch.middle_hz, region)
+
+
+def _own(watch: Watch, region: str, width: float) -> list[int]:
+    """The window's channels of its band's kind of radio: not those of a narrower band of
+    another kind inside it, nor those whose edges reach one (``lookup``)."""
+    band = _asked(watch, region)
+    if band is None:
+        return list(watch.channels)
+    return [c for c in watch.channels if privacy_of(c, region, width) == band.privacy]
+
+
 def _slice(
     watch: Watch, width: float, region: str, rate: int, mode: str | None, channel_hz: float | None
-) -> tuple[float, float]:
-    """The widest slice about the middle of a window that a watch can be tuned to, in MHz: the
-    range is planned again from its own band, so the slice is checked as the user will give it."""
+) -> tuple[float, float, int]:
+    """A slice of a window a watch can be tuned to, in MHz, and its number of channels: the one
+    with the most of the band's own channels and none of another kind between them, nearest the
+    middle among equals. Marine VHF's middle is land mobile radio, which keeps nothing: its
+    slice is the ships' channels. The range is planned again from its own band, so the slice is
+    checked as the user will give it."""
+    own = _own(watch, region, width)
+    rank = {c: i for i, c in enumerate(watch.channels)}
+    middle = (watch.lo_hz + watch.hi_hz) / 2
+    best: tuple[int, float, int, int] | None = None  # channels, -distance from the middle, i, j
+    j = 0
+    for i in range(len(own)):
+        j = max(j, i)
+        # As far as the channels run on without another kind between them, and still fit.
+        while (
+            j + 1 < len(own)
+            and rank[own[j + 1]] == rank[own[j]] + 1
+            and _fits(replace(watch, channels=tuple(own[i : j + 2])), width, rate)
+        ):
+            j += 1
+        score = (j - i + 1, -abs((own[i] + own[j]) / 2 - middle), i, j)
+        if best is None or score[:2] > best[:2]:
+            best = score
+    if best is not None:
+        a, b = math.floor(own[best[2]] / 1e3) / 1e3, math.ceil(own[best[3]] / 1e3) / 1e3
+        try:
+            again, _, w = _plan((a, b), region, mode, channel_hz, watch.threshold_db)
+        except WatchError:
+            again = None
+        if again is not None and _fits(again, w, rate):
+            return a, b, len(again.channels)
+    return _about_the_middle(watch, width, region, rate, mode, channel_hz)
+
+
+def _about_the_middle(
+    watch: Watch, width: float, region: str, rate: int, mode: str | None, channel_hz: float | None
+) -> tuple[float, float, int]:
+    """The widest slice about the middle of a window that a watch can be tuned to."""
     middle = (watch.lo_hz + watch.hi_hz) / 2
     half = rate / 2 - NARROW_MARGIN_HZ - width / 2
     while True:
@@ -119,8 +177,34 @@ def _slice(
         except WatchError:
             again = None
         if (again is not None and _fits(again, w, rate)) or half <= watch.step_hz:
-            return a, b
+            return a, b, len(again.channels) if again is not None else 0
         half -= watch.step_hz / 2
+
+
+def other_kinds(watch: Watch, region: str, width: float) -> str:
+    """Where a window is another kind of radio than its band, in words ("157.45-160.6 MHz is
+    Land mobile radio (VHF), private radio"); "" when it is one kind all through."""
+    band = _asked(watch, region)
+    own_class = band.privacy if band is not None else None
+    runs: list[tuple[int, int, str, list[str]]] = []  # first Hz, last Hz, class, band names
+    for c in watch.channels:
+        cls = privacy_of(c, region, width)
+        here = lookup(c, region)  # the band it is in, without its edges
+        name = here.name if here is not None else "in no band plan of the region"
+        if runs and runs[-1][2] == cls:
+            lo, _, _, names = runs[-1]
+            runs[-1] = (lo, c, cls, names if name in names else [*names, name])
+        else:
+            runs.append((c, c, cls, [name]))
+    said = []
+    for lo, hi, cls, names in runs:
+        if cls == own_class:
+            continue
+        # A channel of the band itself counts as the other kind when its edges reach that.
+        names = [n for n in names if band is None or n != band.name] or names
+        span = mhz_text(lo / 1e6) if lo == hi else f"{mhz_text(lo / 1e6)}-{mhz_text(hi / 1e6)}"
+        said.append(f"{span} MHz is {' and '.join(names)}, {cls} radio")
+    return "; ".join(said)
 
 
 def _plan(

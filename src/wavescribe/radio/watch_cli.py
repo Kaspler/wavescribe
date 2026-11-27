@@ -367,7 +367,7 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
     )
     p.add_argument("receiver", help="receiver id from the config (e.g. a) or its serial")
     p.add_argument(
-        "window", help="a band id (see `radio bands`), or START:STOP in MHz, about 2 MHz at most"
+        "window", help="a band id (see `radio bands`), or START:STOP in MHz, about 2.25 MHz at most"
     )
     p.add_argument(
         "--language",
