@@ -4,6 +4,7 @@ CPU core, with no TensorFlow."""
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from pathlib import Path
 
@@ -14,14 +15,19 @@ from wavescribe.gate import Verdict, decide
 WINDOW = 15600  # samples per YAMNet window: 0.975 s at 16 kHz
 MIN_TAIL = WINDOW // 4  # a shorter leftover isn't worth a window of its own
 
+log = logging.getLogger(__name__)
+
 
 class YamnetGate:
     def __init__(self, model_path: Path, *, model_id: str = "yamnet") -> None:
         from ai_edge_litert.interpreter import Interpreter
 
+        from wavescribe.log import native_stderr
+
         self.model_id = model_id
-        self._it = Interpreter(model_path=str(model_path), num_threads=1)
-        self._it.allocate_tensors()
+        with native_stderr(log, ("XNNPACK delegate",)):  # LiteRT's note as it opens a model
+            self._it = Interpreter(model_path=str(model_path), num_threads=1)
+            self._it.allocate_tensors()
         self._in = self._it.get_input_details()[0]["index"]
         self._out = self._it.get_output_details()[0]["index"]
         # The label list travels inside the .tflite file (TFLite metadata is an appended zip).
