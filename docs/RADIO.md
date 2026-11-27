@@ -358,8 +358,13 @@ Limits:
 A walkie-talkie keyed in the same room as the antenna is far stronger than anything the
 receiver is meant to hear, even at its lowest power. It overloads the receiver: the waterfall
 lights up across the whole window, Settings → **Receivers** marks the receiver *overload*, and
-copies of the signal show on other channels. To test a watch:
+copies of the signal show on other channels. That is the receiver overloading, not the
+walkie-talkie's own emissions: the same radio a few rooms away shows as one channel. To test a
+watch:
 
+- transmit only with a radio you may use on that band: on PMR446 that is a licence-free PMR446
+  set (low power, fixed antenna), not a general handheld tuned to its channels; on amateur bands,
+  a licence;
 - keep the walkie-talkie a few metres from the antenna or more (another room is better), never
   touching the antenna or its cable;
 - use its low-power setting, if it has one;
