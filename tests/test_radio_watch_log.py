@@ -229,6 +229,39 @@ def test_radio_catches_prints_the_log_and_its_json(
     assert row["name"] == "calling channel" and row["utterances"][0]["text"] == "CQ CQ"
 
 
+LIMIT = "limit must be a whole number from 1 up (more than 500 counts as 500)"
+BAD_CATCH_QUERIES = [  # and what the page and the feed say to each
+    ("limit=0", f"{LIMIT}, not '0'"),
+    ("limit=-4", f"{LIMIT}, not '-4'"),
+    ("limit=2.5", f"{LIMIT}, not '2.5'"),
+    ("hours=-1", "hours must be a number from 0 up (0: everything kept), not '-1'"),
+    ("width_khz=-5", "width_khz must be a number of kHz from 0 up, not '-5'"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("query", "said"), BAD_CATCH_QUERIES)
+def test_radio_catches_refuses_what_the_page_refuses_in_the_same_words(
+    query: str, said: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from wavescribe.cli import main
+
+    key, value = query.split("=")
+    flag = {"width_khz": "--width"}.get(key, f"--{key}")
+    with pytest.raises(SystemExit) as e:
+        main(["radio", "catches", f"{flag}={value}"])
+    assert e.value.code == 2
+    assert f"argument {flag}: {said.split(' ', 1)[1]}" in capsys.readouterr().err
+
+
+def test_radio_catches_holds_a_limit_past_the_most_to_it(tmp_path: Path) -> None:
+    from wavescribe.cli import build_parser
+    from wavescribe.radio.watch import MAX_CATCHES
+
+    args = build_parser().parse_args(["radio", "catches", "--limit", "100000"])
+    assert args.limit == MAX_CATCHES == 500
+    assert build_parser().parse_args(["radio", "catches"]).limit == 100
+
+
 @pytest.fixture
 def no_dongle(monkeypatch: pytest.MonkeyPatch) -> None:
     """`radio watch` with no model and no dongle: nothing holds the receiver as far as the USB
@@ -363,6 +396,13 @@ def test_catch_routes_give_other_machines_only_what_may_leave(
         body = request(server, "GET", f"/api/catches?mhz={near}&width_khz=12.5")[1]
         assert [c["freq_hz"] for c in json.loads(body)["catches"]] == [TWO_M]
         assert request(server, "GET", "/api/catches?hours=nan")[0] == 400
+        # One rule with `radio catches`: under the least is refused, over the most is held.
+        for query, said in BAD_CATCH_QUERIES:
+            status, body = request(server, "GET", f"/api/catches?{query}")
+            assert (status, json.loads(body)) == (400, {"error": said}), query
+        assert request(server, "GET", "/feed/v1/catches?limit=0")[0] == 400
+        status, body = request(server, "GET", "/api/catches?limit=100000&hours=0")
+        assert status == 200 and len(json.loads(body)["catches"]) == 2
         listed = json.loads(request(server, "GET", "/feed/v1/stations")[1])
         # "auto" is no language tag: a machine following the watch would refuse the list.
         assert {s["id"]: s["language"] for s in listed}["walkies"] is None

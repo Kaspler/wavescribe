@@ -312,6 +312,47 @@ def on_raster(freq_hz: float, region: str) -> int:
     return band.snap(freq_hz) if band is not None and band.step_hz else round(freq_hz)
 
 
+MAX_CATCHES = 500  # at most this many at once: `radio catches`, /api/catches, /feed/v1/catches
+CATCHES = 100  # by default
+
+
+# What a list of catches may be asked for, checked by the same rule wherever it is asked
+# (`radio catches`, the page's /api/catches, /feed/v1/catches): under the least is refused,
+# with what it must be; a limit over the most is held to it.
+def catch_hours(text: str) -> float:
+    """How far back, in hours; 0 for everything kept."""
+    return _from_zero(text, "a number from 0 up (0: everything kept)")
+
+
+def catch_width(text: str) -> float:
+    """How far either side of a frequency, in kHz."""
+    return _from_zero(text, "a number of kHz from 0 up")
+
+
+def catch_limit(text: str) -> int:
+    """How many at most, held to ``MAX_CATCHES``."""
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise ValueError(
+            f"must be a whole number from 1 up (more than {MAX_CATCHES} counts as "
+            f"{MAX_CATCHES}), not {text!r}"
+        )
+    return min(n, MAX_CATCHES)
+
+
+def _from_zero(text: str, what: str) -> float:
+    try:
+        x = float(text)
+    except ValueError:
+        x = math.nan
+    if not math.isfinite(x) or x < 0:
+        raise ValueError(f"must be {what}, not {text!r}")
+    return x
+
+
 def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
     """Catches as the store gives them, with what the user noted about each one's frequency
     (``Catalog.notes``): its name, note and tags. For this machine only: notes are the user's

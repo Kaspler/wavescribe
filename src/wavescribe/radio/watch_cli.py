@@ -12,7 +12,17 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
-from wavescribe.radio.watch import Catch, Hearing, on_raster, with_notes
+from wavescribe.radio.watch import (
+    CATCHES,
+    MAX_CATCHES,
+    Catch,
+    Hearing,
+    catch_hours,
+    catch_limit,
+    catch_width,
+    on_raster,
+    with_notes,
+)
 
 if TYPE_CHECKING:
     from wavescribe.sources.sdr import RtlSdrDevice
@@ -161,6 +171,20 @@ def minutes(text: str) -> float:
     if not math.isfinite(value) or value < 0:
         raise argparse.ArgumentTypeError(f"give minutes from 0 up (0: until Ctrl-C), not {text!r}")
     return value
+
+
+def _arg(check: Any) -> Any:
+    """An argparse type from a check that raises ValueError with what a value must be, so the
+    command line says it in the words the page and the feed use."""
+
+    def parse(text: str) -> Any:
+        try:
+            return check(text)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from None
+
+    parse.__name__ = check.__name__
+    return parse
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
@@ -360,7 +384,6 @@ def cmd_note(args: argparse.Namespace) -> int:
 
 
 def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any, ppm: Any) -> None:
-    from wavescribe.cli import at_least_one  # loaded already: it builds these parsers
 
     p = rsub.add_parser(
         "watch", help="watch a whole band and transcribe whatever is said on any channel"
@@ -406,9 +429,11 @@ def add_parsers(rsub: Any, add_store_args: Any, add_alert_args: Any, common: Any
 
     p = rsub.add_parser("catches", help="what watches caught and kept, with what was said")
     p.add_argument("--mhz", type=float, help="one channel only")
-    p.add_argument("--width", type=float, default=0.0, help="with --mhz: kHz either side")
-    p.add_argument("--hours", type=float, default=24.0, help="this far back (0: all)")
-    p.add_argument("--limit", type=at_least_one, default=100, help="at most this many (100)")
+    p.add_argument("--width", type=_arg(catch_width), default=0.0,
+                   help="with --mhz: kHz either side")  # fmt: skip
+    p.add_argument("--hours", type=_arg(catch_hours), default=24.0, help="this far back (0: all)")
+    p.add_argument("--limit", type=_arg(catch_limit), default=CATCHES,
+                   help=f"at most this many ({CATCHES}; up to {MAX_CATCHES})")  # fmt: skip
     p.add_argument("--json", action="store_true", help="one JSON object per line (experimental)")
     p.set_defaults(func=cmd_catches)
 

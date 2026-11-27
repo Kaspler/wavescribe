@@ -34,7 +34,6 @@ import hashlib
 import io
 import json
 import logging
-import math
 import queue
 import secrets
 import threading
@@ -60,7 +59,6 @@ if TYPE_CHECKING:
     from wavescribe.web.server import Handler
 
 log = logging.getLogger(__name__)
-MAX_CATCHES = 500  # per request, on the page's /api/catches and on /feed/v1/catches
 
 REPLAY_MAX = 1000  # utterances replayed on (re)connect
 CONTEXT = 2  # utterances before an alert's, in its feed event (as an output's default)
@@ -473,26 +471,28 @@ def catch_filter(query: dict[str, str]) -> dict[str, Any]:
     """The arguments of ``Store.catches`` from a request's query, for the page's /api/catches
     and for /feed/v1/catches alike. ValueError says what a valid query is."""
     from wavescribe.radio.bandplan import TUNER_RANGE_HZ
+    from wavescribe.radio.watch import CATCHES, catch_hours, catch_limit, catch_width
 
     lo, hi = (f / 1e6 for f in TUNER_RANGE_HZ)
     try:
         mhz = float(query["mhz"]) if query.get("mhz") else None
-        width_khz, hours = float(query.get("width_khz") or 0), float(query.get("hours") or 24)
-        limit = int(query.get("limit") or 100)
-        if not all(math.isfinite(x) for x in (width_khz, hours)):
-            raise ValueError
         if mhz is not None and not lo <= mhz <= hi:
             raise ValueError
     except ValueError:
-        raise ValueError(
-            f"mhz is {lo:g} to {hi:g}, width_khz and hours are numbers, limit a whole one"
-        ) from None
+        raise ValueError(f"mhz is {lo:g} to {hi:g}") from None
+    got: dict[str, Any] = {"hours": 24.0, "width_khz": 0.0, "limit": CATCHES}
+    for key, check in (("hours", catch_hours), ("width_khz", catch_width), ("limit", catch_limit)):
+        if query.get(key):  # the same rule as `radio catches` (radio/watch.py)
+            try:
+                got[key] = check(query[key])
+            except ValueError as e:
+                raise ValueError(f"{key} {e}") from None
     return {
         "freq_hz": round(mhz * 1e6) if mhz else None,
-        "width_hz": width_khz * 1e3,
+        "width_hz": got["width_khz"] * 1e3,
         "station_ids": _list(query.get("stations")) or None,
-        "since": time.time() - hours * 3600 if hours > 0 else None,
-        "limit": max(1, min(limit, MAX_CATCHES)),
+        "since": time.time() - got["hours"] * 3600 if got["hours"] else None,
+        "limit": got["limit"],
     }
 
 
