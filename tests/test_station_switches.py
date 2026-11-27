@@ -136,6 +136,40 @@ def test_transcription_switches_on_and_off_without_restarting_the_audio() -> Non
     pipeline.stop()
 
 
+def test_a_station_only_listened_to_loads_no_speech_model() -> None:
+    """Started listen-only, at the start or later (the page's listen_only start keeps a model
+    planned for its saved mode), it loads nothing until it is switched to text."""
+    loads: list[str] = []
+    audio = np.concatenate([tone(1), silence(1)] * 40)
+
+    def transcriber(entry, _p):
+        loads.append(entry.id)
+        return FakeTranscriber()
+
+    listen_a = dataclasses.replace(station("a"), transcribe=False)
+    listen_b = dataclasses.replace(station("b"), transcribe=False)
+    pipeline = Pipeline(
+        [listen_a], dataclasses.replace(PLAN, asr={"a": (ENTRY, Path()), "b": (ENTRY, Path())}),
+        lambda _r: None, source_factory=lambda st: SlowSource(st.id, audio),
+        vad_factory=lambda _p: EnergyVad(), transcriber_factory=transcriber,
+        translator_factory=lambda _e, _p: FakeTranslator(),
+    )  # fmt: skip
+    threading.Thread(target=lambda: pipeline.run(until_idle=False), daemon=True).start()
+    try:
+        assert wait_for_true(lambda: pipeline.status()["stations"].get("a"))
+        pipeline.add_station(listen_b)
+        assert wait_for_true(lambda: pipeline.status()["stations"].get("b"))
+        assert wait_for_true(lambda: pipeline.status()["ready"])
+        import time
+
+        time.sleep(0.5)  # a load would have been queued by now
+        assert loads == []
+        pipeline.update_station(station("b"))  # switched to text: its model loads now
+        assert wait_for_true(lambda: loads == ["m"])
+    finally:
+        pipeline.stop()
+
+
 class SlowNowSource(NowSource):
     def __iter__(self):
         import time

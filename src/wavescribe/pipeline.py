@@ -548,7 +548,7 @@ class Pipeline:
             live = _Live(station, self._source_factory(station))
             self._live[station.id] = live
             self._threads = [t for t in self._threads if t.is_alive()]
-        if planned and self._asr_ready.is_set():
+        if planned and station.transcribe and self._asr_ready.is_set():  # not if listened to
             for model in self._models_for(station):
                 if model[0].id not in self._asr_models:
                     self._control(self._asr_q, _LoadAsr(*model))
@@ -1239,12 +1239,14 @@ class Pipeline:
     def _asr_work(self) -> None:
         # Models load in this thread (MLX arrays are thread-bound): the starting stations'
         # models now, any other when its station first needs it.
+        # A station only listened to this run loads nothing, even with a model planned.
         loaded: dict[str, Transcriber] = {}
-        for station in self._stations:
+        writing = [s for s in self._stations if s.transcribe]
+        for station in writing:
             if station.id in self._plan.asr:
                 self._load_asr(loaded, *self._plan.asr[station.id])
         if self._plan.recheck is not None and self._on_rechecked is not None:
-            self._plan.recheck.preload(self._stations, self._plan.asr,
+            self._plan.recheck.preload(writing, self._plan.asr,
                                        lambda e, p: self._load_asr(loaded, e, p))  # fmt: skip
         self._asr_ready.set()
         last_sweep = time.monotonic()
