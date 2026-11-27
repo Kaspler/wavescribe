@@ -475,9 +475,34 @@ class RadioService:
                 if s["running"]:
                     self.app.stop_station(s["id"])
         try:
-            update_device(self.app, d.id, {"center_mhz": (freq - offset) / 1e6})
+            update_device(self.app, d.id, {"center_mhz": (freq - offset) / 1e6}, retune=force)
         except AdminError as e:
             raise RadioError(str(e)) from e
+
+
+def retune_question(device_id: str, centre_hz: int, unfit: list[Any], running: set[str], *,
+                    freq_hz: int | None = None) -> RadioError:  # fmt: skip
+    """What a retune asks before it leaves stations out (code ``retune``): the stations the
+    receiver wouldn't hear from ``centre_hz``, which of them stop now, and that they stay
+    listed. The page shows it and sends the same request again with ``retune: true``.
+    ``holders`` names the running ones, ``unfit`` all of them, ``center_mhz`` where it goes."""
+    rx, at = receiver_name(device_id), mhz_text(centre_hz / 1e6)
+    names = [s.name for s in unfit]
+    stops = [s.name for s in unfit if s.id in running]
+    if freq_hz is None:
+        said = f"Tuned to {at} MHz, Receiver {rx} no longer hears {joined(names, 'or')}."
+    else:
+        said = (f"To hear {mhz_text(freq_hz / 1e6)} MHz, Receiver {rx} moves to {at} MHz, "
+                f"where it no longer hears {joined(names, 'or')}.")  # fmt: skip
+    if stops:
+        said += f" Retuning it stops {joined(stops)}."
+    one = len(names) == 1
+    said += (f" {'It stays' if one else 'They stay'} in your stations, unavailable until the "
+             f"receiver hears {them(names)} again.")  # fmt: skip
+    return RadioError(
+        said, "retune", holders=stops, center_mhz=centre_hz / 1e6,
+        unfit=[{"id": s.id, "name": s.name, "running": s.id in running} for s in unfit],
+    )  # fmt: skip
 
 
 def _which(cmd: str) -> bool:

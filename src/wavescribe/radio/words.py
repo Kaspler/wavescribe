@@ -23,12 +23,12 @@ def masked_serial(serial: str) -> str:
     return "…" + serial[-keep:] if keep else "…"
 
 
-def joined(names: Sequence[str]) -> str:
-    """Names in a sentence: A; A and B; A, B and C."""
+def joined(names: Sequence[str], word: str = "and") -> str:
+    """Names in a sentence: A; A and B; A, B and C (or ``word`` instead of "and")."""
     names = list(names)
     if len(names) <= 1:
         return "".join(names)
-    return f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{', '.join(names[:-1])} {word} {names[-1]}"
 
 
 def them(names: Sequence[str]) -> str:

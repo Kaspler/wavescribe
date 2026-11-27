@@ -311,7 +311,13 @@ def _delete_receiver(app: App, m, q, b) -> Any:
 
 @route("POST", "/receivers/(?P<id>[a-z0-9_-]+)")
 def _update_receiver(app: App, m, q, b) -> Any:
-    return admin.update_device(app, m["id"], _body(b))
+    """``retune: true`` answers yes to the question a retune asks before it leaves stations out
+    (code ``retune``, as ``/radio/tune`` asks it)."""
+    b = dict(_body(b))
+    retune = b.pop("retune", False)
+    if not isinstance(retune, bool):
+        raise ChangeError("retune must be true or false")
+    return admin.update_device(app, m["id"], b, retune=retune)
 
 
 @route("GET", "/receivers/(?P<id>[a-z0-9_-]+)/spectrum")

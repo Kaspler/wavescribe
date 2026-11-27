@@ -399,9 +399,16 @@ def monitor(app: App, device_id: str, on: bool) -> None:
             mon.close()
 
 
-def update_device(app: App, device_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+def update_device(app: App, device_id: str, changes: dict[str, Any], *,
+                  retune: bool = False) -> dict[str, Any]:  # fmt: skip
     """New centre, gain, sample rate or frequency correction for a dongle: its stations stop,
-    the dongle reopens with the new settings, and the stations that were running start again."""
+    the dongle reopens with the new settings, and the stations that were running start again.
+
+    Stations the new tuning doesn't hear (``heard_by``) are left out: they stay listed,
+    unavailable with the reason, and those running stop for good. Before it does that it asks
+    (``retune_question``, code ``retune``), naming them, running or not; ``retune`` is the
+    yes. A switched-off station, or one already out of reach, is never asked about."""
+    from wavescribe.radio.service import retune_question
     from wavescribe.settings import DEVICE_OVERRIDE_KEYS
     from wavescribe.sources import sdr
 
@@ -424,13 +431,19 @@ def update_device(app: App, device_id: str, changes: dict[str, Any]) -> dict[str
 
     draft = app.settings.snapshot()
     mutate(draft)
-    _, errors = effective_config(app.base, draft)
+    config, errors = effective_config(app.base, draft)
+    on_device = [s for s in app.config.stations if s.sdr and s.sdr.device.id == device_id]
     bad_stations = {k: v for k, v in errors.items() if k == f"device:{device_id}" or (
-        any(s.id == k and s.sdr for s in app.base.stations))}  # fmt: skip
+        any(s.id == k for s in on_device) and k not in app.config_errors)}  # fmt: skip
     if bad_stations:
         raise AdminError(next(iter(bad_stations.values())))
-    on_device = [s.id for s in app.config.stations if s.sdr and s.sdr.device.id == device_id]
-    running = [s for s in on_device if s in app.running()]
+    after = {s.id: s for s in config.stations}
+    unfit = [s for s in on_device if not s.disabled and not s.out_of_reach
+             and s.id in after and after[s.id].out_of_reach]  # fmt: skip
+    running = [s.id for s in on_device if s.id in app.running()]
+    if unfit and not retune:
+        moved = next(x for x in config.devices if x.id == device_id)
+        raise retune_question(device_id, moved.center_hz, unfit, set(running))
     watching = device_id in _monitors
     for sid in running:
         app.pipeline.remove_station(sid, wait=10)

@@ -651,7 +651,8 @@ clear of the centre's spike; every channel of a watch inside the window. A stati
 is built anyway, with `Station.out_of_reach` saying why and where to centre the receiver, and the
 app lists it unavailable with that reason, never starts it (`open_source` refuses it too), and
 stops it if a retune leaves it out. It is not a config error: a stations file with one starts,
-and `doctor` warns `out of reach` instead of counting a page change not applied. A page change that would
+and `doctor` warns `out of reach` instead of counting a page change not applied. Switched-off
+stations, and those already out of reach, never hold a retune back. A page change that would
 tune a station where its receiver doesn't hear it is refused with the same reason.
 
 **Listening by hand** (`radio/live.py`, `/api/manage/live/<receiver>`, the page's **Tune by

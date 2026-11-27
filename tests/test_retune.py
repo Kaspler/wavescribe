@@ -112,6 +112,40 @@ def test_a_page_change_cant_tune_a_station_where_its_receiver_doesnt_hear_it(
         r.close()
 
 
+# -- what constrains a retune ------------------------------------------------------------------
+
+
+def test_the_receivers_page_asks_the_same_question(tmp_path: Path) -> None:
+    rpt = {"id": "rpt", "name": "Repeater", "device": "a", "mhz": 145.1}
+    r = running(tmp_path, stations(two_metres_centre(), rpt), start=["rpt"])
+    real = r.app.running
+    held = {"rpt"}
+    r.app.running = lambda: real() | held  # type: ignore[method-assign]
+    try:
+        status, ask = r.call("POST", "/api/manage/receivers/a", {"center_mhz": 98.0})
+        assert status == 400 and ask["code"] == "retune", ask
+        assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False},
+                                {"id": "rpt", "name": "Repeater", "running": True}]  # fmt: skip
+        assert ask["holders"] == ["Repeater"] and ask["center_mhz"] == 98.0
+        assert ask["error"] == (
+            "Tuned to 98 MHz, Receiver A no longer hears Two metres or Repeater. Retuning it "
+            "stops Repeater. They stay in your stations, unavailable until the receiver hears "
+            "them again."
+        )
+        # On a narrow channel's very centre: that one is left out too, for its spike.
+        status, ask = r.call("POST", "/api/manage/receivers/a", {"center_mhz": 145.1})
+        assert status == 400 and [s["id"] for s in ask["unfit"]] == ["rpt"]
+
+        status, rx = r.call("POST", "/api/manage/receivers/a", {"center_mhz": 98.0, "retune": True})
+        assert status == 200, rx
+        assert {s["id"]: s["out_of_reach"] is not None for s in rx["stations"]} == {
+            "ham2m": True, "rpt": True}  # fmt: skip
+        run = (r.app.settings.get("run") or {}).get("stations", [])
+        assert "rpt" not in run  # stopped, and not to start again with the next serve
+    finally:
+        r.close()
+
+
 def test_doctor_counts_a_station_out_of_reach_as_such_not_as_a_page_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
