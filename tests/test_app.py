@@ -1240,3 +1240,26 @@ def test_a_line_that_passed_through_here_or_too_many_machines_is_refused(central
                     "events": [heard("tsf", via=far[:3], node=north)]})  # fmt: skip
     assert central.via("north-tsf") == [*far[:3], "0000000000aa"]
     assert central.via("a") == []  # its own stations: the event's node says it
+
+
+def test_on_the_lan_what_is_sent_never_names_the_machine_by_its_hostname(
+    central: App, monkeypatch
+) -> None:
+    import socket
+
+    from wavescribe.web import server
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "jane-does-macbook")
+    found = ["http://jane-does-macbook.local:8765/", "http://192.168.1.20:8765/"]
+    monkeypatch.setattr(server, "lan_urls", lambda port: list(found))
+    central.host, central.port = "0.0.0.0", 8765  # serve --lan
+    assert central.node()["url"] == "http://192.168.1.20:8765"
+    assert central.node()["name"] == "wavescribe" or "jane" not in central.node()["name"]
+    found[1:] = []  # no address found: no links rather than the hostname
+    central._lan_url_at = 0.0
+    assert central.node()["url"] is None
+    central.set_node(None, "https://radio.example.org")  # one the user set is used as it is
+    assert central.node()["url"] == "https://radio.example.org"
+    central.host = "127.0.0.1"
+    central.set_node(None, None)
+    assert central.node()["url"] == "http://localhost:8765"

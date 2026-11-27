@@ -14,7 +14,6 @@ import hashlib
 import logging
 import re
 import secrets
-import socket
 import threading
 import time
 from collections import Counter, deque
@@ -22,6 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from wavescribe.config import ConfigError, Station, StationsConfig, confirmed
 from wavescribe.languages import language_name
@@ -70,6 +70,7 @@ MAX_BATCH_EVENTS = 500  # a batch holds a few seconds of utterances; the rest is
 PUSH_ID_CHARS = 40  # a pushed station's id here: <node>-<station>
 PUSH_NODE_CHARS = 16  # what is kept of a long node name in it
 NODE_ID = re.compile(r"[0-9a-f]{12}")  # this machine's id in events (``App.node_id``)
+LAN_URL_TTL_S = 600.0  # the LAN address in links is looked up again after this long
 # Overrides kept even when the station comes out the same without them: what the user confirmed.
 KEPT_OVERRIDES = {"acknowledge", "privacy_floor"}
 
@@ -291,6 +292,8 @@ class App:
         # is passed on says so and never comes back (``via``). In memory: a restart learns it
         # again from the next line.
         self._upstream: dict[str, tuple[str, ...]] = {}
+        self._lan_url: str | None = None
+        self._lan_url_at = 0.0  # when to look it up again
         self._monitor: Any = None
         self._resources: deque[dict[str, Any]] = deque(maxlen=240)  # an hour at 15 s
         self._last_snapshot: dict[str, Any] | None = None
@@ -330,9 +333,22 @@ class App:
         url = n.get("public_url")
         if not url:
             local = self.host in ("127.0.0.1", "::1", "localhost")
-            host = "localhost" if local else f"{socket.gethostname().removesuffix('.local')}.local"
-            url = f"http://{host}:{self.port}"
-        return {"name": name, "url": url.rstrip("/"), "id": self.node_id()}
+            url = f"http://localhost:{self.port}" if local else self._lan_address()
+        return {"name": name, "url": url.rstrip("/") if url else None, "id": self.node_id()}
+
+    def _lan_address(self) -> str | None:
+        """Under ``serve --lan``, this machine's private address for the links in what it
+        sends: not its hostname, which often holds the owner's name and goes wherever the
+        events go. None when it has none; the public URL, when set, is used instead."""
+        now = time.monotonic()
+        if now >= self._lan_url_at:
+            from wavescribe.web import server
+
+            found = [u for u in server.lan_urls(self.port)
+                     if not (urlsplit(u).hostname or "").endswith(".local")]  # fmt: skip
+            self._lan_url = found[0].rstrip("/") if found else None
+            self._lan_url_at = now + LAN_URL_TTL_S
+        return self._lan_url
 
     def node_id(self) -> str:
         """This machine's id in the events it sends: random, made once and kept in ui.toml.

@@ -47,6 +47,10 @@ Utterance fields:
   machines that push to each other never echo a line back and forth.
 - `audio_url`: appears only when the recording is kept and the machine's address is known.
   The page sets that address under Settings → Connections → *For other programs* (*Public URL*).
+- `node.url`: the *Public URL* when one is set. Otherwise `http://localhost:<port>`, or with
+  `serve --lan` the machine's private IP address on the LAN, looked up again every 10 minutes,
+  and `null` when it has none. Never its hostname: that often holds the owner's name, and events
+  travel. `node.name` is the name set on the page, `wavescribe` until then.
 - `station.privacy`: the station's privacy class on the machine that heard it (`broadcast`,
   `amateur`, `utility`, `private`, `digital`; see [RADIO.md](RADIO.md)). A machine that takes
   the text in keeps it, quotes it in alerts and passes it on by its own rules for that class.

@@ -148,14 +148,11 @@ def utterance_event(
     that heard it first; this machine's id is the node's (``node.id``)."""
     base = node.get("url")
     seg = u.get("id")
-    sender = {"name": node.get("name"), "url": base}
-    if node.get("id"):
-        sender["id"] = node["id"]
     out: dict[str, Any] = {
         "type": "utterance",
         "version": FEED_VERSION,
         "id": seg,
-        "node": sender,
+        "node": _sender(node),
         "station": station_ref(u["station"], stations),
         "time": iso(u["t_start"]),
         "t_start": u["t_start"],
@@ -170,6 +167,14 @@ def utterance_event(
         out["audio_url"] = f"{base}/api/segments/{seg}/audio.wav"
     if via := list(via):
         out["via"] = via
+    return out
+
+
+def _sender(node: Mapping[str, Any]) -> dict[str, Any]:
+    """The machine an event comes from: its name, URL and, when it has one, its id."""
+    out = {"name": node.get("name"), "url": node.get("url")}
+    if node.get("id"):
+        out["id"] = node["id"]
     return out
 
 
@@ -193,7 +198,7 @@ def alert_event(
         "type": "alert",
         "version": FEED_VERSION,
         "id": alert.get("id"),
-        "node": {"name": node.get("name"), "url": base},
+        "node": _sender(node),
         "rule": alert.get("rule"),
         "kind": alert.get("kind", "keyword"),
         "severity": alert.get("severity"),

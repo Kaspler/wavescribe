@@ -637,7 +637,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.MISDIRECTED_REQUEST, b"unknown host name", "text/plain")
             return False
         app = self.server.hub.app
-        public = urlsplit(app.node()["url"]).hostname if app is not None else None
+        url = app.node()["url"] if app is not None else None
+        public = urlsplit(url).hostname if url else None
         if name.endswith(".local") or name == public:
             return True
         log.warning("refused a request for host %r (DNS rebinding?)", host)
