@@ -1292,11 +1292,12 @@ def _own_names() -> frozenset[str]:
 
 
 class PortInUseError(OSError):
-    """Another program already listens on the port."""
+    """Something already listens on the port: another program, or a Wavescribe already running
+    (``doctor.port_taken`` tells which)."""
 
 
 def check_port(host: str, port: int) -> None:
-    """Fail early if another program owns the port on this machine.
+    """Fail early if something else owns the port on this machine.
 
     On macOS a wildcard bind (``--lan``) succeeds even when another program holds
     127.0.0.1:<port>, and then "localhost" reaches that program instead of us. A probe bind to
@@ -1311,8 +1312,7 @@ def check_port(host: str, port: int) -> None:
                 s.bind((addr, port))
             except OSError as e:
                 raise PortInUseError(
-                    f"port {port} is already in use on {addr} by another program; "
-                    "choose another with --port"
+                    f"port {port} is already in use on {addr}; choose another with --port"
                 ) from e
 
 

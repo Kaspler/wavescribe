@@ -788,7 +788,10 @@ warn, fail (exit code 1) or skip, with a next step for each problem, as text or 
 - free disk against the retention limits (speech audio cap, text at about 7.75 MB a day per
   station from the soak, models still to download), and whether `data/` is writable;
 - the port: its listener from `lsof` and `ps` (this machine's service, another Wavescribe, or
-  another program), then serve's own probe bind;
+  another program), then serve's own probe bind. `serve` and `service install` word a taken
+  port the same way (`doctor.port_taken`): a Wavescribe already running, with its page's
+  address; another program, named; or, where lsof can't see the listener, only that the port
+  is in use;
 - the voices of spoken alerts from `say -v ?`;
 - the background service (`launchctl print`) and sleep (`pmset -g`).
 

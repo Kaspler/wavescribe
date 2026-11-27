@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_agent import SERVICE_KEYS
-from wavescribe import service
+from wavescribe import doctor, service
 from wavescribe.cli import build_parser, main
 from wavescribe.web.server import PortInUseError
 
@@ -62,13 +62,15 @@ class FakeLaunchd:
 
 @pytest.fixture(autouse=True)
 def no_real_launchd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Any real launchctl call fails the test, and the home directory is a temporary one."""
+    """Any real launchctl call fails the test, and the home directory is a temporary one. No
+    real port is looked up either: nothing listens on any (a test says what does)."""
 
     def refuse(*_a: object, **_k: object) -> None:
         raise AssertionError("a test tried to reach the real launchd")
 
     monkeypatch.setattr(service, "_run", refuse)
     monkeypatch.setattr(service, "default_launchd", refuse)
+    monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: None)
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -271,6 +273,28 @@ def test_install_refuses_what_would_stop_serve_at_every_start(
     monkeypatch.setattr(service, "port_probe", busy)
     assert main(["service", "install", *args]) == 1
     assert expect in capsys.readouterr().err
+    assert "bootstrap" not in launchd.names()
+
+
+def test_install_says_when_the_port_is_a_wavescribe_already_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.chdir(write_folder(tmp_path / "ws"))
+    launchd = FakeLaunchd()
+    monkeypatch.setattr(service, "default_launchd", lambda: launchd)
+
+    def busy(host: str, port: int) -> None:
+        raise PortInUseError(f"port {port} is already in use on {host}")
+
+    monkeypatch.setattr(service, "port_probe", busy)
+    serve = doctor.PortHolder(4000, 3999, "/ws/.venv/bin/python /ws/.venv/bin/wavescribe serve "
+                              "--port 8790", "127.0.0.1:8790")  # fmt: skip
+    monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: serve)
+    assert main(["service", "install", "--port", "8790"]) == 1
+    assert capsys.readouterr().err == (
+        "wavescribe: Wavescribe is already running at http://localhost:8790/ (pid 4000); stop it "
+        "first (Ctrl-C in its Terminal), or install with another --port\n"
+    )
     assert "bootstrap" not in launchd.names()
 
 

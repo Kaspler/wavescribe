@@ -318,8 +318,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     host = "0.0.0.0" if args.lan else args.host
     try:
         check_port(host, args.port)  # before loading anything
-    except PortInUseError as e:
-        print(f"wavescribe: {e}", file=sys.stderr)
+    except PortInUseError:
+        from wavescribe.doctor import port_taken
+
+        print(f"wavescribe: {port_taken(args.port, host)}", file=sys.stderr)
         return 1
     store = open_store(args)
     app = App(
@@ -355,6 +357,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
         serve(app, host=host, port=args.port, on_ready=ready, behind_proxy=args.behind_proxy,
               public_read=args.public_read, remote_ask=args.allow_remote_ask,
               control_key=load_key(DATA_DIR, create=True))  # fmt: skip
+    except PortInUseError:  # taken while the stations loaded
+        from wavescribe.doctor import port_taken
+
+        print(f"wavescribe: {port_taken(args.port, host)}", file=sys.stderr)
+        return 1
     finally:
         if app.alerter is not None:
             app.alerter.close()

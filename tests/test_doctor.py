@@ -18,6 +18,7 @@ from wavescribe.alerts.actions import parse_voices
 from wavescribe.cli import main
 from wavescribe.config import ConfigError, load_stations
 from wavescribe.doctor import FAIL, GB, OK, SKIP, WARN, Doctor
+from wavescribe.invocation import typed
 from wavescribe.registry import Licenses, ModelEntry, ModelRegistry
 from wavescribe.web.server import PortInUseError
 
@@ -365,6 +366,69 @@ def test_a_port_held_where_lsof_cant_see_is_found_by_serves_own_probe(folder: Pa
 
     found = run(folder, "--lan", "--port", "8793", probe=refuse)
     assert "on 0.0.0.0" in found["port"][0].summary and "--port" in found["port"][0].fix
+
+
+SERVE_8793 = "/ws/.venv/bin/python /ws/.venv/bin/wavescribe serve --port 8793"
+OTHER_THAN = "port 8793 is already in use on 127.0.0.1 by another program"
+
+
+@pytest.mark.parametrize(
+    ("lsof", "ps", "service_pid", "said"),
+    [
+        ("p777\nf4\nn127.0.0.1:8793\n", f"4000 {SERVE_8793}", None,
+         "Wavescribe is already running at http://localhost:8793/ (pid 777); use its page, stop "
+         "it first, or start this one with another --port"),
+        ("p777\nf4\nn*:8793\n", "1 /ws/.venv/bin/python -m wavescribe serve --lan", 777,
+         "Wavescribe is already running at http://localhost:8793/ as the background service "
+         "(pid 777); use its page, stop it first ({uninstall}), or start this one with another "
+         "--port"),
+        ("p777\nf4\nn[::1]:8793\n", f"4000 {SERVE_8793}", 4000,
+         "Wavescribe is already running at http://localhost:8793/ as the background service"),
+        ("p777\nf4\nn192.168.1.20:8793\n", "1 uv run wavescribe serve --host 192.168.1.20",
+         None, "Wavescribe is already running at http://192.168.1.20:8793/ (pid 777)"),
+        ("p777\nf4\nn127.0.0.1:8793\n", "1 /usr/bin/python3 serve.py", None,
+         f"{OTHER_THAN}, python3 serve.py (pid 777); choose another with --port, or stop that "
+         "program"),
+        # A folder named wavescribe doesn't make what runs in it Wavescribe.
+        ("p777\n", "1 /Users/x/wavescribe/.venv/bin/python -m http.server 8793", None,
+         f"{OTHER_THAN}, python -m http.server 8793 (pid 777)"),
+        # lsof can't see it (another user's, or no lsof): only that the port is taken.
+        (None, None, None, "port 8793 is already in use on 127.0.0.1; choose another with --port"),
+    ],
+)  # fmt: skip
+def test_a_taken_port_says_whether_wavescribe_holds_it_and_where_its_page_is(
+    folder: Path, lsof, ps, service_pid, said
+) -> None:
+    host = FakeHost(tools(folder), outputs(lsof=lsof, ps=ps))
+    found = doctor.port_taken(8793, "127.0.0.1", host=host, service_pid=lambda: service_pid)
+    assert found.startswith(said.format(uninstall=typed("service uninstall")))
+    host.platform = "linux"  # lsof and ps are read on macOS only
+    assert doctor.port_taken(8793, "127.0.0.1", host=host).endswith("; choose another with --port")
+
+
+def test_serve_says_wavescribe_is_already_running_on_its_port(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("wavescribe.log.setup_logging", lambda *_a, **_k: None)
+    monkeypatch.setattr(doctor, "_service_pid", lambda: None)
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))  # an ephemeral port: nothing real is touched
+        busy.listen()
+        port = busy.getsockname()[1]
+        holder = doctor.PortHolder(4000, 3999, f"/ws/.venv/bin/wavescribe serve --port {port}",
+                                   f"127.0.0.1:{port}")  # fmt: skip
+        monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: holder)
+        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 1
+        assert capsys.readouterr().err == (
+            f"wavescribe: Wavescribe is already running at http://localhost:{port}/ (pid 4000); "
+            "use its page, stop it first, or start this one with another --port\n"
+        )
+        monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: None)
+        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 1
+        assert capsys.readouterr().err == (
+            f"wavescribe: port {port} is already in use on 127.0.0.1; choose another with --port\n"
+        )
+    assert not (folder / "data" / "wavescribe.db").exists()  # it stopped before loading anything
 
 
 def test_a_spoken_voice_that_isnt_installed_fails_with_the_ones_that_are(folder: Path) -> None:

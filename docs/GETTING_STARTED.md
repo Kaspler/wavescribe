@@ -730,7 +730,7 @@ safe to run while Wavescribe is running.
 
 | Problem | What to do |
 |---|---|
-| The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. `uv run wavescribe doctor` says whether another program holds the port; if so, start it with another, e.g. `--port 8780`. |
+| The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. When the port is taken, `serve` says by what: a Wavescribe already running, with the address of its page, which you can open instead; or another program, which you can stop, or start Wavescribe on another port, e.g. `--port 8780`. `uv run wavescribe doctor` says the same. |
 | The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that (`uv run wavescribe doctor` helps), then `uv run wavescribe service install` again. |
 | `models fetch` says *no connection* or *the connection broke off* | The Mac isn't online, or the download was cut off. Nothing is broken and the files that finished are kept: check the network and run the same command again (on the page, start the download again). It downloads only what is missing. |
 | `models fetch` says *this computer doesn't trust the certificate* | Downloads check the server's certificate against the certificates macOS trusts (the Keychain), as a browser does. Check the Mac's date and time. If a company proxy or a security program inspects HTTPS, add its certificate to the System keychain. Then run the same command again. |

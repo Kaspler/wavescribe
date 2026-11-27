@@ -382,14 +382,14 @@ def preflight(ns: argparse.Namespace, workdir: Path,
     except (ConfigError, ValueError) as e:
         raise ServiceError(f"serve would stop at start: {e}") from e
     if port_probe is not None:
+        from wavescribe.doctor import port_taken
         from wavescribe.web.server import PortInUseError
 
         host = "0.0.0.0" if ns.lan else ns.host
         try:
             port_probe(host, ns.port)
         except PortInUseError as e:
-            raise ServiceError(f"{e}. Stop the Wavescribe running in a Terminal first, or "
-                               "install with another --port") from e  # fmt: skip
+            raise ServiceError(port_taken(ns.port, host, installing=True)) from e
 
 
 # -- the command -----------------------------------------------------------------------------

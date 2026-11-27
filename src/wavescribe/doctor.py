@@ -173,12 +173,6 @@ def parse_voice_list(listing: str) -> dict[str, str]:
     return out
 
 
-def parse_lsof_pid(text: str | None) -> int | None:
-    """The first process in ``lsof -F p`` output."""
-    m = re.search(r"^p(\d+)$", text or "", re.M)
-    return int(m[1]) if m else None
-
-
 def size_text(n_bytes: float) -> str:
     return f"{n_bytes / GB:.1f} GB" if n_bytes >= 0.1 * GB else f"{n_bytes / MB:.0f} MB"
 
@@ -194,6 +188,100 @@ def short(path: str | Path | None) -> str:
         return "-"
     text, home = str(path), str(Path.home())
     return "~" + text[len(home) :] if text.startswith(home + os.sep) else text
+
+
+# -- who holds a port: doctor's port check, and serve and service install when theirs is taken --
+
+
+@dataclass(frozen=True)
+class PortHolder:
+    """The process listening on a TCP port, from ``lsof`` and ``ps``."""
+
+    pid: int
+    ppid: int | None
+    command: str
+    address: str | None = None  # where it listens, as lsof says: 127.0.0.1:8765, *:8765
+
+    @property
+    def wavescribe(self) -> bool:
+        """A ``wavescribe serve``, however it was started (uv run, its script, python -m)."""
+        from wavescribe.radio.holders import SERVE
+
+        return SERVE.search(self.command) is not None
+
+    def url(self, port: int) -> str:
+        """Its page's address on this machine."""
+        host = (self.address or "").rpartition(":")[0].strip("[]")
+        if host in ("", "*", "0.0.0.0", "::", "127.0.0.1", "::1"):
+            host = "localhost"
+        elif ":" in host:
+            host = f"[{host}]"
+        return f"http://{host}:{port}/"
+
+
+def parse_lsof_listener(text: str | None) -> tuple[int, str | None] | None:
+    """The first process in ``lsof -F pn`` output, and the address it listens on."""
+    pid = None
+    for line in (text or "").splitlines():
+        if re.fullmatch(r"p\d+", line):
+            if pid is not None:
+                break
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            return pid, line[1:]
+    return None if pid is None else (pid, None)
+
+
+def port_holder(port: int, host: Host | None = None) -> PortHolder | None:
+    """What listens on ``port`` on this machine. None when nothing this user can see does, and
+    where that can't be told (lsof and ps are read on macOS only)."""
+    host = host or LocalHost()
+    if host.platform != "darwin":
+        return None
+    found = parse_lsof_listener(host.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN",
+                                          "-Fpn"], timeout=10))  # fmt: skip
+    if found is None:
+        return None
+    pid, address = found
+    out = (host.run(["ps", "-o", "ppid=,command=", "-p", str(pid)]) or "").strip()
+    ppid, _, command = out.partition(" ")
+    return PortHolder(pid, int(ppid) if ppid.isdigit() else None, command.strip(), address)
+
+
+def _service_pid(home: Path | None = None) -> int | None:
+    """The background service's pid while it runs; None otherwise, and where launchd can't be
+    read. It only words a message, so nothing it meets is worth a traceback."""
+    from wavescribe import service
+
+    try:
+        return service.status(service.default_launchd(), home)["pid"]
+    except Exception:
+        return None
+
+
+def port_taken(port: int, bind: str, *, installing: bool = False, host: Host | None = None,
+               service_pid: Callable[[], int | None] | None = None) -> str:  # fmt: skip
+    """What ``serve`` (or ``service install``) says when ``port`` on ``bind`` is taken: that
+    Wavescribe is already running there, with its page's address, when it is; that another
+    program has it only when it is another program; else only that the port is in use."""
+    holder = port_holder(port, host)
+    if holder is None:
+        return f"port {port} is already in use on {bind}; choose another with --port"
+    if not holder.wavescribe:
+        said = program(holder.command)[:60]
+        who = f"another program, {said}" if said else "another program"
+        return (f"port {port} is already in use on {bind} by {who} (pid {holder.pid}); choose "
+                "another with --port, or stop that program")  # fmt: skip
+    url = holder.url(port)
+    if installing:
+        return (f"Wavescribe is already running at {url} (pid {holder.pid}); stop it first "
+                "(Ctrl-C in its Terminal), or install with another --port")  # fmt: skip
+    if (service_pid or _service_pid)() in (holder.pid, holder.ppid):
+        return (f"Wavescribe is already running at {url} as the background service (pid "
+                f"{holder.pid}); use its page, stop it first ({typed('service uninstall')}), "
+                "or start this one with another --port")  # fmt: skip
+    return (f"Wavescribe is already running at {url} (pid {holder.pid}); use its page, stop it "
+            "first, or start this one with another --port")  # fmt: skip
 
 
 # -- the checks ------------------------------------------------------------------------------
@@ -769,35 +857,26 @@ class Doctor:
 
     # -- the page's port -----------------------------------------------------------------
 
-    def _port_owner(self, port: int) -> tuple[int, int | None, str] | None:
-        """Who listens on the port: (pid, parent pid, command line), from lsof and ps."""
-        pid = parse_lsof_pid(self.host.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN",
-                                            "-Fp"], timeout=10))  # fmt: skip
-        if pid is None:
-            return None
-        out = (self.host.run(["ps", "-o", "ppid=,command=", "-p", str(pid)]) or "").strip()
-        ppid, _, command = out.partition(" ")
-        return pid, int(ppid) if ppid.isdigit() else None, command.strip()
-
     def check_port(self) -> None:
         from wavescribe.web.server import PortInUseError
 
         g = "page"
         host = "0.0.0.0" if self.serve.lan else self.serve.host
         port = self.serve.port
-        owner = self._port_owner(port) if self.host.platform == "darwin" else None
+        owner = port_holder(port, self.host)
         if owner is not None:
-            pid, ppid, command = owner
+            pid, command = owner.pid, owner.command
             service = self.service_status()
-            if "wavescribe" in command:
-                if service and service.get("pid") in (pid, ppid):
+            if owner.wavescribe:
+                if service and service.get("pid") in (pid, owner.ppid):
                     self.add(g, "port", OK, f"{port}: the background service serves the page "
-                             f"(pid {pid})")  # fmt: skip
+                             f"at {owner.url(port)} (pid {pid})")  # fmt: skip
                 else:
                     self.add(g, "port", WARN, f"{port} is in use by another Wavescribe (pid "
                              f"{pid}), so a second serve on it won't start", "that one is "
-                             "already running: use its page, stop it, or start this one with "
-                             "another --port", pid=pid, command=command)  # fmt: skip
+                             f"already running: use its page at {owner.url(port)}, stop it, or "
+                             "start this one with another --port", pid=pid,
+                             command=command)  # fmt: skip
             else:
                 said = program(command)[:60] or "another program"
                 self.add(g, "port", FAIL, f"{port} is in use by {said} (pid {pid}), so serve "
