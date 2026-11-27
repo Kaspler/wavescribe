@@ -10,6 +10,8 @@ Environment:
     FAKE_RTL_AUDIO     float32 16 kHz mono file: broadcast it once on the first station, then exit
     FAKE_RTL_THEN      what every start after the first does (needs FAKE_RTL_SPAWNS): "missing"
                        or "busy" as above, "stream" to write without FAKE_RTL_MAX_BYTES' limit
+    FAKE_RTL_BURSTS    "offset_hz:period_s:on_s": a walkie-talkie keyed for the last on_s of every
+                       period_s (narrowband FM, a 1 kHz tone at 2 kHz deviation), from each start
 """
 
 import argparse
@@ -79,24 +81,35 @@ def main() -> int:
         )
     rng = np.random.default_rng(0)
     x += 0.01 * (rng.normal(size=n) + 1j * rng.normal(size=n))
-    iq = np.empty(2 * n)
-    iq[0::2], iq[1::2] = x.real, x.imag
-    block = np.clip(np.round(iq * 128 + 127.4), 0, 255).astype(np.uint8).tobytes()
+    blocks = [u8(x)]
+    if bursts := os.environ.get("FAKE_RTL_BURSTS"):
+        offset, period, on = (float(v) for v in bursts.split(":"))
+        keyed = x + 0.1 * np.exp(1j * (2 * np.pi * offset * t + 2.0 * np.sin(2 * np.pi * 1e3 * t)))
+        quiet = round((period - on) / BLOCK_S)  # first, so a receiver learns the quiet channel
+        blocks = blocks * quiet + [u8(keyed)] * round(on / BLOCK_S)
 
     limit = int(os.environ.get("FAKE_RTL_MAX_BYTES", "0")) or (2 * args.n if args.n else None)
     if then == "stream":
         limit = None
-    written = 0
+    written, k = 0, 0
     out = sys.stdout.buffer
     try:
         while limit is None or written < limit:
+            block = blocks[k % len(blocks)]
             data = block if limit is None else block[: limit - written]
             out.write(data)
             out.flush()
-            written += len(data)
+            written, k = written + len(data), k + 1
     except BrokenPipeError:
         pass
     return 0
+
+
+def u8(x: np.ndarray) -> bytes:
+    """Complex samples as rtl_sdr writes them: I and Q interleaved, 8 bits each, offset 127.4."""
+    iq = np.empty(2 * len(x))
+    iq[0::2], iq[1::2] = x.real, x.imag
+    return np.clip(np.round(iq * 128 + 127.4), 0, 255).astype(np.uint8).tobytes()
 
 
 if __name__ == "__main__":

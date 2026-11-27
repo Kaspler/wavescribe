@@ -149,8 +149,10 @@ serial, with its centre frequency, manual gain and sample rate (a multiple of 24
 RTL2832U takes: 0.24, or 0.96 to 3.12 MS/s; 2.4 MS/s by default); a station that sets `device = "a"` is heard on it at whichever of its `fm_mhz` falls in
 the band (±1.08 MHz at 2.4 MS/s), and then the SDR is used instead of the stream. `RtlSdrDevice`
 runs `rtl_sdr -d <serial>` (GPL, so a subprocess) on a thread in the main process, restarts it with
-backoff when it exits or stalls for 5 s, and hands each 0.256 s block of IQ to every station on
-the dongle. `radio watch` makes its device with `command_line=True`: a dongle that gives nothing
+backoff when it exits or stalls for 5 s (1 s, doubling to 30 s), and hands each 0.256 s block of
+IQ to every station on the dongle. What listens on a dongle stays attached while it is gone from
+USB, so a station, a watch and the hand tuner carry on by themselves when it comes back
+(tests/test_dongle_recovery.py). `radio watch` makes its device with `command_line=True`: a dongle that gives nothing
 when first started stops it and ends its stations, with what `rtl_sdr` said (`unopened`), and
 `rtl_sdr`'s words go to the log only; the command reads `heard_at` and `reconnects` to say when
 the dongle stopped sending, and before it opens anything it asks the USB registry what holds the
