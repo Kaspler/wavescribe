@@ -18,6 +18,7 @@ import pytest
 from tests.test_radio_watch import watch_station
 from tests.test_radio_watch_detect import PMR
 from tests.test_store import result
+from wavescribe.radio import cli as radio_cli
 from wavescribe.radio.bandplan import apply_policies, exports
 from wavescribe.radio.catalog import Catalog
 from wavescribe.radio.watch import Catch
@@ -25,6 +26,7 @@ from wavescribe.segment import Utterance
 from wavescribe.store import Store
 
 TWO_M = 145_500_000  # the 2 m calling channel
+RX = radio_cli.Receiver("00001234", 30.0, 0, "receiver A")
 
 
 @pytest.fixture(autouse=True)
@@ -236,7 +238,7 @@ def test_radio_watch_plans_the_window_and_writes_nothing_down_for_private_radio(
     ran: list[argparse.Namespace] = []
     monkeypatch.setattr(cli, "cmd_listen", lambda a: ran.append(a) or 0)
     monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
-    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: RX)
     argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--minutes", "10"]
     args = build_parser().parse_args(argv)
     with pytest.raises(ValueError, match="Pass --acknowledge to confirm") as e:
@@ -263,7 +265,7 @@ def test_radio_watch_says_when_the_receivers_spur_list_is_too_coarse_to_use(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "cmd_listen", lambda _a: 0)
     monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
-    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: RX)
     (tmp_path / "data" / "radio").mkdir(parents=True)
     old = {"00001234": {"t": 0, "freqs_hz": [PMR[3]]}}  # no bin_hz: an earlier version's
     (tmp_path / "data" / "radio" / "spurs.json").write_text(json.dumps(old))
@@ -289,7 +291,7 @@ def test_radio_watch_says_when_the_watch_goes_deaf_and_hears_again(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "cmd_listen", listen)
     monkeypatch.setattr(radio_cli, "_config", lambda _a: None)
-    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: ("00001234", 30.0, 0))
+    monkeypatch.setattr(radio_cli, "resolve_receiver", lambda _n, _c: RX)
     argv = ["radio", "watch", "a", "pmr446", "--region", "cept", "--acknowledge"]
     args = build_parser().parse_args(argv)
     assert args.func(args) == 0

@@ -70,7 +70,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
     config = _config(args)
     region = _region(args, config)
-    serial, gain, ppm = resolve_receiver(args.receiver, config)
+    rx = resolve_receiver(args.receiver, config)
     spec = _window(args.window)
     rate = DEFAULT_SAMPLE_RATE
     watch, mode, width = plan_window(
@@ -85,13 +85,13 @@ def cmd_watch(args: argparse.Namespace) -> int:
     device = build_device(
         {
             "id": "cli",
-            "serial": serial,
+            "serial": rx.serial,
             "center_mhz": centre / 1e6,
-            "gain_db": args.gain if args.gain is not None else gain,
+            "gain_db": args.gain if args.gain is not None else rx.gain_db,
             "sample_rate": rate,
-            "ppm": args.ppm if args.ppm is not None else ppm,
+            "ppm": args.ppm if args.ppm is not None else rx.ppm,
         },
-        f"receiver {args.receiver}",
+        rx.name,
     )
     defaults = dict(config.defaults) if config is not None else {}
     d: dict[str, Any] = {
@@ -122,12 +122,12 @@ def cmd_watch(args: argparse.Namespace) -> int:
     )
     print(
         f"# watching {watch.label}: {len(watch.channels)} channels, "
-        f"{mhz_text(watch.lo_hz / 1e6)}-{mhz_text(watch.hi_hz / 1e6)} MHz {mode}, on receiver "
-        f"{args.receiver}; {station.privacy} radio{kept}",
+        f"{mhz_text(watch.lo_hz / 1e6)}-{mhz_text(watch.hi_hz / 1e6)} MHz {mode}, on "
+        f"{rx.name}; {station.privacy} radio{kept}",
         file=sys.stderr,
     )
     catalog = Catalog()
-    _old_spurs(catalog, serial, args.receiver)  # a watch doesn't use such a list
+    _old_spurs(catalog, rx, args.receiver)  # a watch doesn't use such a list
     printer = CatchPrinter(catalog.notes())
     stop_printing = subscribe(printer)
     stop_hearing = subscribe_hearing(printer.hearing)
