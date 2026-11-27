@@ -5,6 +5,7 @@ as their own processes against a real server with fake models."""
 import io
 import json
 import os
+import re
 import select
 import socket
 import subprocess
@@ -42,6 +43,52 @@ UTTERANCE_KEYS = {
     "flags",
     "rules",
 }
+# The other shapes the --json commands and the MCP tools give, pinned so that they can't drift
+# from docs/FEED.md (feed events) and docs/AGENT_TOOLS.md (the rest) without a test saying so.
+ALERT_KEYS = {
+    "type", "version", "id", "node", "rule", "kind", "severity", "status", "time", "first_at",
+    "last_at", "mentions", "terms", "reason", "station", "stations", "language", "text",
+    "translations", "context", "segment_id",
+}  # fmt: skip
+MODEL_KEYS = {"id", "capability", "license", "license_url", "tier", "size_gb", "languages",
+              "accepted", "installed"}  # fmt: skip
+HEARD_KEYS = {"freq_hz", "mhz", "band", "label", "mode", "privacy", "level_db", "snr_db",
+              "first_heard", "last_heard", "times", "seen", "passes", "missing",
+              "device"}  # fmt: skip
+CATCH_KEYS = {"id", "station", "freq_hz", "mhz", "t_start", "t_end", "duration", "mode", "band",
+              "label", "snr_db", "peak_db", "voice", "reason", "privacy", "utterances"}  # fmt: skip
+CHECK_KEYS = {"type", "group", "check", "status", "summary", "fix", "details"}
+SUMMARY_KEYS = {"type", "status", "problems", "warnings", "version", "folder", "options",
+                "from_service"}  # fmt: skip
+SERVICE_KEYS = {"label", "plist", "installed", "loaded", "running", "pid", "state", "runs",
+                "last_exit", "last_signal", "workdir", "serve_args", "keep_awake", "log",
+                "log_bytes", "full_log"}  # fmt: skip
+TOOL_STATION_KEYS = {"id", "name", "language", "translate_to", "kind", "running", "connected",
+                     "last_heard", "lag"}  # fmt: skip
+TOOL_RESULT_KEYS = {
+    "stations": {"stations"},
+    "recent": {"utterances", "next_after_id", "more"},
+    "search": {"utterances"},
+    "alerts": {"alerts"},
+    "wait_for_alert": {"alert", "waited_s"},
+    "ask": {"answer", "sources", "plan"},
+    "status": {"node", "stations", "status", "ask", "mt_model", "noncommercial", "store"},
+}
+DOCS = Path(__file__).parents[1] / "docs"
+
+
+def test_every_json_shape_is_documented_field_by_field() -> None:
+    feed = (DOCS / "FEED.md").read_text(encoding="utf-8")
+    tools = (DOCS / "AGENT_TOOLS.md").read_text(encoding="utf-8")
+    assert [k for k in sorted(UTTERANCE_KEYS | ALERT_KEYS) if f'"{k}"' not in feed] == []
+    shapes = [MODEL_KEYS, HEARD_KEYS, CATCH_KEYS, CHECK_KEYS, SUMMARY_KEYS, SERVICE_KEYS,
+              TOOL_STATION_KEYS, *TOOL_RESULT_KEYS.values()]  # fmt: skip
+    named = set()  # each field in code: `name`, or in a result written `{a, b: null}`
+    prose = re.sub(r"```.*?```", "", tools, flags=re.S)  # not the examples
+    for span in re.findall(r"`([^`\n]+)`", prose):
+        named |= set(re.findall(r"(\w+)(?=[,:}])", span)) if span.startswith("{") else {span}
+    assert sorted({k for keys in shapes for k in keys} - named) == []
+    assert all(f"| `{tool}` |" in tools for tool in TOOL_RESULT_KEYS)
 
 
 def stored(store: Store, sid: str, text: str, ago: float = 60.0, **translations: str) -> int:
@@ -182,13 +229,15 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
 
     for argv in (["alerts", "--json"], ["alerts", "list", "--json"]):
         [alert] = lines(argv)
+        assert set(alert) == ALERT_KEYS  # audio_url and cap_url only with a known address
         assert alert["type"] == "alert" and alert["rule"] == "water"
         assert alert["text"] == "Corte de água amanhã" and alert["segment_id"] == seg
         assert alert["station"]["name"] == "Rádio A" and alert["severity"] == "high"
 
     models = lines(["models", "list", "--json"])
     assert models and all(
-        isinstance(m["installed"], bool)
+        set(m) == MODEL_KEYS
+        and isinstance(m["installed"], bool)
         and isinstance(m["accepted"], bool)
         and m["capability"]
         and m["license"]
@@ -330,9 +379,12 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
 
         failed, data = mcp.call("stations")
         assert not failed and [s["id"] for s in data["stations"]] == ["a", "b"]
+        assert set(data) == TOOL_RESULT_KEYS["stations"]
+        assert all(set(s) == TOOL_STATION_KEYS for s in data["stations"])
         assert data["stations"][0]["kind"] == "stream"
 
         _, recent = mcp.call("recent")
+        assert set(recent) == TOOL_RESULT_KEYS["recent"]
         assert [u["text"] for u in recent["utterances"]] == [
             "Corte de água amanhã no centro",
             "Previsão de chuva forte",
@@ -349,6 +401,7 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
         assert [u["station"]["id"] for u in only_b["utterances"]] == ["b"]
 
         _, found = mcp.call("search", query="chuva")
+        assert set(found) == TOOL_RESULT_KEYS["search"]
         [hit] = found["utterances"]
         assert set(hit) == UTTERANCE_KEYS and hit["id"] == second
         assert hit["translations"] == {"en": "Heavy rain forecast"}
@@ -356,13 +409,16 @@ def test_mcp_session_with_every_read_tool(tmp_path: Path) -> None:
 
         _, alerts = mcp.call("alerts", minutes=60)
         [alert] = alerts["alerts"]
+        assert set(alerts) == TOOL_RESULT_KEYS["alerts"] and set(alert) == ALERT_KEYS
         assert alert["rule"] == "water" and alert["text"] == "Corte de água amanhã no centro"
 
         _, status = mcp.call("status")
+        assert set(status) == TOOL_RESULT_KEYS["status"]
         assert status["node"]["version"] == __version__ and status["ask"] is None
         assert {"ready", "models", "lag"} <= set(status["status"])
 
         failed, answer = mcp.call("ask", question="Is there a water cut?")
+        assert set(answer) == TOOL_RESULT_KEYS["ask"]
         assert not failed and answer["answer"] == "Water is back on [1]."
         assert answer["plan"]["terms"] == ["água"]
         assert answer["sources"][0]["n"] == 1 and answer["sources"][0]["id"] == first

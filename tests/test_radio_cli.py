@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_agent import HEARD_KEYS
 from wavescribe.cli import main
 from wavescribe.radio import cli as radio_cli
 
@@ -123,6 +124,7 @@ def test_no_output_names_a_dongle_by_its_serial(
     assert main(["radio", "heard", "--json"]) == 0
     rows = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
     assert [r.get("device") for r in rows] == ["a", "…9876"]  # no receiver uses it any more
+    assert all(set(r) == HEARD_KEYS for r in rows)
     assert not any("serial" in r for r in rows)
 
     monkeypatch.setattr("wavescribe.radio.scan.scan", lambda *_a, **_k: (None, []))

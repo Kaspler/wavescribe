@@ -162,8 +162,8 @@ Type in the field at the top (**Search or ask**):
   every word is found anywhere. Click a result to read around it or hear it.
 - **Ask** answers a question in plain language from what was said, such as *"what did they say
   about the trains this morning?"*. The answer comes in the language you asked in, with the
-  stations and times it's based on, which you can play. It takes about 5 to 15 seconds and needs
-  the Qwen3.5 model.
+  stations and times it's based on, which you can play. It takes from a few seconds to about a
+  minute, and needs the Qwen3.5 model.
 
 The answers come only from what your stations said. If they didn't cover something, Ask says
 so rather than guessing, but check the quoted moments before acting on an answer.

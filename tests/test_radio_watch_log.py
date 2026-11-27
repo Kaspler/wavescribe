@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.test_agent import CATCH_KEYS
 from tests.test_radio_watch import watch_station
 from tests.test_radio_watch_detect import PMR
 from tests.test_store import result
@@ -224,6 +225,7 @@ def test_radio_catches_prints_the_log_and_its_json(
     assert "145.525" in lines[2] and lines[2].endswith("not checked")
     watch_cli.cmd_catches(argparse.Namespace(**{**vars(args), "json": True}))
     row = json.loads(capsys.readouterr().out.splitlines()[1])
+    assert set(row) == CATCH_KEYS | {"name"}  # and note and tags, when noted
     assert row["name"] == "calling channel" and row["utterances"][0]["text"] == "CQ CQ"
 
 

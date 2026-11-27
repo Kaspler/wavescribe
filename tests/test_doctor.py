@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_agent import CHECK_KEYS, SUMMARY_KEYS
 from tests.test_service import FakeLaunchd
 from wavescribe import doctor, service
 from wavescribe.alerts.actions import parse_voices
@@ -450,6 +451,7 @@ def test_the_command_checks_the_installed_services_options_and_speaks_json(
     code = main(["doctor", "--json"])
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     *checks, summary = lines
+    assert set(summary) == SUMMARY_KEYS and all(set(c) == CHECK_KEYS for c in checks)
     assert summary["type"] == "summary" and summary["from_service"] is True
     assert summary["options"] == ["--port", "8793", "--no-alerts"]
     assert code == (1 if summary["problems"] else 0)

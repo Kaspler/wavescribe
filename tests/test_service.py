@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_agent import SERVICE_KEYS
 from wavescribe import service
 from wavescribe.cli import build_parser, main
 from wavescribe.web.server import PortInUseError
@@ -232,6 +233,7 @@ def test_the_command_installs_reports_and_removes(
     assert "running (pid 4242)" in capsys.readouterr().out
     assert main(["service", "status", "--json"]) == 0
     st = json.loads(capsys.readouterr().out)
+    assert set(st) == SERVICE_KEYS
     assert st["pid"] == 4242 and st["serve_args"] == ["--port", "8780", "--no-alerts"]
 
     # Installing again replaces the running one; its port isn't checked, as it holds it.

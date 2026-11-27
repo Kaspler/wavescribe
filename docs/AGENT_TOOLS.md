@@ -75,17 +75,26 @@ If the client can't find `uv`, give its full path (`which uv` prints it). To let
 start and stop stations, add `"--allow-control"` at the end of `args`. Its own messages go to
 stderr: stdout carries the protocol and nothing else.
 
-| Tool | What it does |
-|---|---|
-| `stations` | The stations set up: id, name, language, kind (stream, receiver, another Wavescribe), running, connected, last heard, lag. |
-| `recent` | What was said, oldest first: from some minutes ago, or after the last utterance it saw (`after_id`), so the agent can follow along without reading anything twice. |
-| `search` | Full-text search of everything kept, in the original words and the translations, newest first (60 at most). Each word is found at the start of a word (*flood* finds *floods*); `*word` finds it inside words too. |
-| `alerts` | Recent alerts, newest first, with their status and what was said. |
-| `wait_for_alert` | Waits up to 300 s for the next announced alert, optionally only from some stations or above a severity. |
-| `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It needs a language model as the translator; otherwise it fails with the reason. |
-| `status` | Models loaded, stations running and why not, queue depths, whether `ask` works, version. |
-| `start_station`, `stop_station` | Only with `--allow-control`. |
-| `add_station` | Only with `--allow-control`: an internet station by its `http://` or `https://` stream address. A name another station already has (ignoring case) is refused; so is renaming a station to one on the page. |
+It talks to the Wavescribe at `http://localhost:8765`. `--url` points it at another one, such as
+`serve --port 8790` (`"--url", "http://localhost:8790"` in `args`), and `--token` gives the feed
+token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who may read*);
+`WAVESCRIBE_TOKEN` in the environment does the same without showing in the list of running
+processes. The control tools work only with the Wavescribe on the same Mac.
+
+Every tool returns one JSON object. A tool that can't do its job returns Wavescribe's reason as
+an error instead.
+
+| Tool | What it does | Returns |
+|---|---|---|
+| `stations` | The stations set up. | `{stations}`, each with `id` (what the other tools take), `name`, `language`, `translate_to`, `kind` (`stream`; `sdr`, a radio receiver; `remote`, another Wavescribe), `running`, `connected` (null while it isn't running), `last_heard` (seconds since 1970; null before anything was heard) and `lag` (seconds from speech to text; null when unknown). |
+| `recent` | What was said, oldest first: from `minutes` ago (60), or after the last utterance it saw (`after_id`), so the agent can follow along without reading anything twice. | `{utterances, next_after_id, more}`: `limit` utterances at most (100, up to 500); `more` is true when the limit cut them short; `next_after_id` is the `after_id` for the next call (the one given, or null, when nothing came). |
+| `search` | Full-text search of everything kept, in the original words and the translations. Each word is found at the start of a word (*flood* finds *floods*); `*word` finds it inside words too. | `{utterances}`, newest first: 20, or `limit` up to 60. |
+| `alerts` | Recent alerts, newest first, with their status and what was said; `minutes` keeps those mentioned in the last that many minutes. | `{alerts}`: 10, or `limit` up to 30. |
+| `wait_for_alert` | Waits for the next announced alert, `timeout_s` seconds (60, up to 300), optionally only from some `stations` or from a `min_severity` up. | `{alert}`, or `{alert: null, waited_s}` when none came. |
+| `ask` | A question in any language, answered by Wavescribe's local model with the excerpts it cites. It takes from a few seconds to about a minute, and needs a language model as the translator; otherwise it fails with the reason. | `{answer, sources, plan}`: `sources` are the cited utterances, each with the `n` the answer cites it by; `plan` is where it looked (`stations`, `since`, `until`, `terms`, and whether it read an `overview`, `widened` the search or `sampled`). |
+| `status` | What Wavescribe is doing, and why a station isn't. | `{node, stations, status, ask, mt_model, noncommercial, store}`: `node` is this machine (`name`, `url`, `version`, `feed_version`, `translation_languages`); `stations` every station set up, with `available` and `reason` (why it can't run); `status` the running part (`ready`, `models`, each running station's `connected`, `error` and `retry_in_s`, queue depths, `lag`); `ask` is null when ask works, else why not; `mt_model` the translation model; `noncommercial` the restricted models in use; `store` whether history is kept. |
+| `start_station`, `stop_station` | Only with `--allow-control`. A start right after a stop waits for the stop to finish, up to 10 s, or fails saying so. | `{ok: true}`. |
+| `add_station` | Only with `--allow-control`: an internet station by its `http://` or `https://` stream address. A name another station already has (ignoring case) is refused; so is renaming a station to one on the page. | The new station as `status` lists it, with its `id`. |
 
 Utterances and alerts come back in the feed's shapes. To see the protocol at work, send it a
 few lines by hand:
@@ -119,10 +128,11 @@ non-zero:
 |---|---|
 | `wavescribe search WORDS --json` | an utterance, oldest first; exits 1 when nothing matches |
 | `wavescribe alerts --json` (or `alerts list --json`) | an alert, oldest first |
-| `wavescribe models list --json` | a model: id, capability, licence, tier, size, languages, accepted, installed |
-| `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json`, with the receiver that heard it as `device` (its id) in place of the dongle's serial |
-| `wavescribe doctor --json` | a check (`"type": "check"`: group, check, status `ok`, `warn`, `fail` or `skip`, summary, fix, details), then one `"type": "summary"`; exits 1 when something is broken |
-| `wavescribe service status --json` | one line: the background service, installed, loaded, running, pid, last exit, options and logs; exits 3 when it isn't running |
+| `wavescribe models list --json` | a model: `id`, `capability` (`asr`, `translate`, `vad` or `gate`), `license`, `license_url`, `tier` (`default`, `opt-in`, `restricted` or `byo`), `size_gb` (null when unknown), `languages` (BCP-47 tags, or `*` for any), `accepted` (its licence, where it needs accepting) and `installed` |
+| `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json`: `freq_hz`, `mhz`, `band`, `label`, `mode`, `privacy`, `level_db`, `snr_db`, `first_heard`, `last_heard`, `times`, `seen`, `passes`, and when known `name`, `user_name`, `rds` and `missing` (not heard on the last scan of its range); with `device`, the id of the receiver that heard it, in place of the dongle's serial |
+| `wavescribe radio catches --json` | a transmission a watch caught and kept, newest first: `id`, `station`, `freq_hz`, `mhz`, `t_start`, `t_end`, `duration`, `mode`, `band`, `label`, `snr_db`, `peak_db`, `voice` (null when not checked), `reason`, `privacy`, `utterances` (`id`, `t`, `language`, `text`), and the `name`, `note` and `tags` noted for its frequency |
+| `wavescribe doctor --json` | a check (`type` `check`: `group`, `check`, `status` `ok`, `warn`, `fail` or `skip`, `summary`, `fix` (null when there is nothing to do), `details`), then one with `type` `summary`: `status`, `problems`, `warnings`, `version`, `folder`, `options` and `from_service` (whether those are the background service's options); exits 1 when something is broken |
+| `wavescribe service status --json` | one line: `label`, `plist`, `installed`, `loaded`, `running`, `pid`, `state`, `runs`, `last_exit`, `last_signal`, `workdir`, `serve_args`, `keep_awake`, `log`, `log_bytes`, `full_log`; exits 3 when it isn't running |
 | `wavescribe follow` | a live utterance or alert, until you stop it |
 
 `search` and `alerts` print utterances and alerts in the shapes of [FEED.md](FEED.md), without
