@@ -443,6 +443,38 @@ def test_every_view_of_a_receiver_gives_what_it_takes_in_as_lo_and_hi(tmp_path: 
         r.close()
 
 
+def test_the_state_says_which_languages_the_topic_rules_have_word_lists_in(tmp_path: Path) -> None:
+    from tests.test_app import Running, make_app
+
+    r = Running(make_app(tmp_path))  # one rule on the topic "water"; a word list for pt only
+
+    def rules(*page: dict) -> None:  # the page's own rules, the file's "water" switched off
+        r.app.alerter.reconfigure(
+            r.app._alert_config({"rule": list(page), "disabled_rules": ["water"]})
+        )
+
+    try:
+        assert r.call("GET", "/api/state")[1]["topic_languages"] == ["pt"]
+        # A topic no word list has: the rule can match in no language.
+        rules({"id": "roads", "topics": ["roads"], "severity": "low"})
+        assert r.call("GET", "/api/state")[1]["topic_languages"] == []
+        # No rule that is on listens for topics: nothing to say (a rule's own words need no list).
+        rules({"id": "roads", "terms": {"fr": ["route barrée"]}, "severity": "low"})
+        assert r.call("GET", "/api/state")[1]["topic_languages"] is None
+        # Another machine reading along is told the same: languages, nothing of the rules.
+        r.app.alerter.reconfigure(r.app._alert_config({}))
+        lan = r.app.hub.state(can_control=False, exports=r.app.hub.exports())
+        assert lan["topic_languages"] == ["pt"]
+    finally:
+        r.close()
+
+
+def test_the_state_has_no_topic_languages_without_alerts() -> None:
+    from wavescribe.web.server import _topic_languages
+
+    assert _topic_languages(None) is None  # no app (a bare hub), or a run with --no-alerts
+
+
 def test_the_models_say_which_can_tell_languages_apart(tmp_path: Path) -> None:
     from dataclasses import replace
 

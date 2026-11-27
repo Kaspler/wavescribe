@@ -464,6 +464,7 @@ class WebHub:
             "audio_rate": SAMPLE_RATE,
             "recent": recent,
             "alerts": self.alerts(exports),
+            "topic_languages": _topic_languages(self.app),
             "status": status,
             "node": self.app.node() if self.app else None,
             "manage": can_control and self.app is not None,
@@ -1245,6 +1246,21 @@ def _row_id(text: str) -> int | None:
     """A row id from a URL, or None when it isn't one. ASCII digits only: str.isdigit() alone
     also passes characters such as "²", which int() then refuses."""
     return int(text) if text.isascii() and text.isdigit() else None
+
+
+def _topic_languages(app: Any) -> list[str] | None:
+    """``topic_languages`` in ``/api/state``: the languages (primary subtags) in which a rule
+    that listens for topics has a word list, so the page can say when none of the running
+    stations is in one of them and such rules can't match. None when no rule that is on
+    listens for topics, or alerts are off."""
+    alerter = getattr(app, "alerter", None)
+    if alerter is None:
+        return None
+    rules = alerter.config.rules
+    topics = {topic for rule in rules.rules for topic in rule.topics}
+    if not topics:
+        return None
+    return sorted(lang for lang, pack in rules.packs.items() if topics & set(pack.topics))
 
 
 def _ask_fields(reason: str | None) -> dict[str, str | None]:
