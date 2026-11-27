@@ -99,8 +99,9 @@ export class Player {
 /** A receiver tuned by hand from the page (radio/live.py): the receivers, the one in use, what it
  * is tuned to, the question the server asked before it would tune (acknowledge, busy), and the
  * sound. Listen's tuner and the dial on Find, On the air share it, so a receiver tuned on one is
- * tuned on the other. `first`: a frequency to tune and play as soon as a receiver is chosen. */
-export function useTuner(first: () => Any | null = () => null) {
+ * tuned on the other. `from`: which of the two this is. `first`: a frequency to tune and play as
+ * soon as a receiver is chosen. */
+export function useTuner(from: "find" | "listen", first: () => Any | null = () => null) {
   const { data: all, error, reload } = useLoad(() => get("/live"));
   const receivers: Any[] = all?.receivers || [];
   const [dev, setDevState] = useState<string>("");
@@ -162,7 +163,8 @@ export function useTuner(first: () => Any | null = () => null) {
     }
     busy.current = true;
     try {
-      const s = await post(`/live/${dev}`, body);
+      // Where the tuning was asked from, so a refusal names the place the person is in.
+      const s = await post(`/live/${dev}`, { ...body, from });
       setAsk(null);
       setSt((old: Any) => ({ ...s, spectrum: old?.spectrum }));
       // A receiver that stopped while playing plays again once a retune brings it back.

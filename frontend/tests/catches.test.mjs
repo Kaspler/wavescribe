@@ -1,7 +1,7 @@
 // "Caught here": what watches caught, grouped by frequency and filtered.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bandsIn, centreIn, deviceIn, filterCatches, groupCatches, hasSpeech, sliceIn, stationIn, talksNowAndThen, technical, voiceWord, windowWords } from "../src/manage/catches.ts";
+import { bandsIn, filterCatches, groupCatches, fitsOneReceiver, hasSpeech, hearsWindow, sliceIn, talksNowAndThen, technical, voiceWord, watchCentre, watchWindow, windowWords } from "../src/manage/catches.ts";
 
 const NOW = 1_800_000_000;
 const caught = (id, freq_hz, ago, more = {}) => ({
@@ -61,14 +61,7 @@ test("a band can be watched when its channels talk now and then", () => {
 test("what the server's refusals offer is read out of them", () => {
   assert.deepEqual(sliceIn("Airband is 19.00 MHz wide, and a watch covers what one receiver hears at once, about 2.2 MHz: watch a slice of it, e.g. 126.400:128.600"), [126.4, 128.6]);
   assert.equal(sliceIn("no band 'x' in the band plan (wavescribe radio bands lists them), or give a range in MHz, e.g. 446.0:446.2"), null);
-  assert.equal(centreIn("station w: device 'a' doesn't hear all of PMR446 (16 of its 16 channels are outside its band). Give the device center_mhz = 445.97500, or watch the part it hears"), 445.975);
-  assert.equal(centreIn("there is already a station called 'w'"), null);
-  const moved = "station 'w' (w): device 'b' doesn't hear all of PMR446 (16 of its 16 channels are outside its band). Give the device center_mhz = 445.97500, or watch the part it hears";
-  assert.equal(stationIn(moved), "w");
-  assert.equal(stationIn("station 'Walkies' (walkies): device 'a' centre_mhz must be a number"), "walkies", "a stations-file station: its id in brackets");
-  assert.equal(stationIn("Receiver A is scanning: wait for it, or stop the scan."), null);
-  assert.equal(deviceIn(moved), "b");
-  assert.ok(technical(moved), "ids in quotes and setting names go under Details");
+  assert.ok(technical("station 'w' (w): device 'b' doesn't hear all of PMR446"), "ids in quotes go under Details");
   assert.ok(!technical("Receiver A is scanning: wait for it, or stop the scan."), "a sentence is said as it is");
 });
 
@@ -77,4 +70,21 @@ test("a window in words", () => {
   assert.equal(windowWords("pmr446", names), "Walkie-talkies");
   assert.equal(windowWords("unknown", names), "unknown");
   assert.equal(windowWords([446, 446.1], names), "446.000–446.100 MHz");
+});
+
+test("a watch is tuned where the server would tune it, and the page knows whether it hears it", () => {
+  const pmr = { start_mhz: 446, stop_mhz: 446.2, step_khz: null, channel_khz: 12.5, channels_mhz: Array.from({ length: 16 }, (_, i) => +(446.00625 + i * 0.0125).toFixed(5)) };
+  const twoM = { start_mhz: 144, stop_mhz: 146, step_khz: 12.5, channel_khz: 12.5, channels_mhz: [] };
+  const w = watchWindow(pmr, "pmr446");
+  assert.deepEqual([w.lo, w.hi], [446.00625, 446.19375]);
+  assert.equal(watchCentre(w, 2.4), 445.75625, "a narrow band: wholly above the centre");
+  assert.ok(hearsWindow(w, 445.75625, 2.4));
+  assert.ok(!hearsWindow(w, 145.00625, 2.4));
+  const m = watchWindow(twoM, "2m");
+  assert.equal(watchCentre(m, 2.4), 145.00625, "a wide one: between two channels near its middle");
+  assert.ok(hearsWindow(m, 145.00625, 2.4));
+  assert.ok(!hearsWindow(m, 144.5, 2.4), "its top channels out of reach");
+  assert.deepEqual(watchWindow(pmr, [446.0, 446.1]).hi, 446.09375, "a slice: the band's channels inside it");
+  assert.ok(fitsOneReceiver(m, 2.4) && fitsOneReceiver(w, 2.4));
+  assert.ok(!fitsOneReceiver(watchWindow({ start_mhz: 118, stop_mhz: 137, step_khz: 25 / 3, channel_khz: 8.33, channels_mhz: [] }, "airband"), 2.4), "the airband is wider than one receiver hears");
 });

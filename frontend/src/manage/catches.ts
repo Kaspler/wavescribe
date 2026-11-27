@@ -117,27 +117,48 @@ export function sliceIn(message: string): [number, number] | null {
   return m ? [+m[1], +m[2]] : null;
 }
 
-/** The station a refusal is about, by its id, where the server's words begin with it
- * ("station 'walkies': …", or for one from the stations file "station 'Walkies' (walkies): …"). */
-export function stationIn(message: string): string | null {
-  const m = /^station '([^']+)'(?: \(([^)]+)\))?:/.exec(message);
-  return m ? m[2] || m[1] : null;
-}
-
 /** Whether the server's words are its own shorthand (ids in quotes, setting names) rather than a
  * sentence for the person: those go under Details, below one the page writes. */
 export const technical = (message: string) => /'[a-z0-9_.-]+'|\b[a-z]+_[a-z_]+\b/.test(message);
 
-/** The receiver a refusal is about ("device 'a' doesn't hear all of …"). */
-export function deviceIn(message: string): string | null {
-  return /device '([^']+)'/.exec(message)?.[1] ?? null;
+/** A watch's window as a receiver must hear it, in MHz: its first and last channel, the step
+ * between channels and a channel's width. */
+export interface WatchWindow { lo: number; hi: number; step: number; channel: number }
+
+type WindowBand = { start_mhz: number; stop_mhz: number; step_khz: number | null; channel_khz: number | null; channels_mhz: number[] };
+
+/** The window a watch of `band` (or of the slice `spec` of it) listens to. */
+export function watchWindow(band: WindowBand, spec: string | number[]): WatchWindow {
+  const channel = (band.channel_khz || 12.5) / 1000;
+  const list = band.channels_mhz.filter((c) => typeof spec === "string" || (c >= spec[0] - 1e-6 && c <= spec[1] + 1e-6));
+  if (list.length) return { lo: list[0], hi: list[list.length - 1], step: list.length > 1 ? +(list[1] - list[0]).toFixed(5) : channel, channel };
+  const [lo, hi] = typeof spec === "string" ? [band.start_mhz, band.stop_mhz] : spec;
+  return { lo, hi, step: (band.step_khz || band.channel_khz || 12.5) / 1000, channel };
 }
 
-/** Where a refusal says the receiver must be tuned for a watch ("Give the device center_mhz = …"). */
-export function centreIn(message: string): number | null {
-  const m = /center_mhz = (\d+(?:\.\d+)?)/.exec(message);
-  return m ? +m[1] : null;
+const NARROW_MARGIN = 0.06; // NARROW_MARGIN_HZ in dsp/__init__.py, in MHz
+const OFF_CENTRE_NFM = 0.25; // OFF_CENTRE_HZ["nfm"]
+
+/** Where a receiver `spanMhz` wide is tuned to watch `w`, as plan_centre in radio/watch.py: a
+ * narrow window wholly above the centre, clear of the dongle's spike and of the mirror it makes
+ * of strong signals; a wide one centred between two channels. */
+export function watchCentre(w: WatchWindow, spanMhz: number): number {
+  const reach = spanMhz / 2 - NARROW_MARGIN;
+  const below = w.lo - OFF_CENTRE_NFM;
+  if (w.hi + w.channel / 2 - below <= reach + 1e-9) return +below.toFixed(5);
+  const k = Math.floor(((w.lo + w.hi) / 2 - w.lo) / w.step + 1e-9);
+  return +(w.lo + (k + 0.5) * w.step).toFixed(5);
 }
+
+/** Whether one receiver `spanMhz` wide can hear all of `w` at once: a wider band is refused by
+ * the server, with a slice that fits. */
+export const fitsOneReceiver = (w: WatchWindow, spanMhz: number) => w.hi - w.lo + w.channel <= spanMhz - 2 * NARROW_MARGIN + 1e-9;
+
+/** Whether a receiver tuned to `centre` hears every channel of `w` (outside in radio/watch.py). */
+export const hearsWindow = (w: WatchWindow, centre: number, spanMhz: number) => {
+  const reach = spanMhz / 2 - NARROW_MARGIN - w.channel / 2;
+  return Math.abs(w.lo - centre) <= reach + 1e-9 && Math.abs(w.hi - centre) <= reach + 1e-9;
+};
 
 /** A watch's window in words: a band's name, or "446.000–446.100 MHz". */
 export function windowWords(spec: string | number[], bandName: (id: string) => string | null): string {

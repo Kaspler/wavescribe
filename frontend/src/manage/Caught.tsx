@@ -11,7 +11,7 @@ import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, ApiError, docUrl, get, listenTo, post, secs, useEvery, useLoad } from "./api";
 import { type Band, and, bandWords, fmtMhz } from "./bands";
-import { type Catch, type Note, RANGES, type Spot, bandsIn, centreIn, filterCatches, groupCatches, sliceIn, stationIn, technical, voiceWord, windowWords } from "./catches";
+import { type Catch, type Note, RANGES, type Spot, bandsIn, filterCatches, fitsOneReceiver, groupCatches, hearsWindow, sliceIn, technical, voiceWord, watchCentre, watchWindow, windowWords } from "./catches";
 import { Refusal } from "./Refusal";
 import { rxName } from "./Receivers";
 
@@ -52,11 +52,6 @@ export const bandNamer = (bands: Band[]) => (id: string) => {
 /** What a watch listens to, in words. */
 export const watchWords = (w: Any, bands: Band[]) => windowWords(w.watch, bandNamer(bands));
 
-/** Why a station keeps a receiver where it is, in words: what it follows, and that it comes
- * from the stations file, which the page can switch off but not change. */
-export const keepsWords = (s: Any, device: string, bands: Band[]) =>
-  `${s.name} keeps Receiver ${rxName(device)} where it is${s.watch != null ? `: it watches ${watchWords(s, bands)}` : ""}${s.origin === "file" ? ", from the stations file" : ""}.`;
-
 const WHAT_IT_DOES = "Listens to every channel of the band at once and turns whatever is said into text, with its channel. One receiver is busy with it while it runs.";
 const CAN_MISS = "It can miss a transmission that is weak, very short, or under another one.";
 
@@ -64,90 +59,84 @@ const CAN_MISS = "It can miss a transmission that is weak, very short, or under 
 const sameWindow = (a: string | number[], b: string | number[]) =>
   typeof a === "string" || typeof b === "string" ? a === b : Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
 
-/** What became of a try to watch: the server's words, with what the page read out of them. */
-interface Trouble {
-  raw: string;
-  /** The band is wider than a receiver hears: the slice the server offers instead. */
-  slice?: [number, number] | null;
-  /** Another station keeps the receiver where it is. */
-  blocker?: Any | null;
-}
+/** A watch asked for: on which receiver, and the band or the slice of it. */
+interface Want { dev: string; spec: string | [number, number] }
 
 /** The second action on a band whose channels talk now and then: watch it with a receiver.
- * Asks what it needs first (the confirmation, a receiver following stations), then makes the
- * watch station and starts it, or starts the one already made for this band (or slice) and
- * receiver. A refusal is said in words, with what can be done. */
-export function WatchBand({ band, device, holders, free, others, needsAck, watches, lost, stations, bands, onDone, onCancel }: {
+ * Asks what it needs first (the confirmation, a receiver following stations or tuned by hand).
+ * A receiver that doesn't hear the window is moved where it does, and the server asks before
+ * that leaves stations out. Then the watch station is made and started, or the one already made
+ * for this band (or slice) and receiver is started again. A refusal is said in words. */
+export function WatchBand({ band, device, holders, byHand, letGo, free, others, needsAck, watches, receivers, bands, onDone, onCancel }: {
   band: Band;
   device: string;
   /** Running stations on the receiver, which watching stops: ids and names. */
   holders: { id: string; name: string }[];
+  /** The receiver is tuned by hand: listening that way ends first (`letGo`). */
+  byHand: boolean;
+  letGo: (dev: string) => Promise<unknown>;
   /** An idle receiver to offer instead. */
   free: string | null;
-  /** Every other receiver, for when this one can't move. */
+  /** Every other receiver, for when this one can't watch. */
   others: string[];
   needsAck: boolean;
   watches: Any[];
-  /** A watch of this band left out of the station list since its receiver was moved away. */
-  lost: { id: string; centre: number | null; device: string | null } | null;
-  /** Every station, to name one that keeps the receiver where it is. */
-  stations: Any[];
+  /** The receivers as GET /radio gives them: where each is set and how much it hears. */
+  receivers: Any[];
   bands: Band[];
   onDone: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [ack, setAck] = useState(false);
-  const [trouble, setTrouble] = useState<Trouble | null>(null);
+  const [trouble, setTrouble] = useState<{ raw: string; slice: [number, number] | null } | null>(null);
+  // The server's question before a move leaves stations out; nothing has changed while it is asked.
+  const [asked, setAsked] = useState<(Want & { question: string; stops: string[] }) | null>(null);
   const box = useRef<HTMLDivElement>(null);
   // The panel replaces the button that opened it: the focus moves into it.
   useEffect(() => { box.current?.querySelector<HTMLElement>("input, button")?.focus(); }, []);
   const name = bandWords(band).name;
-  /** Moves the receiver where the server says a watch needs it, when that is what it refused,
-   * and tries once more. */
-  const centred = async (dev: string, attempt: () => Promise<unknown>) => {
-    try {
-      await attempt();
-    } catch (e) {
-      const centre = e instanceof ApiError ? centreIn(e.message) : null;
-      if (centre == null) throw e;
-      await post(`/receivers/${dev}`, { center_mhz: centre });
-      await attempt();
-    }
-  };
-  const start = async (dev: string, spec: string | [number, number] = band.id) => {
+  /** `stops`: the stations a move the person agreed to has stopped already. */
+  const start = async ({ dev, spec, stops: gone = [] }: Want & { stops?: string[] }, confirmed = false) => {
     setTrouble(null);
-    const stopped = dev === device ? holders : [];
+    setAsked(null);
+    const rx = receivers.find((r) => r.id === dev);
+    const win = watchWindow(band, spec);
+    // A window one receiver can't hear whole goes to the server as it is, which answers with a slice.
+    if (rx && fitsOneReceiver(win, rx.span_mhz) && !hearsWindow(win, rx.center_mhz, rx.span_mhz)) {
+      try {
+        await post(`/receivers/${dev}`, { center_mhz: watchCentre(win, rx.span_mhz), retune: confirmed });
+      } catch (e) {
+        if (e instanceof ApiError && e.code === "retune" && !confirmed) { setAsked({ dev, spec, question: e.message, stops: e.data.holders || [] }); return; }
+        const raw = (e as Error).message;
+        setTrouble({ raw, slice: null });
+        return;
+      }
+    }
     const mine = watches.find((w) => w.device === dev && sameWindow(w.watch, spec));
-    const body = {
-      name: typeof spec === "string" ? name : `${name} ${spec[0]}–${spec[1]}`, device: dev, watch: spec, language: "auto", start: true,
-      ...(needsAck ? { acknowledge: band.privacy } : {}),
-    };
+    const stopped = dev === device ? holders : [];
     try {
-      for (const h of stopped) await post(`/stations/${h.id}/stop`);
-      // A watch made before starts again: a stopped one, or one whose receiver was moved away,
-      // once the receiver is back where it hears the band.
-      if (!mine && lost && lost.device === dev) {
-        await post(`/receivers/${dev}`, { center_mhz: lost.centre });
-        await post(`/stations/${lost.id}/start`);
-      } else await centred(dev, () => (mine ? post(`/stations/${mine.id}/start`) : post("/stations", body)));
+      if (dev === device && byHand) await letGo(dev);
+      // A move the person agreed to has stopped those it left out already.
+      for (const h of stopped) if (!gone.includes(h.name)) await post(`/stations/${h.id}/stop`);
+      if (mine) await post(`/stations/${mine.id}/start`);
+      else {
+        await post("/stations", {
+          name: typeof spec === "string" ? name : `${name} ${spec[0]}–${spec[1]}`, device: dev, watch: spec, language: "auto", start: true,
+          ...(needsAck ? { acknowledge: band.privacy } : {}),
+        });
+      }
     } catch (e) {
       for (const h of stopped) await post(`/stations/${h.id}/start`).catch(() => {});
       const raw = (e as Error).message;
-      const by = stationIn(raw);
-      setTrouble({ raw, slice: sliceIn(raw), blocker: by && by !== mine?.id ? stations.find((x) => x.id === by) || null : null });
+      setTrouble({ raw, slice: sliceIn(raw) });
       return;
     }
     toast(`Watching ${typeof spec === "string" ? name : windowWords(spec, bandNamer(bands))} with Receiver ${rxName(dev)}`);
     await onDone();
   };
-  /** Switches off the station that keeps the receiver where it is, then tries again. */
-  const switchOff = async (s: Any) => {
-    await post(`/stations/${s.id}`, { disabled: true });
-    if (s.running) await post(`/stations/${s.id}/stop`);
-    await start(device);
-  };
   const other = free || others[0] || null;
   const width = +(band.stop_mhz - band.start_mhz).toFixed(1);
+  const stops = [...(byHand ? ["listening by hand"] : []), ...holders.map((h) => h.name)];
   return (
     <div ref={box} className="m-panel rd-retune" role="group" aria-labelledby="rd-watch-h"
          onKeyDown={(e) => {
@@ -155,8 +144,11 @@ export function WatchBand({ band, device, holders, free, others, needsAck, watch
            if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
          }}>
       <p id="rd-watch-h" className="m-line">{WHAT_IT_DOES} {CAN_MISS}</p>
-      {holders.length > 0 && (
-        <p className="m-line">Receiver {rxName(device)} is following {and(holders.map((h) => h.name))}. Watching with it stops {holders.length === 1 ? "that station" : "them"}.</p>
+      {stops.length > 0 && (
+        <p className="m-line">
+          Receiver {rxName(device)} is {and([...(byHand ? ["tuned by hand"] : []), ...(holders.length ? [`following ${and(holders.map((h) => h.name))}`] : [])])}.
+          Watching with it stops {!byHand && holders.length === 1 ? "that station" : and(stops)}.
+        </p>
       )}
       {needsAck && (
         <p className="m-line">
@@ -166,35 +158,41 @@ export function WatchBand({ band, device, holders, free, others, needsAck, watch
           </Check>
         </p>
       )}
+      {asked && <p className="m-line" role="status">{asked.question}</p>}
       {trouble && (
         trouble.slice ? (
           <Refusal raw={trouble.raw} said={`${name} is ${width} MHz wide, more than one receiver hears at once. Watch a slice of it instead:`}>
-            <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(device, trouble.slice!)}>
+            <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: device, spec: trouble.slice! })}>
               Watch {trouble.slice[0].toFixed(3)}–{trouble.slice[1].toFixed(3)} MHz
             </ActButton>
           </Refusal>
-        ) : trouble.blocker ? (
-          <Refusal raw={trouble.raw}
-                   said={keepsWords(trouble.blocker, device, bands)}>
-            <ActButton size="sm" variant="secondary" run={() => switchOff(trouble.blocker)}>Switch {trouble.blocker.name} off</ActButton>
-            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(other)}>Use Receiver {rxName(other)}</ActButton>}
-          </Refusal>
         ) : (
           <Refusal raw={trouble.raw} said={technical(trouble.raw) ? `Receiver ${rxName(device)} couldn't start watching ${name}.` : undefined}>
-            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start(other)}>Use Receiver {rxName(other)}</ActButton>}
+            {other && <ActButton size="sm" variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: other, spec: band.id })}>Use Receiver {rxName(other)}</ActButton>}
           </Refusal>
         )
       )}
       <div className="m-actions">
-        {!trouble?.slice && (
-          <ActButton variant="primary" icon="antenna" disabled={needsAck && !ack} run={() => start(device)}>
-            {holders.length ? `Stop ${and(holders.map((h) => h.name))} and watch` : "Start watching"}
-          </ActButton>
+        {asked ? (
+          <>
+            <ActButton variant="primary" icon="antenna" run={() => start(asked, true)}>
+              {asked.stops.length ? `Stop ${and(asked.stops)} and watch` : "Move it and watch"}
+            </ActButton>
+            <Button variant="ghost" onClick={() => setAsked(null)}>Keep it as it is</Button>
+          </>
+        ) : (
+          <>
+            {!trouble?.slice && (
+              <ActButton variant="primary" icon="antenna" disabled={needsAck && !ack} run={() => start({ dev: device, spec: band.id })}>
+                {stops.length ? `Stop ${and(stops)} and watch` : "Start watching"}
+              </ActButton>
+            )}
+            {free && stops.length > 0 && (
+              <ActButton variant="secondary" disabled={needsAck && !ack} run={() => start({ dev: free, spec: band.id })}>Watch with Receiver {rxName(free)}, which is free</ActButton>
+            )}
+            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          </>
         )}
-        {free && holders.length > 0 && (
-          <ActButton variant="secondary" disabled={needsAck && !ack} run={() => start(free)}>Watch with Receiver {rxName(free)}, which is free</ActButton>
-        )}
-        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </div>
   );
