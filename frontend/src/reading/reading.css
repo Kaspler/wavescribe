@@ -862,3 +862,12 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
   .settings { position: fixed; left: 8px; right: 8px; top: calc(var(--header-h) + 4px); width: auto; max-height: calc(100dvh - var(--header-h) - 16px); overflow-y: auto; }
   .menu { right: -40px; }
 }
+
+/* The read token screen: one question where the page would otherwise fail in every part. */
+.gate { flex: 1; overflow-y: auto; padding: var(--s10) var(--s7); }
+.gate-box { display: grid; gap: var(--s5); justify-items: start; max-width: 52ch; }
+.gate-box h1 { font-size: var(--t-md); font-weight: 650; color: var(--ink); }
+.gate-box p { color: var(--ink-2); font-size: var(--t-ui); line-height: 1.5; text-wrap: pretty; }
+.gate-box .field { justify-self: stretch; }
+.gate-box p.gate-why { color: var(--trouble-ink); font-size: var(--t-sm); }
+@media (max-width: 719px) { .gate { padding: var(--s8) var(--s6); } }

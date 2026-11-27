@@ -1,6 +1,7 @@
 // Questions answered from what the stations said, with the excerpts the answer cites.
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { playReplay } from "../lib/audio";
+import { fetchRead } from "../lib/auth";
 import { sameLang, shownLang } from "../lib/lang";
 import { S } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -75,11 +76,13 @@ export function sendQuestion(q: string) {
   };
   (async () => {
     try {
-      const r = await fetch("/api/ask", {
+      const r = await fetchRead("/api/ask", {
         method: "POST",
         headers: { "X-Wavescribe": "1", "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, history }),
       });
+      // 403: this Wavescribe lets only its own machine ask (asking runs its model).
+      if (r.status === 403) return handle("error", { error: T.askOffHere });
       if (!r.ok || !r.body) {
         handle("error", { error: (await r.json().catch(() => ({}))).error || r.statusText });
         return;
@@ -109,6 +112,10 @@ export function sendQuestion(q: string) {
     }
   })();
 }
+
+/** Why Ask is unavailable, in the reader's terms: on another device, mostly because the owner
+ * keeps asking to the Wavescribe machine (it runs that machine's model). */
+const askOff = (why: string) => (!S.manage && /another machine/i.test(why) ? T.askOffHere : `Ask isn't available: ${why}`);
 
 function examples(): string[] {
   const names = S.stations.filter((s) => S.live[s.id]).map((s) => s.name);
@@ -174,7 +181,7 @@ export function Ask() {
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(draft); }}>
         <textarea ref={input} rows={1} value={draft} disabled={!!S.ask} enterKeyHint="send"
-                  placeholder={S.ask ? `Ask isn't available: ${S.ask}` : CHAT.length ? "Ask a follow-up…" : "Ask about what was said…"}
+                  placeholder={S.ask ? askOff(S.ask) : CHAT.length ? "Ask a follow-up…" : "Ask about what was said…"}
                   aria-label="Your question" onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(draft); } }} />
         <Button type="submit" variant="primary" icon="ask" disabled={!draft.trim() || !!S.ask}>Ask</Button>

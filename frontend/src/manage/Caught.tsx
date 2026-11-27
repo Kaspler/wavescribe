@@ -2,6 +2,7 @@
 // at once and writes down whatever is said, with its channel. "Caught here" lists what it
 // caught by frequency, newest first, with what the person noted about each frequency.
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { fetchRead } from "../lib/auth";
 import { sameLang, langNameEn } from "../lib/lang";
 import { S } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -9,16 +10,15 @@ import { useTopics } from "../lib/store";
 import { isoTime, whenLabel } from "../lib/time";
 import { ActButton, Button, Check, Field, Input, Section, Segmented, Select, Tag, Textarea, act, toast } from "../components/ui";
 import { type Any, ApiError, get, listenTo, post, secs, useEvery, useLoad } from "./api";
-import { type Band, bandWords, fmtMhz } from "./bands";
+import { type Band, and, bandWords, fmtMhz } from "./bands";
 import { type Catch, type Note, RANGES, type Spot, bandsIn, centreIn, filterCatches, groupCatches, sliceIn, voiceWord, windowWords } from "./catches";
-import { and } from "./bands";
 import { rxName } from "./Receivers";
 
 let known: Promise<boolean> | null = null;
 
 /** Whether this Wavescribe watches bands: one that doesn't answers 404 for its catches. */
 function watchesHere(): Promise<boolean> {
-  known ||= fetch("/api/catches?hours=1&limit=1").then((r) => r.status !== 404, () => {
+  known ||= fetchRead("/api/catches?hours=1&limit=1").then((r) => r.status !== 404, () => {
     known = null; // not an answer: ask again next time
     return false;
   });
@@ -36,7 +36,7 @@ export function useWatchesHere(): boolean {
 }
 
 async function loadCatches(hours: number): Promise<Catch[]> {
-  const r = await fetch(`/api/catches?hours=${hours}&limit=500`);
+  const r = await fetchRead(`/api/catches?hours=${hours}&limit=500`);
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
   return body.catches || [];

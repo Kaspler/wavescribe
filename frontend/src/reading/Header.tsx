@@ -2,6 +2,7 @@
 // search or ask, the connection, what's playing, display settings and the gear for Settings.
 import { useEffect, useRef, useState } from "react";
 import { A, stopAudio } from "../lib/audio";
+import { wanted } from "../lib/auth";
 import { headerLag } from "../lib/behind";
 import { S } from "../lib/live";
 import { type Area, go, isReading, parse, useHash } from "../lib/router";
@@ -18,7 +19,9 @@ import { T } from "./strings";
 let lastRead = "#/";
 
 export function Header({ area }: { area: Area | null }) {
-  useTopics("state", "conn", "narrow");
+  useTopics("state", "conn", "narrow", "auth");
+  // On the read token screen there is no connection or alert to speak of yet.
+  const gated = !!wanted();
   // Only a reading view is remembered: until the page knows it is on the Wavescribe machine,
   // Listen, Find and Settings show the reading view too, and Read must not lead back to them.
   if (!area && isReading(location.hash)) lastRead = location.hash || "#/";
@@ -38,9 +41,9 @@ export function Header({ area }: { area: Area | null }) {
       )}
       {!area && S.hasStore && <CommandField />}
       <span className="hdr-end">
-        <Conn />
+        {!gated && <Conn />}
         <NowPlaying />
-        {!area && !V.narrow && <AlertsToggle />}
+        {!area && !V.narrow && !gated && <AlertsToggle />}
         {!area && <DisplayButton />}
         {S.manage && (
           <a className={cx("btn btn-ghost btn-md btn-icon hdr-gear", area === "settings" && "is-on")} href="#/settings"

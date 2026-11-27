@@ -1,5 +1,6 @@
 // The server streams raw 16-bit mono PCM; it is scheduled on a Web Audio clock. This avoids the
 // browsers' media players, which treat endless streams differently (WebKit especially).
+import { fetchRead } from "./auth";
 import { S, post, setNotice, stationsChanged } from "./live";
 import { emit } from "./store";
 
@@ -132,10 +133,10 @@ const JOIN_TRIES = 20; // a station just started joins the stream within a few s
 const JOIN_WAIT_MS = 400;
 
 async function pump(a: Player, justStarted: boolean) {
-  let r = await fetch(`/audio/${a.id}.pcm`, { signal: a.abort.signal, cache: "no-store" });
+  let r = await fetchRead(`/audio/${a.id}.pcm`, { signal: a.abort.signal, cache: "no-store" });
   for (let i = 1; justStarted && r.status === 409 && i < JOIN_TRIES; i++) {
     await new Promise((ok) => setTimeout(ok, JOIN_WAIT_MS));
-    r = await fetch(`/audio/${a.id}.pcm`, { signal: a.abort.signal, cache: "no-store" });
+    r = await fetchRead(`/audio/${a.id}.pcm`, { signal: a.abort.signal, cache: "no-store" });
   }
   if (!r.ok || !r.body) throw new Error(await r.text());
   const reader = r.body.getReader();
@@ -162,7 +163,7 @@ export function playReplay(ids: number[], label: string) {
   emit("audio");
   (async () => {
     for (const id of ids) {
-      const r = await fetch(`/api/segments/${id}/audio.pcm`, { signal: a.abort.signal });
+      const r = await fetchRead(`/api/segments/${id}/audio.pcm`, { signal: a.abort.signal });
       if (!r.ok) throw new Error(await r.text());
       const buf = await r.arrayBuffer();
       schedule(a, new Int16Array(buf.slice(0, buf.byteLength - (buf.byteLength % 2))));

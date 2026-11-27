@@ -1,6 +1,7 @@
 // Search everything heard (SQLite FTS5 on the source text and every translation).
 import { useEffect, useState } from "react";
 import { playReplay } from "../lib/audio";
+import { fetchRead } from "../lib/auth";
 import { sameLang, shownLang } from "../lib/lang";
 import { S } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -23,7 +24,7 @@ export function Search({ q }: { q: string }) {
   useEffect(() => {
     let live = true;
     setSt({ q, hits: null, error: null });
-    fetch(`/api/search?q=${encodeURIComponent(q)}`)
+    fetchRead(`/api/search?q=${encodeURIComponent(q)}`)
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Search failed.");
         return r.json();

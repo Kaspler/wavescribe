@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { wanted } from "./lib/auth";
 import { S, running, setNotice } from "./lib/live";
 import { visible } from "./lib/prefs";
 import { MAX_COLS, go, movedHash, parse, setCols, useHash } from "./lib/router";
@@ -12,11 +13,12 @@ import { Header } from "./reading/Header";
 import { Rack } from "./reading/Rack";
 import { Reading } from "./reading/Reading";
 import { T } from "./reading/strings";
+import { TokenGate } from "./reading/TokenGate";
 
 const Manage = lazy(() => import("./manage/Manage"));
 
 export function App() {
-  useTopics("prefs", "narrow", "state");
+  useTopics("prefs", "narrow", "state", "auth");
   const hash = useHash();
   const route = parse(hash);
   useEffect(() => {
@@ -39,8 +41,8 @@ export function App() {
       <ErrorBoundary what="header">
         <Header area={area?.kind ?? null} />
       </ErrorBoundary>
-      <Notice />
-      {area ? (
+      {wanted() ? <TokenGate /> : <Notice />}
+      {wanted() ? null : area ? (
         <ErrorBoundary what={area.kind === "listen" ? "Listen page" : area.kind === "add" ? "Find stations page" : "settings"}>
           <Suspense fallback={<main className="manage-loading" id="main" tabIndex={-1}>Loading…</main>}>
             <Manage area={area.kind} page={area.page} />

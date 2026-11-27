@@ -1,5 +1,6 @@
 // The page's live data: /api/state once per connection, then /api/events, shared by the tabs
 // open in this browser (tabs.ts).
+import { fetchRead, onWanted, streamWantsToken, ticketed, wanted } from "./auth";
 import { sameLang } from "./lang";
 import { P, setPrefs } from "./prefs";
 import { emit } from "./store";
@@ -77,7 +78,7 @@ function firstLanguage(stations: Station[]): string | null {
 }
 
 export async function loadState() {
-  const r = await fetch("/api/state");
+  const r = await fetchRead("/api/state");
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   const state: PageState = await r.json();
   S.stations = state.stations;
@@ -171,7 +172,7 @@ export async function loadEarlier(id: string): Promise<number> {
   const list = S.utts[id] || [];
   const oldest = list.find((u) => u.id != null);
   if (!oldest) return 0;
-  const r = await fetch(`/api/history?station=${encodeURIComponent(id)}&before_id=${oldest.id}`);
+  const r = await fetchRead(`/api/history?station=${encodeURIComponent(id)}&before_id=${oldest.id}`);
   if (!r.ok) throw new Error(`the server answered ${r.status}`);
   const older: Utterance[] = await r.json();
   if (!older.length) return 0;
@@ -185,9 +186,20 @@ export async function loadEarlier(id: string): Promise<number> {
 // without an answer means that is what happened.
 const STUCK_MS = 10000;
 
+const RETRY_MS = 3000;
+
 /** The events stream, reopened after the browser gives up on it. */
 function openStream(sink: Sink) {
-  const es = new EventSource("/api/events");
+  ticketed("/api/events").then((url) => stream(sink, url), () => {
+    sink.conn("reconnecting");
+    setTimeout(() => openStream(sink), RETRY_MS);
+  });
+}
+
+function stream(sink: Sink, url: string) {
+  const es = new EventSource(url);
+  // A ticket works once: the browser reconnecting with the same address would be refused.
+  const spent = url.includes("ticket=");
   let stuck = 0;
   const arm = () => {
     clearTimeout(stuck);
@@ -201,11 +213,12 @@ function openStream(sink: Sink) {
   };
   es.onerror = () => {
     sink.conn("reconnecting");
-    if (es.readyState === EventSource.CLOSED) {
-      // the browser gave up (e.g. the server answered with an error): try again ourselves
+    if (es.readyState === EventSource.CLOSED || spent) {
+      // the browser gave up (the server answered with an error), or can't reconnect with a spent
+      // ticket: try again ourselves, unless reading now needs a token
       clearTimeout(stuck);
       es.close();
-      setTimeout(() => openStream(sink), 3000);
+      streamWantsToken().then((wants) => { if (!wants) setTimeout(() => openStream(sink), RETRY_MS); });
     } else arm();
   };
   for (const name of ["utterance", "status", "alert"])
@@ -263,14 +276,15 @@ let shared: Shared | null = null;
 /** The lines around one stored segment, for showing a line that is no longer loaded; null where
  * the server doesn't serve them (an older one ignores around_id and sends the newest instead). */
 export async function linesAround(id: string, seg: number, limit = 60): Promise<Utterance[] | null> {
-  const r = await fetch(`/api/history?station=${encodeURIComponent(id)}&around_id=${seg}&limit=${limit}`);
+  const r = await fetchRead(`/api/history?station=${encodeURIComponent(id)}&around_id=${seg}&limit=${limit}`);
   if (!r.ok) return null;
   const list: Utterance[] = await r.json();
   return Array.isArray(list) && list.some((u) => u.id === seg) ? list : null;
 }
 
 export function connect() {
-  const reload = () => loadState().catch((e) => setNotice(`Couldn't load the stations: ${e.message}`));
+  onWanted(() => emit("auth"));
+  const reload = () => loadState().catch((e) => { if (!wanted()) setNotice(`Couldn't load the stations: ${e.message}`); });
   shared = share(browserEnv(), {
     event(name, data) {
       let parsed;
@@ -292,7 +306,7 @@ export function connect() {
   });
   addEventListener("pagehide", () => shared?.leave());
   setTimeout(() => {
-    if (!S.loaded && streamConn !== "reconnecting") {
+    if (!S.loaded && !wanted() && streamConn !== "reconnecting") {
       heldBack = true;
       showConn();
     }
