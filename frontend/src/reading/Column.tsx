@@ -103,8 +103,11 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
   // Translation lag matters only to someone reading the translation.
   const lag = on && !stale ? columnLag(S.live[st.id]) : null;
   const translated = !sameLang(shownLang(st, P.lang), st.language);
-  // Its receiver is tuned where it doesn't hear it: the reason, and on this machine the move back.
-  const away = !on && st.out_of_reach;
+  // Its receiver is tuned where it doesn't hear it: the reason, and on this machine the move back
+  // (not for a station switched off, which the move would start).
+  const away = !on && !st.disabled && st.out_of_reach;
+  // It can't start as it is set up (switched off, no source): the server's reason as its state.
+  const cant = !on && !st.available && !away ? st.reason || T.unavailable : null;
   return (
     <header className="col-head">
       <div className="col-title">
@@ -149,8 +152,8 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
         {st.watch && <span>{watching(st.watch)}</span>}
         {lag?.text && <span className="is-trouble num">{T.colBehind(lag.text)}</span>}
         {lag?.translation && translated && <span className="num">{T.colTranslationBehind(lag.translation)}</span>}
-        {away ? (
-          <span className="col-state is-trouble">{T.outOfReach}</span>
+        {away || cant ? (
+          <span className="col-state is-trouble">{away ? T.outOfReach : cant}</span>
         ) : (stale || !speech) && (
           <span className={cx("col-state", state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>
             {stale ? T.reconnecting : state.why || state.label}
@@ -333,7 +336,7 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
           ))}
           {!list.length && (
             <p className="col-empty">
-              {!on ? (st.out_of_reach ? null : T.stationOff) : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
+              {!on ? (!st.disabled && st.out_of_reach ? null : T.stationOff) : noText(st) ? T.noTextYet : st.transcribe === false ? T.listenOnly : T.waiting}
               {on && noText(st) && S.manage && (
                 <> <button type="button" className="col-empty-link" onClick={() => go("#/settings/languages")}>{T.getModels}</button></>
               )}

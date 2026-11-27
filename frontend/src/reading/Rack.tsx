@@ -235,20 +235,21 @@ function OffStations({ off }: { off: Station[] }) {
             const startable = S.canControl && st.available && !st.disabled;
             const started = running(st.id); // held in place after a start from here
             const state = started ? stateOf(st.id) : null;
-            const word = st.out_of_reach ? T.outOfReach : !st.available ? T.unavailable : state ? state.label : noText(st) ? T.noText : null;
+            const away = !st.disabled && st.out_of_reach;
+            const word = away ? T.outOfReach : !st.available ? T.unavailable : state ? state.label : noText(st) ? T.noText : null;
             return (
               <li key={st.id} className={cx("ch", "ch-off", shown && "is-shown")}>
                 <button type="button" className="ch-main" aria-pressed={shown}
                         onClick={(e) => read(st.id, e.altKey || e.metaKey || e.shiftKey)}
                         title={st.available ? undefined : st.reason || T.unavailable}
-                        aria-label={`${st.name}, ${spoken(st)}, ${state ? state.label : st.available ? T.off.toLowerCase() : st.out_of_reach ? T.outOfReach : T.unavailable}${shown ? ", shown" : ""}`}>
+                        aria-label={`${st.name}, ${spoken(st)}, ${state ? state.label : st.available ? T.off.toLowerCase() : away ? T.outOfReach : T.unavailable}${shown ? ", shown" : ""}`}>
                   <span className="ch-name">
                     <Lamp state={state ? state.lamp : "off"} onBand />
                     <span className="ch-title" dir="auto">{st.name}</span>
                   </span>
                   <span className="ch-sub">
                     <span>{spoken(st)}</span>
-                    {word && <span className={cx(st.out_of_reach && "is-trouble")}>{word}</span>}
+                    {word && <span className={cx(away && "is-trouble")}>{word}</span>}
                   </span>
                 </button>
                 {startable && !started && (

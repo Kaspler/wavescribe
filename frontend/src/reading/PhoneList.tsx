@@ -88,7 +88,7 @@ function Row({ st }: { st: Station }) {
         </span>
         <span className="phone-sub">
           {spoken(st)}
-          {on && !stale && state.why ? ` · ${state.why}` : !on && st.out_of_reach ? ` · ${T.outOfReach}` : !on && noText(st) ? ` · ${T.noText}` : ""}
+          {on && !stale && state.why ? ` · ${state.why}` : !on && !st.disabled && st.out_of_reach ? ` · ${T.outOfReach}` : !on && !st.available ? ` · ${T.unavailable}` : !on && noText(st) ? ` · ${T.noText}` : ""}
           {ago ? ` · ${T.lastText(ago)}` : ""}
         </span>
         {on && last.length > 0 && (
