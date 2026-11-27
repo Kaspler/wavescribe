@@ -444,6 +444,13 @@ def test_notifications_play_the_sound_set_and_none_when_it_is_empty(
     assert actions.sounds == [""] and actions.calls[0][0] == "show"  # shown, without a sound
     with pytest.raises(ConfigError, match="notify_sound must be a sound's name"):
         parse_alerts({**CONFIG, "delivery": {"notify_sound": False}}, None, tmp_path)
+    # The app's alerts go through the digests' Speech: an alert's sound passes, a digest has none.
+    from wavescribe.digest.speech import Speech
+
+    speech = Speech(FakeActions())
+    speech.notify("HIGH · water", "Corte de água", sound="Ping")
+    speech.show("Digest", "Três pontos")
+    assert speech.actions.sounds == ["Ping", ""]
 
     ran: list[list[str]] = []
 
