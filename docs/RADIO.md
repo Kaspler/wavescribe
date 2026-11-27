@@ -113,8 +113,11 @@ apart from the signals it found.
 **One program per dongle.** A dongle opens in one process at a time. A scan with a receiver
 that is running stations (or the spectrum monitor) pauses them for the scan and starts them again
 when it ends; the page says which before you start the scan. From a terminal,
-`wavescribe radio scan` needs the receiver free. When `serve` has it open, the command says so:
-scan from the page instead (Find → On the air), stop `serve`, or scan with another dongle.
+`wavescribe radio scan` and `radio watch` need the receiver free. When `serve` or another program
+has it open, the command says so at once, names the program where it can tell, and exits with an
+error: scan from the page instead (Find → On the air), stop `serve`, or use another dongle. A
+watch whose receiver stops sending says so when it stops and when it is back, and then exits with
+an error too: it never reports a band it didn't hear.
 
 ## Listening by hand
 
@@ -308,8 +311,9 @@ Limits:
   (`watch_behind`) and not kept.
 - **Started from a terminal or the stations file.** The page lists a watch like any station, and
   doesn't show its catches.
-- **Tested on synthetic signals, and with no antenna** (no false catches in 10 minutes on PMR446
-  and on 2 m), not yet on the air.
+- **Tested on synthetic signals, with no antenna** (no false catches in 10 minutes on PMR446
+  and on 2 m), **and briefly on the air** on 2 m with an indoor antenna, where it caught short
+  carrier bursts. Speech on the air is untested.
 
 ## What Wavescribe does with each kind of radio
 
