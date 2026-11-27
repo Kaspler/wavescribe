@@ -25,6 +25,7 @@ from wavescribe.dsp.activity import THRESHOLD_DB
 from wavescribe.invocation import typed
 from wavescribe.radio.bandplan import (
     AUTO,
+    EDGE_HZ,
     STRICTNESS,
     Band,
     find,
@@ -32,6 +33,7 @@ from wavescribe.radio.bandplan import (
     mhz_text,
     privacy_of,
     region_band,
+    strictest_over,
 )
 from wavescribe.refusal import Refusal
 
@@ -54,6 +56,8 @@ class Watch:
     threshold_db: float = THRESHOLD_DB
     region: str = AUTO  # the band plan region, for naming what is caught
     label: str = ""  # what the window is called: the band's name, or its range
+    start_hz: int = 0  # the window's edges as asked: the band's, or the range's
+    stop_hz: int = 0
 
     @property
     def lo_hz(self) -> int:
@@ -74,6 +78,13 @@ class Watch:
         ``width_hz`` wide (by default, as wide as its band's channels)."""
         region = region or AUTO
         return max(self.channels, key=lambda c: STRICTNESS.index(privacy_of(c, region, width_hz)))
+
+    def strictest_anywhere(self, region: str | None) -> tuple[int, float]:
+        """Where the strictest class of a signal anywhere between the window's edges is
+        reached, and the width that reaches it, for a detector that hears the whole window
+        and not only its channels (``bandplan.strictest_over``)."""
+        _, hz = strictest_over(self.start_hz, self.stop_hz, region or AUTO)
+        return hz, 2 * EDGE_HZ
 
 
 def plan_window(
@@ -264,7 +275,8 @@ def _plan(
     if not channels:
         raise WatchError(f"{label} has no channel on the {step / 1e3:g} kHz raster",
                          "no_channels")  # fmt: skip
-    return Watch(key, tuple(channels), step, threshold_db, region, label), mode, float(width)
+    watch = Watch(key, tuple(channels), step, threshold_db, region, label, lo, hi)
+    return watch, mode, float(width)
 
 
 def plan_centre(watch: Watch, channel_hz: float, rate: int) -> int:

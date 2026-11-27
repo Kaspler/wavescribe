@@ -10,6 +10,7 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from functools import cache, lru_cache
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -448,6 +449,34 @@ def channel_label(hz: int | None, region: str) -> str | None:
     frequency (a stream) and for one no band plan lists."""
     band = lookup(hz, region) if hz else None
     return band.label(hz) if band is not None and hz else None
+
+
+EDGE_HZ = 15_000.0  # how far past a range's edge a narrowband signal centred inside it reaches
+
+
+def strictest_over(
+    lo_hz: float, hi_hz: float, region: str, reach_hz: float = EDGE_HZ
+) -> tuple[str, int]:
+    """The strictest privacy class of a signal anywhere from ``lo_hz`` to ``hi_hz`` that
+    reaches ``reach_hz`` either side of its centre, and the frequency in the range where it
+    is: ``privacy_of`` that frequency at ``2 * reach_hz`` gives the same class. Spectrum no
+    plan lists is private inside the range and counts for nothing past its edges, as at a
+    channel's (``lookup``)."""
+    lo, hi = lo_hz - reach_hz, hi_hz + reach_hz
+    edges = {e for b in bands() for e in (b.start_hz, b.stop_hz) if lo < e < hi}
+    cuts = sorted({lo, lo_hz, hi_hz, hi} | edges)
+    # Between two cuts every frequency is in the same bands: one look at its middle does.
+    places = [((a + b) / 2, lo_hz <= (a + b) / 2 <= hi_hz) for a, b in pairwise(cuts)]
+    places.append(((lo_hz + hi_hz) / 2, True))
+    worst, where = -1, (lo_hz + hi_hz) / 2
+    for hz, inside in places:
+        band = lookup(hz, region, 1.0)
+        if band is None and not inside:
+            continue
+        rank = STRICTNESS.index(band.privacy if band is not None else "private")
+        if rank > worst:
+            worst, where = rank, min(max(hz, lo_hz), hi_hz)
+    return STRICTNESS[worst], round(where)
 
 
 def privacy_of(hz: float, region: str, width_hz: float | None = None) -> str:
