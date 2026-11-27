@@ -102,9 +102,13 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
   };
   // A model's alert leads with its reason; the quote follows, folded to two lines.
   const reasoned = a.kind === "llm" && !!a.reason;
+  // A station rule's alert (silent, traffic) quotes nothing heard: its text is Wavescribe's own,
+  // and the later "audio is back" arrives as its reason.
+  const noSegment = a.segment_id == null;
   const openLine = () => {
     const st = a.stations[0];
-    if (a.segment_id == null || !S.byId[st]) return setCols(known.slice(0, MAX_COLS));
+    if (a.segment_id == null) return;
+    if (!S.byId[st]) return setCols(known.slice(0, MAX_COLS));
     showLine(st, a.segment_id);
     if (!V.wide) toggleRail(false); // the rail floats over the columns here and would cover it
     setCols(V.shown.includes(st) ? V.shown : V.narrow ? [st] : [...V.shown, st].slice(-MAX_COLS));
@@ -119,6 +123,7 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
         </span>
         {reasoned && <span className="alert-text">{a.reason}</span>}
         <span className={reasoned ? "alert-said" : "alert-text"} dir="auto" lang={summaryLang || a.language}>{words()}</span>
+        {noSegment && !reasoned && a.reason && <span className="alert-text" dir="auto">{a.reason}</span>}
         {!marked && a.terms?.length > 0 && (
           <span className="alert-terms">
             <span className="alert-label">{T.matched}</span>
@@ -140,19 +145,21 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
               {withInaudible(a.quote)}
             </p>
           )}
-          {a.reason && !reasoned && <p className="alert-reason">{a.reason}</p>}
-          <div className="alert-actions">
-            {a.segment_id != null && S.hasStore && (
-              <Button size="sm" variant="secondary" icon="play" onClick={() => playReplay([a.segment_id!], `${names[0]} ${hm(a.first_at)}`)}>
-                {T.play}
-              </Button>
-            )}
-            {known.length > 0 && (
-              <Button size="sm" variant="ghost" icon="right" onClick={openLine}>
-                {T.showInTranscript}
-              </Button>
-            )}
-          </div>
+          {a.reason && !reasoned && !noSegment && <p className="alert-reason">{a.reason}</p>}
+          {!noSegment && (
+            <div className="alert-actions">
+              {S.hasStore && (
+                <Button size="sm" variant="secondary" icon="play" onClick={() => playReplay([a.segment_id!], `${names[0]} ${hm(a.first_at)}`)}>
+                  {T.play}
+                </Button>
+              )}
+              {known.length > 0 && (
+                <Button size="sm" variant="ghost" icon="right" onClick={openLine}>
+                  {T.showInTranscript}
+                </Button>
+              )}
+            </div>
+          )}
           {trouble && a.actions && (
             <p className="alert-delivery">
               {Object.entries(a.actions).filter(([k]) => k !== "covered_by").map(([k, v]) => `${k}: ${v}`).join(" · ")}

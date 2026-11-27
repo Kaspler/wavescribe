@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { S } from "../lib/live";
 import { langName, langNameEn } from "../lib/lang";
 import {
-  ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act,
+  ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LinkButton, Section, Segmented, Select, Switch, Table, Tag, Textarea, act, toast,
 } from "../components/ui";
 import { type Any, SEVERITIES, SEV_WORD, del, get, post, useLoad } from "./api";
+import { lines, ruleBody } from "./drafts";
 
 /** Said under the page's heading, whatever follows: what an alert can and can't be relied on for. */
 const NOT_A_WARNING_SYSTEM = (
@@ -47,6 +48,11 @@ function RulesPage() {
         <ul className="m-list">
           {v.rules.map((r: Any) => <RuleRow key={r.id} r={r} packs={v.packs} redraw={redraw} onEdit={() => setEditing(r)} />)}
         </ul>
+        <div className="m-row">
+          <span className="m-hint rd-inline">About a station rather than what it says:</span>
+          <Button size="sm" variant="ghost" icon="plus" onClick={() => setEditing({ kind: "silence" })}>Station silent</Button>
+          <Button size="sm" variant="ghost" icon="plus" onClick={() => setEditing({ kind: "traffic" })}>Traffic announcement</Button>
+        </div>
       </Section>
       <TryRules stations={v.stations} />
       <Delivery v={v} reload={reload} />
@@ -71,14 +77,32 @@ function SevMark({ sev }: { sev: string }) {
 /** The languages that have a ready-made word list for a topic (config/keywords). */
 const listsFor = (packs: Any, topic: string) => Object.keys(packs || {}).filter((l) => packs[l].topics?.[topic]);
 
+/** "5 minutes", "30 seconds": how long a silence rule waits. */
+const span = (min: number) => (min < 1 ? `${Math.round(min * 60)} seconds` : min === 1 ? "1 minute" : `${+min.toFixed(1)} minutes`);
+
+/** The kinds of rule this page writes, in its own words; a rule of another kind is listed as it
+ * is and left alone. */
+const KINDS: Record<string, { tag: string; title: string }> = {
+  keyword: { tag: "words", title: "New rule: words to listen for" },
+  llm: { tag: "described", title: "New rule: described in your words" },
+  silence: { tag: "station silent", title: "New rule: a station goes silent" },
+  traffic: { tag: "traffic", title: "New rule: a traffic announcement" },
+};
+const SILENCE_MINUTES = [0.5, 1440] as const; // the server's limits (rules/__init__.py)
+const SILENCE_DB = [-120, 0] as const;
+
 function RuleRow({ r, packs, redraw, onEdit }: { r: Any; packs: Any; redraw: (v: Any) => void; onEdit: () => void }) {
-  const planned = r.kind !== "llm" && r.kind !== "keyword";
+  const known = !!KINDS[r.kind];
   const topic = (t: string) => {
     const langs = listsFor(packs, t);
     return `topic ${t.replace(/_/g, " ")} (${langs.length ? `word lists in ${langs.map(langNameEn).join(", ")}` : "no word list yet"})`;
   };
-  const what = planned ? `A ${r.kind} rule isn't built yet, so it never fires.` : r.kind === "llm" ? `“${r.prompt}”`
-    : [...(r.topics || []).map(topic), ...Object.entries(r.terms || {}).map(([l, ws]) => `${langNameEn(l)}: ${(ws as string[]).join(", ")}`)].join(" · ");
+  const what = !known ? `This page can't edit a rule of kind ${r.kind}; it runs as alerts.toml says.`
+    : r.kind === "llm" ? `“${r.prompt}”`
+    : r.kind === "silence" ? `Station silent: tells you when a station sends no audio for ${span(r.after_minutes ?? 5)}.`
+    : r.kind === "traffic" ? "Traffic announcement: tells you when an FM station starts one."
+    : [...(r.topics || []).map(topic), ...Object.entries(r.terms || {}).map(([l, ws]) => `${langNameEn(l)}: ${(ws as string[]).join(", ")}`),
+       ...(r.regex?.length ? [`${r.regex.length} ${r.regex.length === 1 ? "pattern" : "patterns"}`] : [])].join(" · ");
   return (
     <li className={`m-item${r.enabled ? "" : " is-off"}`}>
       <div className="m-item-head">
@@ -86,11 +110,11 @@ function RuleRow({ r, packs, redraw, onEdit }: { r: Any; packs: Any; redraw: (v:
                 onChange={(on) => act(async () => redraw(await post(`/rules/${r.id}/enable`, { on })), on ? "Rule on" : "Rule off")} />
         <strong className="mono">{r.id}</strong>
         <SevMark sev={r.severity} />
-        {planned ? <Tag tone="muted">{r.kind}: planned</Tag> : <Tag>{r.kind === "llm" ? "described" : "words"}</Tag>}
+        <Tag tone={known ? "neutral" : "muted"}>{known ? KINDS[r.kind].tag : r.kind}</Tag>
         {r.origin === "page" ? <Tag tone="accent">added here</Tag> : <Tag tone="muted">alerts.toml</Tag>}
         {r.verify && <Tag>model confirms</Tag>}
         <span className="m-spacer" />
-        {!planned && <Button size="sm" variant="ghost" icon="edit" onClick={onEdit}>{r.origin === "page" ? "Edit" : "Change here"}</Button>}
+        {known && <Button size="sm" variant="ghost" icon="edit" onClick={onEdit}>{r.origin === "page" ? "Edit" : "Change here"}</Button>}
         {r.origin === "page" && (
           <ConfirmButton size="sm" icon="trash" confirm={`Delete ${r.id}`} onConfirm={() => act(async () => redraw(await del(`/rules/${r.id}`)), "Deleted")}>
             Delete
@@ -108,37 +132,65 @@ function RuleRow({ r, packs, redraw, onEdit }: { r: Any; packs: Any; redraw: (v:
 }
 
 function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: Any) => void; onCancel: () => void }) {
-  const stations: Any[] = v.stations;
+  const kind: string = r.kind || "keyword";
+  const llm = kind === "llm", silence = kind === "silence", traffic = kind === "traffic";
+  const words = kind === "keyword";
+  // An FM station's traffic flag comes with its RDS, so only receiver stations can raise one.
+  const stations: Any[] = traffic ? v.stations.filter((s: Any) => s.kind === "sdr") : v.stations;
   const [id, setId] = useState(r.id || "");
   const [sev, setSev] = useState(r.severity || "medium");
   const [mentions, setMentions] = useState(String(r.min_mentions || 1));
   const [only, setOnly] = useState<string[]>(r.stations || []);
   const [prompt, setPrompt] = useState(r.prompt || "");
-  const langs = [...new Set([...stations.map((s) => s.language.split("-")[0]), ...Object.keys(r.terms || {})])];
+  const langs = [...new Set([...v.stations.map((s: Any) => s.language.split("-")[0]), ...Object.keys(r.terms || {})])] as string[];
   const [terms, setTerms] = useState<Record<string, string>>(Object.fromEntries(langs.map((l) => [l, (r.terms?.[l] || []).join("\n")])));
   const [topics, setTopics] = useState<string[]>(r.topics || []);
   const [near, setNear] = useState<string[]>(r.near || []);
   const [verify, setVerify] = useState(!!r.verify);
+  const [regex, setRegex] = useState<string>((r.regex || []).join("\n"));
+  const [regexErr, setRegexErr] = useState<string | null>(null);
+  const [after, setAfter] = useState(String(r.after_minutes ?? 5));
+  const [level, setLevel] = useState(String(r.level_db ?? -50));
   const [mine, setMine] = useState("");
+  const [saving, setSaving] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
   const packs = Object.values(v.packs || {}) as Any[];
   const topicOpts = [...new Set(packs.flatMap((p) => Object.keys(p.topics)))].sort();
   const placeOpts = [...new Set(packs.flatMap((p) => p.places))].sort() as string[];
-  const llm = r.kind === "llm";
-  const save = async () => {
-    const raw: Any = { id: id.trim(), kind: llm ? "llm" : undefined, severity: sev, min_mentions: +mentions > 1 ? +mentions : undefined, stations: only.length ? only : undefined };
-    if (llm) raw.prompt = prompt.trim();
-    else {
+  const inRange = (x: string, [lo, hi]: readonly [number, number]) => x.trim() !== "" && +x >= lo && +x <= hi;
+  const ready = !!id.trim() && (!llm || !!prompt.trim()) && (!silence || (inRange(after, SILENCE_MINUTES) && inRange(level, SILENCE_DB)));
+  const fields = (): Any => {
+    const f: Any = { id: id.trim(), severity: sev, stations: only };
+    if (!r.id) f.kind = kind;
+    if (llm || words) f.min_mentions = +mentions > 1 ? +mentions : 1;
+    if (llm) f.prompt = prompt.trim();
+    if (silence) Object.assign(f, { after_minutes: +after, level_db: +level });
+    if (words) {
       const t: Record<string, string[]> = {};
       for (const l of langs) {
-        const ws = (terms[l] || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        const ws = lines(terms[l] || "");
         if (ws.length) t[l] = ws;
       }
-      Object.assign(raw, { terms: t, topics, near, verify: verify || undefined });
+      Object.assign(f, { terms: t, topics, near, verify, regex: lines(regex) });
     }
-    for (const k of Object.keys(raw)) if (raw[k] === undefined || (Array.isArray(raw[k]) && !raw[k].length)) delete raw[k];
-    onSaved(await post("/rules", raw));
+    return f;
+  };
+  // A bad pattern is the server's to judge (Python's regular expressions): its words go beside
+  // the field rather than into a passing message.
+  const save = async () => {
+    setSaving(true);
+    setRegexErr(null);
+    try {
+      onSaved(await post("/rules", ruleBody(r.id ? r : null, fields())));
+      toast("Rule saved");
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (words && /: regex /.test(msg)) setRegexErr(msg.replace(/^rule [^:]+: /, ""));
+      else toast(msg, true);
+    } finally {
+      setSaving(false);
+    }
   };
   const suggest = async () => {
     const s = await post("/rules/suggest", { terms: mine.split(","), languages: langs });
@@ -153,24 +205,37 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
   return (
     <div ref={box} className="m-panel">
       <div className="m-panel-head">
-        <h4>{r.id ? `Rule ${r.id}` : llm ? "New rule: described in your words" : "New rule: words to listen for"}</h4>
+        <h4>{r.id ? `Rule ${r.id}` : KINDS[kind].title}</h4>
         <Button size="sm" variant="ghost" icon="close" aria-label="Close" onClick={onCancel} />
       </div>
       {r.origin === "file" && <p className="m-hint">Saving makes a page copy that replaces the alerts.toml rule; delete the copy to go back.</p>}
       <div className="m-form">
         <Field id="ru-id" label="Id" hint="Lowercase letters, digits, dashes and underscores.">
-          <Input id="ru-id" value={id} placeholder="short-id" pattern="[a-z0-9_-]+" disabled={!!r.id} onChange={(e) => setId(e.target.value)} className="mono" />
+          <Input id="ru-id" value={id} placeholder="short-id" pattern="[a-z0-9][a-z0-9_\-]{0,40}" disabled={!!r.id} onChange={(e) => setId(e.target.value)} className="mono" />
         </Field>
         <Field label="Severity" hint={<>{sevDoes(v, sev)} Each level's actions are set under What happens on an alert.</>}>
           <Segmented label="Severity" value={sev} onChange={setSev}
                      options={SEVERITIES.map((x) => ({ value: x, label: SEV_WORD[x] }))} />
         </Field>
+        {silence && (
+          <Field id="ru-after" label="Silent for (minutes)"
+                 hint={`Tells you when a running station sends no audio, or only dead air, for this long: from ${span(SILENCE_MINUTES[0])} to a day. Once its audio is back, the alert says so.`}>
+            <Input id="ru-after" type="number" min={SILENCE_MINUTES[0]} max={SILENCE_MINUTES[1]} step={0.5} value={after}
+                   onChange={(e) => setAfter(e.target.value)} className="input-short" />
+          </Field>
+        )}
+        {traffic && (
+          <p className="m-line field-wide">
+            Tells you when an FM station starts a traffic announcement, which it flags in RDS, the data it sends with its name.
+            Only stations on a receiver send it; more announcements within the cooldown join the same alert.
+          </p>
+        )}
         {llm ? (
           <Field id="ru-prompt" wide label="Alert when the radio says that…"
                  hint="In any language. The model on this machine reads what each station said, about every 45 s, and says why it matches; matches go through the same cooldown and actions. It decides alone, and can miss what you mean or misread what was said.">
             <Textarea id="ru-prompt" rows={3} value={prompt} placeholder="e.g. residents are told to leave their homes or to stay indoors" onChange={(e) => setPrompt(e.target.value)} />
           </Field>
-        ) : (
+        ) : words && (
           <>
             <div className="field field-wide">
               <span className="field-label">Words and phrases</span>
@@ -202,22 +267,38 @@ function RuleEditor({ r, v, onSaved, onCancel }: { r: Any; v: Any; onSaved: (v: 
       </div>
       <Advanced id="rule-editor">
         <div className="m-form">
-          <Field id="ru-min" label="Mentions before alerting" hint="2 or more ignores a passing reference; a real event gets repeated.">
-            <Input id="ru-min" type="number" min={1} max={10} value={mentions} onChange={(e) => setMentions(e.target.value)} className="input-short" />
-          </Field>
-          <Field label="Only on these stations" hint="None selected: every station." wide>
+          {(llm || words) && (
+            <Field id="ru-min" label="Mentions before alerting" hint="2 or more ignores a passing reference; a real event gets repeated.">
+              <Input id="ru-min" type="number" min={1} max={10} value={mentions} onChange={(e) => setMentions(e.target.value)} className="input-short" />
+            </Field>
+          )}
+          {silence && (
+            <Field id="ru-level" label="Dead air below (dBFS)" hint="Audio that never gets louder than this counts as silence: a transmitter on air with nothing on it. −50 suits most stations.">
+              <Input id="ru-level" type="number" min={SILENCE_DB[0]} max={SILENCE_DB[1]} step={1} value={level} onChange={(e) => setLevel(e.target.value)} className="input-short" />
+            </Field>
+          )}
+          <Field label="Only on these stations" hint={traffic && !stations.length ? "No station is on a receiver yet: every FM station counts once there is one." : "None selected: every station."} wide>
             <ChoiceChips label="Stations" options={stations.map((s) => [s.id, s.name] as [string, string])} value={only} onChange={setOnly} />
           </Field>
-          {!llm && (
+          {words && (
             <div className="field field-wide">
               <Check checked={verify} onChange={setVerify}>Let the model confirm each match in context before raising it above Low</Check>
               <p className="field-hint">Fewer false alarms, a few seconds later.</p>
             </div>
           )}
+          {words && (
+            <Field id="ru-regex" wide label="Patterns (regular expressions)"
+                   hint={<>One per line, matched in any station's language, ignoring case: for words that change, such as numbers. For example <code>\broad (closed|blocked)\b</code>.</>}>
+              <Textarea id="ru-regex" rows={3} value={regex} spellCheck={false} className="mono" aria-invalid={regexErr ? true : undefined}
+                        aria-describedby={regexErr ? "ru-regex-err" : undefined}
+                        onChange={(e) => { setRegex(e.target.value); setRegexErr(null); }} />
+              {regexErr && <p className="m-trouble" id="ru-regex-err" role="alert">{regexErr}</p>}
+            </Field>
+          )}
         </div>
       </Advanced>
       <div className="m-actions">
-        <ActButton variant="primary" disabled={!id.trim() || (llm && !prompt.trim())} run={save} done="Rule saved">Save rule</ActButton>
+        <Button variant="primary" busy={saving} disabled={!ready} onClick={save}>Save rule</Button>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { S, loadState } from "../lib/live";
 import { type ModelsView, neededModels, totalGb } from "../lib/models";
+import { get } from "../manage/api";
 import { go } from "../lib/router";
 import { noText } from "../lib/station";
 import { useTopics } from "../lib/store";
@@ -24,9 +25,8 @@ export function FirstRun() {
     const look = async () => {
       if (document.hidden) return;
       try {
-        const r = await fetch("/api/manage/models");
-        if (!r.ok || !on) return;
-        const m: ModelsView = await r.json();
+        const m = await get<ModelsView>("/models");
+        if (!on) return;
         const needs = neededModels(m);
         setGb(needs.length ? totalGb(needs) : null);
         // The stations learn of a download only when the page loads them again: do that when

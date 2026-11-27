@@ -6,6 +6,7 @@ import {
   ActButton, Advanced, Button, Check, ConfirmButton, Field, Input, LangChips, LinkButton, Section, Segmented, Select, Tag, act, cx,
 } from "../components/ui";
 import { type Any, del, get, knownLangs, post, refreshPage, useLoad } from "./api";
+import { changedFields } from "./drafts";
 
 export function Stations() {
   const { data, error, reload: load } = useLoad(() => get("/stations"));
@@ -72,6 +73,7 @@ function StationRow({ s, devices, reload }: { s: Any; devices: string[]; reload:
         </button>
         {state}
         {s.listen_only && !s.disabled && <Tag tone="warn" title={s.reason || undefined}>no text yet</Tag>}
+        {s.translate_to_missing?.length > 0 && !s.listen_only && <Tag tone="muted">some translations missing</Tag>}
         <Tag>{kind}</Tag>
         {s.origin === "page" ? <Tag tone="accent">added here</Tag> : s.overridden.length > 0 && <Tag tone="accent" title={s.overridden.join(", ")}>changed here</Tag>}
       </div>
@@ -87,6 +89,7 @@ function StationRow({ s, devices, reload }: { s: Any; devices: string[]; reload:
         {" · "}<span className="mono" title={src}>{site(src)}</span>
       </p>
       {!s.available && s.reason && !s.disabled && <p className="m-trouble">{s.reason}</p>}
+      {s.available && s.translate_to_missing?.length > 0 && !s.listen_only && s.reason && <p className="m-item-sub">{s.reason}</p>}
       {s.error && <p className="m-trouble">A change from this page wasn't applied: {s.error}</p>}
       <RegionNote s={s} reload={reload} />
       {open && <StationEditor s={s} devices={devices} reload={reload} />}
@@ -124,7 +127,7 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const [name, setName] = useState(s.name);
   const [lang, setLang] = useState(s.language);
   const [targets, setTargets] = useState<string[]>(s.translate_to || []);
-  const [alerts] = useState<string[]>(s.alert_languages || []); // kept as it is: not used yet
+  const [alerts, setAlerts] = useState<string[]>(s.alert_languages || []);
   const [prio, setPrio] = useState(String(s.priority));
   const [model, setModel] = useState(s.asr_choice || "");
   const [mtModel, setMtModel] = useState(s.mt_choice || "");
@@ -148,14 +151,24 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
   const saved = s.transcribe === false ? "listen" : s.translate === false ? "transcribe" : "translate";
   const [mode, setMode] = useState(saved);
   const save = async () => {
-    const ch: Any = { name: name.trim(), language: lang.trim(), translate_to: targets, alert_languages: alerts, priority: +prio, asr_model: model || null, mt_model: mtModel || null, disabled: off || null };
+    // Only what changed is sent: each field sent becomes the station's own setting.
+    const ch: Any = changedFields(
+      { name: s.name, language: s.language, translate_to: s.translate_to || [], alert_languages: s.alert_languages || [], priority: s.priority,
+        asr_model: s.asr_choice || null, mt_model: s.mt_choice || null, disabled: s.disabled || null },
+      { name: name.trim(), language: lang.trim(), translate_to: targets, alert_languages: alerts, priority: +prio,
+        asr_model: model || null, mt_model: mtModel || null, disabled: off || null },
+    );
     // Sent only when it changed: the server checks for models whenever transcription is in a change.
     if (mode !== saved) Object.assign(ch, { transcribe: mode === "listen" ? false : null, translate: mode === "transcribe" ? false : null });
     if (s.kind === "stream") {
       const u = stream.trim();
       if (u !== (s.stream || s.stream_hls)) Object.assign(ch, /\.m3u8(\?|$)/i.test(u) ? { stream_hls: u, stream: null } : { stream: u, stream_hls: null });
     }
-    if (s.kind === "sdr") Object.assign(ch, { device: dev, [freqKey]: fm.split(/[,\s]+/).filter(Boolean).map(Number) });
+    if (s.kind === "sdr") {
+      Object.assign(ch, changedFields({ device: s.device, [freqKey]: s[freqKey] || [] },
+                                      { device: dev, [freqKey]: fm.split(/[,\s]+/).filter(Boolean).map(Number) }));
+    }
+    if (!Object.keys(ch).length) return;
     await post(`/stations/${s.id}`, ch);
     await reload();
   };
@@ -181,6 +194,11 @@ function StationEditor({ s, devices, reload }: { s: Any; devices: string[]; relo
         {mode === "translate" && (
           <Field label="Translate into" hint="Continuously, as the station speaks.">
             <LangChips value={targets} onChange={setTargets} known={knownLangs()} label="Add a translation language" />
+          </Field>
+        )}
+        {transcribing && s.kind !== "remote" && (
+          <Field label="Translate alerts into" hint="Alerts above Low from this station are also translated into these, for everyone reading the page or receiving webhooks.">
+            <LangChips value={alerts} onChange={setAlerts} known={knownLangs()} label="Add a language for alerts" />
           </Field>
         )}
         {s.kind === "stream" && (
