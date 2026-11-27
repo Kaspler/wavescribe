@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, spokenSeconds,
-  windowProblem,
+  ALERT_SPEECH_S, answerOf, asSentence, cutAt, digestBody, failureOf, linksOf, newId, nowBody, saidBy, shown, sinceClock,
+  spokenSeconds, windowProblem,
 } from "../src/reading/digest.ts";
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
@@ -52,16 +52,35 @@ test("a window must reach back at least a minute and no further than the server 
   assert.equal(windowProblem(now - 7 * 3600, now, 1440), null);
 });
 
-test("the request names the stations, the window and the language, and only those", () => {
-  assert.deepEqual(digestBody({ kind: "minutes", minutes: 15 }, { stations: ["tsf"] }), { kind: "digest", stations: ["tsf"], minutes: 15 });
-  assert.deepEqual(digestBody({ kind: "since", at: 1234.9 }, { stations: ["tsf", "rr"], language: "es" }),
-    { kind: "digest", stations: ["tsf", "rr"], since: 1234, language: "es" });
-  assert.deepEqual(digestBody({ kind: "away", at: 99 }, { stations: ["tsf"], speak: true }), { kind: "digest", stations: ["tsf"], since: 99, speak: true });
+test("the request names its id, the stations, the window and the language, and only those", () => {
+  const id = "a1b2c3d4";
+  assert.deepEqual(digestBody({ kind: "minutes", minutes: 15 }, { id, stations: ["tsf"] }), { kind: "digest", id, stations: ["tsf"], minutes: 15 });
+  assert.deepEqual(digestBody({ kind: "since", at: 1234.9 }, { id, stations: ["tsf", "rr"], language: "es" }),
+    { kind: "digest", id, stations: ["tsf", "rr"], since: 1234, language: "es" });
+  assert.deepEqual(digestBody({ kind: "away", at: 99 }, { id, stations: ["tsf"], speak: true }),
+    { kind: "digest", id, stations: ["tsf"], since: 99, speak: true });
 });
 
-test("what a station is talking about now names the one station, and the language when given", () => {
-  assert.deepEqual(nowBody("tsf"), { kind: "now", stations: ["tsf"] });
-  assert.deepEqual(nowBody("tsf", "es"), { kind: "now", stations: ["tsf"], language: "es" });
+test("what a station is talking about now names its id, the one station, and the language when given", () => {
+  assert.deepEqual(nowBody("a1b2c3d4", "tsf"), { kind: "now", id: "a1b2c3d4", stations: ["tsf"] });
+  assert.deepEqual(nowBody("a1b2c3d4", "tsf", "es"), { kind: "now", id: "a1b2c3d4", stations: ["tsf"], language: "es" });
+});
+
+test("a request's id is one the server takes, also where the browser makes no UUID", () => {
+  const takes = /^[A-Za-z0-9_-]{8,64}$/;
+  const ids = new Set(Array.from({ length: 50 }, newId));
+  assert.equal(ids.size, 50);
+  for (const id of ids) assert.match(id, takes);
+  // A page read over plain http from another device: no randomUUID there.
+  const real = crypto.randomUUID;
+  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  try {
+    const id = newId();
+    assert.match(id, /^[0-9a-f]{32}$/);
+    assert.notEqual(newId(), id);
+  } finally {
+    Object.defineProperty(crypto, "randomUUID", { value: real, configurable: true });
+  }
 });
 
 test("points are shown with the stations not read; without points, the server's own sentences", () => {

@@ -1,1 +1,0 @@
-export{t as default}from"./MoveThere-D2ictiQD.js";

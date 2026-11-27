@@ -162,7 +162,12 @@ export const T = {
   writingCost: "Up to a minute: live translation goes first.",
   cancel: "Cancel",
   show: "Show",
-  cancelled: "Stopped waiting. Wavescribe still finishes the summary it began, so the next one may take a little longer.",
+  cancelling: "Cancelling…",
+  cancelled: {
+    stopped: "Cancelled. Wavescribe stopped making it, and the model's time goes back to live translation.",
+    unreached: "Stopped waiting: Wavescribe couldn't be reached to cancel it.",
+  },
+  cancelledLate: "It was already written when the cancel reached Wavescribe, so here it is.",
   closeSummary: "Close the summary",
   summaryOff: (why: string) => `Summaries aren't available: ${why}.`,
   summaryOffWhat: {

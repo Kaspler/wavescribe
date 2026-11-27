@@ -60,6 +60,14 @@ export interface Answer {
   speech?: { started: boolean; error?: string };
 }
 
+/** An id for a request, by which it can be cancelled: a random UUID where the browser makes one
+ * (only on a secure page, which this machine's own address is), else 32 random hex digits, as for
+ * a phone reading the page over plain http on the home network. */
+export function newId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // -- the window ------------------------------------------------------------------------------
 
 /** The server's longest window for a summary, and for one asked from another machine. */
@@ -96,9 +104,9 @@ export function windowProblem(since: number, now: number, longest: number): "soo
 }
 
 /** The request for a summary of `stations` over `choice`, in `language` (the server's default
- * when none), read aloud on the Wavescribe machine with `speak`. */
-export function digestBody(choice: Choice, o: { stations: string[]; language?: string; speak?: boolean }): Record<string, unknown> {
-  const out: Record<string, unknown> = { kind: "digest", stations: o.stations };
+ * when none), read aloud on the Wavescribe machine with `speak`, under the id `id`. */
+export function digestBody(choice: Choice, o: { id: string; stations: string[]; language?: string; speak?: boolean }): Record<string, unknown> {
+  const out: Record<string, unknown> = { kind: "digest", id: o.id, stations: o.stations };
   if (choice.kind === "minutes") out.minutes = choice.minutes;
   else out.since = Math.floor(choice.at);
   if (o.language) out.language = o.language;
@@ -107,8 +115,8 @@ export function digestBody(choice: Choice, o: { stations: string[]; language?: s
 }
 
 /** The request for what one station is talking about now (the server's last few minutes). */
-export function nowBody(station: string, language?: string): Record<string, unknown> {
-  const out: Record<string, unknown> = { kind: "now", stations: [station] };
+export function nowBody(id: string, station: string, language?: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { kind: "now", id, stations: [station] };
   if (language) out.language = language;
   return out;
 }

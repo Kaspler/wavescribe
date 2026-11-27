@@ -19,6 +19,12 @@ import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine
 
 const names = (ids: string[]) => ids.map((id) => S.byId[id]?.name || id);
 
+/** Being made: asked, and neither answered nor done cancelling. */
+const making = (job: Job | null) => job?.state === "working" || job?.state === "cancelling";
+
+/** What became of a cancelled summary. */
+const cancelText = (job: Job) => (job.cancel === "unreached" ? T.cancelled.unreached : T.cancelled.stopped);
+
 /** Minutes and seconds since `since` (ms), ticking; screen readers are told once instead. */
 function Elapsed({ since }: { since: number }) {
   const [, tick] = useState(0);
@@ -53,7 +59,7 @@ export function SummaryButton() {
   const btn = useRef<HTMLButtonElement>(null);
   const pop = useRef<HTMLDivElement>(null);
   useDismiss(open, () => setOpen(false), [btn, pop]);
-  const working = Sm.job?.state === "working";
+  const working = making(Sm.job);
   return (
     <span className="menu-anchor">
       <Button ref={btn} variant="ghost" icon="summary" className="hdr-sum" title={T.summaryHint}
@@ -92,14 +98,15 @@ function OffWhat({ code }: { code: string | null }) {
 }
 
 /** The window is the only choice; the stations are those being read (or the one whose menu it
- * came from). A summary being made is shown first, and another waits until it is cancelled. */
+ * came from). The last summary asked comes first, whatever became of it, as it may have been
+ * answered while closed; another waits until one being made is cancelled. */
 export function Chooser({ stations, onDone, one }: { stations: string[]; onDone: () => void; one?: boolean }) {
   useTopics("summary", "state");
   const uid = useId();
   const [time, setTime] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const job = Sm.job;
-  const busy = job?.state === "working";
+  const busy = making(job);
   const longest = S.canControl ? MAX_MINUTES : REMOTE_MINUTES;
   const ask = (choice: Choice) => {
     onDone();
@@ -120,7 +127,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
     <div className="sum-pick">
       <h2 className="sum-pick-h" dir="auto">{one ? T.summaryOf(list[0] ?? "") : T.summary}</h2>
       <p className="sum-pick-what">{T.summaryWhat}</p>
-      {job && (job.state === "working" || job.state === "done") && (
+      {job && (
         <div className="sum-pick-job">
           <p>
             {busy ? <>{T.writing} · {choiceLabel(job.choice)} <Elapsed since={job.asked} /></>
@@ -128,7 +135,7 @@ export function Chooser({ stations, onDone, one }: { stations: string[]; onDone:
           </p>
           <span className="sum-pick-acts">
             <Button size="sm" variant="ghost" onClick={() => { onDone(); reveal(); }}>{T.show}</Button>
-            {busy && <Button size="sm" variant="secondary" onClick={cancelSummary}>{T.cancel}</Button>}
+            {busy && <CancelButton job={job} />}
           </span>
         </div>
       )}
@@ -206,7 +213,7 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
         </p>
         <p className="sum-meta sum-stations" dir="auto">{(a ? a.stations.map((id) => a.names[id] || id) : names(job.stations)).join(", ")}</p>
       </header>
-      <div className="sum-body" aria-busy={job.state === "working"}>
+      <div className="sum-body" aria-busy={making(job)}>
         <Body job={job} />
       </div>
       <p className="sr-only" role="status">{said(job)}</p>
@@ -217,26 +224,43 @@ export function SummaryPanel({ phone }: { phone?: boolean }) {
 /** What screen readers are told once the state changes; the ticking time isn't read out. */
 function said(job: Job): string {
   if (job.state === "working") return T.writing;
-  if (job.state === "cancelled") return T.cancelled;
+  if (job.state === "cancelling") return T.cancelling;
+  if (job.state === "cancelled") return cancelText(job);
   if (job.state === "failed") return job.failure?.text || "";
   if (!job.answer) return "";
   const v = shown(job.answer);
   return v.points.length ? T.summaryReady(v.points.length) : v.sentences || "";
 }
 
+/** Cancel, which stays in place, unavailable, while the server is being told. */
+function CancelButton({ job }: { job: Job }) {
+  const going = job.state === "cancelling";
+  return (
+    <Button size="sm" variant="secondary" disabled={going} onClick={cancelSummary}>
+      {going ? T.cancelling : T.cancel}
+    </Button>
+  );
+}
+
 function Body({ job }: { job: Job }) {
-  if (job.state === "working") {
+  if (making(job)) {
     return (
       <div className="sum-working">
         <p className="sum-working-line">{T.writing} <Elapsed since={job.asked} /></p>
         <p className="sum-cost">{T.writingCost}</p>
-        <Button size="sm" variant="secondary" onClick={cancelSummary}>{T.cancel}</Button>
+        <CancelButton job={job} />
       </div>
     );
   }
-  if (job.state === "cancelled") return <p className="sum-said">{T.cancelled}</p>;
+  if (job.state === "cancelled") return <p className="sum-said">{cancelText(job)}</p>;
   if (job.state === "failed" && job.failure) return <Failed f={job.failure} again={() => askSummary(job.choice, job.stations)} />;
-  return job.answer ? <AnswerView a={job.answer} took={job.took} speech={job.speak ? <Speech job={job} /> : null} /> : null;
+  if (!job.answer) return null;
+  return (
+    <>
+      {job.cancel === "late" && <p className="sum-speech">{T.cancelledLate}</p>}
+      <AnswerView a={job.answer} took={job.took} speech={job.speak ? <Speech job={job} /> : null} />
+    </>
+  );
 }
 
 /** Whether the summary is being read aloud on this machine, was, or was cut short by an alert's
