@@ -36,6 +36,7 @@ from wavescribe.pipeline import Result
 from wavescribe.search import match as search_match
 from wavescribe.search import parse as search_terms
 from wavescribe.search import snippet as search_snippet
+from wavescribe.search import spellings as search_spellings
 
 if TYPE_CHECKING:
     from wavescribe.alerts import Alert
@@ -891,8 +892,13 @@ class Store:
         if station_id:
             where += " AND s.station_id = ?"
             where_args.append(station_id)
+        # Each word as the text may write it: an apostrophe typed one way finds the others.
+        spelt = [search_spellings(w) for w in words]
         if all(len(w) >= 3 for w in words):
-            match = " ".join('"' + w.replace('"', '""') + '"' for w in words)
+            match = " AND ".join(  # FTS5 ANDs bare phrases, but not groups in brackets
+                "(" + " OR ".join('"' + v.replace('"', '""') + '"' for v in vs) + ")"
+                for vs in spelt
+            )
             sql = f"""
                 SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start, t.text AS text
                 FROM transcripts_fts
@@ -908,8 +914,11 @@ class Store:
                 ORDER BY t_start DESC"""
             args: list[Any] = [match, *where_args, match, *where_args]
         else:  # trigrams can't index words under 3 characters: scan instead
-            like = " AND ".join(["text LIKE ?"] * len(words))
-            pats = [f"%{w}%" for w in words]
+            # % and _ are LIKE's wildcards: escaped, they are only themselves.
+            like = " AND ".join(
+                "(" + " OR ".join(["text LIKE ? ESCAPE '\\'"] * len(vs)) + ")" for vs in spelt
+            )
+            pats = [f"%{_like_literal(v)}%" for vs in spelt for v in vs]
             sql = f"""
                 SELECT s.id, 'source' AS field, t.lang AS lang, s.t_start, t.text AS text
                 FROM transcripts t JOIN segments s ON s.id = t.segment_id
@@ -1379,6 +1388,11 @@ class Store:
 # The condition of the segments_class index, spelled the same in every query that should use it.
 _PRUNED_BY_CLASS = "privacy <> 'broadcast'"
 CATCH_SLACK_S = 0.5  # a catch's audio runs this far either side of its time above the noise
+
+
+def _like_literal(text: str) -> str:
+    """``text`` for a LIKE pattern with ``ESCAPE '\\'``, its wildcards (% and _) escaped."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _exports_sql(exports: Exports | None, table: str = "s") -> tuple[str, list[Any]]:

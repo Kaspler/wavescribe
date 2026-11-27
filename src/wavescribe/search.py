@@ -10,9 +10,13 @@
   A trailing ``*`` changes nothing (every word is a prefix already).
 - In scripts written without spaces between words (Chinese, Japanese, Thai, ...) there are no
   word starts to look for, so every word matches anywhere.
+- Every character is itself: ``%`` and ``_`` are no wildcards. An apostrophe matches any other
+  (U+0027, U+2019, U+2018, U+02BC), so "it's" finds the typographic "it\u2019s" and the
+  other way round.
 
-The store's trigram index finds the candidates (every word as a substring); ``match`` keeps the
-ones whose words start where they should and says where, for highlighting.
+The store's trigram index finds the candidates (every word as a substring, in each of its
+``spellings``); ``match`` keeps the ones whose words start where they should and says where, for
+highlighting.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ from wavescribe.rules.text import _folded as _rules_folded  # one folding for ru
 
 FRAGMENT = "*"
 SNIPPET_CHARS = 80  # about what FTS5's snippet() gave over trigrams, cut at spaces
+# An apostrophe is typed one way and written another: a keyboard's ', typography's U+2019, U+2018
+# by mistake, and U+02BC (a letter in Ukrainian, among others). Each finds the others.
+APOSTROPHES = "'\u2019\u2018\u02bc"
 
 
 @dataclass(frozen=True)
@@ -104,11 +111,19 @@ def snippet(
     return ("…" if begin else "") + "".join(out).strip() + ("…" if end < len(text) else "")
 
 
+def spellings(word: str) -> list[str]:
+    """``word`` as a text may write it: with each kind of apostrophe in place of the one typed
+    (for the index, which compares characters as they are). Just ``word`` when it has none."""
+    if not any(c in APOSTROPHES for c in word):
+        return [word]
+    return ["".join(a if c in APOSTROPHES else c for c in word) for a in APOSTROPHES]
+
+
 def _folded(text: str) -> tuple[str, list[int]]:
     """``text`` folded (decomposed), and the index in ``text`` that each folded character comes
-    from. Query and text fold alike, one character at a time."""
+    from. Query and text fold alike, one character at a time; every apostrophe becomes '."""
     pairs = list(_rules_folded(text))
-    return "".join(c for c, _ in pairs), [i for _, i in pairs]
+    return "".join("'" if c in APOSTROPHES else c for c, _ in pairs), [i for _, i in pairs]
 
 
 def _is_word(c: str) -> bool:

@@ -42,3 +42,28 @@ def test_a_snippet_marks_matches_around_the_first_one() -> None:
     assert cut.startswith("…") and cut.endswith("…") and "As [água]s do rio" in cut
     assert len(cut) <= 82 and " " not in (cut[1], cut[-2])  # cut at spaces
     assert snippet("Água fria", [(0, 4)], ("[", "]")) == "[Água] fria"
+
+
+def test_percent_and_underscore_are_themselves_and_apostrophes_match_each_other(
+    tmp_path,
+) -> None:
+    from tests.test_store import result
+    from wavescribe.store import Store
+
+    store = Store(tmp_path / "w.db")
+    said = ["Desconto de 5% hoje", "Subida de 5 por cento", "a_b c", "axb c", "it's raining",
+            "it\u2019s sunny", "п'ять хвилин", "п\u02bcять годин"]  # fmt: skip
+    for i, text in enumerate(said):
+        store.add_transcript(result("a", text, 1000.0 + i))
+
+    def found(query: str) -> list[str]:
+        return sorted(h["text"] for h in store.search(query))
+
+    assert found("%") == ["Desconto de 5% hoje"]  # no wildcard for everything
+    assert found("5%") == ["Desconto de 5% hoje"]
+    assert found("*a_") == ["a_b c"]  # not "axb"
+    assert found("it's") == found("it\u2019s") == ["it's raining", "it\u2019s sunny"]
+    assert found("it's rain") == ["it's raining"]
+    assert found("п\u2019ять") == ["п'ять хвилин", "п\u02bcять годин"]
+    assert spans("it\u2019s", "it's raining") == ["it's"]
+    store.close()
