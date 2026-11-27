@@ -371,7 +371,8 @@ and marks it as overloaded (`overload`). The watch's status says "A very strong 
 overloaded Receiver A. Move the radio further away, or lower the gain in Settings → Receivers.",
 and the log has `watch_deaf` with `reason=overload` for an overload of 3 s or more (noise is
 `reason=interference`). `radio watch` prints the same sentence in the terminal, with `--gain` for
-the gain. Distance helps more than gain: a walkie-talkie in the same room can overload the
+the gain. Listening by hand (**Listen**) says it too, while the receiver clips and for ten minutes
+after. Distance helps more than gain: a walkie-talkie in the same room can overload the
 receiver even at a low gain, and a lower gain makes weak, distant transmissions harder to catch.
 
 ## What Wavescribe does with each kind of radio

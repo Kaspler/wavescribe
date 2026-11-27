@@ -38,12 +38,14 @@ from wavescribe.dsp import (
     in_band,
     off_centre,
 )
+from wavescribe.dsp.activity import CLIPPING
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.dsp.rds import RdsDecoder
 from wavescribe.dsp.wfm import WfmDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import Band, lookup, mhz_text
 from wavescribe.radio.service import RadioError, span_mhz
+from wavescribe.radio.watch import OVERLOAD_SHOWN_S, overload_report
 from wavescribe.radio.words import joined, receiver_name, sentence, them
 from wavescribe.sources import SourceHealth
 
@@ -128,6 +130,7 @@ class LiveReceiver:
         self._on_audio = on_audio
         self._power: np.ndarray | None = None  # the band's power, LIVE_FFT bins, linear
         self._power_t = 0.0
+        self.overloaded_at: float | None = None  # when the converter last clipped hard
         self._next_spectrum = 0.0
         self.watched_until = 0.0
         self.last_seen = time.time()
@@ -165,6 +168,8 @@ class LiveReceiver:
         audio = self._demod(iq)
         h.signal_db = self._demod.power_db
         h.clipped = self.device.clipped
+        if (h.clipped or 0.0) >= CLIPPING:  # a transmitter close by: Listen says what to do
+            self.overloaded_at = now
         if isinstance(self._demod, NarrowbandDemodulator):
             h.squelch_open = self._demod.open
         if self._rds is not None and self._rds.info.groups:
@@ -479,6 +484,7 @@ class LiveService:
             "signal_db": _r(h.signal_db) if h.connected else None,
             "squelch_open": h.squelch_open if t.mode != "wfm" else None,
             "connected": h.connected, "reconnects": h.reconnects, "clipped": h.clipped,
+            "overload": self._overload(rx),
             "error": rx.error,
             "rds": h.rds if t.mode == "wfm" else None,
             "band": band.to_dict() if band else None,
@@ -489,6 +495,16 @@ class LiveService:
             "spectrum": rx.spectrum(lo, hi) if watch else None,
         })  # fmt: skip
         return out
+
+    @staticmethod
+    def _overload(rx: LiveReceiver) -> dict[str, object] | None:
+        """The receiver's last overload, as a watch's status gives it (``overload_report``),
+        while its converter clips hard and for ``OVERLOAD_SHOWN_S`` after; the channel on top
+        isn't known here, so ``freq_hz`` is None."""
+        at = rx.overloaded_at
+        if at is None or time.time() - at > OVERLOAD_SHOWN_S:
+            return None
+        return overload_report(at, None, f"Receiver {receiver_name(rx.device.config.id)}")
 
     def start_scan(self, device_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         """Scan a list of channels in the band the dongle hears now, stopping on activity."""

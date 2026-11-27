@@ -257,6 +257,31 @@ def test_a_receiver_that_fails_says_so_until_tuned_again(node: Running, monkeypa
     conn.close()
 
 
+def test_a_receiver_overloaded_while_listening_by_hand_says_what_to_do(
+    node: Running, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    node.call("POST", "/api/manage/live/x", {"mhz": 99.5})
+    wait_for(lambda: node.call("GET", "/api/manage/live/x")[1]["connected"])
+    assert node.call("GET", "/api/manage/live/x")[1]["overload"] is None  # the stand-in is clean
+
+    # A walkie-talkie keyed next to the antenna: the converter clips, and Listen says so.
+    monkeypatch.setattr(live, "CLIPPING", 0.0)
+    wait_for(lambda: node.call("GET", "/api/manage/live/x")[1]["overload"] is not None)
+    over = node.call("GET", "/api/manage/live/x")[1]["overload"]
+    assert over["freq_hz"] is None and abs(over["t"] - time.time()) < 10
+    assert over["message"] == (
+        "A very strong signal nearby overloaded Receiver X. Move the radio further away, or "
+        "lower the gain in Settings → Receivers."
+    )
+    # It stays a while after the clipping ends, then goes.
+    monkeypatch.setattr(live, "CLIPPING", 2.0)
+    rx = node.app.live._rx["x"]
+    rx.overloaded_at = time.time() - live.OVERLOAD_SHOWN_S + 60
+    assert node.call("GET", "/api/manage/live/x")[1]["overload"] is not None
+    rx.overloaded_at = time.time() - live.OVERLOAD_SHOWN_S - 1
+    assert node.call("GET", "/api/manage/live/x")[1]["overload"] is None
+
+
 def test_what_cant_be_demodulated_is_refused_when_tuning(node: Running, monkeypatch) -> None:
     def refuse(*args: object) -> None:
         raise ValueError("no such channel")

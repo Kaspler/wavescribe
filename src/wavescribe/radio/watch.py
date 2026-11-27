@@ -374,6 +374,16 @@ def with_notes(rows: list[dict], notes: dict[int, dict]) -> list[dict]:
     return rows
 
 
+OVERLOAD_SHOWN_S = 600.0  # an overload stays in a receiver's status this long after it ended
+
+
+def overload_report(t: float, freq_hz: int | None, receiver: str) -> dict[str, object]:
+    """What a status says of a receiver's last overload: when it was last seen (``t``, epoch
+    seconds), the channel on top (``freq_hz``; None where it isn't known, listening by hand)
+    and what to do (``message``)."""
+    return {"t": round(t, 2), "freq_hz": freq_hz, "message": overloaded(receiver)}
+
+
 def overloaded(receiver: str, where: str = "in Settings → Receivers") -> str:
     """What a watch says when a transmitter close by overloads its receiver: ``receiver`` as
     the sentence names it ("Receiver A"), and ``where`` its gain is set."""

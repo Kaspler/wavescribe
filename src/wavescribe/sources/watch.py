@@ -37,7 +37,15 @@ from wavescribe.dsp.activity import CARRIER_S, Activity, ActivityDetector, IqHis
 from wavescribe.dsp.channel import NarrowbandDemodulator
 from wavescribe.log import event
 from wavescribe.radio.bandplan import POLICIES, lookup
-from wavescribe.radio.watch import Catch, Hearing, Watch, overloaded, publish
+from wavescribe.radio.watch import (
+    OVERLOAD_SHOWN_S,
+    Catch,
+    Hearing,
+    Watch,
+    overload_report,
+    overloaded,
+    publish,
+)
 from wavescribe.radio.words import receiver_name
 from wavescribe.sources import SourceHealth
 from wavescribe.sources.sdr import RtlSdrDevice, shared_device
@@ -54,7 +62,6 @@ CHUNK = SAMPLE_RATE // 4  # a catch reaches the pipeline in quarter seconds, lik
 CLOSING_S = 0.8
 QUEUE_CATCHES = 16  # waiting for the VAD and the gate; beyond it, dropped and counted
 SAY_DEAF_S = 3.0  # interference across the window this long is logged and shown, not a click
-OVERLOAD_SHOWN_S = 600.0  # an overload stays in the status this long after it ended
 INTERFERENCE = "deaf: noise across the whole window; learnt as the new floor if it stays"
 
 
@@ -146,8 +153,8 @@ class Catcher:
         t = self._time(at)
         if self._anchor[1] - t > OVERLOAD_SHOWN_S:
             return None
-        return {"t": round(t, 2), "freq_hz": self.detector.overload_hz,
-                "message": self._overloaded()}  # fmt: skip
+        return overload_report(t, self.detector.overload_hz,
+                               f"Receiver {receiver_name(self.tuning.device.id)}")  # fmt: skip
 
     def _overloaded(self) -> str:
         return overloaded(f"Receiver {receiver_name(self.tuning.device.id)}")
