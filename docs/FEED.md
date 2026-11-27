@@ -238,10 +238,15 @@ refused (400), so it never replaces that one and its secret or headers:
   and the others are an `Update` with an identifier of their own, all in the same `incidents`.
   In `text` format the first line says "(more serious now)", "(still being mentioned)" or
   "(over)".
-- Alerts get six tries over about two minutes on network errors, 408, 425, 429 and 5xx.
-  Utterances get three.
-- Each output has its own queue (2,000 events; the oldest utterances go first when it is
-  full), so a dead endpoint never slows anything else.
+- On a network error, 408, 425, 429 or 5xx, an alert gets six tries, 2, 4, 8, 16 and 32 s
+  apart (about a minute), and utterances three (2 and 4 s apart).
+- If the other end is still away after those, nothing is dropped: the events wait at the head
+  of the output's queue and go again after 5 s, then 10, 20, 40 and every 60 s, until it is
+  back (a central server restarting, a router rebooting). The page shows the output as waiting.
+  Any other answer (400, 401, 404, a redirect) fails the delivery and is not tried again.
+- Each output has its own queue (2,000 events, waiting ones included; when it is full the
+  oldest utterances go first, alerts are kept), so a dead endpoint never slows anything else.
+  An alert goes before any utterances waiting. The queue is in memory: a restart empties it.
 - Every request is logged, with its status, attempts and time. The page shows the log; it is
   also in the store's `deliveries` table.
 - A redirect (any 3xx) is never followed: it is a failed delivery, not tried again, logged

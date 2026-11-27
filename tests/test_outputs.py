@@ -137,7 +137,8 @@ def test_utterances_are_batched_and_alerts_jump_ahead() -> None:
         outs.on_utterance({**UTTERANCE, "id": 10 + i})
     outs.on_alert(ALERT, "low", "x", {})
     wait_for(lambda: len(rec.requests) == 2)
-    batch, alert = rec.json(0), rec.json(1)
+    # The alert goes first unless the batch was already being gathered: then it ends it.
+    batch, alert = sorted((rec.json(0), rec.json(1)), key=lambda e: e["type"] == "alert")
     assert batch["type"] == "batch" and [e["id"] for e in batch["events"]] == [10, 11, 12]
     assert batch["node"]["name"] == "kitchen" and alert["type"] == "alert"
     outs.close()
@@ -277,4 +278,52 @@ def test_the_cap_test_alert_says_it_is_a_test_and_not_for_the_public() -> None:
     assert values["status"] == "Test" and values["scope"] == "Restricted"
     assert tags[tags.index("scope") + 1] == "restriction" and values["restriction"]
     assert root.find(f"{{{NS}}}info") is not None
+    outs.close()
+
+
+def test_while_the_other_end_is_away_events_wait_bounded_and_go_when_it_is_back(
+    monkeypatch,
+) -> None:
+    from wavescribe import outputs as module
+
+    monkeypatch.setattr(module, "HOLD_MIN_S", 0.01)
+    monkeypatch.setattr(module, "HOLD_MAX_S", 0.05)
+    monkeypatch.setattr(module, "QUEUE_MAX", 6)
+    away = threading.Event()
+    away.set()
+    sent: list[dict] = []
+    refused = []
+
+    def central(url: str, body: bytes, headers: dict[str, str], timeout: float) -> int:
+        if away.is_set():
+            refused.append(json.loads(body)["type"])
+            raise OSError("connection refused")  # the central server is restarting
+        sent.append(json.loads(body))
+        return 200
+
+    outs = outputs([{"id": "central", "url": "http://central/feed/v1/ingest", "min_severity": "low",
+                     "events": ["utterance", "alert"]}], central)  # fmt: skip
+    for i in range(8):  # more than the queue holds: the oldest utterances make room
+        outs.on_utterance({**UTTERANCE, "id": 10 + i})
+    wait_for(lambda: len(refused) >= 6)  # tried again and again, never dropped
+    outs.on_alert(ALERT, "low", "x", {})  # an alert meanwhile goes first once it is back
+    wait_for(lambda: "alert" in refused)
+    assert outs.status()["central"]["waiting"] is True
+    away.clear()
+    wait_for(lambda: outs.status()["central"]["queued"] == 0 and len(sent) == 6)
+    assert sent[0]["type"] == "alert"
+    # Six fit: the alert and the five newest utterances, in order; the oldest made room.
+    assert [e["id"] for e in sent[1:]] == [13, 14, 15, 16, 17]
+    status = outs.status()["central"]
+    assert status["dropped"] == 3 and status["waiting"] is False and status["sent"] == 6
+    outs.close()
+
+
+def test_a_refusal_the_other_end_means_is_not_held() -> None:
+    rec = Recorder([401])
+    outs = outputs([{"id": "central", "url": "http://central/feed/v1/ingest",
+                     "events": ["utterance"]}], rec)  # fmt: skip
+    outs.on_utterance(UTTERANCE)
+    wait_for(lambda: outs.status()["central"]["failed"] == 1)
+    assert outs.status()["central"]["queued"] == 0 and outs.status()["central"]["waiting"] is False
     outs.close()

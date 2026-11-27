@@ -39,8 +39,13 @@ EVENTS = ("alert", "utterance")
 FORMATS = ("json", "cap", "text")
 QUEUE_MAX = 2000  # events waiting per output; the oldest utterances go first when full
 BATCH_MAX = 200
-ALERT_ATTEMPTS = 6  # ~2 minutes of retries: 2, 4, 8, 16, 32, 60 s
+ALERT_ATTEMPTS = 6  # five waits between them, 2, 4, 8, 16 and 32 s: about a minute
 OTHER_ATTEMPTS = 3
+# Past those tries, while the other end can't be reached (or answers 408, 425, 429, 5xx), the
+# events wait at the head of the queue, still bounded by QUEUE_MAX, and go again after these
+# waits, doubling: a central server restarting loses nothing.
+HOLD_MIN_S = 5.0
+HOLD_MAX_S = 60.0
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 
 # transport(url, body, headers, timeout) -> HTTP status; raises OSError when nothing came back,
@@ -161,6 +166,11 @@ def urllib_transport(url: str, body: bytes, headers: dict[str, str], timeout: fl
         return int(e.code)
 
 
+def _retryable(status: int | None) -> bool:
+    """Whether a failure may pass: nothing came back, or the other end asked to wait."""
+    return status is None or status in (408, 425, 429) or status >= 500
+
+
 def sign(secret: str, timestamp: str, body: bytes) -> str:
     mac = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256)
     return "sha256=" + mac.hexdigest()
@@ -175,6 +185,7 @@ class _Stats:
     last_error: str | None = None
     last_error_at: float | None = None
     last_status: int | None = None
+    waiting: bool = False  # the other end is away: events wait for it to be back
 
 
 class _Worker:
@@ -191,16 +202,27 @@ class _Worker:
     def put(self, ev: dict[str, Any]) -> None:
         with self._cv:
             if len(self._q) >= QUEUE_MAX:
-                # Make room by dropping the oldest utterance; alerts are kept.
-                for i, old in enumerate(self._q):
-                    if old["type"] != "alert":
-                        del self._q[i]
-                        break
-                else:
-                    self._q.popleft()
-                self.stats.dropped += 1
+                self._drop_one()
             self._q.append(ev)
             self._cv.notify()
+
+    def _drop_one(self) -> None:
+        """Make room by dropping the oldest utterance; alerts are kept."""
+        for i, old in enumerate(self._q):
+            if old["type"] != "alert":
+                del self._q[i]
+                break
+        else:
+            self._q.popleft()
+        self.stats.dropped += 1
+
+    def _hold(self, events: list[dict[str, Any]]) -> None:
+        """Events the other end couldn't take go back to the head of the queue, in order,
+        to go again once it is back; the oldest utterances make room past QUEUE_MAX."""
+        with self._cv:
+            self._q.extendleft(reversed(events))
+            while len(self._q) > QUEUE_MAX:
+                self._drop_one()
 
     def close(self) -> None:
         with self._cv:
@@ -217,6 +239,13 @@ class _Worker:
                 self._cv.wait()
             if self._closed:
                 return None
+            # An alert goes before any utterance waiting, even ones held while the other end
+            # was away.
+            alert = next((i for i, ev in enumerate(self._q) if ev["type"] == "alert"), None)
+            if alert:
+                first = self._q[alert]
+                del self._q[alert]
+                return [first]
             first = self._q.popleft()
             if first["type"] == "alert" or self.config.batch_s <= 0:
                 return [first]
@@ -235,13 +264,23 @@ class _Worker:
             return batch
 
     def _run(self) -> None:
+        wait = HOLD_MIN_S
         while (events := self._take()) is not None:
             try:
-                self.outputs.send(
+                entry = self.outputs.send(
                     self.config, events, stats=self.stats, closed=lambda: self._closed
                 )
             except Exception:
                 log.exception("output %s failed", self.config.id)
+                continue
+            if entry["ok"] or not _retryable(entry["status"]):
+                self.stats.waiting, wait = False, HOLD_MIN_S
+                continue
+            self.stats.waiting = True
+            self._hold(events)
+            with self._cv:  # closing ends the wait
+                self._cv.wait_for(lambda: self._closed, timeout=wait)
+            wait = min(HOLD_MAX_S, wait * 2)
 
 
 class Outputs:
@@ -407,8 +446,7 @@ class Outputs:
                 status, error = None, str(getattr(e, "reason", e))[:200]
             if error is None:
                 break
-            retryable = status is None or status in (408, 425, 429) or status >= 500
-            if not retryable or n == tries or closed():
+            if not _retryable(status) or n == tries or closed():
                 break
             self._sleep(min(60.0, 2.0**n))
         ok = error is None
