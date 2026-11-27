@@ -28,7 +28,9 @@ def crop(scan: dict[str, Any], lo_mhz: float, hi_mhz: float) -> dict[str, Any] |
         return None
     i0, i1 = inside[0], inside[-1] + 1
     return {
-        "t": scan.get("t"), "serial": scan.get("serial"), "seconds": scan.get("seconds"),
+        # The receiver by its id, never its serial: what the page gets may be shown or pasted.
+        "t": scan.get("t"), "device": scan.get("device"), "what": scan.get("what"),
+        "seconds": scan.get("seconds"),
         "spectrum": {"start_mhz": round(a + i0 * step, 6), "stop_mhz": round(a + i1 * step, 6),
                      "db": db[i0:i1]},
         "signals": [s for s in scan.get("signals") or [] if lo_mhz <= s.get("mhz", 0) <= hi_mhz],

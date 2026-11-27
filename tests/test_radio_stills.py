@@ -66,3 +66,21 @@ def test_the_page_asks_for_a_still_picture_by_its_stretch(tmp_path: Path) -> Non
     assert status == 200 and body["scan"] is None
     status, _ = dispatch(App, "GET", "/api/manage/radio/scans", {"lo": "x"}, None)
     assert status == 400
+
+
+def test_a_still_names_its_receiver_never_its_serial(tmp_path: Path) -> None:
+    class Radio:
+        class catalog:
+            root = tmp_path
+
+    class App:
+        radio = Radio
+
+    saved = {**scan(87.5, 108.0, 2000, 100.0), "serial": "00001234", "device": "a", "what": "FM"}
+    save(tmp_path / "scans", "20260101-100000-a", saved)
+    status, body = dispatch(App, "GET", "/api/manage/radio/scans", {"lo": "97", "hi": "99"}, None)
+    assert status == 200 and "serial" not in body["scan"]
+    assert (body["scan"]["device"], body["scan"]["what"]) == ("a", "FM")
+    for q in ({}, {"lo": "97"}, {"lo": "nan", "hi": "99"}, {"lo": "97", "hi": "inf"}):
+        status, body = dispatch(App, "GET", "/api/manage/radio/scans", q, None)
+        assert status == 400 and "MHz" in body["error"], q

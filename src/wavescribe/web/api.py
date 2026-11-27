@@ -9,6 +9,7 @@ Each route is (method, pattern) -> handler(app, match, query, body) -> JSON-able
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from collections.abc import Callable
@@ -374,7 +375,15 @@ def _radio_tune(app: App, m, q, b) -> Any:
 @route("GET", "/radio/scans")
 def _radio_still(app: App, m, q, b) -> Any:
     """A still picture of ``lo`` to ``hi`` MHz from the saved scans (radio/stills.py)."""
-    return {"scan": stills.still(app.radio.catalog.root / "scans", float(q["lo"]), float(q["hi"]))}
+    try:
+        lo, hi = float(q["lo"]), float(q["hi"])
+    except (KeyError, TypeError, ValueError):
+        raise ChangeError(
+            "give lo and hi, the stretch of the dial in MHz, e.g. ?lo=87.5&hi=108"
+        ) from None
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        raise ChangeError("lo and hi must be numbers of MHz, e.g. ?lo=87.5&hi=108")
+    return {"scan": stills.still(app.radio.catalog.root / "scans", lo, hi)}
 
 
 # -- listening by hand (radio/live.py) ---------------------------------------------------------
