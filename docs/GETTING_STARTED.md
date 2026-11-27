@@ -275,7 +275,12 @@ From the command line, with Wavescribe running, in another Terminal window:
 uv run wavescribe digest                                    # stations heard in the last hour
 uv run wavescribe digest --stations tsf,antena1 --since 14:30 --language en
 uv run wavescribe digest --now --stations tsf               # what is TSF on about right now?
+uv run wavescribe digest --url http://localhost:8790        # serve was started with --port 8790
 ```
+
+The command asks the running `wavescribe serve` at `http://localhost:8765`. When `serve` was
+started with `--port`, give that address with `--url`; without it the command says that no
+Wavescribe answers.
 
 ```
 TSF Rádio Notícias, RTP Antena 1, 14:30-16:00
