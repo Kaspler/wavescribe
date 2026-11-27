@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  answerOf, digestBody, failureOf, linksOf, saidBy, shown, sinceClock, windowProblem,
+  answerOf, digestBody, failureOf, linksOf, nowBody, saidBy, shown, sinceClock, windowProblem,
 } from "../src/reading/digest.ts";
 
 const at = (h, m) => new Date(2026, 10, 27, h, m, 0, 0);
@@ -55,6 +55,11 @@ test("the request names the stations, the window and the language, and only thos
   assert.deepEqual(digestBody({ kind: "minutes", minutes: 15 }, { stations: ["tsf"] }), { kind: "digest", stations: ["tsf"], minutes: 15 });
   assert.deepEqual(digestBody({ kind: "since", at: 1234.9 }, { stations: ["tsf", "rr"], language: "es" }),
     { kind: "digest", stations: ["tsf", "rr"], since: 1234, language: "es" });
+});
+
+test("what a station is talking about now names the one station, and the language when given", () => {
+  assert.deepEqual(nowBody("tsf"), { kind: "now", stations: ["tsf"] });
+  assert.deepEqual(nowBody("tsf", "es"), { kind: "now", stations: ["tsf"], language: "es" });
 });
 
 test("points are shown with the stations not read; without points, the server's own sentences", () => {

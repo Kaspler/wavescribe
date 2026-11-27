@@ -180,4 +180,8 @@ export const T = {
   cantReach: "Couldn't reach Wavescribe: is it still running?",
   answerUnreadable: "The answer couldn't be read.",
   summaryReady: (n: number) => `Summary ready: ${n} point${n === 1 ? "" : "s"}.`,
+  summaryOfThis: "Summary of this station…",
+  nowAsk: "What are they talking about now?",
+  nowWorking: "Reading the last few minutes",
+  nowClose: "Put this away",
 };

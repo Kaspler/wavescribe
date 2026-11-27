@@ -102,6 +102,13 @@ export function digestBody(choice: Choice, o: { stations: string[]; language?: s
   return out;
 }
 
+/** The request for what one station is talking about now (the server's last few minutes). */
+export function nowBody(station: string, language?: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { kind: "now", stations: [station] };
+  if (language) out.language = language;
+  return out;
+}
+
 // -- the answer ------------------------------------------------------------------------------
 
 /** The server's answer, or null when it isn't one (a server from before digests, a proxy's page):

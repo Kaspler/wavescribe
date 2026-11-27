@@ -19,6 +19,7 @@ const FLASH_MS = 2400; // how long a line asked for by a link stays marked
 const PAGES_BACK = 20; // how far "Load earlier" may page back to reach such a line
 import { channelHeads, channelText } from "./channels";
 import { StationMenu } from "./StationMenu";
+import { NowLine } from "./Summary";
 import { T } from "./strings";
 import { topSeverity, utteranceWords, withInaudible } from "./text";
 
@@ -167,6 +168,7 @@ function ColumnHead({ st, span, onlyOne }: { st: Station; span: string | null; o
         )}
         {span && <span className="col-span num" title="The time span in view">{span}</span>}
       </p>
+      <NowLine id={st.id} />
       {away && (
         <div className="col-reach">
           <p>{st.out_of_reach}</p>

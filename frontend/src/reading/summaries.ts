@@ -2,7 +2,9 @@
 // lines it rests on (POST /api/digest; reading/digest.ts reads it). The server and the command
 // line call it a digest; the page says "summary", the word its notifications and its voice use.
 // One summary at a time per tab: a second waits for the first to be cancelled, since the model
-// makes them one after the other anyway. The last one survives a reload of this tab.
+// makes them one after the other anyway. The last one survives a reload of this tab. What a
+// station is talking about now is asked once at a time per station; beyond the two the server
+// makes at once, its own answer says to try again.
 import { fetchRead } from "../lib/auth";
 import { sameLang } from "../lib/lang";
 import { S } from "../lib/live";
@@ -10,7 +12,7 @@ import { P, visible } from "../lib/prefs";
 import { MAX_COLS, setCols } from "../lib/router";
 import { emit } from "../lib/store";
 import { V, showLine } from "../lib/view";
-import { type Answer, type Choice, type Failure, answerOf, digestBody, failureOf } from "./digest";
+import { type Answer, type Choice, type Failure, answerOf, digestBody, failureOf, nowBody } from "./digest";
 import { T } from "./strings";
 
 export interface Job {
@@ -66,21 +68,15 @@ export function readerLanguage(stations: string[]): string | undefined {
   return stations.some(has) ? lang : undefined;
 }
 
-/** Asks for a summary of `stations` over `choice`; the answer opens beside the columns. */
-export async function askSummary(choice: Choice, stations: string[]) {
-  if (Sm.job?.state === "working") return;
-  const job: Job = { stations, choice, asked: Date.now(), took: null, state: "working", answer: null, failure: null };
-  const mine = new AbortController();
-  ctl = mine;
-  Sm.job = job;
-  Sm.open = true;
-  emit("summary");
+/** Sends `body` and fills `job` with the answer or why there is none; "cancelled" when `signal`
+ * stopped the wait. */
+async function fetchAnswer(job: Job | NowJob, body: Record<string, unknown>, signal: AbortSignal) {
   try {
     const r = await fetchRead("/api/digest", {
       method: "POST",
       headers: { "X-Wavescribe": "1", "Content-Type": "application/json" },
-      body: JSON.stringify(digestBody(choice, { stations, language: readerLanguage(stations) })),
-      signal: mine.signal,
+      body: JSON.stringify(body),
+      signal,
     });
     const data = await r.json().catch(() => null);
     if (!r.ok) {
@@ -92,13 +88,25 @@ export async function askSummary(choice: Choice, stations: string[]) {
       if (!job.answer) job.failure = { kind: "failed", text: T.answerUnreadable, retry: true, retryAfter: null };
     }
   } catch {
-    if (mine.signal.aborted) job.state = "cancelled";
+    if (signal.aborted) job.state = "cancelled";
     else {
       job.failure = { kind: "unreachable", text: T.cantReach, retry: true, retryAfter: null };
       job.state = "failed";
     }
   }
   if (job.state !== "cancelled") job.took = Date.now() - job.asked;
+}
+
+/** Asks for a summary of `stations` over `choice`; the answer opens beside the columns. */
+export async function askSummary(choice: Choice, stations: string[]) {
+  if (Sm.job?.state === "working") return;
+  const job: Job = { stations, choice, asked: Date.now(), took: null, state: "working", answer: null, failure: null };
+  const mine = new AbortController();
+  ctl = mine;
+  Sm.job = job;
+  Sm.open = true;
+  emit("summary");
+  await fetchAnswer(job, digestBody(choice, { stations, language: readerLanguage(stations) }), mine.signal);
   if (ctl === mine) ctl = null;
   keep();
   emit("summary");
@@ -110,6 +118,38 @@ export function cancelSummary() {
   Sm.job.state = "cancelled";
   ctl?.abort();
   emit("summary");
+}
+
+// -- what a station is talking about now: one line under its column's head --------------------
+
+export interface NowJob {
+  asked: number;
+  took: number | null;
+  state: Job["state"];
+  answer: Answer | null;
+  failure: Failure | null;
+  ctl: AbortController;
+}
+
+/** By station, the last "now" asked in this tab. */
+export const Now: Record<string, NowJob> = {};
+
+export async function askNow(station: string) {
+  if (Now[station]?.state === "working") return;
+  const job: NowJob = { asked: Date.now(), took: null, state: "working", answer: null, failure: null, ctl: new AbortController() };
+  Now[station] = job;
+  emit(`now:${station}`);
+  await fetchAnswer(job, nowBody(station, readerLanguage([station])), job.ctl.signal);
+  emit(`now:${station}`);
+}
+
+/** Puts the line away, and stops waiting for it if it is still being made. */
+export function dropNow(station: string) {
+  const job = Now[station];
+  if (!job) return;
+  job.ctl.abort();
+  delete Now[station];
+  emit(`now:${station}`);
 }
 
 export function showSummary(open: boolean) {

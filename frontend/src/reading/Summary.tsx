@@ -1,6 +1,7 @@
 // Summaries on the page: the header's control and its choice of window, and the answer, which
 // opens beside the columns (on a phone, as a page of its own) and stays there while new lines
-// arrive and while its lines are opened in the transcript.
+// arrive and while its lines are opened in the transcript. And what one station is talking about
+// now, a line under its column's head.
 import { useEffect, useId, useRef, useState } from "react";
 import { awaySince, looked } from "../lib/away";
 import { S } from "../lib/live";
@@ -12,9 +13,9 @@ import { Icon } from "../components/Icon";
 import { Button, LinkButton, cx, useDismiss } from "../components/ui";
 import { SEV_WORD, human } from "./Alerts";
 import { SourceRow } from "./Ask";
-import { type Answer, type Choice, type Failure, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, linksOf, saidBy, shown, sinceClock, windowProblem } from "./digest";
+import { type Answer, type Choice, type Failure, type Link, type Point, MAX_MINUTES, REMOTE_MINUTES, SPANS, linksOf, saidBy, shown, sinceClock, windowProblem } from "./digest";
 import { T } from "./strings";
-import { type Job, Sm, askSummary, cancelSummary, openLine, readingStations, showSummary } from "./summaries";
+import { type Job, Now, Sm, askNow, askSummary, cancelSummary, dropNow, openLine, readingStations, showSummary } from "./summaries";
 
 const names = (ids: string[]) => ids.map((id) => S.byId[id]?.name || id);
 
@@ -274,32 +275,82 @@ function AnswerView({ a, took }: { a: Answer; took: number | null }) {
 
 function PointView({ p, a }: { p: Point; a: Answer }) {
   const by = saidBy(p, a);
-  const links = linksOf(p, a);
-  // Two lines in the same minute are told apart by their seconds.
-  const minutes = links.map((l) => whenLabel(l.t));
-  const label = new Set(minutes).size < minutes.length ? hms : whenLabel;
   return (
     <li className="sum-point">
       {by && <p className="sum-who" dir="auto">{by}</p>}
       <p className="sum-text" dir="auto" lang={a.language}>{p.text}</p>
-      {links.length > 0 && (
-        <p className="sum-lines">
-          <span className="sum-from">{T.from}</span>
-          {links.map((l) => {
-            const who = l.who || S.byId[l.station]?.name || l.station;
-            const at = label(l.t);
-            return Object.hasOwn(S.byId, l.station) ? (
-              <button key={l.n} type="button" className="sum-line num" onClick={() => openLine(l.station, l.id)}
-                      aria-label={T.lineAt(who, at)} title={T.showInTranscript}>
-                {l.who ? `${l.who} ${at}` : at}
-              </button>
-            ) : (
-              <span key={l.n} className="sum-line is-static num">{l.who ? `${l.who} ${at}` : at}</span>
-            );
-          })}
-        </p>
-      )}
+      <Lines links={linksOf(p, a)} />
     </li>
+  );
+}
+
+/** The times of the lines a point rests on, each opening its line in the transcript. */
+function Lines({ links }: { links: Link[] }) {
+  if (!links.length) return null;
+  // Two lines in the same minute are told apart by their seconds.
+  const minutes = links.map((l) => whenLabel(l.t));
+  const label = new Set(minutes).size < minutes.length ? hms : whenLabel;
+  return (
+    <p className="sum-lines">
+      <span className="sum-from">{T.from}</span>
+      {links.map((l) => {
+        const who = l.who || S.byId[l.station]?.name || l.station;
+        const at = label(l.t);
+        return Object.hasOwn(S.byId, l.station) ? (
+          <button key={l.n} type="button" className="sum-line num" onClick={() => openLine(l.station, l.id)}
+                  aria-label={T.lineAt(who, at)} title={T.showInTranscript}>
+            {l.who ? `${l.who} ${at}` : at}
+          </button>
+        ) : (
+          <span key={l.n} className="sum-line is-static num">{l.who ? `${l.who} ${at}` : at}</span>
+        );
+      })}
+    </p>
+  );
+}
+
+/** What a station is talking about now: under its column's head, so the transcript keeps its
+ * place, until put away. */
+export function NowLine({ id }: { id: string }) {
+  useTopics(`now:${id}`, "prefs");
+  const job = Now[id];
+  if (!job) return null;
+  const a = job.answer;
+  const v = a ? shown(a) : null;
+  const close = <Button size="sm" variant="ghost" icon="close" aria-label={T.nowClose} title={T.nowClose} onClick={() => dropNow(id)} />;
+  return (
+    <div className="col-now" aria-busy={job.state === "working"}>
+      {job.state === "working" ? (
+        <div className="col-now-row">
+          <p className="col-now-wait">{T.nowWorking} <Elapsed since={job.asked} /></p>
+          <Button size="sm" variant="ghost" onClick={() => dropNow(id)}>{T.cancel}</Button>
+        </div>
+      ) : job.state === "failed" && job.failure ? (
+        <div className="col-now-row">
+          <p className="col-now-said" dir="auto">{job.failure.text}</p>
+          {job.failure.retry && <Button size="sm" variant="ghost" icon="refresh" onClick={() => askNow(id)}>{T.tryAgain}</Button>}
+          {close}
+        </div>
+      ) : a && v ? (
+        <>
+          <div className="col-now-row">
+            <div className="col-now-body">
+              {v.points.length ? v.points.map((p, i) => (
+                <div key={i} className="col-now-point">
+                  <p className="col-now-text" dir="auto" lang={a.language}>{p.text}</p>
+                  <Lines links={linksOf(p, a)} />
+                </div>
+              )) : <p className="col-now-said">{v.sentences}</p>}
+            </div>
+            {close}
+          </div>
+          {v.notice && <p className="col-now-notice">{v.notice}</p>}
+        </>
+      ) : null}
+      <p className="sr-only" role="status">
+        {job.state === "working" ? T.nowWorking : job.state === "failed" ? job.failure?.text : v ? (v.points[0]?.text ?? v.sentences) : ""}
+      </p>
+    </div>
   );
 }
 
