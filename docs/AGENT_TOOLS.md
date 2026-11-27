@@ -82,7 +82,9 @@ start and stop stations, and read digests aloud, add `"--allow-control"` at the 
 Its own messages go to stderr: stdout carries the protocol and nothing else.
 
 It talks to the Wavescribe at `http://localhost:8765`. `--url` points it at another one, such as
-`serve --port 8790` (`"--url", "http://localhost:8790"` in `args`), and `--token` gives the feed
+`serve --port 8790` (`"--url", "http://localhost:8790"` in `args`; an address that isn't
+`http://` or `https://` with a host stops it at start, so the agent shows no tools rather than
+failing on each), and `--token` gives the feed
 token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who can read what*);
 `WAVESCRIBE_TOKEN` in the environment does the same without showing in the list of running
 processes. The control tools work only with the Wavescribe on the same Mac. Behind a proxy
@@ -185,7 +187,7 @@ printed once.
 | `--alerts-only` | alerts, no utterances |
 | `--since-id ID`, `--since EPOCH` | first, what finished after that resume point, or was heard since that time (up to 1,000), then live. `ID` is a `resume` as `follow` gives it (`195,197`), or an utterance's `id`, which skips a line that was still being translated then |
 | `--resume FILE` | keep the resume point in `FILE`, and start from it: see *Stopping and going on* |
-| `--url URL` | another Wavescribe (default `http://localhost:8765`): an `http://` or `https://` address with a host; anything else is refused at once, and `follow` exits 2 |
+| `--url URL` | another Wavescribe (default `http://localhost:8765`): an `http://` or `https://` address with a host; anything else is refused at once with exit 2, by `follow`, `digest` and `mcp` alike |
 | `--token TOKEN` | a feed token, which a Wavescribe on another machine asks for once it has one ([FEED.md](FEED.md), *Who can read what*); `WAVESCRIBE_TOKEN` in the environment does the same and doesn't show in the list of running processes |
 
 **Stopping and going on.** Lines don't always finish in order: one still being translated
