@@ -235,6 +235,12 @@ def test_numbers_apart_from_a_point_are_no_source_of_it() -> None:
     assert parse_points(reply, 4) == Parsed([("Water is cut tomorrow.", [1])], 1, False)
 
 
+def test_a_range_of_sources_cites_each_of_them() -> None:
+    parsed = parse_points("- Water is cut tomorrow [1-3].\n- Rain [2\u20134, 9].\n- Wind [5-1].", 6)
+    assert parsed.points == [("Water is cut tomorrow.", [1, 2, 3]), ("Rain.", [2, 3, 4])]
+    assert parsed.uncited == 1  # a range backwards is no citation
+
+
 def test_a_point_is_one_sentence_however_long_the_reply() -> None:
     prose = "The water is cut tomorrow in the centre [1]. " + "Then more was said, " * 60 + "[2]."
     [(text, cited)] = parse_points(prose, 4).points

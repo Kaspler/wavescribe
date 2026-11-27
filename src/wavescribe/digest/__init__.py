@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Digests: what mattered on some stations over a stretch of time, in the reader's language,
-each point with the moments it rests on.
+"""Digests: a few points the local model picked out of what some stations said over a stretch
+of time, in the reader's language, each point with the moments it rests on.
 
     digest   "what did I miss?": the last N minutes or hours of the stations chosen
     now      "what are they talking about?": the last few minutes of one station
@@ -128,7 +128,7 @@ ORDER = (
     "dangers, then decisions and events that touch many people, then the rest"
 )
 _POINT = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")  # "- ", also "* ", "1. "
-_CITATION = re.compile(r"\[\s*(\d+(?:\s*[,;]\s*\d+)*)\s*\]")
+_CITATION = re.compile(r"\[\s*(\d+(?:\s*[-\u2013,;]\s*\d+)*)\s*\]")
 _NONE = re.compile(r"^\W*NONE\W*:")
 _SENTENCE_END = re.compile(r"[.!?\u2026\u3002\uff01\uff1f](?=\s|$)")
 _GROUP = re.compile(r"\d+(?:\s*\+\s*\d+)*")  # "3+9" in "3+9, 7, 1"
@@ -954,7 +954,7 @@ def parse_points(reply: str, count: int) -> Parsed:
         if _NONE.match(body):
             none = True
             continue
-        cited = [int(n) for group in _CITATION.findall(body) for n in re.findall(r"\d+", group)]
+        cited = [n for group in _CITATION.findall(body) for n in _numbers(group)]
         cited = [n for n in dict.fromkeys(cited) if 1 <= n <= count]
         bare = _CITATION.sub("", body)
         # "said so: [3]" and "said so — [3]" lose what stood before the numbers too.
@@ -967,6 +967,18 @@ def parse_points(reply: str, count: int) -> Parsed:
             continue
         found.append((within(text, POINT_CHARS), cited[:CITED]))
     return Parsed(found, uncited, none and not found)
+
+
+def _numbers(group: str) -> list[int]:
+    """The numbers a citation gives: "1, 4", or a range, "1-3"; a range backwards gives none."""
+    out: list[int] = []
+    for part in re.split(r"\s*[,;]\s*", group.strip()):
+        ends = [int(n) for n in re.split(r"\s*[-\u2013]\s*", part)]
+        if len(ends) == 1:
+            out.append(ends[0])
+        elif len(ends) == 2 and ends[0] <= ends[1]:
+            out += range(ends[0], min(ends[1], ends[0] + CITED) + 1)
+    return out
 
 
 def within(text: str, limit: int) -> str:

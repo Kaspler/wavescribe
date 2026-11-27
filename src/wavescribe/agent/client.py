@@ -114,10 +114,24 @@ class Client:
 
     def digest(self, body: dict[str, Any]) -> Any:
         """A digest (``POST /api/digest``), once the server's model has made it."""
-        with self.open(
-            "POST", "/api/digest", body=body, control=True, timeout=DIGEST_TIMEOUT_S
-        ) as resp:
-            return json.loads(resp.read())
+        try:
+            resp = self.open(
+                "POST", "/api/digest", body=body, control=True, timeout=DIGEST_TIMEOUT_S
+            )
+        except Refused as e:
+            if e.status != 404:  # the route never answers 404: a Wavescribe from before it
+                raise
+            raise Refused(
+                404, f"the Wavescribe at {self.url} makes no digests; update it and restart it"
+            ) from None
+        with resp:
+            try:
+                return json.loads(resp.read())
+            except ValueError:
+                raise Refused(
+                    resp.status,
+                    f"what answers at {self.url} isn't Wavescribe; give its address with --url",
+                ) from None
 
 
 def _reason(e: urllib.error.HTTPError) -> str:

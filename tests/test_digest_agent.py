@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import argparse
+import http.server
 import json
 import socket
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -78,6 +80,39 @@ def test_the_command_says_to_start_wavescribe_when_none_answers(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == "" and len(captured.err.splitlines()) == 1
     assert "no Wavescribe answers" in captured.err and "wavescribe serve" in captured.err
+
+
+def test_the_command_explains_a_server_without_digests_or_not_wavescribes(capsys) -> None:
+    answers = [(404, b'{"error": "not found"}'), (200, b"<html>A router's page</html>")]
+
+    class Other(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            status, body = answers.pop(0)
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Other)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        assert main(["digest", "--url", url]) == 1
+        assert capsys.readouterr().err == (
+            f"wavescribe: the Wavescribe at {url} makes no digests; update it and restart it "
+            "(HTTP 404)\n"
+        )
+        assert main(["digest", "--url", url]) == 1
+        assert capsys.readouterr().err == (
+            f"wavescribe: what answers at {url} isn't Wavescribe; give its address with --url "
+            "(HTTP 200)\n"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_mcp_digest_and_now_return_points_with_their_sources(tmp_path: Path) -> None:
