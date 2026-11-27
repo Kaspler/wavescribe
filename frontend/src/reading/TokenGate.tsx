@@ -31,7 +31,7 @@ export function TokenGate() {
     <main className="gate" id="main" tabIndex={-1}>
       <form className="gate-box" onSubmit={submit} aria-labelledby="gate-h">
         <h1 id="gate-h">{T.tokenTitle}</h1>
-        <p>{T.tokenBody}</p>
+        <p>{T.tokenBody.ask} <code>{T.tokenBody.command}</code> {T.tokenBody.or}</p>
         <Field id="gate-token" label={T.tokenLabel}>
           <Input id="gate-token" type="password" value={token} autoFocus autoComplete="off" spellCheck={false}
                  aria-invalid={why ? true : undefined} aria-describedby={why ? "gate-why" : undefined}

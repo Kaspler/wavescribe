@@ -109,7 +109,13 @@ export const T = {
   connectionLost: "Connection to Wavescribe lost. Reconnecting; the lamps show the last known state.",
   cantConnect: "Can't connect",
   tokenTitle: "This Wavescribe asks for a read token",
-  tokenBody: "Its owner makes read tokens under Settings, Connections on the Wavescribe machine. This browser keeps the token, so it is asked for once.",
+  // Around the command, which is shown as code. Behind a proxy the page's settings are refused even
+  // on the Wavescribe machine, so the command comes first.
+  tokenBody: {
+    ask: "Ask its owner for a read token. They make one on the Wavescribe machine with",
+    command: "wavescribe token make",
+    or: "(or under Settings → Connections when it isn't behind a proxy). This browser keeps the token, so it is asked for once.",
+  },
   tokenLabel: "Read token",
   tokenGo: "Read",
   tokenWrong: "That token isn't accepted. Check it, or ask the owner for a new one.",
