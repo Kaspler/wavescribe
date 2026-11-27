@@ -5,11 +5,13 @@ import { sameLang, shownLang } from "../lib/lang";
 import { S } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
+import { goToLine } from "../lib/view";
 import { useTopics } from "../lib/store";
 import { hm, whenLabel } from "../lib/time";
 import type { SearchHit, Station } from "../lib/types";
 import { Button } from "../components/ui";
-import { snippet } from "./text";
+import { markWords, snippet } from "./text";
+import { T } from "./strings";
 
 const SEARCH_LIMIT = 60; // the server's (web/server.py, _search)
 
@@ -45,7 +47,7 @@ export function Search({ q }: { q: string }) {
       <div className="panel-body">
         {st.hits && n > 0 && (
           <ol className="hits">
-            {st.hits.map((h) => <HitRow key={`${h.id}:${h.field}`} h={h} />)}
+            {st.hits.map((h) => <HitRow key={`${h.id}:${h.field}`} h={h} q={st.q} />)}
           </ol>
         )}
         {st.hits && !n && !st.error && (
@@ -56,11 +58,13 @@ export function Search({ q }: { q: string }) {
   );
 }
 
-function HitRow({ h }: { h: SearchHit }) {
+function HitRow({ h, q }: { h: SearchHit; q: string }) {
   const st: Station = S.byId[h.station] || { id: h.station, name: h.station, language: h.language, translate_to: [] } as unknown as Station;
   const shown = shownLang(st, P.lang);
-  // The other side of the match: the reader's translation of a source hit, or the source of a translation hit.
-  const other = h.field === "source" ? (sameLang(shown, st.language) ? null : h.translations[shown]) : h.text;
+  // The hit in the reader's language when it has one and the match was in another; the match
+  // itself under it. Otherwise the match first, with the original under a translation's match.
+  const mine = sameLang(h.field_lang, shown) ? null : sameLang(shown, h.language) ? h.text : h.translations[shown] ?? null;
+  const original = !mine && h.field !== "source" ? h.text : null;
   return (
     <li className="hit">
       <div className="hit-meta">
@@ -69,21 +73,24 @@ function HitRow({ h }: { h: SearchHit }) {
         ) : (
           <span className="hit-station" dir="auto">{st.name}</span>
         )}
-        <time className="num">{whenLabel(h.t_start)}</time>
+        {S.byId[h.station] && h.t_start != null ? (
+          <button type="button" className="hit-time num" onClick={() => goToLine(h.station, h.id)} title={T.showInTranscript}>{whenLabel(h.t_start)}</button>
+        ) : (
+          <time className="num">{whenLabel(h.t_start)}</time>
+        )}
         {h.audio && (
           <Button size="sm" variant="ghost" icon="play" onClick={() => playReplay([h.id], `${st.name} ${hm(h.t_start)}`)}>Play</Button>
         )}
       </div>
-      {h.field === "source" && other ? (
-        // Matched in the original, read in the reader's language first.
+      {mine ? (
         <>
-          <p className="hit-text" dir="auto" lang={shown}>{other}</p>
+          <p className="hit-text" dir="auto" lang={shown}>{markWords(mine, q)}</p>
           <p className="hit-other" dir="auto" lang={h.field_lang}>{snippet(h.snippet)}</p>
         </>
       ) : (
         <>
           <p className="hit-text" dir="auto" lang={h.field_lang}>{snippet(h.snippet)}</p>
-          {other && <p className="hit-other" dir="auto">{other}</p>}
+          {original && <p className="hit-other" dir="auto" lang={h.language}>{original}</p>}
         </>
       )}
     </li>

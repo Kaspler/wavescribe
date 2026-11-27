@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
-import { dirOf, langName, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
+import { dirOf, langNameEn, otherLang, pick, sameLang, shownLang } from "../lib/lang";
 import { S, linesAround, loadEarlier, post, running, setNotice, startStation } from "../lib/live";
 import { P } from "../lib/prefs";
 import { go, setCols } from "../lib/router";
@@ -354,7 +354,7 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
   return (
     <div className="para" data-t={para.start}>
       {ids.length ? (
-        <button type="button" className="ts" title={`Play from ${hms(para.start)}`}
+        <button type="button" className="ts" title={`Play from ${hms(para.start)}`} aria-label={`Play from ${whenLabel(para.start)}`}
                 onClick={() => playReplay(ids, `${st.name} ${hm(para.start)}`)}>
           <Icon name="play" size={10} /><time className="num">{whenLabel(para.start)}</time>
         </button>
@@ -383,7 +383,7 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
         )}
         {!src && revealed && (
           <p className="para-src is-one" dir={dirOf(revealed.language || st.language)} lang={revealed.language || st.language}>
-            <span className="para-src-lang">{langName(revealed.language || st.language).split(" · ").pop()}</span>
+            <span className="para-src-lang">{langNameEn(revealed.language || st.language)}</span>
             {withInaudible(revealed.text)}
           </p>
         )}
@@ -398,7 +398,7 @@ const ParaView = memo(function ParaView({ para, st, shown, src }: { para: Para; 
 function labelOf(u: Utterance, st: Station, shown: string): string {
   const [, lang, state] = pick(u, st, shown);
   const other = otherLang(u);
-  return state === "untranslated" ? langNameEn(lang) : other ? T.heardAs(langNameEn(other)) : "";
+  return state === "untranslated" ? langNameEn(lang) : other ? T.saidIn(langNameEn(other)) : "";
 }
 
 function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; shown: string; linked: boolean; label: boolean }) {
@@ -417,7 +417,7 @@ function UttView({ u, st, shown, linked, label }: { u: Utterance; st: Station; s
     );
   }
   const title = [
-    other ? `Heard as ${langNameEn(other)}: maybe a song or a clip in another language` : "",
+    other ? `Said in ${langNameEn(other)}: maybe a song or a clip in another language` : "",
     hits.length ? `Alert rule: ${[...new Set(hits.map((h) => h.rule))].join(", ")}` : "",
     state === "untranslated" ? `Not translated into ${langNameEn(shown)}` : "",
   ].filter(Boolean).join(" · ");

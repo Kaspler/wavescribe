@@ -39,16 +39,34 @@ export function utteranceWords(u: Utterance, text: string): ReactNode[] {
   return withMarks(text, hits.flatMap((h) => h.spans.map(([a, b]) => [a, b, h.severity] as const)));
 }
 
-/** A search snippet: the server wraps matches in \x02 … \x03. */
+// The letters a match may stop in the middle of.
+const WORD_END = /[\p{L}\p{N}\p{M}'’]+$/u;
+const WORD_START = /^[\p{L}\p{N}\p{M}'’]+/u;
+
+/** A search snippet: the server wraps matches in \x02 … \x03. A match is widened to the whole
+ * word it falls in: "road" found in "roads" marks "roads". */
 export function snippet(text: string): ReactNode[] {
+  const parts = text.split("\x02");
   const out: ReactNode[] = [];
-  text.split("\x02").forEach((part, i) => {
-    if (i === 0) {
-      out.push(...withInaudible(part, `s${i}`));
-      return;
-    }
+  let before = parts[0];
+  parts.slice(1).forEach((part, i) => {
     const [hit, rest = ""] = part.split("\x03");
-    out.push(<mark key={`h${i}`} className="found">{hit}</mark>, ...withInaudible(rest, `r${i}`));
+    const head = WORD_END.exec(before)?.[0] || "";
+    const tail = hit ? WORD_START.exec(rest)?.[0] || "" : "";
+    out.push(...withInaudible(before.slice(0, before.length - head.length), `s${i}`));
+    out.push(<mark key={`h${i}`} className="found">{head + hit + tail}</mark>);
+    before = rest.slice(tail.length);
   });
+  out.push(...withInaudible(before, "end"));
   return out;
+}
+
+/** `text` with every whole word that holds one of the searched words marked, for text the
+ * search didn't match itself (the reader's translation of a hit). */
+export function markWords(text: string, q: string): ReactNode[] {
+  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const terms = q.split(/\s+/).map((w) => fold(w.replace(/["*()^:]/g, ""))).filter((w) => w.length > 1 && !/^(and|or|not|near)$/i.test(w));
+  if (!terms.length) return withInaudible(text);
+  return text.split(/([\p{L}\p{N}\p{M}'’]+)/u).map((w, i) =>
+    i % 2 && terms.some((t) => fold(w).includes(t)) ? <mark key={i} className="found">{w}</mark> : <span key={i}>{withInaudible(w, `w${i}`)}</span>);
 }

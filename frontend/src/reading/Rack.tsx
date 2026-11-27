@@ -161,6 +161,7 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
           <span>{langNameEn(st.language)}</span>
           {word && <span className={cx(state.lamp === "trouble" && "is-trouble")} title={state.detail || undefined}>{word}</span>}
         </span>
+        {!stale && state.lamp === "trouble" && state.detail && <span className="ch-why" title={state.detail}>{state.detail}</span>}
         <span className="ticks" style={{ "--lv": level.toFixed(3) } as React.CSSProperties} aria-hidden="true">
           <span className="ticks-lit" />
         </span>

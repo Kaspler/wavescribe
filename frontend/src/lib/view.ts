@@ -18,6 +18,13 @@ export function showLine(station: string, id: number) {
   emit("focus");
 }
 
+/** Opens a station's column at one of its lines (a search hit's, an excerpt's). */
+export function goToLine(station: string, id: number) {
+  showLine(station, id);
+  const hash = `#/s/${station}`;
+  if (location.hash !== hash) location.hash = hash;
+}
+
 export function setShown(ids: string[]) {
   if (ids.join(",") === V.shown.join(",")) return;
   V.shown = ids;

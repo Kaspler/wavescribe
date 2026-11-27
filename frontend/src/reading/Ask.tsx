@@ -10,6 +10,8 @@ import { hm, whenLabel } from "../lib/time";
 import type { Station } from "../lib/types";
 import { Icon } from "../components/Icon";
 import { Button, cx } from "../components/ui";
+import { goToLine } from "../lib/view";
+import { T } from "./strings";
 
 interface Source {
   n: number;
@@ -182,8 +184,9 @@ export function Ask() {
 }
 
 function planLabel(plan: Plan): string {
-  const names = plan.stations.map((id) => S.byId[id]?.name || id);
-  const where = names.length ? names.join(", ") : "all stations";
+  // The stations it searched, by name; one that is gone isn't named by its id.
+  const names = plan.stations.map((id) => S.byId[id]?.name).filter(Boolean);
+  const where = names.length ? names.join(", ") : "every station";
   const when = `${whenLabel(plan.since)}–${whenLabel(plan.until)}`;
   const terms = plan.terms.slice(0, 10).join(", ");
   const what = plan.sampled ? `nothing matched ${terms}, so a sample of everything said`
@@ -209,7 +212,7 @@ function TurnView({ t }: { t: Turn }) {
       <div className="turn-a" dir="auto" aria-live="polite" aria-busy={!t.done}>
         {t.error ? <p className="turn-err"><Icon name="warn" /> {t.error}</p>
           : t.text ? <Answer text={t.text} onCite={cite} />
-          : t.plan && !t.done ? <p className="turn-reading">Reading the excerpts<span className="dots"><i /><i /><i /></span></p> : null}
+          : t.plan && !t.done ? <p className="turn-reading">{S.manage ? T.thinkingHere : T.thinking}</p> : null}
       </div>
       {t.sources.length > 0 && (
         <details className="turn-srcs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
@@ -219,7 +222,12 @@ function TurnView({ t }: { t: Turn }) {
           </ol>
         </details>
       )}
-      {t.meta && <p className="turn-meta num">{t.meta.model} · {(t.meta.total_ms / 1000).toFixed(1)} s</p>}
+      {t.meta && (
+        <details className="turn-meta">
+          <summary>Details</summary>
+          <p className="num">{t.meta.model} · {(t.meta.total_ms / 1000).toFixed(1)} s</p>
+        </details>
+      )}
     </article>
   );
 }
@@ -267,7 +275,11 @@ function SourceRow({ s, id, flash }: { s: Source; id: string; flash: boolean }) 
       <div className="hit-meta">
         <span className="cite is-static">{s.n}</span>
         <span className="hit-station" dir="auto">{st.name}</span>
-        <time className="num">{whenLabel(s.t_start)}</time>
+        {S.byId[s.station] && s.t_start != null ? (
+          <button type="button" className="hit-time num" onClick={() => goToLine(s.station, s.id)} title={T.showInTranscript}>{whenLabel(s.t_start)}</button>
+        ) : (
+          <time className="num">{whenLabel(s.t_start)}</time>
+        )}
         {s.audio && <Button size="sm" variant="ghost" icon="play" onClick={() => playReplay([s.id], `${st.name} ${hm(s.t_start)}`)}>Play</Button>}
       </div>
       <p className="hit-text" dir="auto" lang={translated ? shown : s.language}>{translated || s.text}</p>

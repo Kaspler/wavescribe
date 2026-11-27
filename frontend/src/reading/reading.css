@@ -59,6 +59,7 @@
   align-items: center;
   gap: 8px;
   flex: 0 1 460px;
+  min-width: 0; /* gives way before the header's own buttons do, at 200 % zoom say */
   height: 32px;
   margin: 0 auto;
   padding: 0 8px 0 10px;
@@ -275,7 +276,9 @@ a.playing-label:hover { text-decoration: underline; }
   overflow: hidden;
 }
 .ch-sub > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ch-sub > span:first-child { flex: none; max-width: 60%; }
+.ch-sub > span:first-child { flex: none; max-width: 100%; }
+/* Why a station is in trouble, in its row: "Retrying (9 attempts so far)". */
+.ch-why { display: block; padding-left: 16px; font-size: var(--t-xs); line-height: 1.35; color: var(--band-lamp-trouble); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ch-sub > span + span::before { content: "·"; margin-right: 6px; }
 .ch-sub .is-trouble { color: var(--band-lamp-trouble); }
 .ch-actions {
@@ -472,7 +475,9 @@ button.ts:hover svg, button.ts:focus-visible svg { opacity: 1; }
 .u-flash { border-radius: 2px; animation: u-flash 2.4s var(--ease); }
 @keyframes u-flash { 0%, 55% { background: var(--accent-tint); } }
 @media (prefers-reduced-motion: reduce) { .u-flash { animation: none; background: var(--accent-tint); } }
-.u-untranslated, .u-other { color: var(--ink-2); }
+.u-untranslated { color: var(--ink-2); }
+/* Words said in another language are what was said, not a fallback: full contrast, chip too. */
+.u-other .u-lang { color: var(--ink-2); }
 .is-linked { background: var(--accent-tint); }
 .para-text .u[data-k] { cursor: default; }
 .u-pending { color: var(--ink-3); }
@@ -701,6 +706,11 @@ button.cite:hover { border-color: var(--accent); color: var(--ink); }
 .turn-srcs summary:hover { color: var(--ink); }
 .turn-srcs ol { margin-top: 6px; }
 .turn-meta { margin-top: 10px; font-size: var(--t-sm); color: var(--ink-3); }
+.turn-meta summary { cursor: pointer; width: fit-content; }
+.turn-meta p { margin-top: 4px; }
+/* A hit's time opens its line in the transcript. */
+.hit-time { padding: 0; border: 0; background: none; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
+.hit-time:hover { color: var(--ink); text-decoration-color: currentColor; }
 .composer { display: flex; gap: 8px; max-width: calc(760px + 2 * var(--s8)); width: 100%; margin: 0 auto; padding: var(--s5) var(--s8) var(--s6); }
 .composer textarea {
   flex: 1;
