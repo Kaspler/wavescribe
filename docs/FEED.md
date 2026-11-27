@@ -306,7 +306,8 @@ refused (400), so it never replaces that one and its secret or headers:
   alert, is over (`ended`); never for each mention. In `cap` format the first is a CAP `Alert`
   and the others are an `Update` with an identifier of their own, all in the same `incidents`.
   In `text` format the first line says "(more serious now)", "(still being mentioned)" or
-  "(over)".
+  "(over)", and "not checked" after the severity when the model couldn't check the match; in
+  `cap` format that is the parameter `checked`.
 - On a network error, 408, 425, 429 or 5xx, an alert gets six tries, 2, 4, 8, 16 and 32 s
   apart (about a minute), and utterances three (2 and 4 s apart).
 - If the other end is still away after those, nothing is dropped: the events wait at the head

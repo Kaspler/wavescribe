@@ -104,6 +104,20 @@ def test_config_validation() -> None:
     ):
         with pytest.raises(OutputError):
             OutputConfig.from_dict(bad)
+    # A value of the wrong kind in a hand-edited file is refused by name too: any other error
+    # would stop Wavescribe at start instead of skipping the one output.
+    for key, value in (
+        ("batch_s", "soon"),
+        ("context", [2]),
+        ("timeout_s", None),
+        ("batch_s", True),
+    ):
+        with pytest.raises(OutputError, match=rf"^h: {key} is a number"):
+            OutputConfig.from_dict({"id": "h", "url": "https://x", key: value})
+    for bad in ({"id": "h", "url": "https://x", "events": 3},
+                {"id": "h", "url": "https://x", "rules": 7}):  # fmt: skip
+        with pytest.raises(OutputError, match=r"^h: "):
+            OutputConfig.from_dict(bad)
     # Named as the page names it: by its name, else by its id (an [[output]] in a file).
     with pytest.raises(OutputError, match=r"^'Home hub': the URL must start"):
         OutputConfig.from_dict({"id": "h", "name": " Home hub ", "url": "ftp://x"})
@@ -283,6 +297,22 @@ def test_the_cap_test_alert_says_it_is_a_test_and_not_for_the_public() -> None:
     assert values["status"] == "Test" and values["scope"] == "Restricted"
     assert tags[tags.index("scope") + 1] == "restriction" and values["restriction"]
     assert root.find(f"{{{NS}}}info") is not None
+    outs.close()
+
+
+def test_a_cap_webhook_says_when_the_match_was_not_checked() -> None:
+    outs = outputs([{"id": "hub", "url": "http://h/cap", "format": "cap"}], Recorder())
+    config = outs.configs()[0]
+    for checked, said in ((False, "false"), (True, "true"), (None, None)):
+        ev = alert_event({**ALERT, "checked": checked}, STATIONS, NODE, text="Road closed.")
+        body, _ = outs.body(config, [ev])
+        document = body.decode()
+        if said is None:
+            assert "<valueName>checked</valueName>" not in document
+        else:
+            assert f"<valueName>checked</valueName><value>{said}</value>" in document.replace(
+                "\n", ""
+            ).replace("  ", "")
     outs.close()
 
 

@@ -97,6 +97,21 @@ class OutputConfig:
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> OutputConfig:
+        """An output as saved or sent by the page. Whatever is wrong with it is an
+        ``OutputError`` that names it: a hand-edited settings file is read at start, where any
+        other error would stop Wavescribe instead of skipping one output."""
+        try:
+            return cls._read(raw)
+        except OutputError:
+            raise
+        except (TypeError, ValueError, AttributeError) as e:
+            who = raw.get("id") if isinstance(raw, Mapping) else None
+            raise OutputError(
+                f"{who or 'an output'}: a setting has the wrong kind of value ({e})"
+            ) from None
+
+    @classmethod
+    def _read(cls, raw: Mapping[str, Any]) -> OutputConfig:
         oid = str(raw.get("id", ""))
         if not _ID.fullmatch(oid):  # match() with $ would let "id\n" through
             raise OutputError("an output id is lowercase letters, digits, - or _")
@@ -122,7 +137,14 @@ class OutputConfig:
             for k, v in headers.items()
         ):
             raise OutputError(f"{who}: headers are name = value text")
-        batch_s = float(raw.get("batch_s", 0))
+
+        def number(key: str, default: float) -> float:
+            value = raw.get(key, default)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise OutputError(f"{who}: {key} is a number, not {value!r}")
+            return float(value)
+
+        batch_s = number("batch_s", 0)
         if not 0 <= batch_s <= 3600:
             raise OutputError(f"{who}: batch_s is 0 to 3600 seconds")
         try:
@@ -147,9 +169,9 @@ class OutputConfig:
             batch_s=batch_s,
             headers=dict(headers),
             secret=str(raw.get("secret", "")),
-            context=max(0, min(10, int(raw.get("context", 2)))),
+            context=max(0, min(10, int(number("context", 2)))),
             enabled=bool(raw.get("enabled", True)),
-            timeout_s=max(1.0, min(60.0, float(raw.get("timeout_s", 10)))),
+            timeout_s=max(1.0, min(60.0, number("timeout_s", 10))),
             alert_max_age_hours=max_age,
         )
 
@@ -799,6 +821,7 @@ class Outputs:
                 "quote": ev["text"], "terms": ev["terms"], "mentions": ev["mentions"],
                 "summaries": ev["translations"], "kind": ev.get("kind"),
                 "change": ev.get("change"), "status": ev.get("status"),
+                "checked": ev.get("checked"),
             }  # fmt: skip
             names = {s["id"]: s["name"] for s in ev["stations"]}
             return to_cap(alert, station_names=names).encode(), "application/xml; charset=utf-8"
