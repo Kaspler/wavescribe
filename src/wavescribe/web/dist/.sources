@@ -28,7 +28,7 @@ c37656e50443e19771f6021a7f6ee0d977c3adbe frontend/src/lib/types.ts
 4b61cd76fb382fa21e2e4004a99da4e794a7adad frontend/src/lib/view.ts
 98004750a9e0a258a0409015fd173aa28d02b177 frontend/src/main.tsx
 cac8cc4efb6aa7fb143eb87a9cb8a37f545d04d5 frontend/src/manage/AlertRules.tsx
-5cfce03d824b028f56d864655d85b24b72d0b43e frontend/src/manage/DialView.tsx
+c435c85d605b625ea6c3ccaffc8a5055bb3e8439 frontend/src/manage/DialView.tsx
 1bfc7279cbb2694adfc63131950f04940614de0c frontend/src/manage/FeedApi.tsx
 bcf629dad03a108ddc64c99abf9ce38eb5e8a1fb frontend/src/manage/Internet.tsx
 2c80704fff15a7adf5cb193d77ba6bcf606897b3 frontend/src/manage/Listen.tsx

@@ -381,7 +381,7 @@ export function dialMarkers(heard: Any[], signals: Any[], lo: number, hi: number
 }
 
 /** A receiver tuned by hand, live: the tuning and what is there, the sound, and its window as
- * spectrum and waterfall, where a click listens. `signals`: a scan's findings in the window, for
+ * spectrum and waterfall, where a click listens. `signals`: what a scan found in the window, for
  * the lines that aren't transmissions. */
 export function LiveView({ t, heard, signals, onAdd }: { t: Tuner; heard: Any[]; signals: Any[]; onAdd: (pre: Any) => void }) {
   const st = t.st;

@@ -22,7 +22,7 @@ def save(d: Path, name: str, data: dict) -> None:
 
 
 def test_a_scan_is_cut_to_the_stretch_asked_for() -> None:
-    cut = crop(scan(88.0, 108.0, 200, 1.0, (89.0, 98.5, 99.5, 107.0)), 98.0, 100.0)
+    cut = crop(scan(88.0, 108.0, 200, 1.0, (89.0, 98.5, 99.5, 102.7)), 98.0, 100.0)
     assert cut is not None
     assert cut["spectrum"]["start_mhz"] == 98.0 and cut["spectrum"]["stop_mhz"] == 100.0
     assert cut["spectrum"]["db"] == [float(i) for i in range(100, 120)]
