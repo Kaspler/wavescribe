@@ -14,7 +14,7 @@ graphics processor through Apple's MLX. Intel Macs, Windows and Linux aren't sup
 
 | Mac | What to expect |
 |---|---|
-| **M1 Max, 64 GB** | Four news stations transcribed and translated around the clock: 6.6 GB of memory, peaks of 8.5 GB, translation busy 28% of the time and transcription 6% (a 34-hour run; [MEASUREMENTS.md](MEASUREMENTS.md)). Room for more |
+| **M1 Max, 64 GB** | Four news stations transcribed and translated around the clock: 6.6 GB of memory, peaks of 8.5 GB, translation busy 28% of the time and transcription 6% (a 34-hour run; [MEASUREMENTS.md](MEASUREMENTS.md)). More may fit, depending on how much is said: watch Settings → Health |
 | Max or Ultra, 32 GB or more | As above |
 | Pro, 18–32 GB | About half the M1 Max's graphics cores: expect two to four translated stations, more transcribed only |
 | Any M chip, 16 GB | Everything fits in memory, with little left for other apps. The base chips have a quarter of the M1 Max's graphics cores: expect one or two translated stations, more transcribed only |
@@ -24,7 +24,8 @@ The M1 Max row is measured; the others are estimates from memory and graphics co
 
 - **Transcription is light, translation is heavy.** Speech recognition takes a few percent of
   the M1 Max for four stations; translation takes most of the work. Stations that are only
-  transcribed, or only listened to, cost little.
+  transcribed, or only listened to, cost little. Past what the Mac can translate, translations
+  fall behind, by minutes on a busy machine: translate fewer stations, or fewer languages.
 - **Settings → Languages and models** estimates whether each model fits this Mac, from its
   memory and graphics limits.
 - **Disk:** about 8 GB of models (10 GB with Whisper for languages outside Europe), plus about

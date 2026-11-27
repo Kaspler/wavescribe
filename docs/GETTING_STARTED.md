@@ -61,7 +61,7 @@ Your browser opens Wavescribe's page at <http://localhost:8765>. It keeps runnin
 this Terminal window does; press **Ctrl-C** there to stop it.
 
 Until you choose your own stations, it shows an example list (four national stations of one
-country). Press **▶** beside one to start it and listen right away: until the models are
+country). Press **Start** beside one to start it and listen right away: until the models are
 downloaded (next step) it plays without text, and its text starts by itself once they are.
 Stations that were running when you stopped Wavescribe start again next time. To start some
 from the Terminal, name them: `uv run wavescribe serve <station id> …` (the ids are in the
@@ -136,7 +136,8 @@ rewritten.
 
 ## 5. Read along, listen, translate
 
-- **The station list** (left) shows each station's state with a lamp. **▶** plays it.
+- **The station list** (left) shows each station's state with a lamp. **Start** starts a
+  stopped one.
   Choose a station to read only that one, or **All live** (key `0`) for every running station
   side by side. **Edit list** chooses which stations this device shows.
 - **Listen** at the top lists your stations to play: one click plays a station, starting it
@@ -364,7 +365,7 @@ safe to run while Wavescribe is running.
 | The page doesn't open | Is the Terminal window still running Wavescribe? Open <http://localhost:8765> by hand. `uv run wavescribe doctor` says whether another program holds the port; if so, start it with another, e.g. `--port 8780`. |
 | The background service doesn't run | `uv run wavescribe service status` shows its last exit, and `data/logs/service.log` says why it stopped. Fix that (`uv run wavescribe doctor` helps), then `uv run wavescribe service install` again. |
 | A station plays without text and says it's waiting for a model | Download it under Settings → **Languages and models**; the text starts when it finishes. |
-| No sound | Press **▶** beside the station, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
+| No sound | Press **Start** beside the station, and check the Mac's volume. *Channel quiet* on a radio channel means nobody is transmitting right now. |
 | Nonsense text, or the wrong language | Check the station's language under Settings → **Stations**. Some songs still get through the music filter; heavy accents, phone-ins and weak signals transcribe worse. |
 | The dongle isn't found | Allow it in System Settings → Privacy & Security → *Allow accessories to connect*, then unplug it and plug it in again. `uv run wavescribe doctor` lists the dongles macOS sees, with their serials, and says whether each receiver in your settings is plugged in. |
 | The dongle is found but busy | Only one program can use a dongle at a time. Close other radio programs (GQRX, SDR++), and stop any `rtl_fm` or `rtl_power` left running. |

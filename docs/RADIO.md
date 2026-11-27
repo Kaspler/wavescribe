@@ -13,7 +13,7 @@ from your own receptions: no station list is downloaded.
 
 ## Your first receiver
 
-Plug in an RTL-SDR dongle with an antenna and open **Radio** → **Receivers**. Dongles on USB
+Plug in an RTL-SDR dongle with an antenna and open **Settings** → **Receivers**. Dongles on USB
 that no receiver uses yet are listed there (once a receiver is set up, under **Look for
 dongles**): **Use it** makes one a receiver (gain 30 dB; the same page changes its centre and
 gain, and its sample rate under *Advanced*, where *Test the antenna* shows its live spectrum).
@@ -83,10 +83,10 @@ when it ends; the page says which before you start the scan. From a terminal,
 
 ## Listening by hand
 
-**Radio** → **Tune by hand** is a receiver you tune yourself, like a hand-held scanner:
+**Listen** → **Tune by hand** is a receiver you tune yourself, like a hand-held scanner:
 nothing is written down, stored or checked for alerts. Pick a receiver and type a frequency,
-press a band (FM, airband, marine, amateur, PMR446...) or **Listen** beside anything on **Find
-stations**. Then:
+press a band (FM, airband, marine, amateur, PMR446...) or **Listen** beside anything on
+**Find**. Then:
 
 - **The spectrum and waterfall** show what the dongle hears; the orange line is where you are
   tuned and the shaded band the channel you hear. Click a signal to tune it, scroll or use the
