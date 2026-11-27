@@ -119,6 +119,54 @@ def test_a_page_change_cant_tune_a_station_where_its_receiver_doesnt_hear_it(
         r.close()
 
 
+def test_starting_a_station_its_receiver_doesnt_hear_moves_it_and_asks_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    far = {"id": "far", "name": "Far", "device": "a", "mhz": 432.5}
+    rpt = {"id": "rpt", "name": "Repeater", "device": "a", "mhz": 145.6}
+    r = running(tmp_path, stations(two_metres_centre(), far, rpt))
+    before = r.app.settings.snapshot()
+    try:
+        assert r.app.unavailable == {"far": r.app.config.get("far").out_of_reach}
+        status, ask = r.call("POST", "/api/manage/stations/far/start")
+        assert status == 400 and ask["code"] == "retune", ask
+        assert ask["unfit"] == [{"id": "ham2m", "name": "Two metres", "running": False},
+                                {"id": "rpt", "name": "Repeater", "running": False}]  # fmt: skip
+        assert ask["holders"] == [] and ask["center_mhz"] == 432.25
+        assert ask["error"] == (
+            "Receiver A moves to 432.25 MHz to hear Far, where it no longer hears Two metres or "
+            "Repeater. They stay in your stations, unavailable until the receiver hears them again."
+        )
+        assert r.app.settings.snapshot() == before  # nothing changed while it asks
+        status, err = r.call("POST", "/api/manage/stations/far/start", {"retune": "yes"})
+        assert status == 400 and err["error"] == "retune must be true or false"
+
+        status, started = r.call("POST", "/api/manage/stations/far/start", {"retune": True})
+        assert status == 200, started
+        assert started["ok"] is True and started["start_error"] is None
+        assert started["receiver"] == {"id": "a", "center_mhz": 432.25, "moved": True}
+        assert [s["id"] for s in started["unfit"]] == ["ham2m", "rpt"]
+        assert started["live_closed"] is False
+        assert r.app.config.devices[0].center_hz == 432_250_000
+        assert "far" not in r.app.unavailable and "far" in r.app.settings.get("run")["stations"]
+        assert set(r.app.unavailable) == {"ham2m", "rpt"}
+
+        # Back to the repeater: where only the station just started is left out, it asks again.
+        status, ask = r.call("POST", "/api/manage/stations/rpt/start")
+        assert status == 400 and ask["code"] == "retune" and ask["center_mhz"] == 145.35
+        # Started on its own, a station in reach starts as it always did.
+        assert r.call("POST", "/api/manage/stations/stream/start") == (200, {"ok": True})
+
+        # A receiver that can't be tuned anywhere that hears the station: nothing to ask.
+        monkeypatch.setattr(service, "TUNER_RANGE_HZ", (24_000_000, 100_000_000))
+        status, err = r.call("POST", "/api/manage/stations/rpt/start", {"retune": True})
+        assert (status, err["code"]) == (400, "out_of_reach"), err
+        assert err["error"] == "Receiver A can't be tuned to hear 145.6 MHz."
+        assert r.app.config.devices[0].center_hz == 432_250_000
+    finally:
+        r.close()
+
+
 # -- what constrains a retune ------------------------------------------------------------------
 
 

@@ -129,14 +129,18 @@ def _delete_station(app: App, m, q, b) -> Any:
 
 @route("POST", "/stations/(?P<id>[a-z0-9_-]+)/(?P<action>start|stop)")
 def _start_stop(app: App, m, q, b) -> Any:
+    """A station its receiver doesn't hear moves the receiver to start, and asks first when
+    that leaves stations out (code ``retune``, as ``/radio/tune`` asks it); ``retune: true`` is
+    the yes. ``listen_only: true`` is for this run only; the saved mode stays."""
     if m["action"] == "stop":
         app.stop_station(m["id"])
         return {"ok": True}
-    listen_only = b.get("listen_only", False) if isinstance(b, dict) else False
-    if not isinstance(listen_only, bool):
-        raise ChangeError("listen_only must be true or false")
-    app.start_station(m["id"], listen_only=listen_only)  # only for this run; the mode stays
-    return {"ok": True}
+    b = b if isinstance(b, dict) else {}
+    listen_only, retune = b.get("listen_only", False), b.get("retune", False)
+    for key, value in (("listen_only", listen_only), ("retune", retune)):
+        if not isinstance(value, bool):
+            raise ChangeError(f"{key} must be true or false")
+    return app.radio.start_station(m["id"], listen_only=listen_only, retune=retune)
 
 
 @route("POST", "/probe")

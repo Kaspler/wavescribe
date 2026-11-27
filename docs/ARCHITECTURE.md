@@ -692,8 +692,13 @@ planner: `_centre_for_station` tries, for a watch, where a watch is tuned (`plan
 then every kHz from which it hears the whole window): without asking when that leaves nothing
 out, else the same question with nothing changed, until the same body comes with `retune: true`.
 After such a move its answer adds `receiver`, `unfit`, `live_closed` and `start_error`, as
-`tune`'s does. A receiver tuned by hand is let go first, and what it paused
-starts again where it is still heard.
+`tune`'s does. `POST /api/manage/stations/<id>/start` does the same for a station already made
+that its receiver doesn't hear (`RadioService.start_station`, the same `_centre_for_station`
+and `_place`): it moves the receiver and starts the station, or asks the same question (code
+`retune`) with nothing changed until the body has `retune: true`; where no centre hears the
+station at all, the refusal has code `out_of_reach`. Its answer is `{"ok": true}`, and after a
+move also `receiver`, `unfit`, `live_closed` and `start_error`. A receiver tuned by hand is let
+go first, and what it paused starts again where it is still heard.
 
 **Codes beside refusals** (`refusal.py`). A refusal the page may act on carries a `code` beside
 its sentence, in the 400's JSON, so the page needn't judge from the words (which stay as they
@@ -705,7 +710,8 @@ questions (`acknowledge` with `privacy`, `busy` with `holders`, `scanning`, `lan
 refused with: `bad_frequency` (not a frequency in MHz, or none given), `out_of_band` (a
 frequency no receiver tunes, or one this receiver can't be tuned to hear), `bad_mode`,
 `bad_channel` and `bad_squelch` (`channel_khz`, `squelch_db`), `no_receiver`, `out_of_reach` (a
-change that would tune a station where its receiver doesn't hear it), and for a watch
+change that would tune a station where its receiver doesn't hear it, or a start of one that no
+centre of its receiver hears), and for a watch
 `unknown_band`, `bad_window` (not two frequencies, or the start not below the stop),
 `no_channels` (none on the band's raster in the range), `bad_threshold`, and `too_wide` with
 `slice_mhz: [start, stop]`, the slice that fits that the sentence offers. A station in language
@@ -723,7 +729,7 @@ stops it if a retune leaves it out. It is not a config error: a stations file wi
 and `doctor` warns `out of reach` instead of counting a page change not applied. Switched-off
 stations, and those already out of reach, never hold a retune back. A page change that would
 tune a station where its receiver doesn't hear it is refused with the same reason (code
-`out_of_reach`); a station added from the page moves the receiver instead, as above.
+`out_of_reach`); a station added or started from the page moves the receiver instead, as above.
 
 **Listening by hand** (`radio/live.py`, `/api/manage/live/<receiver>`, the page's **Tune by
 hand**). A `LiveReceiver` is one more consumer of the dongle's shared `rtl_sdr` pipe, like a

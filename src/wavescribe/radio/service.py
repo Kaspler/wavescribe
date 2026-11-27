@@ -443,10 +443,7 @@ class RadioService:
                                                      " Confirm")  # fmt: skip
             raise RadioError(sentence(said), "acknowledge" if needs else "refused",
                              privacy=band.privacy if band else "private") from e  # fmt: skip
-        job = self._job
-        if job and job["device"] == d.id and job["phase"] not in ("done", "error"):
-            raise RadioError(f"Receiver {receiver_name(d.id)} is scanning: wait for it, or stop "
-                             "the scan.", "scanning")  # fmt: skip
+        self._refuse_while_scanning(d)
         language = raw.get("language") or self.app.base.defaults.get("language")
         if not language:
             raise RadioError("Which language is spoken there?", "language")
@@ -503,26 +500,68 @@ class RadioService:
         if station.sdr is None or not station.out_of_reach or station.disabled:
             return self.app.add_station(entry, start=start)
         d = station.sdr.device
-        job = self._job
-        if job and job["device"] == d.id and job["phase"] not in ("done", "error"):
-            raise RadioError(f"Receiver {receiver_name(d.id)} is scanning: wait for it, or stop "
-                             "the scan.", "scanning")  # fmt: skip
+        self._refuse_while_scanning(d)
 
         def place(hand: int | None, running: set[str]) -> tuple[int, list[Any]]:
             return self._centre_for_station(station, hand, running)
 
         return self._add_on(d, entry, place, retune, {}, heard=station.name, start=start)
 
-    def _add_on(self, d: Any, station: dict[str, Any],
-                place: Callable[[int | None, set[str]], tuple[int, list[Any]]], retune: bool,
-                extra: dict[str, Any], *, freq_hz: int | None = None, heard: str | None = None,
-                start: bool = True) -> dict[str, Any]:  # fmt: skip
-        """``tune``'s second half, and a page station's whose receiver has to move: where the
-        receiver goes (``place``, given where the hand tuner has it and the stations that run:
-        the centre, and the stations it would leave out), then the station made and, with
-        ``start``, started. ``freq_hz`` or ``heard`` is what the question says it moves for."""
+    def start_station(self, sid: str, *, listen_only: bool = False,
+                      retune: bool = False) -> dict[str, Any]:  # fmt: skip
+        """Start a station (``POST /api/manage/stations/<id>/start``). One its receiver doesn't
+        hear where it is tuned moves the receiver first, as adding it does: to where it hears
+        the station and every station it has now, or, where no place hears them all, nothing
+        changes and the answer is the question (``retune_question``) until the same request
+        comes with ``retune: true``; where no place hears the station at all, the refusal has
+        code ``out_of_reach``. The answer is ``ok``; after a move also ``receiver``, ``unfit``,
+        ``live_closed`` and ``start_error``, as ``tune`` gives them."""
         from wavescribe.admin import AdminError, update_device
 
+        station = self.app.config.get(sid)
+        if station.sdr is None or not station.out_of_reach or station.disabled:
+            self.app.start_station(sid, listen_only=listen_only)  # or why it can't start
+            return {"ok": True}
+        d = station.sdr.device
+        self._refuse_while_scanning(d)
+
+        def place(hand: int | None, running: set[str]) -> tuple[int, list[Any]]:
+            try:
+                return self._centre_for_station(station, hand, running)
+            except RadioError as e:  # no centre hears it: the station is out of reach for good
+                raise RadioError(str(e), "out_of_reach") from e
+
+        centre, unfit, running, by_hand = self._where(d, place, retune, heard=station.name)
+        carried = self.app._live.close(d.id, resume=False) if by_hand else None
+        try:
+            if centre != d.center_hz:
+                update_device(self.app, d.id, {"center_mhz": centre / 1e6}, retune=True)
+        except (AdminError, ValueError) as e:
+            raise _coded(e) from e
+        finally:
+            self._resume(carried)  # what the hand tuner paused, where it is still heard
+        start_error = None
+        try:
+            self.app.start_station(sid, listen_only=listen_only)
+        except ValueError as e:  # moved, and still listed: the page says why it didn't start
+            start_error = sentence(str(e))
+        return {"ok": True, **self._moved(d, centre, unfit, running, by_hand),
+                "start_error": start_error}  # fmt: skip
+
+    def _refuse_while_scanning(self, d: Any) -> None:
+        job = self._job
+        if job and job["device"] == d.id and job["phase"] not in ("done", "error"):
+            raise RadioError(f"Receiver {receiver_name(d.id)} is scanning: wait for it, or stop "
+                             "the scan.", "scanning")  # fmt: skip
+
+    def _where(self, d: Any, place: Callable[[int | None, set[str]], tuple[int, list[Any]]],
+               retune: bool, *, freq_hz: int | None = None,
+               heard: str | None = None) -> tuple[int, list[Any], set[str], bool]:  # fmt: skip
+        """Where receiver ``d`` goes (``place``, given where the hand tuner has it and the
+        stations that run: the centre, and the stations it would leave out), or, when that
+        leaves stations out and ``retune`` isn't given, the question (``retune_question``).
+        ``freq_hz`` or ``heard`` is what the question says it moves for. Also the stations that
+        run, and whether the hand tuner has the receiver."""
         live = getattr(self.app, "_live", None)
         by_hand = live is not None and live.is_open(d.id)
         running = self._running_on(d, live)
@@ -530,6 +569,31 @@ class RadioService:
         centre, unfit = place(hand, running)
         if unfit and not retune:
             raise retune_question(d.id, centre, unfit, running, freq_hz=freq_hz, heard=heard)
+        return centre, unfit, running, by_hand
+
+    @staticmethod
+    def _moved(d: Any, centre: int, unfit: list[Any], running: set[str],
+               by_hand: bool) -> dict[str, Any]:  # fmt: skip
+        """What an answer says of a move: where the receiver is, what was left out, and whether
+        the hand tuner was let go."""
+        return {
+            "live_closed": by_hand,
+            "receiver": {"id": d.id, "center_mhz": centre / 1e6, "moved": centre != d.center_hz},
+            "unfit": [{"id": s.id, "name": s.name, "running": s.id in running} for s in unfit],
+        }  # fmt: skip
+
+    def _add_on(self, d: Any, station: dict[str, Any],
+                place: Callable[[int | None, set[str]], tuple[int, list[Any]]], retune: bool,
+                extra: dict[str, Any], *, freq_hz: int | None = None, heard: str | None = None,
+                start: bool = True) -> dict[str, Any]:  # fmt: skip
+        """``tune``'s second half, and a page station's whose receiver has to move: where the
+        receiver goes (``_where``), then the station made and, with ``start``, started.
+        ``freq_hz`` or ``heard`` is what the question says it moves for."""
+        from wavescribe.admin import AdminError, update_device
+
+        live = getattr(self.app, "_live", None)
+        centre, unfit, running, by_hand = self._where(d, place, retune, freq_hz=freq_hz,
+                                                      heard=heard)  # fmt: skip
         from wavescribe.app import slug
 
         # Nothing changes until the station is known to be one that can be made there.
@@ -556,11 +620,8 @@ class RadioService:
         except ValueError as e:  # made, and listed: the page says why it didn't start
             start_error = sentence(str(e))
         view = next(v for v in self.app.stations_view() if v["id"] == view["id"])
-        return {
-            **view, **extra, "start_error": start_error, "live_closed": by_hand,
-            "receiver": {"id": d.id, "center_mhz": centre / 1e6, "moved": centre != d.center_hz},
-            "unfit": [{"id": s.id, "name": s.name, "running": s.id in running} for s in unfit],
-        }  # fmt: skip
+        return {**view, **extra, "start_error": start_error,
+                **self._moved(d, centre, unfit, running, by_hand)}  # fmt: skip
 
     @staticmethod
     def _draft(draft: dict[str, Any], d: Any, centre: int, station: dict[str, Any]) -> None:
