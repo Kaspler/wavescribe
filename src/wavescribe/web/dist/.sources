@@ -59,7 +59,7 @@ c138c9b65a912f941b656ac7dfd36410bbabe86e frontend/src/manage/Stations.tsx
 1cfa49aaba2968b7f205ba686f4a118f6e751d38 frontend/src/manage/added.ts
 dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 995950933ff4308317d22f1aa5a40406bc36fafa frontend/src/manage/bandplan.ts
-16baa601a050446286a84ab9edd1f44752f442d7 frontend/src/manage/bands.ts
+3e43e27cde15b8e6c755baac16d0c04394b9c4e2 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 0f8b4e87a0bf15d0d9147f1eb7622150eeda1f8e frontend/src/manage/checks.ts
 37a421c904fbe0108dcc77af365f57d95117ae5f frontend/src/manage/connections.ts

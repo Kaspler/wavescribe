@@ -687,7 +687,7 @@ radio that isn't broadcast is often protected by law:
 | Radio amateurs | 7 days | no | no | no |
 | Aircraft, ships | 3 days | no | no | yes |
 | Walkie-talkies, CB, anything unlisted | nothing | no | no | yes |
-| Digital and encrypted services (no decoder: you hear noise) | nothing | no | no | yes |
+| Digital services (no decoder: you hear noise) | nothing | no | no | yes |
 
 "Leaves the Mac" means the phone view, the text feed, webhooks and other Wavescribes. Alerts
 from radio that stays on the Mac reach them without the words that were said.
