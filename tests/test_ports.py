@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import errno
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -39,8 +40,9 @@ def within_our_ports(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @contextlib.contextmanager
-def listening(addr: str, port: int, *, reuse: bool = False) -> Iterator[socket.socket]:
-    """Another program's socket, listening on ``addr``:``port``."""
+def listening(addr: str, port: int, *, reuse: bool = True) -> Iterator[socket.socket]:
+    """Another program's socket, listening on ``addr``:``port``; with SO_REUSEADDR, as most
+    servers bind, so connections an earlier test left closing there don't stop it."""
     family = socket.AF_INET6 if ":" in addr else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as s:
         if reuse:
@@ -53,7 +55,7 @@ def listening(addr: str, port: int, *, reuse: bool = False) -> Iterator[socket.s
 def closing(port: int) -> None:
     """Leaves connections closing (TIME_WAIT) on 127.0.0.1:``port``, as a server that just
     stopped does: the server closes first."""
-    with listening("127.0.0.1", port, reuse=True) as srv:
+    with listening("127.0.0.1", port) as srv:
         client = socket.create_connection(("127.0.0.1", port))
         conn, _ = srv.accept()
         conn.close()
@@ -194,8 +196,9 @@ def test_serve_on_a_fixed_port_beside_a_wildcard_listener_exits_4(tmp_path: Path
 
 
 def test_serve_auto_skips_the_taken_port_and_says_where_it_runs(tmp_path: Path) -> None:
+    if not any(ports.free("127.0.0.1", p) for p in range(LOW + 1, HIGH + 1)):
+        pytest.skip("8791 to 8799 are all taken or closing: serve would look past them")
     with listening("0.0.0.0", LOW):
-        expect = first_free_from(LOW + 1)
         log = (tmp_path / "serve.log").open("w+")
         p = subprocess.Popen(
             [sys.executable, "-m", "wavescribe", "serve", "--home", str(tmp_path / "h"),
@@ -207,7 +210,8 @@ def test_serve_auto_skips_the_taken_port_and_says_where_it_runs(tmp_path: Path) 
             while "running at" not in (text := (tmp_path / "serve.log").read_text()):
                 assert p.poll() is None and time.monotonic() < deadline, text
                 time.sleep(0.2)
-            assert f"Wavescribe is running at http://localhost:{expect}/" in text
+            at = re.search(r"Wavescribe is running at http://localhost:(\d+)/", text)
+            assert at is not None and LOW < int(at[1]) <= HIGH, text
         finally:
             p.send_signal(signal.SIGINT)
             assert p.wait(30) == 130

@@ -1395,6 +1395,7 @@ def serve(
         app.run()
     finally:
         server.shutdown()
+        server.server_close()  # it doesn't listen from here: the ready file goes next
         time.sleep(0.1)
 
 

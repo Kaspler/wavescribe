@@ -590,3 +590,31 @@ event arrived.
   script). It receives the alert JSON above.
 - **Monitoring:** scrape `/metrics`; health checks use `/healthz`.
 - **Archiving:** fetch `/feed/v1/utterances?format=ndjson` by time range.
+
+## Starting Wavescribe from another program
+
+A program that starts `wavescribe serve` finds it, follows it and stops it this way.
+
+**Start it** with `--port auto` (the first free port of 8765 to 8784; `auto:N` starts at N) and
+`--parent-pid` set to the program's own pid, so `serve` stops when the program ends, however it
+ends:
+
+```sh
+wavescribe serve --home ~/radio --port auto --parent-pid 4242 --ready-file /tmp/ws-ready.json
+```
+
+**Find it** in the ready file (`--ready-file`, by default `data/serve.json` in the home). It
+appears once the page listens, while the models may still be loading, written whole (never half
+a file), readable only by its owner:
+
+```json
+{"app": "wavescribe", "version": "0.1.0a1", "pid": 5120, "host": "127.0.0.1", "port": 8766,
+ "url": "http://127.0.0.1:8766/", "home": "/Users/me/radio", "started": "2026-05-04T08:15:02Z"}
+```
+
+`url` is this machine's address, also under `--lan`. The file is removed when `serve` stops; one
+left behind by a crash names a pid that no longer runs.
+
+**Stop it** with SIGTERM (exit code 143), or end the parent (exit code 0). Exit codes 2, 3 and 4
+mean it didn't start: a file or an option it can't use, another Wavescribe on the same home, a
+fixed `--port` another program has ([COMMANDS.md](COMMANDS.md#exit-codes)).

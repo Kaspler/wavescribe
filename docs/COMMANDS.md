@@ -132,6 +132,8 @@ here start right away; with none, the ones that ran last time do. It also takes
 | `--config FILE` | the stations file (default `config/stations.toml`, else the example) |
 | `--settings FILE` | where the page keeps its changes (default `config/ui.toml`) |
 | `--open` | open the page in the default browser |
+| `--ready-file PATH` | where to write the ready file (default `data/serve.json` in the home): written once the page listens, removed when `serve` stops ([FEED.md](FEED.md#starting-wavescribe-from-another-program)) |
+| `--parent-pid PID` | follow that process: when it ends, `serve` stops as with SIGTERM, with exit code 0; if it has ended already, `serve` doesn't start |
 | `--port PORT` | the page's port (default 8765). Another program listening on it, on this machine's address or on every address, stops `serve` at once with exit code 4. `auto` takes the first free port of 8765 to 8784, `auto:N` of N to N+19, and after those one the system picks; the port taken is in the startup line, never saved |
 | `--host ADDRESS` | the address to listen on (default `127.0.0.1`: this machine only). Another machine that reaches it reads only, as with `--lan` |
 | `--lan` | listen on every address, so other devices on the network read along (read-only); `--host` is then ignored |
@@ -402,7 +404,7 @@ sleep while it runs. It takes [`serve`'s options](#wavescribe-serve) and
 the LaunchAgent's file names the home, absolute, as its working folder and as
 `WAVESCRIBE_HOME`. Run it again to change them, from the Wavescribe folder or with the same
 `--home`. Another `serve` running with this home stops the install, as a taken port does.
-It needs a fixed `--port`: `auto` doesn't apply to a background service.
+It needs a fixed `--port` and no `--parent-pid`.
 
 | Option | What it does |
 |---|---|
@@ -537,9 +539,10 @@ the `<clip>.ref-template.txt` it writes, save it as `<clip>.ref.txt` and run it 
 
 | Code | When |
 |---|---|
-| 0 | done |
+| 0 | done; also `serve` that stopped because its `--parent-pid` process ended |
 | 1 | it couldn't be done, with the reason after `wavescribe:`; also `search` and `alerts check` with no match, and `doctor` with something broken |
-| 2 | a command or an option it doesn't take, or a value it refuses; also a `--home` that can't be made or isn't a folder |
+| 2 | a command or an option it doesn't take, or a value it refuses; also a `--home` that can't be made or isn't a folder; `serve`: a stations, alerts or settings file that doesn't load, or a station named that isn't one |
 | 3 | `serve`, `listen`, `radio tune` and `radio watch`: another of them is running with this home (the message names its pid, and its page's address when it has one); `service status`: the service isn't running |
 | 4 | `serve`: another program listens on its `--port` (the message names it when it can) |
-| 130 | stopped with Ctrl-C |
+| 130 | stopped with Ctrl-C (SIGINT) |
+| 143 | stopped with SIGTERM (`kill`, or the background service stopping) |

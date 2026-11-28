@@ -376,6 +376,9 @@ def preflight(ns: argparse.Namespace, workdir: Path,
         raise ServiceError(f"{workdir} isn't a Wavescribe folder (no config/): run "
                            f"`{typed('service install')}` in the folder you run it in, or give "
                            "that folder with --home")  # fmt: skip
+    if ns.parent_pid is not None:
+        raise ServiceError("--parent-pid doesn't apply to a background service: it runs until "
+                           f"`{typed('service uninstall')}`")  # fmt: skip
     if not isinstance(ns.port, int):
         raise ServiceError(f"--port {ns.port} doesn't apply to a background service: give it a "
                            "fixed --port, so its page keeps one address")  # fmt: skip

@@ -88,6 +88,15 @@ the process, however it ends, and a clean stop empties the file. The other comma
 and run beside it; `service install` refuses a home another `serve` holds, since the service
 would stop at every start.
 
+**Started by another program.** `serve` writes the ready file (`ready.py`; `--ready-file`, by
+default `data/serve.json`) once the page's socket listens, before the models load: the app, its
+version, the pid, the address, the home and when it started. It is written to a temporary file
+(mode 0600) and renamed into place, so a reader never sees half of one. Every stop that runs
+serve's cleanup removes it once the page no longer listens, and only while it still names this
+process. `--parent-pid` follows a process (kqueue's `NOTE_EXIT` on macOS, a check once a second
+elsewhere): when it ends, serve sends itself SIGTERM and runs the same cleanup, with exit code 0.
+One that has ended already stops serve before the home is entered.
+
 ## Process model
 
 One process with threads. Each station has a source thread (an ffmpeg subprocess, or a channel
@@ -313,8 +322,14 @@ it spends the one LLM everything else waits for. `serve` prints one line at star
 of these holds (`server.access_line`). Every response carries a
 Content-Security-Policy (`default-src 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`
 and `Referrer-Policy: no-referrer`.
-Before loading models, `serve` checks that no other program holds the port on 127.0.0.1 (macOS
-lets a wildcard bind succeed anyway, and "localhost" would then reach the other program).
+**The page's port** (`web/ports.py`) is tried only by binding, never by connecting. A fixed
+`--port` is refused before models load (exit code 4) when another program listens on the
+wildcard address, the bind host or IPv6: on macOS a socket with SO_REUSEADDR binds 127.0.0.1
+beside a program on 0.0.0.0 and then takes its local connections. The page's socket binds with
+SO_REUSEADDR, so connections of a run that just stopped don't hold the port, and the wildcard is
+checked once more after the bind. `--port auto` takes the first port where sockets without
+SO_REUSEADDR or SO_REUSEPORT bind on the wildcard address and on the bind host; connections
+still closing count as taken there, so a quick restart may take the next port.
 
 **History, search and replay.** With the store on (the default), the page opens with the last
 300 utterances per station from SQLite, so a restart loses nothing, and each transcript has a

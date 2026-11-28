@@ -351,6 +351,18 @@ def source_arg(text: str) -> str:
     return str(given_path(text))
 
 
+def process_id(value: str) -> int:
+    """A process id for ``--parent-pid``: a whole number above 1."""
+    try:
+        pid = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a process id") from None
+    if pid < 2:
+        raise argparse.ArgumentTypeError(f"{pid} isn't a process id serve can follow")
+    return pid
+
+
+USAGE = 2  # a command line, or a stations, alerts or settings file, that can't be used
 PORT_TAKEN = 4  # serve's exit code when its fixed --port is taken
 
 
@@ -372,6 +384,7 @@ def _no_port(e: OSError) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     import webbrowser
 
+    from wavescribe import ready as ready_file
     from wavescribe.alerts import resolve_alerts_path
     from wavescribe.app import App
     from wavescribe.config import ConfigError, load_stations, resolve_stations_path
@@ -381,15 +394,18 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.web.ports import AutoPort, PortInUseError, choose
     from wavescribe.web.server import access_line, check_port, lan_urls, serve
 
+    started = time.time()
+    if args.parent_pid is not None:
+        ready_file.watch_parent(args.parent_pid, stop_by_itself)
     setup_logging(
         DATA_DIR / "logs", console_level=logging.INFO if args.verbose else logging.WARNING
     )
-    base = load_stations(resolve_stations_path(args.config))
     try:
+        base = load_stations(resolve_stations_path(args.config))
         settings = Settings(args.settings)
     except ConfigError as e:
         print(f"wavescribe: {e}", file=sys.stderr)
-        return 1
+        return USAGE
     host = "0.0.0.0" if args.lan else args.host
     auto = args.port if isinstance(args.port, AutoPort) else None
     try:  # before loading anything
@@ -399,15 +415,22 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except PortInUseError as e:
         return _port_taken(args.port, host) if auto is None else _no_port(e)
     store = open_store(args)
-    app = App(
-        base, settings, ModelRegistry.load(),
-        translate=not args.no_translate, asr_model=args.asr, mt_model=args.translator,
-        use_gate=not args.no_gate, store=store, alerts_path=args.alerts,
-        alerts_enabled=not args.no_alerts and resolve_alerts_path(args.alerts) is not None,
-        host=host, port=port, start=args.stations or None,
-    )  # fmt: skip
-    for sid in args.stations:
-        app.config.get(sid)  # fail early on a typo
+    try:
+        app = App(
+            base, settings, ModelRegistry.load(),
+            translate=not args.no_translate, asr_model=args.asr, mt_model=args.translator,
+            use_gate=not args.no_gate, store=store, alerts_path=args.alerts,
+            alerts_enabled=not args.no_alerts and resolve_alerts_path(args.alerts) is not None,
+            host=host, port=port, start=args.stations or None,
+        )  # fmt: skip
+        for sid in args.stations:
+            app.config.get(sid)  # fail early on a typo
+    except ConfigError as e:  # alerts.toml, or a station named here that isn't one
+        print(f"wavescribe: {e}", file=sys.stderr)
+        if store is not None:
+            store.close()
+        return USAGE
+    ready_path = args.ready_file or Path.cwd() / DATA_DIR / "serve.json"
     for sid, reason in app.unavailable.items():
         print(f"# {sid}: unavailable ({reason})", file=sys.stderr)
     for sid, reason in app.config_errors.items():
@@ -420,6 +443,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         from wavescribe.home import note_page
 
         note_page(url)  # in the home's lock file, for whoever finds the home taken
+        try:
+            ready_file.write(ready_path, ready_file.fields(
+                host=host, port=app.port, started=started, home=Path.cwd()))  # fmt: skip
+        except OSError as e:
+            raise RuntimeError(f"can't write the ready file {ready_path}: {e.strerror or e}"
+                               ) from e  # fmt: skip
         print(f"Wavescribe is running at {url}  (Ctrl-C to stop)", file=sys.stderr)
         if host not in ("127.0.0.1", "::1", "localhost"):
             for lan in lan_urls(app.port):
@@ -438,6 +467,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except PortInUseError as e:  # taken while the stations loaded
         return _port_taken(port, host) if auto is None else _no_port(e)
     finally:
+        ready_file.remove(ready_path)  # whatever the way it stops, once the page doesn't listen
         if app.alerter is not None:
             app.alerter.close()
         if store is not None:
@@ -1009,6 +1039,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="let other machines ask the local model questions (it is busy meanwhile)",
     )  # fmt: skip
     p.add_argument("--open", action="store_true", help="open the page in the default browser")
+    p.add_argument(
+        "--ready-file", type=given_path, metavar="PATH",
+        help="where to write the page's address once it listens, removed when serve stops "
+        "(default: data/serve.json)",
+    )  # fmt: skip
+    p.add_argument(
+        "--parent-pid", type=process_id, metavar="PID",
+        help="stop, with exit code 0, when this process ends",
+    )  # fmt: skip
     add_settings_arg(p)
     p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--asr", metavar="MODEL", help="ASR model id (default: first in the chain)")
@@ -1145,7 +1184,18 @@ def install_stop_signals() -> None:
     (launchd, kill) exits through the same cleanup.
     """
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(_stop_code))
+
+
+_stop_code = 143  # SIGTERM's exit code: 0 once serve stops by itself (stop_by_itself)
+
+
+def stop_by_itself() -> None:
+    """Stops as SIGTERM does, through the same cleanup, but with exit code 0: what serve was
+    following (``--parent-pid``) ended. Called from any thread."""
+    global _stop_code
+    _stop_code = 0
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1156,6 +1206,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    parent = getattr(args, "parent_pid", None) if getattr(args, "func", None) is cmd_serve else None
+    if parent is not None:
+        from wavescribe.ready import alive
+
+        if not alive(parent):  # ended already: nothing to follow, so nothing to start
+            print(f"wavescribe: process {parent} (--parent-pid) has ended; not starting",
+                  file=sys.stderr)  # fmt: skip
+            return 0
     try:
         home.enter(args.home)  # before anything reads or writes a file, or starts a thread
     except home.HomeError as e:
