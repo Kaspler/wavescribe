@@ -717,16 +717,18 @@ def _radio_fields(s: Station, stations: Any = (), running: Any = ()) -> dict[str
 
 
 def _payload(result: Result, *, final: bool, mt: bool, audio: bool = False) -> dict[str, Any]:
-    from wavescribe.radio.bandplan import class_of
+    from wavescribe.radio.bandplan import class_of, policy_of
 
     u, st = result.utterance, result.station
     targets = list(st.translation_targets)
     stored = result.segment_id is not None
+    policy = policy_of(st)
     return {
         "id": result.segment_id,
         # The same key as the store's rows, so live updates and history merge on the page.
         "key": f"{st.id}:{result.segment_id}" if stored else f"{st.id}:s{u.seq}",
-        "audio": audio and stored,
+        # Archived only where its class keeps audio (Store.add_transcript), as a reload says.
+        "audio": audio and stored and (policy is None or policy.audio),
         "flags": list(result.flags),
         "hits": [h.payload() for h in result.hits],
         "station": st.id,

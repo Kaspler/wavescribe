@@ -202,3 +202,32 @@ def test_a_line_caught_live_comes_flagged_for_its_feed_and_stays_on_this_machine
         assert hub.history(CAUGHT) == [line] and hub.history(CAUGHT, before_id=5) == []
     finally:
         hub.close()
+
+
+def test_a_live_line_offers_its_audio_only_where_its_class_keeps_audio(tmp_path: Path) -> None:
+    """A line's time plays it back only where the audio was kept: live as after a reload, so a
+    watch of a class that keeps no audio offers nothing to play."""
+    from wavescribe.store import AudioArchive
+
+    store = Store(tmp_path / "w.db", archive=AudioArchive(tmp_path / "audio"))
+    ham = watch_station(id="ham", watch=[145.2, 145.8], acknowledge=False)
+    hub = WebHub(StationsConfig((ham,), Path("t.toml"), radio_region="cept"), PLAN, {},
+                 store=store)  # fmt: skip
+    here = hub.subscribe()
+    now = time.time()
+    try:
+        for r in (said("ham", TWO_M, now, "QSY to the next channel", privacy="amateur",
+                       lang="en"),
+                  said("watch", MARINE, now + 1, "all ships, all ships", privacy="utility",
+                       lang="en"),
+                  result("valley", "il traffico in centro", now + 2, "it")):  # fmt: skip
+            hub.store_transcript(r)
+            hub.on_result(r)
+        live = [json.loads(here.get_nowait()[1]) for _ in range(3)]
+        assert [u["id"] is not None for u in live] == [True, True, True]  # all three stored
+        assert [u["audio"] for u in live] == [False, False, True]  # only broadcast keeps audio
+        stored = {u["key"]: u["audio"] for u in store.recent("ham")}
+        assert stored == {live[0]["key"]: False}  # as a reload says
+    finally:
+        hub.close()
+        store.close()
