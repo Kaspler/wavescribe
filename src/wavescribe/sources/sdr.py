@@ -44,6 +44,7 @@ LEVEL_LOG_S = 30.0  # how often each device logs its signal levels
 SPECTRUM_BINS = 512  # what the page draws
 SPECTRUM_FFT = 2048
 SPECTRUM_EVERY_S = 0.4
+LOAD_SMOOTHING = 0.2  # of each block's share in ``RtlSdrDevice.load``
 
 
 class RtlSdrDevice:
@@ -88,6 +89,9 @@ class RtlSdrDevice:
         self.said: deque[str] = deque(maxlen=20)  # rtl_sdr's last words on stderr, this run's
         self.unopened: str | None = None  # what rtl_sdr said when it gave up (command_line)
         self.clipped: float | None = None  # share of IQ samples at the ADC's limits (overload)
+        # The share of a block's length spent handing it to everything on the dongle,
+        # smoothed: near 1, the thread is falling behind the dongle.
+        self.load = 0.0
         # The spectrum is computed only while someone looks at it (the receivers panel asks
         # again every half second), so a dongle nobody watches costs nothing extra.
         self.spectrum_wanted_until = 0.0
@@ -203,6 +207,7 @@ class RtlSdrDevice:
             pid=proc.pid,
         )
         fd = proc.stdout.fileno()
+        block_s = self._chunk_bytes / 2 / self.config.sample_rate
         buf = bytearray()
         first, got = True, False
         reason = "eof"
@@ -228,6 +233,7 @@ class RtlSdrDevice:
                     now = self._clock()
                     if self.heard_at is None:
                         self.heard_at = now
+                    began = time.perf_counter()
                     for ch in self._snapshot():
                         try:
                             ch._feed(iq, now, first)
@@ -238,6 +244,8 @@ class RtlSdrDevice:
                             with contextlib.suppress(Exception):
                                 ch.close()
                     first = False
+                    share = (time.perf_counter() - began) / block_s
+                    self.load += LOAD_SMOOTHING * (share - self.load)
                     if now < self.spectrum_wanted_until and now >= self._next_spectrum:
                         self._next_spectrum = now + SPECTRUM_EVERY_S
                         self.spectrum = spectrum(iq, self.config, now, clipped)

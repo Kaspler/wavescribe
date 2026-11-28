@@ -64,7 +64,7 @@ beginning in its own history of the IQ and demodulate it from there.
 from __future__ import annotations
 
 import itertools
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -197,6 +197,9 @@ class ActivityDetector:
         self._up = 1.0 - np.exp(-frame_s / FLOOR_UP_S)
         self._window = np.hanning(fft).astype(np.float32)
         self._norm = float(self._window.sum()) ** 2  # a full-scale tone reads 1 (0 dBFS)
+        # Each frame as it is made (power by bin, centre in the middle; its first sample and
+        # the end): a receiver's waterfall is cut from them.
+        self.on_frame: Callable[[np.ndarray, int, int], None] | None = None
 
         step = float(step_hz or channel_hz)
         half = MEASURED * min(step, channel_hz) / 2
@@ -327,6 +330,15 @@ class ActivityDetector:
         return self._samples
 
     @property
+    def frame_samples(self) -> int:
+        return self._frame_samples
+
+    @property
+    def init_samples(self) -> int:
+        """How much IQ the first floors are learnt from."""
+        return self._init_frames * self._frame_samples
+
+    @property
     def deaf_s(self) -> float | None:
         """How long interference or overload across the window has kept anything (but the
         channel on top, overloaded) from starting, or None; ``deaf_reason`` says which."""
@@ -368,6 +380,8 @@ class ActivityDetector:
                 frame = np.fft.fftshift(self._acc / (self._per_frame * self._norm))
                 self._frame_clipped = self._acc_clips / (2 * self._frame_samples)
                 end = self._frame_start + self._frame_samples
+                if self.on_frame is not None:
+                    self.on_frame(frame, self._frame_start, end)
                 out += self._frame(frame, self._frame_start, end)
                 if self.open is not None:
                     out += self.open.frame(
