@@ -71,7 +71,7 @@ export function FirstRun() {
             : T.firstRunBody(gb)}
         </p>
         {running && <progress max={100} value={running.total_bytes ? (100 * (running.bytes || 0)) / running.total_bytes : undefined}
-                              aria-label={T.downloadingTitle} style={{ width: 200, height: 6, marginTop: 8, accentColor: "var(--accent)" }} />}
+                              aria-label={T.downloadingTitle} />}
         {failed && <p><span className="is-trouble">{sentence(failed.error || T.downloadFailed(failed.model))}</span></p>}
       </div>
       {failed ? (

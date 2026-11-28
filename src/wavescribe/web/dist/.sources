@@ -79,7 +79,7 @@ da1de3f9f1e83e98c542dedd186fcc420bf8d358 frontend/src/manage/tuner.tsx
 befd121584a0fe920f214314188db3e7e750e13f frontend/src/reading/Alerts.tsx
 d61ab9fe9c7de350fc6584b6bc0d230b937d4e63 frontend/src/reading/Ask.tsx
 7cdeb3daeca8e27a658f45e6fd7a2bb903e40b7d frontend/src/reading/Column.tsx
-544bc5e3588665d08b85540e065700115c09f29e frontend/src/reading/FirstRun.tsx
+e1021536ac6f1b2278eadc504135317530d897eb frontend/src/reading/FirstRun.tsx
 a97f5566b3dee1d88a2796948dd129170d053ac7 frontend/src/reading/Header.tsx
 74ba1eea23352d327af5526be3dd3e92294fdd00 frontend/src/reading/PhoneList.tsx
 6ab98a576a1c0bb006ee3ec94b24188ac79f3cc5 frontend/src/reading/Rack.tsx
@@ -95,7 +95,7 @@ cd13e6e1e44a731d3c09934f19f40af51a25e138 frontend/src/reading/channels.ts
 ec577ee16ba49abe4ed61b980cd80b2c229a6d56 frontend/src/reading/colNote.ts
 787e28346d17c220b924dc619dfc71c0fe2e47dc frontend/src/reading/digest.ts
 9cb05e074e89362e29959129713c58ce23f76a3d frontend/src/reading/held.ts
-12812dd48e876ce52256606ad98b5b09fa655e28 frontend/src/reading/reading.css
+bbd27c4af912c5f2637bf102c80c9a3acb3ce467 frontend/src/reading/reading.css
 06f63790b2abf799932d1835103ae44b256ae7d0 frontend/src/reading/rulesNote.ts
 03cf78d25feff36eef3669b085d1ecaf39b6c006 frontend/src/reading/strings.ts
 c4e6fb591a2d83f663ef2465067a345bf5a983e3 frontend/src/reading/summaries.ts

@@ -442,6 +442,7 @@ a.playing-label:hover { text-decoration: underline; }
 /* A row of its own under the rest, from where the text starts (the icon is 16 px). */
 .firstrun p.firstrun-note { flex: 0 0 calc(100% - 16px - var(--s6)); margin: calc(-1 * var(--s3)) 0 0 calc(16px + var(--s6)); color: var(--ink-3); font-size: var(--t-sm); }
 .firstrun .btn { flex: none; }
+.firstrun progress { display: block; width: 200px; max-width: 100%; height: 6px; margin-top: var(--s4); accent-color: var(--accent); }
 
 .para { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 12px; margin-bottom: calc(var(--read) * 0.85); }
 .ts {
