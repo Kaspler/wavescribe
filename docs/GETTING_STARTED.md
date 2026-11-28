@@ -443,9 +443,9 @@ each station's language. Read them, fix any that are wrong, and save.
   type the words yourself. With a translator that isn't a language model (MADLAD), there are
   no suggestions.
 
-- **Severity** decides what happens. *Low* is only highlighted in the transcript. *Medium*
-  shows a notification on the Mac. *High* and *critical* are also **spoken aloud**, in the
-  languages you choose. You can change what each level does.
+- **Severity** decides what happens. *Low* is only highlighted in the transcript. *Medium* and
+  above show a notification on the Mac. Nothing is **spoken aloud** until you add a voice to a
+  level, in the language you choose. You can change what each level does.
 - **Ready-made word lists** are the topics of the keyword packs, for the languages that have
   one. **More severe near** raises a match one level when a place from the pack's `[places]` is
   named in the same sentence.

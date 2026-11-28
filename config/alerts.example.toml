@@ -175,9 +175,12 @@ severity = "medium"
 # stations = ["station-id"]   # only these stations; every FM station when left out
 
 [actions]
-# speak:<lang> speaks a checked translation into <lang> (or that language's fallback phrase).
-critical = ["notify", "speak:en", "log"]
-high = ["notify", "speak:en", "log"]
+# Nothing is spoken aloud until you add it: a Mac that talks can wake the house, so choose the
+# levels and the language. speak:<lang> speaks a checked translation into <lang> (or that
+# language's fallback phrase) in its [speak.<lang>] voice above: for example "notify",
+# "speak:en", "log" for critical.
+critical = ["notify", "log"]
+high = ["notify", "log"]
 medium = ["notify", "log"]
 low = ["log"]
 
@@ -190,7 +193,7 @@ low = ["log"]
 # [digest]
 # every_minutes = 60            # 30 is on the hour and half past; any number from 5 to 1440
 #                               # that divides a day evenly (10, 15, 45, 90, 120, 180...)
-# stations = ["tsf"]            # leave out for every station
+# stations = ["station-id"]     # leave out for every station
 # language = "en"               # default: notify_language
 # speak = true
 # quiet_hours = ["22:00", "07:00"]
