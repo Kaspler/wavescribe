@@ -23,6 +23,10 @@ import os
 import sys
 import time
 
+if pid_file := os.environ.get("FAKE_POWER_PID"):  # first, before numpy loads: a busy machine
+    with open(pid_file, "w") as f:  # can be slow to start, and a test reads it after a kill
+        f.write(str(os.getpid()))
+
 import numpy as np
 
 MAX_RATE, MIN_RATE = 2_800_000, 1_000_000
@@ -100,9 +104,6 @@ def main() -> int:
     if started := os.environ.get("FAKE_POWER_STARTS"):
         with open(started, "a") as f:
             f.write(" ".join(sys.argv[1:]) + "\n")
-    if pid := os.environ.get("FAKE_POWER_PID"):
-        with open(pid, "w") as f:
-            f.write(str(os.getpid()))
     if os.environ.get("FAKE_POWER_BUSY"):
         print("usb_claim_interface error -6\nFailed to open rtlsdr device #0.", file=sys.stderr)
         return 1

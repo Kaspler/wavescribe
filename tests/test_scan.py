@@ -310,7 +310,7 @@ def test_a_stalled_sweep_is_killed_with_a_clear_error(
     monkeypatch.setenv("FAKE_POWER_PID", str(tmp_path / "pid"))
     t0 = time.monotonic()
     with pytest.raises(S.ScanError, match="stopped reporting"):
-        S.sweep("000001", 446e6, 446.2e6, command=fake_power, stall_s=1.0)
+        S.sweep("000001", 446e6, 446.2e6, command=fake_power, stall_s=2.0)
     assert time.monotonic() - t0 < 10
     assert _gone(int((tmp_path / "pid").read_text()))
 
