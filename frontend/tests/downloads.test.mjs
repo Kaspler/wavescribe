@@ -31,7 +31,7 @@ test("the reading view's notice adds up the downloads the stations wait for, or 
     mt: { model: "mt", state: "failed", error: "couldn't download mt: no connection" },
   };
   const { running, failed } = awaitedDownload(d, ["asr", "vad", "mt"]);
-  assert.equal(failed, null);
+  assert.equal(failed, d.mt); // said beside the ones running
   assert.deepEqual(progressText(running), ["1.0 of 3.0 GB", "11 MB/s · about 3 min left"]);
   assert.equal(running.model, "asr, vad");
   assert.equal(progressText(awaitedDownload({ asr: { ...d.asr, speed: null } }, ["asr"]).running)[1], "measuring the speed…");

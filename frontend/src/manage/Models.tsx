@@ -127,30 +127,34 @@ function Downloads({ d, models, reload }: { d: Record<string, Any>; models: Any[
   const byId = new Map<string, Any>(models.map((e) => [e.id, e]));
   return (
     <Section id="mod-dl" title="Downloads">
-      <Table caption="Downloads" cols={[{ label: "Model" }, { label: "State" }, { label: "Progress" }, { label: "", width: "1%" }]}>
+      {/* The button sits under the state, so a narrow screen keeps it in view. */}
+      <Table caption="Downloads" cols={[{ label: "Model" }, { label: "State" }, { label: "Progress" }]}>
         {rows.map((j) => {
           const [word, detail] = downloadState(j);
           const busy = j.state === "running" || j.state === "stopping";
+          const again = (j.state === "stopped" || j.state === "failed") && !byId.get(j.model)?.installed;
           return (
             <tr key={j.model}>
               <td className="mono">{j.model}</td>
-              <td className={cx(j.state === "failed" && "is-trouble")}>
-                {word}
-                {detail && <div className="m-hint">{detail}</div>}
-              </td>
-              <td className="num-cell m-dl-progress">
-                {busy && <DownloadProgress j={j} />}
-              </td>
-              <td>
+              <td className="m-dl-state">
+                <span className={cx(j.state === "failed" && "is-trouble")}>{word}</span>
+                {detail && <div className={cx("m-hint", j.state === "failed" && "is-trouble")}>{detail}</div>}
                 {j.state === "running" && (
-                  <ActButton size="sm" icon="stop" run={async () => { await post(`/models/${j.model}/stop`); await reload(); }}>Stop</ActButton>
+                  <div className="m-dl-act">
+                    <ActButton size="sm" icon="stop" run={async () => { await post(`/models/${j.model}/stop`); await reload(); }}>Stop</ActButton>
+                  </div>
                 )}
-                {(j.state === "stopped" || j.state === "failed") && !byId.get(j.model)?.installed && (
-                  <ActButton size="sm" icon="download" done="Download started"
-                             run={async () => { await post(`/models/${j.model}/fetch`); await reload(); }}>
-                    {againText(byId.get(j.model))}
-                  </ActButton>
+                {again && (
+                  <div className="m-dl-act">
+                    <ActButton size="sm" icon="download" done="Download started"
+                               run={async () => { await post(`/models/${j.model}/fetch`); await reload(); }}>
+                      {againText(byId.get(j.model))}
+                    </ActButton>
+                  </div>
                 )}
+              </td>
+              <td className="m-dl-progress">
+                {busy && <DownloadProgress j={j} />}
               </td>
             </tr>
           );

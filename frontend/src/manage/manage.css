@@ -98,6 +98,11 @@
 .m-line { margin: 6px 0; color: var(--ink-2); max-width: 64ch; text-wrap: pretty; }
 .m-hint { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-3); max-width: 66ch; line-height: 1.45; text-wrap: pretty; }
 .m-trouble { margin-top: 4px; font-size: var(--t-sm); color: var(--trouble-ink); }
+.m-hint.is-trouble { color: var(--trouble-ink); }
+.m-dl-act { margin-top: 8px; }
+.m-dl-state { overflow-wrap: anywhere; }
+.m-dl-progress { font-variant-numeric: tabular-nums; min-width: 8em; }
+.manage .m-dl-progress progress { width: 100%; max-width: 160px; }
 .m-muted { color: var(--ink-3); }
 .m-cell-note { display: block; margin-top: 2px; font-size: var(--t-sm); color: var(--ink-3); }
 .m-cell-note.is-wide { min-width: 22ch; }
@@ -110,7 +115,7 @@
 .m-station { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 .num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .num-cell .tag { margin-left: 6px; }
-.manage progress { width: 160px; height: 6px; vertical-align: middle; accent-color: var(--accent); }
+.manage progress { width: 160px; max-width: 100%; height: 6px; vertical-align: middle; accent-color: var(--accent); }
 
 /* the machine, as instrument readings */
 .meters { border-top: 1px solid var(--rule); }

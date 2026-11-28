@@ -72,9 +72,9 @@ export function FirstRun() {
         </p>
         {running && <progress max={100} value={running.total_bytes ? (100 * (running.bytes || 0)) / running.total_bytes : undefined}
                               aria-label={T.downloadingTitle} style={{ width: 200, height: 6, marginTop: 8, accentColor: "var(--accent)" }} />}
-        {failed && <p className="is-trouble">{sentence(failed.error || T.downloadFailed(failed.model))}</p>}
+        {failed && <p><span className="is-trouble">{sentence(failed.error || T.downloadFailed(failed.model))}</span></p>}
       </div>
-      {failed && !running ? (
+      {failed ? (
         <ActButton variant="primary" icon="download" run={async () => { await post(`/models/${failed.model}/fetch`); setTick((n) => n + 1); }}>{T.retry}</ActButton>
       ) : (
         <Button variant={running ? "ghost" : "primary"} icon="right" onClick={() => go("#/settings/languages")}>{running ? T.seeDownload : T.getModels}</Button>

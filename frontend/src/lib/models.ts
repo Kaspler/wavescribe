@@ -107,17 +107,18 @@ export interface DownloadJob {
 }
 
 /** The downloads of the models the stations wait for (`ids`), as the reading view's notice says
- * them: those running added up into one (for progressText), else the first that failed. */
+ * them: those running added up into one (for progressText), and the first that failed. */
 export function awaitedDownload(downloads: Record<string, DownloadJob> | undefined, ids: string[]): { running: DownloadJob | null; failed: DownloadJob | null } {
   const jobs = ids.map((id) => downloads?.[id]).filter((j): j is DownloadJob => !!j);
   const running = jobs.filter((j) => j.state === "running" || j.state === "stopping");
-  if (!running.length) return { running: null, failed: jobs.find((j) => j.state === "failed") || null };
+  const failed = jobs.find((j) => j.state === "failed") || null;
+  if (!running.length) return { running: null, failed };
   const sum = (f: (j: DownloadJob) => number | null | undefined) => running.reduce((s, j) => s + (f(j) || 0), 0);
   const bytes = sum((j) => j.bytes);
   const total = running.every((j) => j.total_bytes) ? sum((j) => j.total_bytes) : null;
   const speed = running.every((j) => j.speed != null) ? sum((j) => j.speed) : null;
   const eta_s = total != null && speed ? Math.round(Math.max(0, total - bytes) / speed) : null;
-  return { running: { model: running.map((j) => j.model).join(", "), state: "running", bytes, total_bytes: total, speed, eta_s }, failed: null };
+  return { running: { model: running.map((j) => j.model).join(", "), state: "running", bytes, total_bytes: total, speed, eta_s }, failed };
 }
 
 /** A download's speed: 12 MB/s, 2.4 MB/s, 800 kB/s. */

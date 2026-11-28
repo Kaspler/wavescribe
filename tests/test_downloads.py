@@ -252,6 +252,9 @@ def test_a_running_download_says_its_speed_and_the_time_left_once_measured(
         fetching.status()
         job = fetching.status()["big"]
         assert (job["speed"], job["eta_s"]) == (0, None)
+        arrived["bytes"] = 101_000_000  # more than the registry's rounded size says
+        job = fetching.status()["big"]
+        assert (job["bytes"], job["total_bytes"], job["percent"]) == (101_000_000,) * 2 + (99.0,)
     finally:
         fetching.close()
 

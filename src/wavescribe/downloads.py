@@ -227,6 +227,8 @@ class Downloads:
                 done = self._done(self.registry.get(model_id))
                 job["bytes"] = done
                 total = job.get("total_bytes")
+                if total and done > total:  # the registry's size is rounded: never "2.4 of 2.3"
+                    job["total_bytes"] = total = done
                 job["percent"] = min(99.0, round(100 * done / total, 1)) if total else None
                 job["speed"] = speed = self._speed(model_id, done)
                 left = max(0, total - done) if total else None
