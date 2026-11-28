@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from wavescribe.modelfetch import (
     dir_bytes,
     kept_bytes,
     library_parts,
+    no_room_on_page,
     remove_parts,
     stopped_on_page,
     target_dir,
@@ -45,6 +47,8 @@ log = logging.getLogger(__name__)
 FETCH_TIMEOUT_S = 6 * 3600
 STOP_WAIT_S = 5.0  # after asking a download to stop, before it is killed
 ERROR_MAX_CHARS = 500  # the longest sentence `models fetch` ends with is under 400
+SPEED_WINDOW_S = 20.0  # a download's speed is what arrived over about this long
+SPEED_SPAN_S = 2.0  # and is said once two looks this far apart have measured it
 
 
 def fetch_command(model_id: str) -> list[str]:
@@ -86,15 +90,28 @@ class Downloads:
         self._threads: dict[str, threading.Thread] = {}
         # The library's part-files in each download's folder when it began: not its own.
         self._before: dict[str, frozenset[Path]] = {}
+        # (when, bytes) each time a running download was measured, for its speed.
+        self._samples: dict[str, deque[tuple[float, int]]] = {}
+        self.clock: Callable[[], float] = time.monotonic
         self._closed = False
 
     def start(self, model_id: str) -> dict[str, Any]:
+        """Start downloading a model, after its licence and the room on its disk are settled:
+        a refusal is a ``ModelError`` with the sentence, before a byte is fetched."""
         entry = self.registry.get(model_id)
         self.registry.check_license(entry)  # fail now, on the page, not in the thread
         with self._lock:
             job = self._jobs.get(model_id)
             if job is not None and job["state"] in ("running", "stopping"):
                 return dict(job)
+        refusal = no_room_on_page(self.registry, entry)
+        if refusal:
+            raise ModelError(refusal)
+        with self._lock:
+            job = self._jobs.get(model_id)
+            if job is not None and job["state"] in ("running", "stopping"):
+                return dict(job)
+            self._samples[model_id] = deque()
             target = target_dir(self.registry, entry)
             base = dir_bytes(target) - kept_bytes(target)  # what is continued counts as done
             job = {"model": model_id, "state": "running", "started": time.time(),
@@ -194,6 +211,10 @@ class Downloads:
         _end(procs)
 
     def status(self) -> dict[str, dict[str, Any]]:
+        """Every download since the start, by model id. A running one has its ``bytes`` so
+        far, its ``percent``, and from the second look on, SPEED_SPAN_S or more apart, its
+        ``speed`` (bytes a second over the last SPEED_WINDOW_S) and ``eta_s``, the seconds
+        left at that speed (None while nothing arrives, or with no size known)."""
         out = {}
         with self._lock:
             jobs = {k: dict(v) for k, v in self._jobs.items()}
@@ -204,8 +225,25 @@ class Downloads:
                 job["bytes"] = done
                 total = job.get("total_bytes")
                 job["percent"] = min(99.0, round(100 * done / total, 1)) if total else None
+                job["speed"] = speed = self._speed(model_id, done)
+                left = max(0, total - done) if total else None
+                job["eta_s"] = round(left / speed) if left is not None and speed else None
             out[model_id] = job
         return out
+
+    def _speed(self, model_id: str, done: int) -> int | None:
+        """Bytes a second over the last SPEED_WINDOW_S of looks at a download, or None until
+        two looks SPEED_SPAN_S apart have measured it."""
+        now = self.clock()
+        with self._lock:
+            samples = self._samples.setdefault(model_id, deque())
+            samples.append((now, done))
+            while len(samples) > 2 and now - samples[1][0] >= SPEED_WINDOW_S:
+                samples.popleft()
+            then, before = samples[0]
+        if now - then < SPEED_SPAN_S:
+            return None
+        return max(0, round((done - before) / (now - then)))
 
 
 class _StoppedFirst(Exception):

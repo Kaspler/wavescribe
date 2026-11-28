@@ -1,10 +1,10 @@
 // Models: what this machine can run, in which order, and where more come from.
 import { useEffect, useRef, useState } from "react";
 import { langNameEn } from "../lib/lang";
-import { NEED_LABEL, afterRemoval, downloadState, neededModels, needsLicence, sentence, sizeText, totalGb } from "../lib/models";
+import { NEED_LABEL, afterRemoval, downloadState, neededModels, needsLicence, progressText, roomForAll, roomText, sentence, sizeText } from "../lib/models";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, Input, Section, Select, Table, Tag, type Tone, act, cx, toast } from "../components/ui";
-import { type Any, ApiError, bytes, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
+import { type Any, ApiError, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
 
 const CAPS: [string, string, string][] = [
   ["asr", "Speech recognition", "Each station uses the first installed model in this order that speaks its language and fits. A station can also name its own under Stations."],
@@ -76,9 +76,10 @@ function Recommended({ m, reload }: { m: Any; reload: () => Promise<void> }) {
   const tr: Any[] = m.recommended.translation || [];
   rows.push(["translation", NEED_LABEL.translation, tr.map((r) => r.id)]);
   const job = (id: string) => (m.downloads || {})[id];
-  const needs = neededModels(m).filter((n) => job(n.entry.id)?.state !== "running");
+  const needs = neededModels(m).filter((n) => !["running", "stopping"].includes(job(n.entry.id)?.state));
   const ready = needs.filter((n) => !needsLicence(n.entry));
-  const gb = totalGb(ready);
+  const left = ready.reduce((sum, n) => sum + (n.entry.left_bytes ?? (n.entry.size_gb || 0) * 1e9), 0);
+  const [fits, room] = roomForAll(ready.map((n) => n.entry));
   const chain = (ids: string[]) => ids.map((id, i) => <span key={id}>{i > 0 && <span className="m-then">then</span>}<code>{id}</code></span>);
   const state = (ids: string[]) => {
     const have = ids.find((id) => byId.get(id)?.installed);
@@ -105,12 +106,14 @@ function Recommended({ m, reload }: { m: Any; reload: () => Promise<void> }) {
       {none.length > 0 && <p className="m-trouble">Nothing installed speaks {none.map(langNameEn).join(", ")}: search the catalogue below.</p>}
       {ready.length > 0 && (
         <div className="m-actions">
-          <ActButton variant="primary" icon="download" done="Downloads started"
+          <ActButton variant="primary" icon="download" done="Downloads started" disabled={!fits}
                      run={async () => { for (const n of ready) await post(`/models/${n.entry.id}/fetch`); await reload(); }}>
-            Download what's missing{gb >= 0.1 ? ` · ${gbSize(gb)}` : ""}
+            Download what's missing{left >= 1e8 ? ` · ${sizeText(left)}` : ""}
           </ActButton>
+          {fits && room && <span className="m-muted">{room}</span>}
         </div>
       )}
+      {!fits && <p className="m-trouble">{room}</p>}
       <p className="m-hint">Each job uses the first model in its order that is installed and fits this machine. Speech detection is needed for any text at all; the music filter keeps songs out of the transcripts.</p>
     </div>
   );
@@ -132,9 +135,8 @@ function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promis
                 {word}
                 {detail && <div className="m-hint">{detail}</div>}
               </td>
-              <td className="num-cell">
-                {busy && <progress max={100} value={j.percent ?? 0} aria-label={`${j.model} downloaded`} />}
-                {j.bytes != null && ` ${bytes(j.bytes)}`}
+              <td className="num-cell m-dl-progress">
+                {busy && <DownloadProgress j={j} />}
               </td>
               <td>
                 {j.state === "running" && (
@@ -153,6 +155,18 @@ function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promis
   );
 }
 
+/** A running download's bar, how much has arrived, and its speed with the time left. */
+function DownloadProgress({ j }: { j: Any }) {
+  const [amount, pace] = progressText(j);
+  return (
+    <>
+      <progress max={100} value={j.percent ?? 0} aria-label={`${j.model} downloaded`} />
+      <div>{amount}</div>
+      <div className="m-muted">{pace}</div>
+    </>
+  );
+}
+
 function ModelSection({ cap, label, desc, m, reload }: { cap: string; label: string; desc: string; m: Any; reload: () => Promise<void> }) {
   const chain: string[] = m.chains[cap] || [];
   const entries: Any[] = m.models.filter((e: Any) => e.capability === cap).sort((a: Any, b: Any) => (a.chain_position ?? 999) - (b.chain_position ?? 999));
@@ -167,14 +181,14 @@ function ModelSection({ cap, label, desc, m, reload }: { cap: string; label: str
   return (
     <Section id={`mod-${cap}`} title={label} description={desc}>
       <ol className="m-list">
-        {entries.map((e) => <ModelRow key={e.id} e={e} chain={chain} move={move} setChain={setChain} reload={reload} />)}
+        {entries.map((e) => <ModelRow key={e.id} e={e} job={(m.downloads || {})[e.id]} chain={chain} move={move} setChain={setChain} reload={reload} />)}
       </ol>
     </Section>
   );
 }
 
-function ModelRow({ e, chain, move, setChain, reload }: {
-  e: Any; chain: string[]; move: (id: string, d: number) => Promise<void> | undefined;
+function ModelRow({ e, job, chain, move, setChain, reload }: {
+  e: Any; job?: Any; chain: string[]; move: (id: string, d: number) => Promise<void> | undefined;
   setChain: (ids: string[], done: string) => Promise<void>; reload: () => Promise<void>;
 }) {
   const [accepting, setAccepting] = useState(false);
@@ -185,21 +199,25 @@ function ModelRow({ e, chain, move, setChain, reload }: {
   const [fitWord, fitTone] = FIT[e.fit.level] || FIT.unknown;
   const langs = e.languages.includes("*") ? "any language" : e.languages.length > 8 ? `${e.languages.length} languages` : e.languages.map(langNameEn).join(", ");
   const needsAccept = (e.tier === "opt-in" || e.tier === "restricted") && !e.accepted;
+  const downloading = !e.installed && (job?.state === "running" || job?.state === "stopping");
+  const [fits, room] = e.installed || downloading ? [true, null] : roomText(e.left_bytes, e.free_bytes);
   return (
     <li className={cx("m-item", pos < 0 && "is-off")}>
       <div className="m-item-head">
         <span className={cx("m-pos", pos < 0 && "is-out")} aria-label={pos >= 0 ? `Number ${pos + 1} in the order` : "Not in the order"}>{pos >= 0 ? pos + 1 : "–"}</span>
         <strong className="mono">{e.id}</strong>
-        {e.loaded ? <Tag tone="good">loaded</Tag> : e.in_use.length ? <Tag tone="accent">planned: {e.in_use.join(", ")}</Tag> : e.installed ? <Tag tone="muted">installed</Tag> : <Tag tone="muted">not downloaded</Tag>}
+        {e.loaded ? <Tag tone="good">loaded</Tag> : e.in_use.length ? <Tag tone="accent">planned: {e.in_use.join(", ")}</Tag> : e.installed ? <Tag tone="muted">installed</Tag>
+          : downloading ? <Tag tone="accent">downloading{job.percent != null ? ` ${Math.round(job.percent)}%` : "…"}</Tag> : <Tag tone="muted">not downloaded</Tag>}
         <Tag tone={fitTone}>{fitWord}</Tag>
         <Tag tone={tierTone} title={tierText}>{tierWord}</Tag>
         {e.tested ? <Tag tone="good" title={e.tested}>tested</Tag> : <Tag tone="muted">untested</Tag>}
         {e.origin === "catalog" && <Tag>from the catalogue</Tag>}
         <span className="m-spacer" />
-        {!e.installed && e.origin !== "local" && (needsAccept ? (
+        {!e.installed && !downloading && e.origin !== "local" && (needsAccept ? (
           <Button size="sm" aria-expanded={accepting} onClick={() => setAccepting(!accepting)}>Accept the licence…</Button>
         ) : (
-          <ActButton size="sm" variant="primary" icon="download" done="Download started" run={async () => { await post(`/models/${e.id}/fetch`); await reload(); }}>
+          <ActButton size="sm" variant="primary" icon="download" done="Download started" disabled={!fits}
+                     run={async () => { await post(`/models/${e.id}/fetch`); await reload(); }}>
             Download{e.size_gb ? ` · ${gbSize(e.size_gb)}` : ""}
           </ActButton>
         ))}
@@ -224,6 +242,7 @@ function ModelRow({ e, chain, move, setChain, reload }: {
         {e.upstream && <> · <a href={e.upstream} target="_blank" rel="noopener">source</a></>}
       </p>
       <p className="m-item-sub">{e.fit.reason}{e.speed ? ` · ${e.speed}` : ""}</p>
+      {room && (fits ? <p className="m-item-sub">{room}</p> : <p className="m-trouble">{room}</p>)}
       {e.tested && <p className="m-hint">Tested: {e.tested}</p>}
       {e.notes && <p className="m-hint">{e.notes}</p>}
       {e.unsafe_targets.length > 0 && <p className="m-trouble">Unsafe into {e.unsafe_targets.map(langNameEn).join(", ")}: it invents text there.</p>}

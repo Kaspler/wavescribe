@@ -194,6 +194,94 @@ def test_the_page_stops_a_download_only_from_this_machine(tmp_path: Path, monkey
         node.close()
 
 
+def _big(root: Path):
+    """A registry with one model of 100 MB from a URL, not downloaded yet."""
+    from wavescribe.registry import ModelEntry, ModelRegistry
+
+    big = ModelEntry("big", "asr", "fake", "url:https://models.example/big.bin", "u", "MIT", "u",
+                     "default", False, ("*",), "", sha256="0" * 64, size_gb=0.1)  # fmt: skip
+    return ModelRegistry([big], {"asr": ["big"]}, models_dir=root / "models")
+
+
+def test_a_download_the_disk_has_no_room_for_is_refused_before_it_starts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import pytest
+
+    from wavescribe import modelfetch
+    from wavescribe.registry import ModelError
+
+    def never(_model: str) -> list[str]:
+        raise AssertionError("nothing may be fetched")
+
+    monkeypatch.setattr(downloads, "fetch_command", never)
+    monkeypatch.setattr(modelfetch, "free_bytes", lambda _path: 1_000_000)
+    reg = _big(tmp_path)
+    with pytest.raises(ModelError) as refused:
+        downloads.Downloads(reg).start("big")
+    assert str(refused.value) == (
+        f"not enough room on the disk: 100 MB to download and 1 MB free at {tmp_path}; nothing "
+        "was downloaded: make 99 MB of room, then start the download again."
+    )
+
+
+def test_a_running_download_says_its_speed_and_the_time_left_once_measured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from wavescribe import modelfetch
+
+    arrived = {"bytes": 0}
+    monkeypatch.setattr(downloads, "dir_bytes", lambda _folder: arrived["bytes"])
+    monkeypatch.setattr(modelfetch, "free_bytes", lambda _path: 10**12)
+    endless = [sys.executable, "-c", "import time; time.sleep(60)"]
+    monkeypatch.setattr(downloads, "fetch_command", lambda _model: endless)
+    fetching = downloads.Downloads(_big(tmp_path))
+    now = {"t": 100.0}
+    fetching.clock = lambda: now["t"]
+    fetching.start("big")
+    try:
+        job = fetching.status()["big"]
+        assert (job["speed"], job["eta_s"]) == (None, None)  # one look: no speed yet
+        now["t"], arrived["bytes"] = 101.0, 2_000_000
+        assert fetching.status()["big"]["speed"] is None  # a second later: still too soon
+        now["t"], arrived["bytes"] = 105.0, 10_000_000
+        job = fetching.status()["big"]
+        assert job["speed"] == 2_000_000 and job["eta_s"] == 45 and job["percent"] == 10.0
+        now["t"] = 115.0  # nothing more arrived: the speed falls, and there's no time left
+        job = fetching.status()["big"]
+        assert job["speed"] == 666_667 and job["eta_s"] == 135
+        now["t"] = 140.0  # the window has moved past the bytes that came: nothing arriving
+        fetching.status()
+        job = fetching.status()["big"]
+        assert (job["speed"], job["eta_s"]) == (0, None)
+    finally:
+        fetching.close()
+
+
+def test_the_models_view_says_what_is_left_to_download_and_the_room_for_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from tests.test_app import Running
+    from wavescribe import modelfetch
+
+    monkeypatch.setattr(modelfetch, "free_bytes", lambda _path: 50_000_000)
+    node = Running(make_app(tmp_path, models=_big))
+    try:
+        part = tmp_path / "node" / "models" / "big" / ("big.bin." + "0" * 16 + ".part")
+        part.parent.mkdir(parents=True)
+        part.write_bytes(b"p" * 30_000_000)  # what a stopped download kept
+        [big] = node.call("GET", "/api/manage/models")[1]["models"]
+        assert not big["installed"]
+        assert (big["left_bytes"], big["free_bytes"]) == (70_000_000, 50_000_000)
+        assert big["disk"] == str(part.stat().st_dev)
+        status, refused = node.call("POST", "/api/manage/models/big/fetch")
+        assert status == 400 and refused["error"].startswith(
+            "not enough room on the disk: 70 MB to download and 50 MB free at "
+        )
+    finally:
+        node.close()
+
+
 def test_serve_stopping_stops_its_downloads(tmp_path: Path, monkeypatch) -> None:
     app = make_app(tmp_path)
     stopped: list[bool] = []

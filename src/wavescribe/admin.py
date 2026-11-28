@@ -17,7 +17,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from wavescribe.config import ConfigError
-from wavescribe.registry import CATALOG_MODELS_PATH, ModelError, _parse_entry
+from wavescribe.registry import (
+    CATALOG_MODELS_PATH,
+    ModelEntry,
+    ModelError,
+    ModelRegistry,
+    _parse_entry,
+)
 from wavescribe.settings import device_dict, dumps
 
 if TYPE_CHECKING:
@@ -70,6 +76,7 @@ def models_view(app: App) -> dict[str, Any]:
             "installed": path is not None, "size_gb": size,
             # Wavescribe downloaded it, so it can remove it (never a model at a path you gave).
             "removable": e.kind != "local",
+            **_room(reg, e, path),
             # Whether it can be the speech model of a station in language "auto" (asr only).
             "detects_languages": detects_languages(e, path),
             "accepted": reg.licenses.accepted(e),
@@ -100,6 +107,20 @@ def models_view(app: App) -> dict[str, Any]:
         "recommended": recommended,
         "loading": status["loading"],
     }
+
+
+def _room(reg: ModelRegistry, e: ModelEntry, path: Path | None) -> dict[str, Any]:
+    """For a model that isn't installed, before anyone clicks: the bytes still to download
+    (``left_bytes``, None with no size known) and the free space on the disk it would go to
+    (``free_bytes``, and which disk: ``disk``, to add up several models on one)."""
+    if path is not None or e.kind == "local":
+        return {"left_bytes": None, "free_bytes": None, "disk": None}
+    from wavescribe import modelfetch
+
+    folder = modelfetch.target_dir(reg, e)
+    return {"left_bytes": modelfetch.to_download(reg, e),
+            "free_bytes": modelfetch.free_bytes(folder),
+            "disk": str(modelfetch.disk_of(folder))}  # fmt: skip
 
 
 def accept_model(app: App, model_id: str, license_id: str, non_commercial: bool) -> None:

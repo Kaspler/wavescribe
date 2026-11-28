@@ -158,6 +158,20 @@ def free_bytes(path: Path) -> int:
     return shutil.disk_usage(_existing(path)).free
 
 
+def disk_of(path: Path) -> int:
+    """Which disk holds ``path`` (which needn't exist yet): its device number."""
+    return _existing(path).stat().st_dev
+
+
+def to_download(registry: ModelRegistry, entry: ModelEntry) -> int | None:
+    """Bytes still to download for a model that isn't installed: its size less what is in its
+    folder already (part-files the next download continues included); None when the registry
+    gives no size."""
+    if not entry.size_gb:
+        return None
+    return max(0, int(entry.size_gb * GB) - dir_bytes(target_dir(registry, entry)))
+
+
 # -- What there is to download -----------------------------------------------------------------
 
 
@@ -192,10 +206,18 @@ def survey(registry: ModelRegistry, entries: list[ModelEntry]) -> list[Item]:
         left: int | None = 0
         if path is None and entry.kind != "local":
             remove_parts(folder, older_than_s=STALE_PART_S)
-            size = int(entry.size_gb * GB) if entry.size_gb else None
-            left = None if size is None else max(0, size - dir_bytes(folder))
+            left = to_download(registry, entry)
         items.append(Item(entry, folder, path, left))
     return items
+
+
+def no_room_on_page(registry: ModelRegistry, entry: ModelEntry) -> str | None:
+    """``no_room`` for one model the page is about to download, in the page's words."""
+    if entry.kind == "local" or registry.local_path(entry) is not None:
+        return None
+    item = Item(entry, target_dir(registry, entry), None, to_download(registry, entry))
+    refusal = no_room([item])
+    return refusal.replace(RETRY, RETRY_ON_PAGE) if refusal else None
 
 
 def no_room(items: list[Item]) -> str | None:

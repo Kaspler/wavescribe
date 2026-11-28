@@ -9,6 +9,10 @@ export interface ModelEntry {
   tier: string;
   accepted: boolean;
   in_use: string[];
+  /** Not installed: the bytes still to download, the free space on its disk, and which disk. */
+  left_bytes?: number | null;
+  free_bytes?: number | null;
+  disk?: string | null;
 }
 
 export interface ModelsView {
@@ -91,6 +95,60 @@ export interface DownloadJob {
   state: string; // running, stopping, done, failed, stopped
   error?: string | null;
   note?: string | null;
+  bytes?: number | null;
+  total_bytes?: number | null;
+  percent?: number | null;
+  speed?: number | null; // bytes a second, once measured
+  eta_s?: number | null;
+}
+
+/** A download's speed: 12 MB/s, 2.4 MB/s, 800 kB/s. */
+export function speedText(bps: number): string {
+  if (bps >= 10e6) return `${Math.round(bps / 1e6)} MB/s`;
+  if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} MB/s`;
+  return `${Math.max(1, Math.round(bps / 1e3))} kB/s`;
+}
+
+/** The time a download has left at its measured speed, rounded as a person would say it. */
+export function timeLeft(s: number): string {
+  if (s < 60) return `about ${Math.max(5, Math.round(s / 5) * 5)} s left`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `about ${min} min left`;
+  const h = Math.floor(min / 60), rest = min % 60;
+  return `about ${h} h${rest ? ` ${rest} min` : ""} left`;
+}
+
+/** A running download in two parts: how much has arrived, and its speed with the time left
+ * (only once the speed is measured: nothing is guessed). */
+export function progressText(j: DownloadJob): [string, string] {
+  const done = j.bytes || 0;
+  const have = done < 0.5e6 ? "0 MB" : sizeText(done);
+  const amount = j.total_bytes ? `${have} of ${sizeText(j.total_bytes)}` : `${have} so far`;
+  if (j.speed == null) return [amount, "measuring the speed…"];
+  if (j.speed === 0) return [amount, "nothing arriving"];
+  return [amount, speedText(j.speed) + (j.eta_s != null ? ` · ${timeLeft(j.eta_s)}` : "")];
+}
+
+/** Whether what is left to download fits the free space on its disk, and the sentence that
+ * says so: the free space when it fits, the shortfall when it doesn't. Sizes unknown: fits. */
+export function roomText(left: number | null | undefined, free: number | null | undefined): [boolean, string | null] {
+  if (free == null) return [true, null];
+  if (left != null && left > free) return [false, `Not enough room: ${sizeText(left)} to download and ${sizeText(free)} free on this disk. Make room first.`];
+  return [true, `${sizeText(free)} free on this disk`];
+}
+
+/** The same for several models at once (Download what's missing), added up per disk; the first
+ * disk without room, else the free space when they share one disk. */
+export function roomForAll(entries: { left_bytes?: number | null; free_bytes?: number | null; disk?: string | null }[]): [boolean, string | null] {
+  const disks = new Map<string, { left: number; free: number }>();
+  for (const e of entries) {
+    if (e.disk == null || e.free_bytes == null) continue;
+    const d = disks.get(e.disk) || { left: 0, free: e.free_bytes };
+    d.left += e.left_bytes || 0;
+    disks.set(e.disk, d);
+  }
+  for (const d of disks.values()) if (d.left > d.free) return roomText(d.left, d.free);
+  return disks.size === 1 ? roomText(0, [...disks.values()][0].free) : [true, null];
 }
 
 /** A sentence the server sends in lower case without its full stop, as the page shows it. */
