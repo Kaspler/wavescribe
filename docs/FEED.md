@@ -382,8 +382,8 @@ A longer line is cut, between whole characters (never inside a character's bytes
 a letter and its accent, or inside an emoji or a flag), and ends with "…":
 
 ```text
-[HIGH] water · Radio Example: Corte de água amanhã entre as 9h e as 17h na zona norte.
-[CRITICAL, not checked] fire (more serious now) · Радіо Приклад: Пожежа біля промислової зони, дим іде на північ; мешканців просят…
+[HIGH] water · Radio Example: Corte de agua mañana entre las 9 y las 17 h en la zona norte.
+[CRITICAL, not checked] fire (more serious now) · Ραδιόφωνο Παράδειγμα: Πυρκαγιά κοντά στη βιομηχανική ζώνη, ο καπνός κινείται πρ…
 [MEDIUM] roads · 示例电台: 下午三点起桥附近道路封闭，请绕行市中心，并留意救援部门的最新通知。谢谢合作，祝大家平安，请转告家人和邻居，保持…
 ```
 
@@ -445,7 +445,7 @@ meshtastic [--port <serial port> | --host <address>] --dest '!1a2b3c4d' --sendte
   never the translation, cut on a word with "…":
 
   ```text
-  15:03 Radio Example [HIGH] water: Corte de água amanhã entre as 9h e as 17h na zona norte.
+  15:03 Radio Example [HIGH] water: Corte de agua mañana entre las 9 y las 17 h en la zona norte.
   ```
 
 - **Acknowledged, or not.** Wavescribe reads what the program prints. A line with `ACK` and a

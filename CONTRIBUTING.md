@@ -41,7 +41,9 @@ radio, and the radio code is tested on synthetic signals.
    the model registry, so adding a language takes configuration and a model.
 5. **Alerts use source-language text.** Translation is for people and never sits on the alert
    path.
-6. **Receive only.** No transmit code paths, no decryption of protected services.
+6. **Receive only, on the receivers.** No code transmits with a receiver, and nothing decrypts
+   protected services. Alerts leave only through outputs the user sets up (a webhook, ntfy, or a
+   mesh node the user owns, which sends them).
 7. **Runs 24/7, possibly on battery.** Memory and disk stay bounded, it recovers from SDR or
    stream dropouts, and power draw stays modest. Measure, don't guess.
 8. **Platform-specific code sits behind interfaces** (MLX, `say`, notifications), with a portable
