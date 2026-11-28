@@ -74,8 +74,9 @@ def registry(tmp_path: Path) -> ModelRegistry:
 
 def make_app(tmp_path: Path, name: str = "node", *, transcriber=SpeakingTranscriber,
              audio=None, transport=None, start=None, stations=None,
-             page=None) -> App:  # fmt: skip
-    """``page``: what config/ui.toml holds before the app starts."""
+             page=None, models=None) -> App:  # fmt: skip
+    """``page``: what config/ui.toml holds before the app starts. ``models``: the registry,
+    made from the app's folder (by default one model, "m", for every job)."""
     root = tmp_path / name
     root.mkdir()
     (root / "alerts.toml").write_text(ALERTS)
@@ -84,7 +85,8 @@ def make_app(tmp_path: Path, name: str = "node", *, transcriber=SpeakingTranscri
     settings.update(lambda d: d.update(page or {}))
     settings.update(lambda d: d.setdefault("node", {}).update(name=name))
     return App(
-        parse_stations(stations or BASE, root / "stations.toml"), settings, registry(root),
+        parse_stations(stations or BASE, root / "stations.toml"), settings,
+        (models or registry)(root),
         store=Store(root / "w.db"), alerts_path=root / "alerts.toml",
         keywords_dir=pack(root), start=start if start is not None else [],
         pipeline_kwargs={

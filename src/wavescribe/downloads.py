@@ -178,6 +178,13 @@ class Downloads:
         event(log, "model_fetch_stopped", model=model_id, state=job["state"])
         return self.status().get(model_id, dict(job))
 
+    def forget(self, model_id: str) -> None:
+        """Drop a download that has ended from the list (its model was removed since)."""
+        with self._lock:
+            job = self._jobs.get(model_id)
+            if job is not None and job["state"] not in ("running", "stopping"):
+                del self._jobs[model_id]
+
     def close(self) -> None:
         """Stop the downloads still running (``App.close``). Each is a child process, which
         would otherwise go on downloading after ``serve`` has stopped."""

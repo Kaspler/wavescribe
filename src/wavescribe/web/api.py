@@ -200,6 +200,19 @@ def _stop_fetch(app: App, m, q, b) -> Any:
     return app.downloads.stop(m["id"])
 
 
+@route("GET", "/models/(?P<id>[A-Za-z0-9_.-]+)/remove")
+def _removal(app: App, m, q, b) -> Any:
+    """What removing a model would free, and why it can't be removed now (``refusal``)."""
+    return app.removal_view(m["id"])
+
+
+@route("POST", "/models/(?P<id>[A-Za-z0-9_.-]+)/remove")
+def _remove(app: App, m, q, b) -> Any:
+    """Remove a downloaded model: ``freed`` bytes. Refused with code ``in_use`` (and the
+    ``stations`` that use it, ``translator``), ``downloading`` or ``not_installed``."""
+    return app.remove_model(m["id"])
+
+
 @route("POST", "/models/(?P<id>[A-Za-z0-9_.-]+)/accept")
 def _accept(app: App, m, q, b) -> Any:
     b = _body(b)

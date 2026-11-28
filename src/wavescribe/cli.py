@@ -114,10 +114,9 @@ def cmd_models_fetch(args: argparse.Namespace) -> int:
     code = modelfetch.run(registry, entries)
     if code:
         return code
-    out = DATA_DIR / "THIRD_PARTY_MODELS.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(credits_markdown(registry), encoding="utf-8")
-    print(f"credits for the installed models: {out}")
+    from wavescribe.registry import write_credits
+
+    print(f"credits for the installed models: {write_credits(registry)}")
     models = "The model is" if len(entries) == 1 else "The models are"
     print(f"Done. {models} installed. Start Wavescribe with: {typed('serve --open')}")
     return 0
@@ -141,42 +140,132 @@ def cmd_models_accept(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_models_remove(args: argparse.Namespace) -> int:
-    from wavescribe import modelremove
-    from wavescribe.modelfetch import size_text
-    from wavescribe.registry import ModelRegistry
+class _NoRemoval(Exception):
+    """``models remove`` ends before removing anything: ``code``, and the sentence to say."""
 
-    if args.all == bool(args.ids):
-        print("wavescribe: name the models to remove, or give --all (not both)", file=sys.stderr)
-        return 2
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# One model to remove: its id, the bytes it frees, the bytes that stay (another entry in the
+# Hugging Face cache has the same files) and where it is, as the listing shows it.
+_Removing = tuple[str, int, int, str]
+
+
+def _not_installed(missing: list[str]) -> _NoRemoval:
+    one = len(missing) == 1
+    are, them = ("isn't", "it") if one else ("aren't", "them")
+    return _NoRemoval(1, f"{', '.join(missing)} {are} installed (nothing of {them} is on this "
+                         "disk), so nothing was removed")  # fmt: skip
+
+
+def _removals_here(args: argparse.Namespace) -> tuple[list[_Removing], Callable[[str], int]]:
+    """What ``models remove`` takes off the disk itself, when nothing runs in this home."""
+    from wavescribe import modelremove
+    from wavescribe.registry import ModelRegistry, write_credits
+
     registry = ModelRegistry.load()
     if args.all:
         found = [modelremove.plan(registry, e) for e in registry.entries() if e.kind != "local"]
         removals = [r for r in found if r is not None]
         if not removals:
-            print("No model is installed: nothing to remove.")
-            return 0
+            raise _NoRemoval(0, "No model is installed: nothing to remove.")
     else:
         entries = [registry.get(i) for i in dict.fromkeys(args.ids)]  # an unknown id stops here
         planned = [(e, modelremove.plan(registry, e)) for e in entries]
-        missing = [e.id for e, r in planned if r is None]
-        if missing:
-            are = "isn't" if len(missing) == 1 else "aren't"
-            print(f"wavescribe: {', '.join(missing)} {are} installed (nothing of "
-                  f"{'it' if len(missing) == 1 else 'them'} is on this disk), so nothing was "
-                  "removed", file=sys.stderr)  # fmt: skip
-            return 1
+        if missing := [e.id for e, r in planned if r is None]:
+            raise _not_installed(missing)
         removals = [r for _, r in planned if r is not None]
-    width = max(len(r.id) for r in removals)
-    for r in removals:
-        places = ", ".join(modelremove.where(p) for p in r.places)
-        print(f"{r.id:<{width}}  {size_text(r.size):>10}  {places}")
-        if r.shared >= 1e6:
-            print(f"{'':<{width}}  {'':>10}  (another {size_text(r.shared)} stays: another entry "
+    by_id = {r.id: r for r in removals}
+
+    def remove(model_id: str) -> int:
+        freed = modelremove.remove(registry, by_id[model_id])
+        write_credits(registry, only_if_there=True)
+        return freed
+
+    rows = [(r.id, r.size, r.shared, ", ".join(modelremove.where(p) for p in r.places))
+            for r in removals]  # fmt: skip
+    return rows, remove
+
+
+def _removals_on_page(
+    holder: dict[str, Any], args: argparse.Namespace
+) -> tuple[list[_Removing], Callable[[str], int]]:
+    """What ``models remove`` asks the ``serve`` that runs in this home to remove: it knows
+    what its stations use right now, refuses those, and plans its stations afresh after."""
+    import json
+    import urllib.parse
+
+    from wavescribe.agent.client import Client, Refused, Unreachable
+
+    url = holder.get("url")
+    if not isinstance(url, str) or not url:  # `listen`, or a serve still starting
+        command = holder.get("command") if isinstance(holder.get("command"), str) else "serve"
+        pid = f" (pid {holder['pid']})" if isinstance(holder.get("pid"), int) else ""
+        raise _NoRemoval(1, f"`{typed(command)}` is running in this home{pid} and may be using "
+                            "these models: stop it first, then remove them")  # fmt: skip
+    client = Client(url)
+
+    def ask(method: str, path: str) -> Any:
+        try:
+            with client.open(method, "/api/manage" + path, control=True) as resp:
+                return json.loads(resp.read())
+        except Unreachable:
+            why = f"Wavescribe runs in this home at {url} but doesn't answer: try again in a "
+            raise _NoRemoval(1, why + "moment, or stop it, then remove them") from None
+
+    try:
+        if args.all:
+            models = ask("GET", "/models")["models"]
+            ids = [m["id"] for m in models if m["installed"] and m.get("removable", True)]
+            if not ids:
+                raise _NoRemoval(0, "No model is installed: nothing to remove.")
+        else:
+            ids = list(dict.fromkeys(args.ids))
+        found = [ask("GET", f"/models/{urllib.parse.quote(i, safe='')}/remove") for i in ids]
+    except Refused as e:
+        raise _NoRemoval(1, e.message) from None
+    if missing := [f["model"] for f in found if not f["on_disk"]]:
+        raise _not_installed(missing)
+    if busy := [f["refusal"] for f in found if f.get("refusal")]:
+        raise _NoRemoval(1, "; ".join(busy) + "; nothing was removed")
+
+    def remove(model_id: str) -> int:
+        try:
+            return int(ask("POST", f"/models/{urllib.parse.quote(model_id, safe='')}/remove")
+                       ["freed"])  # fmt: skip
+        except Refused as e:  # in use since it was asked: a station started meanwhile
+            raise _NoRemoval(1, e.message) from None
+
+    return [(f["model"], f["size"], f["shared"], ", ".join(f["places"])) for f in found], remove
+
+
+def cmd_models_remove(args: argparse.Namespace) -> int:
+    from wavescribe import home
+    from wavescribe.modelfetch import size_text
+
+    if args.all == bool(args.ids):
+        print("wavescribe: name the models to remove, or give --all (not both)", file=sys.stderr)
+        return 2
+    holder = home.running()  # a serve or listen in this home: it may use them right now
+    try:
+        if holder is None:
+            removals, remove = _removals_here(args)
+        else:
+            removals, remove = _removals_on_page(holder, args)
+    except _NoRemoval as e:
+        print(str(e) if e.code == 0 else f"wavescribe: {e}", file=sys.stderr if e.code else None)
+        return e.code
+    width = max(len(r[0]) for r in removals)
+    for model_id, size, shared, places in removals:
+        print(f"{model_id:<{width}}  {size_text(size):>10}  {places}")
+        if shared >= 1e6:
+            print(f"{'':<{width}}  {'':>10}  (another {size_text(shared)} stays: another entry "
                   "in the Hugging Face cache has the same files)")  # fmt: skip
-    total = size_text(sum(r.size for r in removals))
+    total = size_text(sum(r[1] for r in removals))
     if not args.yes:
-        what = removals[0].id if len(removals) == 1 else f"these {len(removals)} models"
+        what = removals[0][0] if len(removals) == 1 else f"these {len(removals)} models"
         try:
             answer = input(f"Remove {what} ({total}{' in all' * (len(removals) > 1)})? [y/N] ")
         except EOFError:  # nobody to ask
@@ -184,11 +273,15 @@ def cmd_models_remove(args: argparse.Namespace) -> int:
         if answer.strip().lower() not in ("y", "yes"):
             print("Nothing removed.")
             return 1
-    freed = sum(modelremove.remove(registry, r) for r in removals)
-    credits = DATA_DIR / "THIRD_PARTY_MODELS.md"
-    if credits.exists():
-        credits.write_text(credits_markdown(registry), encoding="utf-8")
-    names = [r.id for r in removals]
+    freed, names = 0, []
+    for model_id, *_ in removals:
+        try:
+            freed += remove(model_id)
+        except _NoRemoval as e:
+            done = f"Removed {', '.join(names)} ({size_text(freed)} freed); " if names else ""
+            print(f"wavescribe: {done}{e}", file=sys.stderr)
+            return 1
+        names.append(model_id)
     listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
     again = typed(f"models fetch {names[0]}" if len(names) == 1 else "models fetch <id>")
     print(f"Removed {listed}: {size_text(freed)} freed. To download "
@@ -197,22 +290,8 @@ def cmd_models_remove(args: argparse.Namespace) -> int:
     return 0
 
 
-def credits_markdown(registry: ModelRegistry) -> str:
-    """Attribution for every installed model (CC-BY and friends require it)."""
-    lines = ["# Third-party models", "",
-             f"Models installed by `{typed('models fetch')}`, downloaded from their rights "
-             "holders.", ""]  # fmt: skip
-    for e in registry.entries():
-        if registry.local_path(e) is None:
-            continue
-        lines.append(f"- **{e.id}** ({e.capability}): {e.attribution or e.upstream}  ")
-        lines.append(f"  Licence: {e.license}" + (f" <{e.license_url}>" if e.license_url else "")
-                     + (f"; source {e.upstream}" if e.upstream else ""))  # fmt: skip
-    return "\n".join(lines) + "\n"
-
-
 def cmd_models_credits(args: argparse.Namespace) -> int:
-    from wavescribe.registry import ModelRegistry
+    from wavescribe.registry import ModelRegistry, credits_markdown
 
     print(credits_markdown(ModelRegistry.load()), end="")
     return 0

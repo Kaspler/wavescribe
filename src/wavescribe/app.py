@@ -1044,6 +1044,48 @@ class App:
             self._mark_unavailable()
         event(log, "models_changed", model=model_id, waiting=len(self.listen_only))
 
+    def models_removed(self, model_id: str) -> None:
+        """A model was removed: nothing plans to use it any more. The speech detector, the
+        music filter and the translator move to the next installed model in their order, or to
+        none; stations that were to use it are planned afresh (another model, or none: then
+        they play without text, and say what to download)."""
+        with self._lock:
+            plan = self.plan
+
+            def gone(item: tuple[ModelEntry, Path] | None) -> bool:
+                return item is not None and item[0].id == model_id
+
+            def next_one(capability: str) -> tuple[ModelEntry, Path] | None:
+                with contextlib.suppress(ModelError):
+                    return self.registry.resolve(capability)
+                return None
+
+            if gone(plan.vad):
+                plan.vad = next_one("vad")
+            if gone(plan.gate):
+                plan.gate = next_one("gate") if self.use_gate else None
+            if gone(plan.mt):
+                mt = None
+                if self.translate:
+                    with contextlib.suppress(ModelError):
+                        mt = (self.registry.installed(self.mt_model) if self.mt_model
+                              else self.registry.resolve("translate"))  # fmt: skip
+                self.pipeline.set_translator(mt)
+            for sid in [sid for sid, item in plan.mt_station.items() if gone(item)]:
+                del plan.mt_station[sid]  # it takes the shared translator
+            if plan.recheck is not None:
+                plan.recheck.forget()
+            for s in self.config.stations:
+                if s.remote or not s.transcribe:
+                    continue
+                if plan.vad is not None and not gone(plan.asr.get(s.id)):
+                    continue
+                plan.asr.pop(s.id, None)
+                self._replan(s, None)
+            self._check_translations()
+            self._mark_unavailable()
+        event(log, "models_changed", model=model_id, removed=True, waiting=len(self.listen_only))
+
     def _reload(self) -> None:
         """Lay the settings over stations.toml again and apply the difference."""
         with self._lock:
@@ -1318,6 +1360,87 @@ class App:
 
     def plan_view(self) -> Plan:
         return self.plan
+
+    def model_users(self, model_id: str) -> tuple[list[str], bool]:
+        """What uses a model right now: the names of the running stations that need it (to be
+        written down, re-checked or translated, as ``Pipeline.models_in_use`` says, and the
+        stations of other machines translated here), and whether the shared translator has it
+        loaded (it stays loaded for questions, rules and summaries)."""
+        names = {s.id: s.name for s in self.config.stations}
+        stations = [names.get(sid, sid) for sid in self.pipeline.models_in_use().get(model_id, [])]
+        for follower in list(self.followers.values()):
+            s = follower.station
+            mt = self.plan.translator_for(s) if s.translation_targets else None
+            if not follower.closed and mt is not None and mt[0].id == model_id:
+                stations.append(s.name)
+        mt = self.plan.mt
+        loaded = mt is not None and mt[0].id == model_id
+        loaded = loaded and self.pipeline.status()["models"]["mt"] is not None
+        return list(dict.fromkeys(stations)), loaded
+
+    def _removal_refusal(self, model_id: str) -> ChangeError | None:
+        """Why a model can't be removed now (in use, or being downloaded), or None."""
+        stations, translator = self.model_users(model_id)
+        if stations or translator:
+            why = []
+            if stations:
+                one = len(stations) == 1
+                who = stations[0] if one else f"{', '.join(stations[:-1])} and {stations[-1]}"
+                them = "that station" if one else "those stations"
+                why.append(f"{who} {'uses' if one else 'use'} it right now, so stop {them} first")
+            if translator:
+                why.append("the translator has it loaded, so put another model first under "
+                           "Translation, or stop Wavescribe first")  # fmt: skip
+            return ChangeError(f"{model_id} can't be removed while it is in use: "
+                               + "; ".join(why), "in_use", stations=stations,
+                               translator=translator)  # fmt: skip
+        job = self.downloads.status().get(model_id)
+        if job is not None and job["state"] in ("running", "stopping"):
+            return ChangeError(f"{model_id} is being downloaded: stop the download first, then "
+                               "remove it", "downloading")  # fmt: skip
+        return None
+
+    def removal_view(self, model_id: str) -> dict[str, Any]:
+        """What removing a model would take off the disk (``size`` bytes freed, ``shared``
+        bytes that stay because another entry in the cache has the same files, ``places``), and
+        why it can't be removed now (``refusal`` and its ``code``), for the page to ask first."""
+        from wavescribe import modelremove
+
+        entry = self.registry.get(model_id)
+        removal = modelremove.plan(self.registry, entry)  # refuses a model of your own
+        refused = self._removal_refusal(model_id)
+        return {
+            "model": entry.id,
+            "on_disk": removal is not None,
+            "size": removal.size if removal else 0,
+            "shared": removal.shared if removal else 0,
+            "places": [modelremove.where(p) for p in removal.places] if removal else [],
+            "refusal": str(refused) if refused else None,
+            "code": refused.code if refused else None,
+        }
+
+    def remove_model(self, model_id: str) -> dict[str, Any]:
+        """Remove what a model put on this disk (modelremove.py), unless something uses it now
+        or it is being downloaded; then nothing plans to use it any more (``models_removed``).
+        Returns the bytes freed."""
+        from wavescribe import modelremove
+        from wavescribe.registry import write_credits
+
+        entry = self.registry.get(model_id)
+        with self._lock:
+            refused = self._removal_refusal(model_id)
+            if refused is not None:
+                raise refused
+            removal = modelremove.plan(self.registry, entry)
+            if removal is None:
+                raise ChangeError(f"{model_id} isn't installed: nothing of it is on this disk",
+                                  "not_installed")  # fmt: skip
+            freed = modelremove.remove(self.registry, removal)
+            self.models_removed(model_id)
+        self.downloads.forget(model_id)
+        write_credits(self.registry, only_if_there=True)
+        event(log, "model_removed", model=model_id, freed=freed)
+        return {"model": model_id, "freed": freed}
 
     # -- alerts ------------------------------------------------------------------------------
 

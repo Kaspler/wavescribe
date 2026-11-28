@@ -112,6 +112,10 @@ asks before deleting anything, and ends with how much it freed.
   removed.
 - A model with nothing on this disk is refused, and then nothing is removed.
 - Any answer but `y` to the question removes nothing, with exit code 1.
+- While `wavescribe serve` runs in the same home, the removal goes through it: a model that a
+  running station or the loaded translator uses right now is refused with the stations' names,
+  and nothing is removed; the others go, and its stations stop planning to use them. While
+  `wavescribe listen` runs in the same home, nothing is removed: stop it first.
 
 Stations that need a removed model have no text until it is downloaded again (`models fetch`,
 or Settings → Languages and models). Licences you accepted stay accepted.

@@ -466,6 +466,33 @@ def _install(
     part.replace(target)
 
 
+CREDITS_PATH = Path("data/THIRD_PARTY_MODELS.md")
+
+
+def credits_markdown(registry: ModelRegistry) -> str:
+    """Attribution for every installed model (CC-BY and friends require it)."""
+    lines = ["# Third-party models", "",
+             f"Models installed by `{typed('models fetch')}`, downloaded from their rights "
+             "holders.", ""]  # fmt: skip
+    for e in registry.entries():
+        if registry.local_path(e) is None:
+            continue
+        lines.append(f"- **{e.id}** ({e.capability}): {e.attribution or e.upstream}  ")
+        lines.append(f"  Licence: {e.license}" + (f" <{e.license_url}>" if e.license_url else "")
+                     + (f"; source {e.upstream}" if e.upstream else ""))  # fmt: skip
+    return "\n".join(lines) + "\n"
+
+
+def write_credits(registry: ModelRegistry, *, only_if_there: bool = False) -> Path:
+    """Write ``data/THIRD_PARTY_MODELS.md`` for what is installed now; with ``only_if_there``,
+    only when it exists already (after a model was removed)."""
+    if only_if_there and not CREDITS_PATH.exists():
+        return CREDITS_PATH
+    CREDITS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CREDITS_PATH.write_text(credits_markdown(registry), encoding="utf-8")
+    return CREDITS_PATH
+
+
 def _parse_local_entry(raw: dict[str, Any], path: Path) -> ModelEntry:
     """A bring-your-own entry from ``config/models.local.toml``: fewer rules, all on the user."""
     missing = [k for k in ("id", "capability", "backend", "source", "languages", "license")

@@ -1378,6 +1378,25 @@ class Pipeline:
         second = recheck.model_for(station, planned[0]) if recheck is not None else None
         return [planned] if second is None else [planned, second]
 
+    def models_in_use(self) -> dict[str, list[str]]:
+        """The models the running stations use now, as model id -> station ids: a station
+        written down uses its speech model, the Whisper that re-checks its lines, the speech
+        detector and the music filter, and its translator when it is translated. A station
+        only listened to uses none; one still stopping still finishes its last words."""
+        with self._lock:
+            running = [live.station for live in self._live.values()]
+        used: dict[str, list[str]] = {}
+        for station in running:
+            if not station.transcribe or self._plan.vad is None:
+                continue
+            models = [*self._models_for(station), self._plan.vad, self._plan.gate]
+            if station.translation_targets:
+                models.append(self._plan.translator_for(station))
+            for model in models:
+                if model is not None and station.id not in used.get(model[0].id, []):
+                    used.setdefault(model[0].id, []).append(station.id)
+        return used
+
     def _load_asr(self, loaded: dict[str, Transcriber], entry: ModelEntry, path: Path) -> None:
         if entry.id in loaded:
             self._asr_models[entry.id] = time.time()  # in use again: not idle

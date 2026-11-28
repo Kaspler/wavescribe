@@ -1,10 +1,10 @@
 // Models: what this machine can run, in which order, and where more come from.
 import { useEffect, useRef, useState } from "react";
 import { langNameEn } from "../lib/lang";
-import { NEED_LABEL, downloadState, neededModels, needsLicence, totalGb } from "../lib/models";
+import { NEED_LABEL, afterRemoval, downloadState, neededModels, needsLicence, sentence, sizeText, totalGb } from "../lib/models";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, Input, Section, Select, Table, Tag, type Tone, act, cx, toast } from "../components/ui";
-import { type Any, bytes, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
+import { type Any, ApiError, bytes, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
 
 const CAPS: [string, string, string][] = [
   ["asr", "Speech recognition", "Each station uses the first installed model in this order that speaks its language and fits. A station can also name its own under Stations."],
@@ -178,6 +178,7 @@ function ModelRow({ e, chain, move, setChain, reload }: {
   setChain: (ids: string[], done: string) => Promise<void>; reload: () => Promise<void>;
 }) {
   const [accepting, setAccepting] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [nc, setNc] = useState(false);
   const pos = chain.indexOf(e.id);
   const [tierWord, tierTone, tierText] = TIER[e.tier] || [e.tier, "neutral", e.tier];
@@ -202,6 +203,9 @@ function ModelRow({ e, chain, move, setChain, reload }: {
             Download{e.size_gb ? ` · ${gbSize(e.size_gb)}` : ""}
           </ActButton>
         ))}
+        {e.installed && e.removable && (
+          <Button size="sm" variant="ghost" icon="trash" aria-expanded={removing} onClick={() => setRemoving(!removing)}>Remove…</Button>
+        )}
         {pos >= 0 ? (
           <span className="m-order">
             <Button size="sm" variant="ghost" icon="up" aria-label={`Move ${e.id} earlier`} title="Earlier in the order" disabled={pos === 0} onClick={() => move(e.id, -1)} />
@@ -238,7 +242,49 @@ function ModelRow({ e, chain, move, setChain, reload }: {
           </div>
         </div>
       )}
+      {removing && <RemoveWell e={e} close={() => setRemoving(false)} reload={reload} />}
     </li>
+  );
+}
+
+/** Removing a downloaded model, asked in place: what it frees, or why it can't go now (a running
+ * station or the translator uses it, or it is being downloaded). */
+function RemoveWell({ e, close, reload }: { e: Any; close: () => void; reload: () => Promise<void> }) {
+  const { data: r, error } = useLoad(() => get(`/models/${e.id}/remove`), [e.id]);
+  const [refused, setRefused] = useState<string | null>(null);
+  const why = refused || r?.refusal;
+  if (!r) return <div className="m-edit"><p className="m-line">{error ? `Couldn't check what it frees: ${error}` : "Checking what it frees…"}</p></div>;
+  if (why || !r.on_disk) {
+    return (
+      <div className="m-edit">
+        <p className="m-trouble" role="status">{why ? sentence(why) : `Nothing of ${e.id} is on this disk.`}</p>
+        <div className="m-actions"><Button variant="ghost" onClick={close}>Close</Button></div>
+      </div>
+    );
+  }
+  const after = e.in_use.length ? afterRemoval(e.capability) : null;
+  const remove = async () => {
+    try {
+      const done = await post(`/models/${e.id}/remove`);
+      toast(`${e.id} removed: ${sizeText(done.freed)} freed`);
+      close();
+      await reload();
+      refreshPage();
+    } catch (err) {
+      if (err instanceof ApiError && err.code) setRefused(err.message); // in use since it was asked
+      else throw err;
+    }
+  };
+  return (
+    <div className="m-edit">
+      <p className="m-line">Removing {e.id} frees {sizeText(r.size)} on this disk. You can download it again later.</p>
+      {r.shared >= 1e6 && <p className="m-hint">Another {sizeText(r.shared)} stays: another model in the Hugging Face cache uses the same files.</p>}
+      {after && <p className="m-hint">{after}</p>}
+      <div className="m-actions">
+        <ActButton variant="danger" icon="trash" run={remove}>Remove · {sizeText(r.size)}</ActButton>
+        <Button variant="ghost" onClick={close}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 

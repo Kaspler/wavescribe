@@ -57,8 +57,9 @@ def models_view(app: App) -> dict[str, Any]:
         path = reg.local_path(e)
         size = e.size_gb or (cat.installed_size_gb(path) if path else None)
         sizes[e.id] = size
-        loaded = e.id in status["asr"] or (status["mt"] is not None and plan.mt is not None
-                                           and plan.mt[0].id == e.id)  # fmt: skip
+        # A speech model removed a moment ago stays in memory until it is let go as idle.
+        mt_loaded = status["mt"] is not None and plan.mt is not None and plan.mt[0].id == e.id
+        loaded = path is not None and (e.id in status["asr"] or mt_loaded)
         f = cat.fit(e.capability, size, m, backend=e.backend)
         entries.append({
             "id": e.id, "capability": e.capability, "backend": e.backend, "tier": e.tier,
@@ -67,6 +68,8 @@ def models_view(app: App) -> dict[str, Any]:
             "origin": e.origin, "upstream": e.upstream, "revision": e.revision,
             "gated": e.gated, "unsafe_targets": list(e.unsafe_targets),
             "installed": path is not None, "size_gb": size,
+            # Wavescribe downloaded it, so it can remove it (never a model at a path you gave).
+            "removable": e.kind != "local",
             # Whether it can be the speech model of a station in language "auto" (asr only).
             "detects_languages": detects_languages(e, path),
             "accepted": reg.licenses.accepted(e),

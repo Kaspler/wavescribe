@@ -93,7 +93,27 @@ export interface DownloadJob {
   note?: string | null;
 }
 
-const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + (/[.?]$/.test(s) ? "" : ".");
+/** A sentence the server sends in lower case without its full stop, as the page shows it. */
+export const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + (/[.?]$/.test(s) ? "" : ".");
+
+/** Bytes as the command line says them (modelfetch.size_text): 7.9 GB, 340 MB, under 1 MB.
+ * Decimal, as models.toml's sizes and the Finder are. */
+export function sizeText(n: number): string {
+  if (n >= 0.95e9) return `${(n / 1e9).toFixed(1)} GB`;
+  return n >= 0.5e6 ? `${Math.max(1, Math.round(n / 1e6))} MB` : "under 1 MB";
+}
+
+/** What becomes of what uses a model once it is removed, by its job; null for a job with no
+ * such sentence. Said only when something plans to use it. */
+export function afterRemoval(capability: string): string | null {
+  switch (capability) {
+    case "asr": return "Stations that use it switch to the next installed model in the order, or play without text until one is downloaded.";
+    case "vad": return "Unless another speech detector is installed, stations play without text until one is downloaded.";
+    case "translate": return "Unless another translator is installed, nothing is translated until one is downloaded.";
+    case "gate": return "Unless another music filter is installed, songs are written down too.";
+    default: return null;
+  }
+}
 
 /** A download's state in a word, and the sentence that goes under it: why it failed, or what
  * the next download does with what a stopped one kept. */

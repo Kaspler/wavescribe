@@ -51,12 +51,16 @@ class Removal:
 
 def _own_folder(registry: ModelRegistry, entry: ModelEntry) -> Path | None:
     """The model's folder under the models folder, when there is one: models/<id>, and never a
-    path that leads out of the models folder."""
+    path that leads out of the models folder, nor one that holds the Hugging Face cache or is in
+    it (the Mac app keeps that cache in models/hf, beside the models from a URL)."""
     root = registry.models_dir
     folder = root / entry.id
     if not entry.id or Path(entry.id).name != entry.id or entry.id in (".", ".."):
         return None
     if not (folder.is_dir() or folder.is_symlink()):
+        return None
+    mine, cache = folder.resolve(), hub_cache().resolve()
+    if cache == mine or cache.is_relative_to(mine) or mine.is_relative_to(cache):
         return None
     return folder
 

@@ -137,6 +137,11 @@ class Rechecker:
             self._found[language] = (self._clock(), model)
         return model
 
+    def forget(self) -> None:
+        """Look the Whisper for each language up again next time (a model was removed)."""
+        with self._lock:
+            self._found.clear()
+
     def preload(self, stations: Iterable[Any], asr: dict[str, Model], load: GetModel) -> None:
         """Load the Whisper these stations need now (call on the ASR thread before their audio
         is read). One that fails to load only leaves their lines flagged."""
