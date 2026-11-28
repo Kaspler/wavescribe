@@ -113,7 +113,10 @@ def prepare(directory: Path, *, pace: bool = True) -> dict[str, str]:
         exe = bin_dir / tool
         exe.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{TESTS / script}" "$@"\n')
         exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("FAKE_")}
+    # The directory is serve's home: a WAVESCRIBE_HOME in the shell would take it elsewhere.
+    env = {
+        k: v for k, v in os.environ.items() if not k.startswith("FAKE_") and k != "WAVESCRIBE_HOME"
+    }
     env |= {
         "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
         "FAKE_RTL_WORLD": str(directory / "world.json"),
