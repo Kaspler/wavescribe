@@ -55,7 +55,7 @@ id the first model of each chain (about 8 GB).
   downloads only what is missing. A file that was cut off continues where it stopped when it is
   a Hugging Face file of 100 MB or more or a model from a URL with a checksum, and the sentence
   says so; any other starts again from its beginning. A part-file nobody has written to for a
-  week, or of a revision no longer pinned, is removed.
+  week, or of a revision no longer pinned, is removed, and `models remove` removes a model's.
 - Ctrl-C stops it at once, says which models finished and which didn't, and exits with 130.
 - When everything named is installed it writes `data/THIRD_PARTY_MODELS.md` and ends with the
   command that starts Wavescribe.
@@ -93,7 +93,7 @@ asks before deleting anything, and ends with how much it freed.
   repository and revision Wavescribe downloaded, and of that revision only Wavescribe's files
   when another program added others. The weights sit in a store the whole cache shares, and a
   file there is deleted only when nothing else in the cache uses it; the listing says how much
-  stays for that reason.
+  stays for that reason. The part-file of a download that stopped goes too.
 - A model from a URL goes with its folder in `models/`, and with any download of it that didn't
   finish.
 - A model of your own at a path you gave (`local:` in `config/models.local.toml`) is never

@@ -12,8 +12,10 @@ revision of the same repository, and every other repository, belong to someone e
 revision holds files beyond the ones the registry asks for (``files``), another program fetched
 them, and only Wavescribe's are removed.
 
-A model from a URL is a file in ``models/<id>/``, and that folder goes, part-files and all. A
-model of your own at a path you gave (``local:``) is yours, and is never removed.
+The part-files of a download that stopped, which the next download would continue (partfiles.py),
+go too, unless a download is writing one. A model from a URL is a file in ``models/<id>/``, and
+that folder goes, part-files and all. A model of your own at a path you gave (``local:``) is
+yours, and is never removed.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from wavescribe import partfiles
 from wavescribe.modelfetch import dir_bytes, hub_cache, repo_folder
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
 
@@ -39,6 +42,7 @@ class Removal:
     shared: int = 0  # bytes that stay: another entry in the cache has the same files
     strategy: Any = None  # the library's deletion plan for its cache entry
     folder: Path | None = None  # its folder under the models folder
+    parts: list[Path] = field(default_factory=list)  # part-files the next download continues
 
     @property
     def id(self) -> str:
@@ -119,6 +123,10 @@ def plan(registry: ModelRegistry, entry: ModelEntry) -> Removal | None:
         if found is not None:
             removal.strategy, places, removal.size, removal.shared = found
             removal.places += places
+        removal.parts = partfiles.found(hub_cache() / repo_folder(entry))
+        removal.places += [p for p in removal.parts
+                           if not any(p.is_relative_to(q) for q in removal.places)]  # fmt: skip
+        removal.size += partfiles.size(removal.parts)
     folder = _own_folder(registry, entry)
     if folder is not None:
         removal.folder = folder
@@ -133,6 +141,7 @@ def remove(registry: ModelRegistry, removal: Removal) -> int:
     fresh = plan(registry, removal.entry)
     if fresh is None:
         return 0
+    partfiles.remove(fresh.parts)  # first: the plan may take the whole folder they are in
     if fresh.strategy is not None:
         fresh.strategy.execute()
     if fresh.folder is not None:

@@ -18,7 +18,7 @@ import huggingface_hub
 import pytest
 from huggingface_hub.utils import _shared_blobs
 
-from wavescribe import modelfetch
+from wavescribe import modelfetch, modelremove, partfiles
 from wavescribe.cli import build_parser, main
 from wavescribe.invocation import typed
 from wavescribe.registry import Licenses, ModelEntry, ModelRegistry
@@ -184,6 +184,29 @@ def test_a_url_model_goes_with_its_folder_and_part_files(
     assert out[0].split() == ["vad", "under", "1", "MB", "models/vad"]
     assert out[1].startswith("Removed vad: under 1 MB freed.")
     assert not (disk.models / "vad").exists() and disk.models.is_dir()
+
+
+def test_the_part_files_of_a_stopped_download_go_with_the_model(
+    disk: Disk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A download of "half" stopped in its first file: a part-file is all there is of it.
+    half = entry("half", "hf:org/half", OURS)
+    disk.registry.add(half)
+    blobs = disk.folder("org/half") / "blobs"
+    blobs.mkdir(parents=True)
+    part = blobs / ("d" * 64 + ".part")
+    part.write_bytes(b"p" * (2 * MB))
+    assert main(["models", "remove", "half", "--yes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].split() == ["half", "2", "MB", modelremove.where(part)]
+    assert out[1].startswith("Removed half: 2 MB freed.")
+    assert not part.exists()
+
+    # One a download is writing stays with that download.
+    part.write_bytes(b"p" * MB)
+    with partfiles.held(part):
+        assert main(["models", "remove", "half", "--yes"]) == 0
+    assert part.exists()
 
 
 def test_the_last_reference_to_a_shared_file_frees_it(
