@@ -115,9 +115,7 @@ def test_a_download_stopped_on_the_page_keeps_what_the_next_one_continues(
     job = fetching.stop("m")
     assert time.monotonic() - started < 3 and child.poll() is not None
     assert job["state"] == "stopped" and job["error"] is None
-    assert job["note"] == (
-        "what was downloaded is kept: start the download again and it continues where it stopped"
-    )
+    assert job["note"] == "what was downloaded is kept: Continue goes on from there"
     assert fetching.status()["m"]["state"] == "stopped" and finished == []
     # SIGTERM, which a real `models fetch` answers by removing the library's part-files: the
     # stand-in doesn't, so the page did. Wavescribe's own stays for the next download.
@@ -154,10 +152,10 @@ def test_a_stop_before_the_download_began_starts_nothing(tmp_path: Path, monkeyp
     monkeypatch.setattr(downloads, "fetch_command", never)
     reg = registry(tmp_path)
     fetching = downloads.Downloads(reg)
-    job = {"model": "m", "state": "stopping", "error": None, "note": None, "base_bytes": 0}
+    job = {"model": "m", "state": "stopping", "error": None, "note": None}
     fetching._run(reg.get("m"), job)
     assert job["state"] == "stopped"
-    assert job["note"].endswith("start the download again and it downloads only what is missing")
+    assert job["note"] == "nothing of it was downloaded yet"
 
 
 def test_nothing_to_stop_is_said_plainly(tmp_path: Path) -> None:
@@ -185,7 +183,7 @@ def test_the_page_stops_a_download_only_from_this_machine(tmp_path: Path, monkey
         assert node.app.downloads.status()["m"]["state"] == "running"
 
         status, job = node.call("POST", "/api/manage/models/m/stop")
-        assert status == 200 and job["state"] == "stopped" and "continues" in job["note"]
+        assert status == 200 and job["state"] == "stopped" and "Continue" in job["note"]
         status, models = node.call("GET", "/api/manage/models")
         assert models["downloads"]["m"]["state"] == "stopped"
         status, refused = node.call("POST", "/api/manage/models/other/stop")
@@ -231,7 +229,7 @@ def test_a_running_download_says_its_speed_and_the_time_left_once_measured(
     from wavescribe import modelfetch
 
     arrived = {"bytes": 0}
-    monkeypatch.setattr(downloads, "dir_bytes", lambda _folder: arrived["bytes"])
+    monkeypatch.setattr(downloads, "model_bytes", lambda _folder, _rev: arrived["bytes"])
     monkeypatch.setattr(modelfetch, "free_bytes", lambda _path: 10**12)
     endless = [sys.executable, "-c", "import time; time.sleep(60)"]
     monkeypatch.setattr(downloads, "fetch_command", lambda _model: endless)
@@ -270,9 +268,12 @@ def test_the_models_view_says_what_is_left_to_download_and_the_room_for_it(
         part = tmp_path / "node" / "models" / "big" / ("big.bin." + "0" * 16 + ".part")
         part.parent.mkdir(parents=True)
         part.write_bytes(b"p" * 30_000_000)  # what a stopped download kept
+        cut = part.parent / "tmp1a2b3c.incomplete"  # a download that lost its power: no resume
+        cut.write_bytes(b"c" * 4_000_000)
         [big] = node.call("GET", "/api/manage/models")[1]["models"]
         assert not big["installed"]
-        assert (big["left_bytes"], big["free_bytes"]) == (70_000_000, 50_000_000)
+        assert (big["have_bytes"], big["left_bytes"]) == (30_000_000, 70_000_000)
+        assert (big["cut_bytes"], big["free_bytes"]) == (4_000_000, 50_000_000)
         assert big["disk"] == str(part.stat().st_dev)
         status, refused = node.call("POST", "/api/manage/models/big/fetch")
         assert status == 400 and refused["error"].startswith(

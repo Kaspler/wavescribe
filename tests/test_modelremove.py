@@ -209,6 +209,43 @@ def test_the_part_files_of_a_stopped_download_go_with_the_model(
     assert part.exists()
 
 
+def test_what_a_stopped_download_kept_counts_once_and_what_cant_continue_doesnt(
+    disk: Disk,
+) -> None:
+    folder = disk.folder("org/speech")
+    # The pinned revision: its config, and its weights through the store, counted once although
+    # the other revision links the same weights. The other revision's own config isn't counted.
+    assert modelfetch.model_bytes(folder, OURS) == len(CONFIG) + len(WEIGHTS)
+    assert modelfetch.model_bytes(folder, None) == len(CONFIG) + len(WEIGHTS) + 18  # a branch
+    blobs = folder / "blobs"
+    (blobs / ("e" * 64)).write_bytes(b"e" * MB)  # finished, not linked yet: the download stopped
+    (blobs / ("d" * 64 + ".part")).write_bytes(b"p" * MB)  # Wavescribe's, which continues
+    (blobs / ("f" * 64 + ".1a2b3c4d.incomplete")).write_bytes(b"i" * (2 * MB))  # the library's
+    assert modelfetch.model_bytes(folder, OURS) == len(CONFIG) + len(WEIGHTS) + 2 * MB
+    assert modelfetch.cut_bytes(folder) == 2 * MB
+    assert modelfetch.model_bytes(disk.folder("org/nothing"), OURS) == 0
+
+
+def test_a_part_finished_download_goes_whole_with_remove(
+    disk: Disk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A download of "half" stopped in its second file: the first is whole but not linked yet.
+    disk.registry.add(entry("half", "hf:org/half", OURS))
+    blobs = disk.folder("org/half") / "blobs"
+    blobs.mkdir(parents=True)
+    finished, part = blobs / ("e" * 64), blobs / ("d" * 64 + ".part")
+    finished.write_bytes(b"e" * (2 * MB))
+    part.write_bytes(b"p" * MB)
+    assert main(["models", "remove", "half", "--yes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].split() == ["half", "3", "MB", modelremove.where(part) + ",",
+                              modelremove.where(finished)]  # fmt: skip
+    assert out[1].startswith("Removed half: 3 MB freed.")
+    assert not finished.exists() and not part.exists()
+    # The files of a revision the registry doesn't pin are someone else's, linked or not.
+    assert (disk.folder("org/speech") / "snapshots" / THEIRS / "config.json").exists()
+
+
 def test_the_last_reference_to_a_shared_file_frees_it(
     disk: Disk, capsys: pytest.CaptureFixture[str]
 ) -> None:

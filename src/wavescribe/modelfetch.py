@@ -25,9 +25,11 @@ import errno
 import http.client
 import logging
 import os
+import re
 import shutil
 import socket
 import ssl
+import stat
 import sys
 import threading
 import time
@@ -100,6 +102,60 @@ def dir_bytes(path: Path) -> int:
     return total
 
 
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
+def model_bytes(folder: Path, revision: str | None = None) -> int:
+    """The bytes of a model that are on disk for good: the files that finished and the
+    part-files the next download continues, each counted once (a Hugging Face file is a link to
+    a blob, which may be a link into the cache's shared store). The library's part-files, which
+    nothing continues, don't count, nor do the files that only another revision of the
+    repository uses (``revision``: the commit the registry pins)."""
+    if not folder.is_dir():
+        return 0
+    others = _other_revisions(folder, revision)
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for root, dirs, files in os.walk(folder):
+        if root == str(folder):  # the library's notes of branches and of files a repo lacks
+            dirs[:] = [d for d in dirs if d not in ("refs", ".no_exist")]
+        for name in files:
+            if name.endswith(TEMP_SUFFIX):
+                continue
+            try:
+                st = (Path(root) / name).stat()
+            except OSError:  # a link to nothing
+                continue
+            key = (st.st_dev, st.st_ino)
+            if stat.S_ISREG(st.st_mode) and key not in seen and key not in others:
+                seen.add(key)
+                total += st.st_size
+    return total
+
+
+def _other_revisions(folder: Path, revision: str | None) -> set[tuple[int, int]]:
+    """The files that only other revisions' snapshots link to (another program fetched them),
+    when the registry pins a commit."""
+    snapshots = folder / "snapshots"
+    if not revision or not _COMMIT.fullmatch(revision) or not snapshots.is_dir():
+        return set()
+    mine: set[tuple[int, int]] = set()
+    others: set[tuple[int, int]] = set()
+    for snapshot in snapshots.iterdir():
+        for p in snapshot.rglob("*"):
+            with contextlib.suppress(OSError):
+                st = p.stat()
+                if stat.S_ISREG(st.st_mode):
+                    (mine if snapshot.name == revision else others).add((st.st_dev, st.st_ino))
+    return others - mine
+
+
+def cut_bytes(folder: Path) -> int:
+    """The bytes of the library's part-files in ``folder``: files that were cut off, which no
+    download continues (each starts again from its beginning)."""
+    return partfiles.size(_parts(folder))
+
+
 def _parts(folder: Path) -> list[Path]:
     """The part-files that no download continues. The Hugging Face library writes each file as
     ``blobs/<name>.<id>.incomplete`` and renames it when it is whole; a model from a URL with no
@@ -119,11 +175,12 @@ def library_parts(folder: Path) -> frozenset[Path]:
     return frozenset(_parts(folder))
 
 
-def stopped_on_page(folder: Path) -> str:
-    """What the page says of a download stopped there, in the words Ctrl-C uses: whether the
-    next download continues a part-file kept in ``folder`` or downloads what is missing."""
-    then = f"{SO_FAR}: {CONTINUES}" if kept_bytes(folder) else f"{FINISHED}: {AGAIN}"
-    return then.replace(RETRY, RETRY_ON_PAGE)
+def stopped_on_page(folder: Path, revision: str | None = None) -> str:
+    """What the page says of a download stopped there: whether anything of it is kept, which
+    the page's Continue goes on from."""
+    if model_bytes(folder, revision):
+        return f"{SO_FAR}: Continue goes on from there"
+    return "nothing of it was downloaded yet"
 
 
 def remove_parts(
@@ -164,12 +221,12 @@ def disk_of(path: Path) -> int:
 
 
 def to_download(registry: ModelRegistry, entry: ModelEntry) -> int | None:
-    """Bytes still to download for a model that isn't installed: its size less what is in its
-    folder already (part-files the next download continues included); None when the registry
-    gives no size."""
+    """Bytes still to download for a model that isn't installed: its size less what of it is
+    on disk for good (``model_bytes``); None when the registry gives no size."""
     if not entry.size_gb:
         return None
-    return max(0, int(entry.size_gb * GB) - dir_bytes(target_dir(registry, entry)))
+    have = model_bytes(target_dir(registry, entry), entry.revision)
+    return max(0, int(entry.size_gb * GB) - have)
 
 
 # -- What there is to download -----------------------------------------------------------------

@@ -13,15 +13,18 @@ revision holds files beyond the ones the registry asks for (``files``), another 
 them, and only Wavescribe's are removed.
 
 The part-files of a download that stopped, which the next download would continue (partfiles.py),
-go too, unless a download is writing one. A model from a URL is a file in ``models/<id>/``, and
+go too, unless a download is writing one, and so do the files it had finished that no snapshot
+links to yet. A model from a URL is a file in ``models/<id>/``, and
 that folder goes, part-files and all. A model of your own at a path you gave (``local:``) is
 yours, and is never removed.
 """
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
+import re
 import shutil
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -30,6 +33,8 @@ from typing import Any
 from wavescribe import partfiles
 from wavescribe.modelfetch import dir_bytes, hub_cache, repo_folder
 from wavescribe.registry import ModelEntry, ModelError, ModelRegistry
+
+_BLOB = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # a blob's name: its etag (git or sha256)
 
 
 @dataclass
@@ -43,6 +48,7 @@ class Removal:
     strategy: Any = None  # the library's deletion plan for its cache entry
     folder: Path | None = None  # its folder under the models folder
     parts: list[Path] = field(default_factory=list)  # part-files the next download continues
+    unlinked: list[Path] = field(default_factory=list)  # files a stopped download finished
 
     @property
     def id(self) -> str:
@@ -114,6 +120,22 @@ def _hub_plan(entry: ModelEntry, cache: Path) -> tuple[Any, list[Path], int, int
     return plan, places, plan.expected_freed_size, max(0, logical - plan.expected_freed_size)
 
 
+def _unlinked(folder: Path) -> list[Path]:
+    """The files among a repository's blobs that no snapshot links to: those a download that
+    stopped had finished before the library linked them (Wavescribe puts a large file there
+    first, partfiles.py). Part-files are not among them."""
+    blobs = folder / "blobs"
+    if not blobs.is_dir():
+        return []
+    linked = {
+        Path(os.path.normpath(p.parent / os.readlink(p)))
+        for p in (folder / "snapshots").rglob("*")
+        if p.is_symlink()
+    }
+    return sorted(p for p in blobs.iterdir()
+                  if _BLOB.fullmatch(p.name) and p not in linked)  # fmt: skip
+
+
 def plan(registry: ModelRegistry, entry: ModelEntry) -> Removal | None:
     """What removing ``entry`` would take off the disk; None when nothing of it is there."""
     if entry.kind == "local":
@@ -128,9 +150,11 @@ def plan(registry: ModelRegistry, entry: ModelEntry) -> Removal | None:
             removal.strategy, places, removal.size, removal.shared = found
             removal.places += places
         removal.parts = partfiles.found(hub_cache() / repo_folder(entry))
-        removal.places += [p for p in removal.parts
+        removal.unlinked = _unlinked(hub_cache() / repo_folder(entry))
+        removal.places += [p for p in (*removal.parts, *removal.unlinked)
                            if not any(p.is_relative_to(q) for q in removal.places)]  # fmt: skip
         removal.size += partfiles.size(removal.parts)
+        removal.size += sum(p.stat().st_size for p in removal.unlinked if not p.is_symlink())
     folder = _own_folder(registry, entry)
     if folder is not None:
         removal.folder = folder
@@ -146,6 +170,9 @@ def remove(registry: ModelRegistry, removal: Removal) -> int:
     if fresh is None:
         return 0
     partfiles.remove(fresh.parts)  # first: the plan may take the whole folder they are in
+    for blob in fresh.unlinked:
+        with contextlib.suppress(FileNotFoundError):
+            blob.unlink()
     if fresh.strategy is not None:
         fresh.strategy.execute()
     if fresh.folder is not None:

@@ -9,8 +9,12 @@ export interface ModelEntry {
   tier: string;
   accepted: boolean;
   in_use: string[];
-  /** Not installed: the bytes still to download, the free space on its disk, and which disk. */
+  /** Not installed: how much of it an earlier download kept (Continue goes on from there), the
+   * bytes still to download, the library's part-files no download continues, the free space on
+   * its disk, and which disk. */
+  have_bytes?: number | null;
   left_bytes?: number | null;
+  cut_bytes?: number | null;
   free_bytes?: number | null;
   disk?: string | null;
 }
@@ -118,12 +122,33 @@ export function timeLeft(s: number): string {
   return `about ${h} h${rest ? ` ${rest} min` : ""} left`;
 }
 
+/** Part of a whole: "2.1 of 5.5 GB", "340 MB of 1.6 GB", "0 MB of 600 MB". */
+export function ofText(part: number, whole: number): string {
+  if (part >= 0.95e9 && whole >= 0.95e9) return `${(part / 1e9).toFixed(1)} of ${sizeText(whole)}`;
+  return `${part < 0.5e6 ? "0 MB" : sizeText(part)} of ${sizeText(whole)}`;
+}
+
+/** How much of a model that isn't installed an earlier download kept, which Continue goes on
+ * from: "2.1 of 5.5 GB downloaded"; null when nothing worth saying is kept. */
+export function keptText(e: ModelEntry): string | null {
+  const have = e.have_bytes || 0;
+  if (e.installed || have < 0.5e6) return null;
+  return e.left_bytes != null ? `${ofText(have, have + e.left_bytes)} downloaded` : `${sizeText(have)} downloaded`;
+}
+
+/** What a download that was cut off left of a model that no download continues, said plainly;
+ * null when there is nothing worth saying. */
+export function cutText(e: ModelEntry): string | null {
+  const cut = e.cut_bytes || 0;
+  if (e.installed || cut < 0.5e6) return null;
+  return `${sizeText(cut)} of a file that was cut off can't be continued: that file downloads again from its beginning.`;
+}
+
 /** A running download in two parts: how much has arrived, and its speed with the time left
  * (only once the speed is measured: nothing is guessed). */
 export function progressText(j: DownloadJob): [string, string] {
   const done = j.bytes || 0;
-  const have = done < 0.5e6 ? "0 MB" : sizeText(done);
-  const amount = j.total_bytes ? `${have} of ${sizeText(j.total_bytes)}` : `${have} so far`;
+  const amount = j.total_bytes ? ofText(done, j.total_bytes) : `${done < 0.5e6 ? "0 MB" : sizeText(done)} so far`;
   if (j.speed == null) return [amount, "measuring the speed…"];
   if (j.speed === 0) return [amount, "nothing arriving"];
   return [amount, speedText(j.speed) + (j.eta_s != null ? ` · ${timeLeft(j.eta_s)}` : "")];

@@ -1,7 +1,7 @@
 // Models: what this machine can run, in which order, and where more come from.
 import { useEffect, useRef, useState } from "react";
 import { langNameEn } from "../lib/lang";
-import { NEED_LABEL, afterRemoval, downloadState, neededModels, needsLicence, progressText, roomForAll, roomText, sentence, sizeText } from "../lib/models";
+import { NEED_LABEL, afterRemoval, cutText, downloadState, keptText, neededModels, needsLicence, progressText, roomForAll, roomText, sentence, sizeText } from "../lib/models";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, Input, Section, Select, Table, Tag, type Tone, act, cx, toast } from "../components/ui";
 import { type Any, ApiError, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
@@ -46,7 +46,7 @@ export function Models({ after }: { after?: React.ReactNode }) {
         <Recommended m={m} reload={reload} />
       </Section>
       {after}
-      <Downloads d={m.downloads || {}} reload={reload} />
+      <Downloads d={m.downloads || {}} models={m.models} reload={reload} />
       {CAPS.filter(([c]) => m.models.some((e: Any) => e.capability === c)).map(([cap, label, desc]) => (
         <ModelSection key={cap} cap={cap} label={label} desc={desc} m={m} reload={reload} />
       ))}
@@ -89,6 +89,8 @@ function Recommended({ m, reload }: { m: Any; reload: () => Promise<void> }) {
     const first = byId.get(ids[0]);
     if (!first) return <span className="is-trouble">nothing fits this machine</span>;
     if (needsLicence(first)) return <span className="m-muted">accept its licence below first</span>;
+    const kept = keptText(first);
+    if (kept) return <span className="m-muted">{kept}</span>;
     return <span className="m-muted">not downloaded{first.size_gb ? ` · ${gbSize(first.size_gb)}` : ""}</span>;
   };
   return (
@@ -119,9 +121,10 @@ function Recommended({ m, reload }: { m: Any; reload: () => Promise<void> }) {
   );
 }
 
-function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promise<void> }) {
+function Downloads({ d, models, reload }: { d: Record<string, Any>; models: Any[]; reload: () => Promise<void> }) {
   const rows = Object.values(d);
   if (!rows.length) return null;
+  const byId = new Map<string, Any>(models.map((e) => [e.id, e]));
   return (
     <Section id="mod-dl" title="Downloads">
       <Table caption="Downloads" cols={[{ label: "Model" }, { label: "State" }, { label: "Progress" }, { label: "", width: "1%" }]}>
@@ -142,9 +145,11 @@ function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promis
                 {j.state === "running" && (
                   <ActButton size="sm" icon="stop" run={async () => { await post(`/models/${j.model}/stop`); await reload(); }}>Stop</ActButton>
                 )}
-                {(j.state === "stopped" || j.state === "failed") && (
+                {(j.state === "stopped" || j.state === "failed") && !byId.get(j.model)?.installed && (
                   <ActButton size="sm" icon="download" done="Download started"
-                             run={async () => { await post(`/models/${j.model}/fetch`); await reload(); }}>Start again</ActButton>
+                             run={async () => { await post(`/models/${j.model}/fetch`); await reload(); }}>
+                    {againText(byId.get(j.model))}
+                  </ActButton>
                 )}
               </td>
             </tr>
@@ -153,6 +158,13 @@ function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promis
       </Table>
     </Section>
   );
+}
+
+/** The button that downloads a model again: Continue with what is left when an earlier
+ * download kept part of it, else Start again. */
+function againText(e: Any): string {
+  if (!e || !keptText(e)) return "Start again";
+  return `Continue${e.left_bytes ? ` · ${sizeText(e.left_bytes)}` : ""}`;
 }
 
 /** A running download's bar, how much has arrived, and its speed with the time left. */
@@ -201,13 +213,16 @@ function ModelRow({ e, job, chain, move, setChain, reload }: {
   const needsAccept = (e.tier === "opt-in" || e.tier === "restricted") && !e.accepted;
   const downloading = !e.installed && (job?.state === "running" || job?.state === "stopping");
   const [fits, room] = e.installed || downloading ? [true, null] : roomText(e.left_bytes, e.free_bytes);
+  const kept = downloading ? null : keptText(e); // a download that stopped, or ended with Wavescribe
+  const cut = downloading ? null : cutText(e);
   return (
     <li className={cx("m-item", pos < 0 && "is-off")}>
       <div className="m-item-head">
         <span className={cx("m-pos", pos < 0 && "is-out")} aria-label={pos >= 0 ? `Number ${pos + 1} in the order` : "Not in the order"}>{pos >= 0 ? pos + 1 : "–"}</span>
         <strong className="mono">{e.id}</strong>
         {e.loaded ? <Tag tone="good">loaded</Tag> : e.in_use.length ? <Tag tone="accent">planned: {e.in_use.join(", ")}</Tag> : e.installed ? <Tag tone="muted">installed</Tag>
-          : downloading ? <Tag tone="accent">downloading{job.percent != null ? ` ${Math.round(job.percent)}%` : "…"}</Tag> : <Tag tone="muted">not downloaded</Tag>}
+          : downloading ? <Tag tone="accent">downloading{job.percent != null ? ` ${Math.round(job.percent)}%` : "…"}</Tag>
+          : kept ? <Tag tone="muted">part downloaded</Tag> : <Tag tone="muted">not downloaded</Tag>}
         <Tag tone={fitTone}>{fitWord}</Tag>
         <Tag tone={tierTone} title={tierText}>{tierWord}</Tag>
         {e.tested ? <Tag tone="good" title={e.tested}>tested</Tag> : <Tag tone="muted">untested</Tag>}
@@ -218,10 +233,10 @@ function ModelRow({ e, job, chain, move, setChain, reload }: {
         ) : (
           <ActButton size="sm" variant="primary" icon="download" done="Download started" disabled={!fits}
                      run={async () => { await post(`/models/${e.id}/fetch`); await reload(); }}>
-            Download{e.size_gb ? ` · ${gbSize(e.size_gb)}` : ""}
+            {kept ? againText(e) : `Download${e.size_gb ? ` · ${gbSize(e.size_gb)}` : ""}`}
           </ActButton>
         ))}
-        {e.installed && e.removable && (
+        {(e.installed || kept) && e.removable && (
           <Button size="sm" variant="ghost" icon="trash" aria-expanded={removing} onClick={() => setRemoving(!removing)}>Remove…</Button>
         )}
         {pos >= 0 ? (
@@ -242,6 +257,8 @@ function ModelRow({ e, job, chain, move, setChain, reload }: {
         {e.upstream && <> · <a href={e.upstream} target="_blank" rel="noopener">source</a></>}
       </p>
       <p className="m-item-sub">{e.fit.reason}{e.speed ? ` · ${e.speed}` : ""}</p>
+      {kept && <p className="m-item-sub">{kept}: Continue goes on from there, and Remove frees the space.</p>}
+      {cut && <p className="m-item-sub">{cut}</p>}
       {room && (fits ? <p className="m-item-sub">{room}</p> : <p className="m-trouble">{room}</p>)}
       {e.tested && <p className="m-hint">Tested: {e.tested}</p>}
       {e.notes && <p className="m-hint">{e.notes}</p>}

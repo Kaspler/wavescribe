@@ -1,14 +1,26 @@
 // The Downloads table on the models page: a download's state in a word, and the sentence under it.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { afterRemoval, downloadState, progressText, roomForAll, roomText, sizeText, speedText, timeLeft } from "../src/lib/models.ts";
+import { afterRemoval, cutText, downloadState, keptText, progressText, roomForAll, roomText, sizeText, speedText, timeLeft } from "../src/lib/models.ts";
 
 test("a running download says nothing of its speed until it is measured", () => {
   const j = { model: "m", state: "running", bytes: 1_200_000_000, total_bytes: 5_500_000_000 };
-  assert.deepEqual(progressText(j), ["1.2 GB of 5.5 GB", "measuring the speed…"]);
-  assert.deepEqual(progressText({ ...j, speed: 0 }), ["1.2 GB of 5.5 GB", "nothing arriving"]);
-  assert.deepEqual(progressText({ ...j, speed: 12_400_000, eta_s: 347 }), ["1.2 GB of 5.5 GB", "12 MB/s · about 6 min left"]);
+  assert.deepEqual(progressText(j), ["1.2 of 5.5 GB", "measuring the speed…"]);
+  assert.deepEqual(progressText({ ...j, speed: 0 }), ["1.2 of 5.5 GB", "nothing arriving"]);
+  assert.deepEqual(progressText({ ...j, speed: 12_400_000, eta_s: 347 }), ["1.2 of 5.5 GB", "12 MB/s · about 6 min left"]);
+  assert.deepEqual(progressText({ ...j, bytes: 340_000_000 }), ["340 MB of 5.5 GB", "measuring the speed…"]);
   assert.deepEqual(progressText({ model: "m", state: "running", bytes: 100, speed: 800_000 }), ["0 MB so far", "800 kB/s"]);
+});
+
+test("a part-finished download says how much it kept, and what can't be continued", () => {
+  const e = { id: "m", capability: "asr", installed: false, size_gb: 5.5, tier: "default", accepted: true, in_use: [] };
+  assert.equal(keptText({ ...e, have_bytes: 2_100_000_000, left_bytes: 3_400_000_000 }), "2.1 of 5.5 GB downloaded");
+  assert.equal(keptText({ ...e, have_bytes: 2_100_000_000, left_bytes: null }), "2.1 GB downloaded");
+  assert.equal(keptText({ ...e, have_bytes: 40 }), null); // nothing worth saying
+  assert.equal(keptText({ ...e, installed: true, have_bytes: 2_100_000_000 }), null);
+  assert.equal(cutText({ ...e, cut_bytes: 300_000_000 }),
+               "300 MB of a file that was cut off can't be continued: that file downloads again from its beginning.");
+  assert.equal(cutText({ ...e, cut_bytes: 0 }), null);
 });
 
 test("speeds and times left as a person says them", () => {

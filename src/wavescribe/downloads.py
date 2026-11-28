@@ -3,9 +3,9 @@
 
 Each download runs ``wavescribe models fetch <id>`` as a child process: the same licence check
 and the rights holder's own repository at the pinned revision, and the only place the network
-is used. The server process itself stays offline (``HF_HUB_OFFLINE=1``). Progress is the bytes
-in the model's target folder, partial files included; a part-file an earlier download left,
-which this one continues, counts as done from the start.
+is used. The server process itself stays offline (``HF_HUB_OFFLINE=1``). Progress is how much
+of the model is on disk (``modelfetch.model_bytes``) and the part-files being written: what an
+earlier download kept, which this one goes on from, counts as done from the start.
 
 Stopping a download (``stop``, the page's Stop) and stopping ``serve`` both end the child with
 SIGTERM, which leaves the same files behind as Ctrl-C on the command line: Wavescribe's own
@@ -29,12 +29,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from wavescribe import partfiles
 from wavescribe.log import event
 from wavescribe.modelfetch import (
     RETRY_ON_PAGE,
-    dir_bytes,
-    kept_bytes,
     library_parts,
+    model_bytes,
     no_room_on_page,
     remove_parts,
     stopped_on_page,
@@ -113,9 +113,8 @@ class Downloads:
                 return dict(job)
             self._samples[model_id] = deque()
             target = target_dir(self.registry, entry)
-            base = dir_bytes(target) - kept_bytes(target)  # what is continued counts as done
             job = {"model": model_id, "state": "running", "started": time.time(),
-                   "error": None, "note": None, "base_bytes": base,
+                   "error": None, "note": None,
                    "total_bytes": int(entry.size_gb * 1e9) if entry.size_gb else None}  # fmt: skip
             self._jobs[model_id] = job
             self._before[model_id] = library_parts(target)
@@ -174,7 +173,7 @@ class Downloads:
         them itself on SIGTERM, but not when it had to be killed); Wavescribe's own stay."""
         folder = target_dir(self.registry, entry)
         remove_parts(folder, keep=self._before.get(entry.id, frozenset()))
-        job["state"], job["note"] = "stopped", stopped_on_page(folder)
+        job["state"], job["note"] = "stopped", stopped_on_page(folder, entry.revision)
 
     def stop(self, model_id: str) -> dict[str, Any]:
         """Stop a download that is running, as Ctrl-C stops `models fetch`, and return how it
@@ -220,8 +219,7 @@ class Downloads:
             jobs = {k: dict(v) for k, v in self._jobs.items()}
         for model_id, job in jobs.items():
             if job["state"] in ("running", "stopping"):
-                entry = self.registry.get(model_id)
-                done = max(0, dir_bytes(target_dir(self.registry, entry)) - job["base_bytes"])
+                done = self._done(self.registry.get(model_id))
                 job["bytes"] = done
                 total = job.get("total_bytes")
                 job["percent"] = min(99.0, round(100 * done / total, 1)) if total else None
@@ -230,6 +228,15 @@ class Downloads:
                 job["eta_s"] = round(left / speed) if left is not None and speed else None
             out[model_id] = job
         return out
+
+    def _done(self, entry: ModelEntry) -> int:
+        """How much of a model is on disk while it downloads: what is there for good (what an
+        earlier download kept included, which this one goes on from) and the library's
+        part-files this download is writing."""
+        folder = target_dir(self.registry, entry)
+        before = self._before.get(entry.id, frozenset())
+        writing = [p for p in library_parts(folder) if p not in before]
+        return model_bytes(folder, entry.revision) + partfiles.size(writing)
 
     def _speed(self, model_id: str, done: int) -> int | None:
         """Bytes a second over the last SPEED_WINDOW_S of looks at a download, or None until

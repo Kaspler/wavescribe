@@ -110,15 +110,19 @@ def models_view(app: App) -> dict[str, Any]:
 
 
 def _room(reg: ModelRegistry, e: ModelEntry, path: Path | None) -> dict[str, Any]:
-    """For a model that isn't installed, before anyone clicks: the bytes still to download
-    (``left_bytes``, None with no size known) and the free space on the disk it would go to
+    """For a model that isn't installed, before anyone clicks: how much of it an earlier
+    download kept (``have_bytes``, which the next one goes on from), the bytes still to
+    download (``left_bytes``, None with no size known), the library's part-files that no
+    download continues (``cut_bytes``), and the free space on the disk it would go to
     (``free_bytes``, and which disk: ``disk``, to add up several models on one)."""
     if path is not None or e.kind == "local":
-        return {"left_bytes": None, "free_bytes": None, "disk": None}
+        return dict.fromkeys(("have_bytes", "left_bytes", "cut_bytes", "free_bytes", "disk"))
     from wavescribe import modelfetch
 
     folder = modelfetch.target_dir(reg, e)
-    return {"left_bytes": modelfetch.to_download(reg, e),
+    return {"have_bytes": modelfetch.model_bytes(folder, e.revision),
+            "left_bytes": modelfetch.to_download(reg, e),
+            "cut_bytes": modelfetch.cut_bytes(folder),
             "free_bytes": modelfetch.free_bytes(folder),
             "disk": str(modelfetch.disk_of(folder))}  # fmt: skip
 
