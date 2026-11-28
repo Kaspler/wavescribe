@@ -227,6 +227,7 @@ class Band:
     channel_hz: float | None = None
     channels: tuple[int, ...] = ()
     region_modes: tuple[tuple[str, str], ...] = ()  # (region, mode) where it isn't `mode`
+    group: str = "other"  # where a person finds it when choosing where to look around
 
     @property
     def width_hz(self) -> int:
@@ -267,6 +268,7 @@ class Band:
             "step_khz": self.step_hz / 1e3 if self.step_hz else None,
             "channel_khz": self.channel_hz / 1e3 if self.channel_hz else None,
             "channels_mhz": [c / 1e6 for c in self.channels], "regions": list(self.regions),
+            "group": self.group,
         }  # fmt: skip
 
 
@@ -274,13 +276,30 @@ def _mhz(x: float) -> int:
     return round(x * 1e6)
 
 
+@dataclass(frozen=True)
+class Group:
+    """A handful of bands a person thinks of together ("Aircraft"), for looking around."""
+
+    id: str
+    name: str
+
+
+@cache
+def groups(path: Path = BANDS_PATH) -> tuple[Group, ...]:
+    raw = tomllib.loads(path.read_text("utf-8"))
+    return tuple(Group(g["id"], g["name"]) for g in raw["group"])
+
+
 @cache
 def bands(path: Path = BANDS_PATH) -> tuple[Band, ...]:
     raw = tomllib.loads(path.read_text("utf-8"))
+    known = {g["id"] for g in raw["group"]}
     out = []
     for b in raw["band"]:
         if b["privacy"] not in PRIVACY:
             raise ValueError(f"{path}: band {b['id']}: unknown privacy {b['privacy']!r}")
+        if b.get("group") not in known:
+            raise ValueError(f"{path}: band {b['id']}: unknown group {b.get('group')!r}")
         step = b.get("step_khz")
         width = b.get("channel_khz")
         modes = b.get("region_mode", {})
@@ -292,7 +311,7 @@ def bands(path: Path = BANDS_PATH) -> tuple[Band, ...]:
             privacy=b["privacy"], regions=tuple(b.get("regions", ())), mode=b.get("mode"),
             step_hz=step * 1e3 if step else None, channel_hz=width * 1e3 if width else None,
             channels=tuple(_mhz(c) for c in b.get("channels", ())),
-            region_modes=tuple(modes.items()),
+            region_modes=tuple(modes.items()), group=b["group"],
         ))  # fmt: skip
     return tuple(out)
 

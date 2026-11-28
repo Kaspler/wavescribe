@@ -67,8 +67,8 @@ def place(freq_hz: float, region: str, width_hz: float | None = None) -> Place:
 class Shape:
     """What the spectrum shows of one signal. ``kind`` is how it looks: "wide_fm",
     "narrow_fm", "am", "flat_block", "data_bursts", "carrier", or "nothing" (never on). It
-    cannot say what the signal is, who sends it, or whether it is encrypted: a flat block is
-    digital, and nothing in its shape says more."""
+    cannot say what the signal is or who sends it: a flat block is digital, and nothing in its
+    shape says more."""
 
     kind: str
     width_hz: float
