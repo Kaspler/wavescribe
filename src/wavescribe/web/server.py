@@ -61,6 +61,9 @@ log = logging.getLogger(__name__)
 # station, so a chatty station never pushes a quiet one's history out.
 RECENT_PER_STATION = 300
 AROUND_DEFAULT = 50  # utterances in a /api/history?around_id= window unless limit says
+# Read's feed of what was caught on the air and isn't kept as a station (``WebHub.caught``), as
+# /api/history's ``station``. A station id has no dot (config._STATION_ID), so none is this.
+CAUGHT = "caught.air"
 RECENT_ALERTS = 30
 CLIENT_BACKLOG = 1000  # events per browser before we drop
 STATUS_INTERVAL_S = 1.0
@@ -211,7 +214,48 @@ class WebHub:
     def _payload(self, result: Result, *, final: bool) -> dict[str, Any]:
         archived = self.store is not None and self.store.archive is not None
         payload = _payload(result, final=final, mt=self.plan.mt is not None, audio=archived)
+        if self.caught_line(payload):
+            payload["caught"] = True  # read in Caught on the air, not in a station's column
         return self.labelled([payload])[0]
+
+    def caught_line(self, u: dict[str, Any]) -> bool:
+        """Whether a line was caught on the air without being kept: heard on a frequency, of
+        open radio (``bandplan.OPEN_CLASSES``), by something that isn't a station here (a
+        look-around, a scan, a watch nobody kept). Read shows such lines in Caught on the air."""
+        from wavescribe.radio.bandplan import OPEN_CLASSES
+
+        return (
+            u.get("freq_hz") is not None
+            and u.get("privacy") in OPEN_CLASSES
+            and all(s.id != u.get("station") for s in self.config.stations)
+        )
+
+    def caught(
+        self,
+        *,
+        before_id: int | None = None,
+        around_id: int | None = None,
+        limit: int = RECENT_PER_STATION,
+        exports: Exports | None = None,
+    ) -> list[dict[str, Any]]:
+        """Caught on the air: what was caught of open radio without being kept as a station,
+        as ``history`` gives a station's lines (oldest first), each with ``caught`` true. From
+        the store's catches (``Store.caught``); without a store, the lines heard in this run.
+        For another machine, only what ``exports`` lets leave."""
+        if self.store is not None:
+            kept = [s.id for s in self.config.stations]
+            rows = self.store.caught(kept, before_id=before_id, around_id=around_id,
+                                     limit=limit, exports=exports)  # fmt: skip
+            return [{**u, "caught": True} for u in self.labelled(rows)]
+        if before_id is not None or around_id is not None:
+            return []  # nothing older to page to, nor ids to look around
+        with self._lock:
+            lines = [u for recent in self._recent.values() for u in recent.values()
+                     if u.get("caught")]  # fmt: skip
+        lines = [u for u in lines if self.caught_line(u)]  # kept as a station since
+        lines = [u for u in lines if exports is None or exports.utterance(u)]
+        lines.sort(key=lambda u: u["t_start"])
+        return lines[-limit:]
 
     def labelled(self, utterances: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Utterances with the ``label`` of where each was heard (``freq_hz``), as the band plan
@@ -471,6 +515,7 @@ class WebHub:
             )
         recent = self.history(exports=exports)
         recent.sort(key=lambda u: u["t_start"])
+        caught = self.caught(exports=exports)
         status = self.status()
         if exports is not None:
             status = self._lan_status(status, exports)
@@ -484,6 +529,8 @@ class WebHub:
             "noncommercial": self.plan.noncommercial(),
             "audio_rate": SAMPLE_RATE,
             "recent": recent,
+            # Caught on the air (``caught``): its newest lines, oldest first, as ``recent``.
+            "caught": caught,
             "alerts": self.alerts(exports),
             "topic_languages": _topic_languages(self.app),
             "invocation": typed(),  # how a command is typed here, for hints on the page
@@ -561,7 +608,11 @@ class WebHub:
     ) -> list[dict[str, Any]]:
         """Recent utterances (oldest first), at most ``limit`` per station: from the store when
         there is one, else memory. ``around_id``: one station's window around that segment
-        instead (``Store.around``). For another machine, only what ``exports`` lets leave."""
+        instead (``Store.around``). ``CAUGHT`` is Caught on the air (``caught``). For another
+        machine, only what ``exports`` lets leave."""
+        if station_id == CAUGHT:
+            return self.caught(before_id=before_id, around_id=around_id, limit=limit,
+                               exports=exports)  # fmt: skip
         ids = [station_id] if station_id else [s.id for s in self.config.stations]
         if self.store is not None:
             if around_id is not None and station_id:

@@ -370,6 +370,21 @@ without a frequency or for one no plan lists), with that band's id (`band`) and 
 number (`channel`) beside it, so a program shows its own names without reading the label's
 words; catches and scan rows carry `channel` beside their `band` and `label` too. `--no-store` falls back to 300 utterances per station in memory, with no search or replay.
 
+**Radio in Read.** A watch kept as a station is a station: its row, its column, its history, each
+line with the channel it was heard on. **Caught on the air** is one more feed beside them, for what
+was caught and isn't kept as a station: the words heard in catches (`Store.caught`, joined to
+`catches` as `Store.catches` finds a catch's words) whose station isn't configured (a watch run
+from a terminal, one deleted since, and, once they are wired, look-arounds and scans), of open radio
+only (`bandplan.OPEN_CLASSES`: broadcast, amateur, utility). Private and digital catches never
+enter it, whatever their class keeps. `/api/state` gives its newest lines as `caught`, in the shape
+of `recent`, and `/api/history?station=caught.air` pages and opens it as a station's column
+(`before_id`, `around_id`; `caught.air` can't be a station id). Live, a line from a source that
+isn't a station here, with a frequency and an open class, comes on the usual `utterance` event
+with `caught: true` (`WebHub.caught_line`), which the page reads into that feed. For another
+machine all three go through `WebHub.exports()` as any read does, so a class whose `export` is off
+never shows, and, as Exports keeps what no configured station heard, Caught on the air stays on
+this machine.
+
 **Ask.** Above the search box, a question in any language goes to
 `POST /api/ask`, which streams Server-Sent Events back: `plan` (stations, time range, search
 words), `sources` (the numbered excerpts), `text` (the answer as the model writes it), then

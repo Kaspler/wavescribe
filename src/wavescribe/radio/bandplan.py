@@ -56,6 +56,12 @@ POLICIES = dict(DEFAULT_POLICIES)  # in effect: the defaults with the user's cha
 STRICTNESS = ("broadcast", "amateur", "utility", "private", "digital")
 
 
+# Open radio: every kind but private and digital. What was caught of it without being kept as a
+# station is read in one feed (Read's "Caught on the air"). Private and digital radio never is,
+# whatever is kept of it: kept, its words are reached through search and Ask on this machine.
+OPEN_CLASSES = ("broadcast", "amateur", "utility")
+
+
 def stricter(a: str, b: str) -> bool:
     """Whether class ``a`` is stricter than class ``b``."""
     return STRICTNESS.index(a) > STRICTNESS.index(b)

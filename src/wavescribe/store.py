@@ -1538,6 +1538,54 @@ class Store:
                         u["translations"][tr["lang"]] = tr["text"]
         return out
 
+    def caught(
+        self,
+        kept: Iterable[str],
+        *,
+        before_id: int | None = None,
+        around_id: int | None = None,
+        limit: int = 300,
+        exports: Exports | None = None,
+    ) -> list[dict[str, Any]]:
+        """What was caught on the air and isn't kept as a station: the words heard in the
+        catches of open radio (``bandplan.OPEN_CLASSES``) whose station isn't one of ``kept``,
+        as ``recent`` gives a station's (oldest first, ``limit`` at most, older than
+        ``before_id``), or a window about ``around_id`` as ``around`` gives one. Private and
+        digital radio never is, whatever its class keeps. With ``exports``, only what may leave
+        this machine."""
+        from wavescribe.radio.bandplan import OPEN_CLASSES
+
+        kept = sorted(set(kept))
+        opened = ",".join("?" * len(OPEN_CLASSES))
+        where = f" AND c.privacy IN ({opened}) AND s.privacy IN ({opened})"
+        args: list[Any] = [CATCH_SLACK_S, CATCH_SLACK_S, *OPEN_CLASSES, *OPEN_CLASSES]
+        if kept:
+            where += f" AND c.station_id NOT IN ({','.join('?' * len(kept))})"
+            args += kept
+        leaving, leaving_args = _exports_sql(exports)
+        # Its words: as ``catches`` finds them, the same station's on the same frequency, starting
+        # within the catch. A line in two catches close together is one line.
+        base = (
+            "SELECT DISTINCT s.id FROM segments s JOIN catches c ON c.station_id = s.station_id "
+            "AND c.freq_hz = s.freq_hz AND s.t_start BETWEEN c.t_start - ? AND c.t_end + ? "
+            f"WHERE 1 = 1{where}{leaving}"
+        )
+        args += leaving_args
+        with self._lock:
+            if around_id is None:
+                rows = self._db.execute(
+                    f"{base} AND s.id < ? ORDER BY s.id DESC LIMIT ?",
+                    (*args, before_id if before_id is not None else 2**62, limit),
+                ).fetchall()
+                return self._payloads([r["id"] for r in reversed(rows)])
+            near = (*args, around_id, limit)
+            before = [r["id"] for r in self._db.execute(
+                f"{base} AND s.id <= ? ORDER BY s.id DESC LIMIT ?", near)]  # fmt: skip
+            after = [r["id"] for r in self._db.execute(
+                f"{base} AND s.id > ? ORDER BY s.id LIMIT ?", near)]  # fmt: skip
+            n_before = min(len(before), max(limit - limit // 2, limit - len(after)))
+            return self._payloads(before[:n_before][::-1] + after[: limit - n_before])
+
     def prune_catches(self) -> int:
         """Catches past their class's text retention, or past the store's own: the same ages
         as the words they hold."""
