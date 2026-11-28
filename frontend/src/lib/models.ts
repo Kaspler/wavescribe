@@ -84,3 +84,25 @@ export const needsLicence = (e: ModelEntry) => (e.tier === "opt-in" || e.tier ==
 /** The download size of a list of models in GB; models whose size isn't known count as nothing
  * (the detector and the filter are a few megabytes). */
 export const totalGb = (needs: Need[]) => needs.reduce((sum, n) => sum + (n.entry.size_gb || 0), 0);
+
+/** A download the page started, as /api/manage/models gives it (src/wavescribe/downloads.py). */
+export interface DownloadJob {
+  model: string;
+  state: string; // running, stopping, done, failed, stopped
+  error?: string | null;
+  note?: string | null;
+}
+
+const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + (/[.?]$/.test(s) ? "" : ".");
+
+/** A download's state in a word, and the sentence that goes under it: why it failed, or what
+ * the next download does with what a stopped one kept. */
+export function downloadState(j: DownloadJob): [string, string | null] {
+  switch (j.state) {
+    case "running": return ["downloading", null];
+    case "stopping": return ["stopping…", null];
+    case "stopped": return ["stopped", j.note ? sentence(j.note) : null];
+    case "failed": return ["failed", j.error ? sentence(j.error) : null];
+    default: return [j.state, null];
+  }
+}

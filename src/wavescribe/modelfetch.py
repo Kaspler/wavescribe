@@ -114,6 +114,18 @@ def kept_bytes(folder: Path) -> int:
     return partfiles.size(partfiles.found(folder))
 
 
+def library_parts(folder: Path) -> frozenset[Path]:
+    """The part-files in ``folder`` that no download continues (``remove_parts`` removes them)."""
+    return frozenset(_parts(folder))
+
+
+def stopped_on_page(folder: Path) -> str:
+    """What the page says of a download stopped there, in the words Ctrl-C uses: whether the
+    next download continues a part-file kept in ``folder`` or downloads what is missing."""
+    then = f"{SO_FAR}: {CONTINUES}" if kept_bytes(folder) else f"{FINISHED}: {AGAIN}"
+    return then.replace(RETRY, RETRY_ON_PAGE)
+
+
 def remove_parts(
     folder: Path, *, older_than_s: float = 0.0, keep: frozenset[Path] = frozenset()
 ) -> int:
@@ -509,7 +521,7 @@ def run(registry: ModelRegistry, entries: list[ModelEntry]) -> int:
         source = f"  from {entry.source}" + (f" @ {entry.revision}" if entry.revision else "")
         print(source + (f", {size_text(item.left)}" if item.left else ""), flush=True)
         calm_library(new_model=True)
-        not_ours = frozenset(_parts(item.folder))
+        not_ours = library_parts(item.folder)
         progress = _Progress(item, enabled=plain)
         try:
             path = _stoppable(lambda entry=entry: registry.fetch(entry), progress.tick)

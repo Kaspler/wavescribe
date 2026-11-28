@@ -1,7 +1,7 @@
 // Models: what this machine can run, in which order, and where more come from.
 import { useEffect, useRef, useState } from "react";
 import { langNameEn } from "../lib/lang";
-import { NEED_LABEL, neededModels, needsLicence, totalGb } from "../lib/models";
+import { NEED_LABEL, downloadState, neededModels, needsLicence, totalGb } from "../lib/models";
 import { Icon } from "../components/Icon";
 import { ActButton, Advanced, Button, Check, Input, Section, Select, Table, Tag, type Tone, act, cx, toast } from "../components/ui";
 import { type Any, bytes, gbSize, get, post, refreshPage, useEvery, useLoad } from "./api";
@@ -24,7 +24,7 @@ const FIT: Record<string, [string, Tone]> = { good: ["fits", "good"], tight: ["t
 /** `after` goes under the first section (what this machine can run, and what to download). */
 export function Models({ after }: { after?: React.ReactNode }) {
   const { data: m, error, reload } = useLoad(() => get("/models"));
-  const downloading = !!m && Object.values(m.downloads || {}).some((d: Any) => d.state === "running");
+  const downloading = !!m && Object.values(m.downloads || {}).some((d: Any) => d.state === "running" || d.state === "stopping");
   useEvery(2500, reload, downloading);
   // When a download finishes, the reading view loads the stations again: they have text now.
   const was = useRef<Record<string, string>>({});
@@ -46,7 +46,7 @@ export function Models({ after }: { after?: React.ReactNode }) {
         <Recommended m={m} reload={reload} />
       </Section>
       {after}
-      <Downloads d={m.downloads || {}} />
+      <Downloads d={m.downloads || {}} reload={reload} />
       {CAPS.filter(([c]) => m.models.some((e: Any) => e.capability === c)).map(([cap, label, desc]) => (
         <ModelSection key={cap} cap={cap} label={label} desc={desc} m={m} reload={reload} />
       ))}
@@ -116,22 +116,38 @@ function Recommended({ m, reload }: { m: Any; reload: () => Promise<void> }) {
   );
 }
 
-function Downloads({ d }: { d: Record<string, Any> }) {
+function Downloads({ d, reload }: { d: Record<string, Any>; reload: () => Promise<void> }) {
   const rows = Object.values(d);
   if (!rows.length) return null;
   return (
     <Section id="mod-dl" title="Downloads">
-      <Table caption="Downloads" cols={[{ label: "Model" }, { label: "State" }, { label: "Progress" }]}>
-        {rows.map((j) => (
-          <tr key={j.model}>
-            <td>{j.model}</td>
-            <td className={cx(j.state === "failed" && "is-trouble")}>{j.state}{j.error ? `: ${j.error}` : ""}</td>
-            <td className="num-cell">
-              {j.state === "running" && <progress max={100} value={j.percent ?? 0} aria-label={`${j.model} downloaded`} />}
-              {j.bytes != null && ` ${bytes(j.bytes)}`}
-            </td>
-          </tr>
-        ))}
+      <Table caption="Downloads" cols={[{ label: "Model" }, { label: "State" }, { label: "Progress" }, { label: "", width: "1%" }]}>
+        {rows.map((j) => {
+          const [word, detail] = downloadState(j);
+          const busy = j.state === "running" || j.state === "stopping";
+          return (
+            <tr key={j.model}>
+              <td className="mono">{j.model}</td>
+              <td className={cx(j.state === "failed" && "is-trouble")}>
+                {word}
+                {detail && <div className="m-hint">{detail}</div>}
+              </td>
+              <td className="num-cell">
+                {busy && <progress max={100} value={j.percent ?? 0} aria-label={`${j.model} downloaded`} />}
+                {j.bytes != null && ` ${bytes(j.bytes)}`}
+              </td>
+              <td>
+                {j.state === "running" && (
+                  <ActButton size="sm" icon="stop" run={async () => { await post(`/models/${j.model}/stop`); await reload(); }}>Stop</ActButton>
+                )}
+                {(j.state === "stopped" || j.state === "failed") && (
+                  <ActButton size="sm" icon="download" done="Download started"
+                             run={async () => { await post(`/models/${j.model}/fetch`); await reload(); }}>Start again</ActButton>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </Table>
     </Section>
   );

@@ -75,6 +75,125 @@ def test_a_part_file_the_download_continues_counts_as_done_on_the_page(
         fetching.close()
 
 
+# A stand-in for `models fetch` that writes what a real one writes into the model's folder: a
+# part-file of Wavescribe's own, which the next download continues, and one of the library's,
+# named after the process, which nothing continues. "deaf" ignores SIGTERM, as a child busy in
+# a system call can seem to, so that it has to be killed.
+CHILD = """
+import os, signal, sys, time
+from pathlib import Path
+folder = Path(sys.argv[1])
+folder.mkdir(parents=True, exist_ok=True)
+if sys.argv[2] == "deaf":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+(folder / ("x." + "0" * 16 + ".part")).write_bytes(b"p" * 300_000)
+(folder / ("x.%d.incomplete" % os.getpid())).write_bytes(b"i" * 100_000)
+time.sleep(60)
+"""
+
+
+def _child(folder: Path, how: str = "") -> list[str]:
+    return [sys.executable, "-c", CHILD, str(folder), how]
+
+
+def _parts(folder: Path, suffix: str) -> list[str]:
+    return sorted(p.name for p in folder.glob("*" + suffix))
+
+
+def test_a_download_stopped_on_the_page_keeps_what_the_next_one_continues(
+    tmp_path: Path, monkeypatch
+) -> None:
+    folder = tmp_path / "models" / "m"
+    monkeypatch.setattr(downloads, "fetch_command", lambda _model: _child(folder))
+    finished: list[str] = []
+    fetching = downloads.Downloads(registry(tmp_path), on_done=finished.append)
+    fetching.start("m")
+    wait_for(lambda: _parts(folder, ".incomplete"))
+    child = fetching._procs["m"]
+
+    started = time.monotonic()
+    job = fetching.stop("m")
+    assert time.monotonic() - started < 3 and child.poll() is not None
+    assert job["state"] == "stopped" and job["error"] is None
+    assert job["note"] == (
+        "what was downloaded is kept: start the download again and it continues where it stopped"
+    )
+    assert fetching.status()["m"]["state"] == "stopped" and finished == []
+    # SIGTERM, which a real `models fetch` answers by removing the library's part-files: the
+    # stand-in doesn't, so the page did. Wavescribe's own stays for the next download.
+    assert _parts(folder, ".part") == ["x.0000000000000000.part"]
+    assert _parts(folder, ".incomplete") == []
+
+    assert fetching.stop("m")["state"] == "stopped"  # twice: the same answer, nothing breaks
+    assert fetching.start("m")["state"] == "running"  # and it can be started again
+    wait_for(lambda: _parts(folder, ".incomplete"))
+    fetching.close()
+
+
+def test_a_download_that_ignores_the_stop_is_killed_and_its_leftovers_removed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fetching = downloads.Downloads(registry(tmp_path))
+    folder = tmp_path / "models" / "m"
+    (folder / "x.1.incomplete").write_bytes(b"t")  # there before: another download's, perhaps
+    monkeypatch.setattr(downloads, "STOP_WAIT_S", 0.5)
+    monkeypatch.setattr(downloads, "fetch_command", lambda _model: _child(folder, "deaf"))
+    fetching.start("m")
+    wait_for(lambda: len(_parts(folder, ".incomplete")) == 2)
+
+    job = fetching.stop("m")
+    assert job["state"] == "stopped"
+    assert _parts(folder, ".incomplete") == ["x.1.incomplete"]
+    assert _parts(folder, ".part") == ["x.0000000000000000.part"]
+
+
+def test_a_stop_before_the_download_began_starts_nothing(tmp_path: Path, monkeypatch) -> None:
+    def never(_model: str) -> list[str]:
+        raise AssertionError("no download may start after a stop")
+
+    monkeypatch.setattr(downloads, "fetch_command", never)
+    reg = registry(tmp_path)
+    fetching = downloads.Downloads(reg)
+    job = {"model": "m", "state": "stopping", "error": None, "note": None, "base_bytes": 0}
+    fetching._run(reg.get("m"), job)
+    assert job["state"] == "stopped"
+    assert job["note"].endswith("start the download again and it downloads only what is missing")
+
+
+def test_nothing_to_stop_is_said_plainly(tmp_path: Path) -> None:
+    import pytest
+
+    from wavescribe.registry import ModelError
+
+    with pytest.raises(ModelError, match="m isn't being downloaded: there is nothing to stop"):
+        downloads.Downloads(registry(tmp_path)).stop("m")
+
+
+def test_the_page_stops_a_download_only_from_this_machine(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_app import Running
+
+    node = Running(make_app(tmp_path))
+    try:
+        folder = tmp_path / "node" / "models" / "m"
+        monkeypatch.setattr(downloads, "fetch_command", lambda _model: _child(folder))
+        assert node.call("POST", "/api/manage/models/m/fetch")[0] == 200
+        wait_for(lambda: _parts(folder, ".incomplete"))
+        # Another website's form (no header), and a request a proxy forwards: refused.
+        stop = "/api/manage/models/m/stop"
+        assert node.call("POST", stop, headers={"X-Wavescribe": ""})[0] == 403
+        assert node.call("POST", stop, headers={"X-Forwarded-For": "203.0.113.5"})[0] == 403
+        assert node.app.downloads.status()["m"]["state"] == "running"
+
+        status, job = node.call("POST", "/api/manage/models/m/stop")
+        assert status == 200 and job["state"] == "stopped" and "continues" in job["note"]
+        status, models = node.call("GET", "/api/manage/models")
+        assert models["downloads"]["m"]["state"] == "stopped"
+        status, refused = node.call("POST", "/api/manage/models/other/stop")
+        assert status == 400 and "nothing to stop" in refused["error"]
+    finally:
+        node.close()
+
+
 def test_serve_stopping_stops_its_downloads(tmp_path: Path, monkeypatch) -> None:
     app = make_app(tmp_path)
     stopped: list[bool] = []

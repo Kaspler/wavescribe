@@ -193,6 +193,13 @@ def _fetch(app: App, m, q, b) -> Any:
     return app.downloads.start(m["id"])
 
 
+@route("POST", "/models/(?P<id>[A-Za-z0-9_.-]+)/stop")
+def _stop_fetch(app: App, m, q, b) -> Any:
+    """Stop a download the page started: state ``stopped`` with a ``note`` that says what the
+    next download does with what is kept (or ``done``, when it finished first)."""
+    return app.downloads.stop(m["id"])
+
+
 @route("POST", "/models/(?P<id>[A-Za-z0-9_.-]+)/accept")
 def _accept(app: App, m, q, b) -> Any:
     b = _body(b)
