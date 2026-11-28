@@ -298,3 +298,30 @@ def test_installed_hook_blocks_a_stale_page_and_runs_local_checks(repo):
     assert blocked.returncode != 0 and "local check says no" in blocked.stderr
     local.unlink()
     assert commit("-m", "b").returncode == 0
+
+
+def test_the_package_page_lists_exactly_the_locked_packages(repo):
+    assert cc.check_package_page(repo) == []  # no lock, nothing to hold
+    lock = (
+        '[[package]]\nname = "x"\nversion = "0.1"\nsource = { editable = "." }\n\n'
+        '[[package]]\nname = "Left_Pad"\nversion = "1.0"\n\n'
+        '[[package]]\nname = "right-pad"\nversion = "2.0"\n'
+    )
+    stage(repo, {"uv.lock": lock})
+    problem = cc.check_package_page(repo)[0]
+    assert "not on it: left-pad 1.0, right-pad 2.0" in problem
+    assert "scripts/licence_table.py" in problem
+    head = "| Package | Version | Licence |\n|---|---|---|\n"
+    stage(
+        repo,
+        {"docs/PYTHON_PACKAGES.md": head + "| left-pad | 1.0 | MIT |\n| right-pad | 1.9 | MIT |\n"},
+    )
+    problem = cc.check_package_page(repo)[0]
+    assert (
+        "not on it: right-pad 2.0" in problem and "on it but not locked: right-pad 1.9" in problem
+    )
+    stage(
+        repo,
+        {"docs/PYTHON_PACKAGES.md": head + "| left_pad | 1.0 | MIT |\n| right-pad | 2.0 | MIT |\n"},
+    )
+    assert cc.check_package_page(repo) == []

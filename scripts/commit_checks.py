@@ -9,7 +9,9 @@
    frontend/package-lock.json) needs a docs/LICENSING.md entry, unless it is a transitive
    package with a tier-A licence. A new or re-pinned model in models.toml needs LICENSING.md
    updated in the same commit.
-3. **The README lists every command.** Each top-level `wavescribe` command must be named in
+3. **The package page matches the lock.** docs/PYTHON_PACKAGES.md lists every package in uv.lock
+   with its locked version, and nothing else (`scripts/licence_table.py` writes it).
+4. **The README lists every command.** Each top-level `wavescribe` command must be named in
    README.md as `wavescribe <name>`: its line in the list under "What it does". The names are
    read from the sources, where each is registered with `sub.add_parser("<name>", ...)`.
 
@@ -18,7 +20,7 @@ installed hook runs it after these when it exists and is executable.
 
 Usage:
   commit_checks.py install        Install the pre-commit hook.
-  commit_checks.py check          Checks 1-3 on the staged commit (the pre-commit hook).
+  commit_checks.py check          Checks 1-4 on the staged commit (the pre-commit hook).
   commit_checks.py check --base REV
                                   The same on what is checked out, with check 2 on everything
                                   that changed since commit REV (CI: a pull request or a push).
@@ -43,6 +45,8 @@ SOURCES = f"{BUILT}/.sources"
 LICENSING = "docs/LICENSING.md"
 MODELS = "src/wavescribe/models.toml"
 README = "README.md"
+PACKAGE_PAGE = "docs/PYTHON_PACKAGES.md"
+PAGE_ROW = re.compile(r"^\|\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*\|\s*([^|\s]+)\s*\|", re.M)
 PACKAGE = "src/wavescribe"
 # How a top-level command is registered: on the main parser's subcommands, which cli.py and
 # every module that adds a command call `sub`. A command's own actions go on another name.
@@ -450,6 +454,38 @@ def check_models(repo: Repo, changed: set[str]) -> list[str]:
     return problems
 
 
+def check_package_page(repo: Repo) -> list[str]:
+    """Every package in uv.lock is on the package page with its locked version, and nothing
+    else is: names and versions only, so no package is imported here."""
+    lock = repo.read("uv.lock")
+    if not lock:
+        return []
+    locked = {
+        (norm(p["name"]), p.get("version", ""))
+        for p in tomllib.loads(lock).get("package", [])
+        if "name" in p and not {"editable", "virtual"} & set(p.get("source", {}))
+    }
+    listed = {
+        (norm(name), version)
+        for name, version in PAGE_ROW.findall(repo.read(PACKAGE_PAGE) or "")
+        if name != "Package"
+    }
+    missing = sorted(f"{n} {v}".strip() for n, v in locked - listed)
+    extra = sorted(f"{n} {v}".strip() for n, v in listed - locked)
+    if not missing and not extra:
+        return []
+    found = []
+    if missing:
+        found.append("not on it: " + shown(missing))
+    if extra:
+        found.append("on it but not locked: " + shown(extra))
+    return [
+        f"{PACKAGE_PAGE} doesn't match uv.lock ({'; '.join(found)}). Fix: `uv sync --offline`, "
+        "then `uv run --offline python scripts/licence_table.py`, and stage "
+        f"{PACKAGE_PAGE} (CONTRIBUTING.md)."
+    ]
+
+
 # ---- the README's list ----
 
 
@@ -507,7 +543,7 @@ def install(repo: Repo) -> list[str]:
 
 
 def run_checks(repo: Repo) -> list[str]:
-    return check_page(repo) + check_licences(repo) + check_readme(repo)
+    return check_page(repo) + check_licences(repo) + check_package_page(repo) + check_readme(repo)
 
 
 def report(problems: list[str]) -> str:

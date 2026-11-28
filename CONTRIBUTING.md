@@ -139,6 +139,10 @@ three made-up receivers, from a scratch directory.
 - the built page doesn't match the page sources being committed;
 - a new dependency has no LICENSING.md entry, or a model is added or re-pinned without
   LICENSING.md updated in the same commit;
+- docs/PYTHON_PACKAGES.md doesn't list exactly the packages and versions in `uv.lock`: after
+  changing dependencies, run `uv sync --offline`, then
+  `uv run --offline python scripts/licence_table.py` (on macOS, where every package installs),
+  and stage the page;
 - a `wavescribe` command isn't named in README.md, written as `wavescribe <name>`: every
   command has its line in the README's list. It is a tripwire for commands only; what the page
   can do has no such check, so add its line by hand.
