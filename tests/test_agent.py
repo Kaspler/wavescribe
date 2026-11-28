@@ -274,7 +274,7 @@ def test_read_commands_print_one_json_object_a_line(tmp_path, monkeypatch, capsy
 
     for argv in (["alerts", "--json"], ["alerts", "list", "--json"]):
         [alert] = lines(argv)
-        assert set(alert) == ALERT_KEYS  # audio_url and cap_url only with a known address
+        assert set(alert) == ALERT_KEYS  # audio_url, cap_url and page_url only with a known address
         assert alert["type"] == "alert" and alert["rule"] == "water"
         assert alert["text"] == "Corte de água amanhã" and alert["segment_id"] == seg
         assert alert["station"]["name"] == "Rádio A" and alert["severity"] == "high"

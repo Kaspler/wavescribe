@@ -892,6 +892,9 @@ button.sum-alert:hover > .num { color: var(--ink); text-decoration: underline; t
 /* -- phones --------------------------------------------------------------------------------- */
 .phone { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s5) var(--s6) var(--s9); }
 .alerts.is-compact { margin-bottom: var(--s7); }
+/* On phones, the alert a link opened, above its station's column. */
+.alerts.is-focused { display: flex; align-items: flex-start; gap: var(--s2); margin-bottom: var(--s5); }
+.alerts.is-focused .alert-list { flex: 1; min-width: 0; }
 .phone-h { font-size: var(--t-md); font-weight: 650; margin-bottom: 4px; }
 .phone-row {
   display: grid;

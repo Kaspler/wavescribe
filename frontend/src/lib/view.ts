@@ -2,6 +2,7 @@
 // follows them), whether this is a phone, and whether the alerts rail is showing.
 import { P, setPrefs } from "./prefs";
 import { emit } from "./store";
+import type { Alert } from "./types";
 
 export const V = {
   shown: [] as string[],
@@ -10,6 +11,9 @@ export const V = {
   railOpen: false,
   /** A line a link asked to see (an alert's): its station's column scrolls to it and marks it. */
   focus: null as { station: string; id: number } | null,
+  /** The alert a link opened (#/alert/<id>): shown open and marked among the alerts, and on
+   *  phones above its station's column. */
+  alert: null as Alert | null,
 };
 
 /** Asks the station's column to bring one utterance into view; the caller opens the column. */
@@ -47,13 +51,11 @@ watch("(min-width: 1600px)", (on) => (V.wide = on));
  *  narrower ones, only while the reader has it open. */
 export function railShown(): boolean {
   if (V.narrow) return false;
-  return V.wide ? P.alerts : V.railOpen;
+  return V.wide ? P.alerts || V.railOpen : V.railOpen; // a link to an alert opens it too
 }
 
 export function toggleRail(open = !railShown()) {
+  V.railOpen = open && !V.wide;
   if (V.wide) setPrefs({ alerts: open });
-  else {
-    V.railOpen = open;
-    emit("narrow");
-  }
+  emit("narrow");
 }

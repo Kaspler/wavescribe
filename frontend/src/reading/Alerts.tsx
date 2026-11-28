@@ -2,13 +2,14 @@
 // screens and lead the station list on phones.
 import { useEffect, useRef, useState } from "react";
 import { playReplay } from "../lib/audio";
+import { fetchRead } from "../lib/auth";
 import { skippedChecks } from "../lib/behind";
 import { langNameEn, sameLang } from "../lib/lang";
-import { S, running } from "../lib/live";
+import { S, running, setNotice } from "../lib/live";
 import { P } from "../lib/prefs";
-import { MAX_COLS, setCols } from "../lib/router";
+import { MAX_COLS, alertHash, setCols } from "../lib/router";
 import { noText } from "../lib/station";
-import { useTopics } from "../lib/store";
+import { emit, useTopics } from "../lib/store";
 import { hm, isoTime, whenLabel } from "../lib/time";
 import type { Alert } from "../lib/types";
 import { V, railShown, showLine, toggleRail } from "../lib/view";
@@ -37,12 +38,38 @@ export function alertList(): { list: Alert[]; also: Map<number, string[]> } {
 const recent = (a: Alert) => a.severity !== "low" && a.last_at >= Date.now() / 1000 - RECENT_S;
 export const recentAlerts = () => alertList().list.filter(recent);
 
+/** Opens the page at one alert (#/alert/<id>, an alert's page_url): the alerts show it, open and
+ * marked, and its station's column scrolls to what was said. One older than the page loaded is
+ * asked for; one no longer kept says so. */
+export async function openAlert(id: number) {
+  let a = S.alerts.get(id);
+  if (!a) {
+    const r = await fetchRead(`/api/alerts/${id}`).catch(() => null);
+    a = r?.ok ? ((await r.json()) as Alert) : undefined;
+  }
+  if (!a) {
+    setNotice(T.alertGone);
+    location.replace("#/");
+    return;
+  }
+  V.alert = a;
+  const hash = alertHash(a.stations, (st) => Object.hasOwn(S.byId, st));
+  const st = a.stations.find((x) => Object.hasOwn(S.byId, x));
+  if (st && a.segment_id != null && st === a.stations[0]) showLine(st, a.segment_id);
+  if (!V.narrow) V.railOpen = true; // phones show it above the column instead
+  emit("focus", "narrow", "alerts");
+  location.replace(hash); // Back leaves the alert, rather than opening it again
+}
+
 export function AlertList({ max, compact }: { max?: number; compact?: boolean }) {
-  useTopics("alerts", "prefs", "state", "status");
+  useTopics("alerts", "prefs", "state", "status", "focus");
   const [all, setAll] = useState(false);
   const { list, also } = alertList();
   const rec = list.filter(recent);
-  const shown = (all ? list : rec).slice(0, all ? 50 : max ?? 50);
+  let shown = (all ? list : rec).slice(0, all ? 50 : max ?? 50);
+  // The alert a link opened is shown whatever the filter, first when it wouldn't be.
+  const target = V.alert && (S.alerts.get(V.alert.id) ?? V.alert);
+  if (target && !compact && !shown.some((a) => a.id === target.id)) shown = [target, ...shown];
   // The stations being written down here now, none in a language the topic rules have a word
   // list for: such rules can't match, which an empty list wouldn't say.
   const heard = S.stations.filter((s) => running(s.id) && s.transcribe && !noText(s) && !s.listen_only_run && s.kind !== "remote");
@@ -89,8 +116,15 @@ export const SEV_WORD = { critical: "Critical", high: "High", medium: "Medium", 
 export const human = (rule: string) => rule.replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolean }) {
-  const [open, setOpen] = useState(false);
-  useTopics(`utt:${a.stations[0]}`); // the quoted utterance's own translation may arrive later
+  useTopics(`utt:${a.stations[0]}`, "focus"); // the quoted utterance's translation may come later
+  const focused = V.alert?.id === a.id;
+  const [open, setOpen] = useState(focused);
+  const item = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    setOpen(true);
+    item.current?.scrollIntoView({ block: "nearest" });
+  }, [focused]);
   const names = a.stations.map((id) => S.byId[id]?.name || id);
   const known = a.stations.filter((id) => S.byId[id]);
   // The alert's own translations exist only for the languages its actions announce in. Without
@@ -130,7 +164,8 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
     setCols(V.shown.includes(st) ? V.shown : V.narrow ? [st] : [...V.shown, st].slice(-MAX_COLS));
   };
   return (
-    <li className={cx("alert", `sev-${a.severity}`, fresh && "is-fresh", open && "is-open")}>
+    <li ref={item} className={cx("alert", `sev-${a.severity}`, (fresh || focused) && "is-fresh", open && "is-open")}
+        aria-current={focused || undefined}>
       <button type="button" className="alert-sum" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="alert-line">
           <span className={`sev sev-${a.severity}`}><i aria-hidden="true" />{SEV_WORD[a.severity]}</span>
@@ -187,6 +222,25 @@ function AlertItem({ a, also, fresh }: { a: Alert; also: string[]; fresh: boolea
         </div>
       )}
     </li>
+  );
+}
+
+/** On phones, the alert a link opened, above its station's column, until it is closed. */
+export function FocusedAlert({ station }: { station: string }) {
+  useTopics("focus", "alerts");
+  const a = V.alert && (S.alerts.get(V.alert.id) ?? V.alert);
+  if (!a || !a.stations.includes(station)) return null;
+  const close = () => {
+    V.alert = null;
+    emit("focus");
+  };
+  return (
+    <div className="alerts is-focused">
+      <ol className="alert-list" aria-label={T.alerts}>
+        <AlertItem a={a} also={[]} fresh={false} />
+      </ol>
+      <Button size="sm" variant="ghost" icon="close" aria-label={T.closeAlert} onClick={close} />
+    </div>
   );
 }
 

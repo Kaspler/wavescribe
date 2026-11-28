@@ -8,7 +8,7 @@ import { V, railShown, toggleRail } from "./lib/view";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Icon } from "./components/Icon";
 import { Button, Kbd, Toasts } from "./components/ui";
-import { AlertAnnouncer, AlertsRail } from "./reading/Alerts";
+import { AlertAnnouncer, AlertsRail, openAlert } from "./reading/Alerts";
 import { Header } from "./reading/Header";
 import { Rack } from "./reading/Rack";
 import { Reading } from "./reading/Reading";
@@ -25,6 +25,11 @@ export function App() {
     const moved = movedHash(hash);
     if (moved) location.replace(moved); // an old link: the address follows to the new page
   }, [hash]);
+  // A link to an alert, once the page knows its stations.
+  const alertId = route.kind === "alert" ? route.id : null;
+  useEffect(() => {
+    if (alertId != null && S.loaded) openAlert(alertId);
+  }, [alertId, S.loaded]);
   // Listen, Find stations and Settings answer only on the Wavescribe machine; elsewhere they read
   // as the start.
   const elsewhere = route.kind === "listen" || route.kind === "add" || route.kind === "settings";
@@ -59,7 +64,7 @@ export function App() {
           <div className={`work${V.narrow ? "" : " has-rack"}`}>
             {!V.narrow && <ErrorBoundary what="station list"><Rack /></ErrorBoundary>}
             <ErrorBoundary what="reading view">
-              <Reading route={elsewhere ? { kind: "live" } : route} />
+              <Reading route={elsewhere || route.kind === "alert" ? { kind: "live" } : route} />
             </ErrorBoundary>
             {rail && <ErrorBoundary what="alerts panel"><AlertsRail overlay={!docked} /></ErrorBoundary>}
           </div>

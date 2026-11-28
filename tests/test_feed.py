@@ -193,8 +193,8 @@ def open_stream(server: WebServer, path: str, headers: dict[str, str] | None = N
 
 
 PAGE_READS = ["/api/state", "/api/history?station=a", "/api/history?station=a&around_id=1",
-              "/api/search?q=x", "/api/alerts", "/api/alerts/1.cap", "/api/catches",
-              "/api/catches?mhz=100&hours=1", "/api/segments/1/audio.wav",
+              "/api/search?q=x", "/api/alerts", "/api/alerts/1", "/api/alerts/1.cap",
+              "/api/catches", "/api/catches?mhz=100&hours=1", "/api/segments/1/audio.wav",
               "/api/segments/1/audio.pcm", "/audio/a.pcm",
               "/api/a-read-yet-to-be-added"]  # fmt: skip
 

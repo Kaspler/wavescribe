@@ -177,6 +177,8 @@ is less tried.
 
 - [Keyword alerts](docs/GETTING_STARTED.md#7-get-alerts): words and phrases per language, matched on
   the station's own words, not on the translation.
+- [A link in every alert](docs/FEED.md#event-format-version-1) (`page_url`) that opens the page at
+  that alert and what was said.
 - [Words suggested by the local model](docs/GETTING_STARTED.md#7-get-alerts) in each station's
   language; it can also confirm each match in context.
 - [Regular expressions](docs/GETTING_STARTED.md#7-get-alerts) (regex) in a keyword rule, such as a

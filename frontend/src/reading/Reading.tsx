@@ -10,6 +10,7 @@ import { Column } from "./Column";
 import { Ask } from "./Ask";
 import { FirstRun } from "./FirstRun";
 import { Search } from "./Search";
+import { FocusedAlert } from "./Alerts";
 import { PhoneList, StationStrip } from "./PhoneList";
 import { NoneRunning } from "./Rack";
 import { T } from "./strings";
@@ -39,7 +40,7 @@ function useFit(ref: React.RefObject<HTMLElement | null>, beside: boolean) {
 }
 
 export function Reading({ route }: { route: Route }) {
-  useTopics("state", "status", "prefs", "narrow", "summary");
+  useTopics("state", "status", "prefs", "narrow", "summary", "focus");
   // Beside the columns, a summary's own link is All live with the summary open.
   const alone = route.kind === "summary" && V.narrow;
   const allLive = route.kind === "live" || (route.kind === "summary" && !V.narrow);
@@ -75,6 +76,7 @@ export function Reading({ route }: { route: Route }) {
     content = (
       <>
         {V.narrow && <StationStrip current={ids[0]} />}
+        {V.narrow && <FocusedAlert station={ids[0]} />}
         {more && (
           <p className="cols-note">
             {all ? T.showingAll(live.length) : T.showingOf(fit, live.length)} ·{" "}

@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import queue
+import re
 import socket
 import threading
 import time
@@ -243,6 +244,18 @@ class WebHub:
             with self._lock:
                 alerts = list(reversed(self._alerts.values()))
         return alerts if exports is None else [exports.alert(a) for a in alerts]
+
+    def alert(self, alert_id: int, exports: Exports | None = None) -> dict[str, Any] | None:
+        """One alert, as ``alerts`` lists them, or None when there is no such alert (or no
+        longer one: without a store, only those in memory)."""
+        if self.store is not None:
+            alert = self.store.alert(alert_id)
+        else:
+            with self._lock:
+                alert = self._alerts.get(alert_id)
+        if alert is None:
+            return None
+        return alert if exports is None else exports.alert(alert)
 
     def on_audio(self, station_id: str, chunk: AudioChunk) -> None:
         tap = self._taps.get(station_id)
@@ -828,6 +841,12 @@ class Handler(BaseHTTPRequestHandler):
             self._replay(path[len("/api/segments/") : -len("/audio.pcm")])
         elif path == "/api/alerts":
             self._json(self.server.hub.alerts(self._exports()))
+        elif re.fullmatch(r"/api/alerts/[0-9]+", path):  # one alert: the page's #/alert/<id>
+            alert = self.server.hub.alert(int(path.rsplit("/", 1)[1]), self._exports())
+            if alert is None:
+                self._json({"error": "no such alert"}, HTTPStatus.NOT_FOUND)
+            else:
+                self._json(alert)
         elif path == "/api/catches":
             self._catches(query)
         elif path.startswith("/api/alerts/") and path.endswith(".cap"):

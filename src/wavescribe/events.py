@@ -10,10 +10,10 @@ Version 1 shapes (docs/FEED.md is the reference):
     alert      {type, id, node, rule, kind, severity, status, time, first_at, last_at, mentions,
                 terms[], reason?, checked, station{…}, stations[{…}], language, text,
                 translations{…}, context[{id, time, station, text, translations}], segment_id,
-                audio_url?, cap_url?, change?}  change (live events and pushes): new, escalated,
-                reminder or ended when it was announced; update for anything else. checked (a
-                rule with verify): true, the LLM confirmed the match; false, it was raised
-                without the LLM's answer; null when nothing was checked
+                audio_url?, cap_url?, page_url?, change?}  change (live events and pushes): new,
+                escalated, reminder or ended when it was announced; update for anything else.
+                checked (a rule with verify): true, the LLM confirmed the match; false, it was
+                raised without the LLM's answer; null when nothing was checked
     batch      {type: "batch", node, events[…]}
 """
 
@@ -239,6 +239,7 @@ def alert_event(
         out["audio_url"] = f"{base}/api/segments/{seg}/audio.wav"
     if base and alert.get("id") is not None:
         out["cap_url"] = f"{base}/api/alerts/{alert['id']}.cap"
+        out["page_url"] = f"{base}/#/alert/{alert['id']}"
     if "change" in alert:  # live events say what changed; stored rows don't
         out["change"] = alert["change"]
     return out

@@ -68,6 +68,8 @@ export const T = {
   matched: "Matched",
   play: "Play",
   showInTranscript: "Show in the transcript",
+  alertGone: "That alert isn't kept any more.",
+  closeAlert: "Close this alert",
   lineGone: "That line is no longer kept: the transcript shows what is.",
   original: "Original",
   notDelivered: "not delivered",

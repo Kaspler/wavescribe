@@ -77,6 +77,7 @@ def test_events_carry_text_station_time_and_links() -> None:
                      translations={"en": "Water cut in Vila Nova"},
                      context=[UTTERANCE])  # fmt: skip
     assert al["cap_url"] == "http://mac.local:8766/api/alerts/3.cap"
+    assert al["page_url"] == "http://mac.local:8766/#/alert/3"  # the page, open at this alert
     assert al["text"] == "Corte de água em Vila Nova" and al["context"][0]["id"] == 7
     assert (
         as_text(al, ["en"])

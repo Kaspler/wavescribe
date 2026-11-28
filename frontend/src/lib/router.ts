@@ -7,6 +7,8 @@
 //   #/listen          every station to play, and the receiver tuned by hand
 //   #/add/<page>      Find stations: on the air, on the internet
 //   #/settings/<page> stations, alerts, languages, receivers, storage, connections, health
+//   #/alert/<id>      one alert (an alert's page_url): the alerts open at it, and its station's
+//                     column at what was said; the address then becomes that column's
 // Older links (#/manage/<tab>, #/radio/<page>) still open the page that took their place.
 import { useSyncExternalStore } from "react";
 
@@ -18,6 +20,7 @@ export type Route =
   | { kind: "find"; q: string }
   | { kind: "ask" }
   | { kind: "summary" }
+  | { kind: "alert"; id: number }
   | { kind: Area; page: string };
 
 export const MAX_COLS = 4;
@@ -56,6 +59,8 @@ export function parse(hash: string): Route {
   }
   if (hash === "#/ask") return { kind: "ask" };
   if (hash === "#/summary") return { kind: "summary" };
+  m = hash.match(/^#\/alert\/(\d+)$/);
+  if (m) return { kind: "alert", id: Number(m[1]) };
   m = hash.match(/^#\/(listen|add|settings)(?:\/([a-z]+))?/);
   if (m) return { kind: m[1] as Area, page: m[2] || "" };
   m = hash.match(/^#\/(manage|radio)(?:\/([a-z]+))?/);
@@ -79,6 +84,13 @@ export function movedHash(hash: string): string | null {
   if (!/^#\/(manage|radio)(?:\/|$)/.test(hash)) return null;
   const r = parse(hash);
   return r.kind === "listen" || r.kind === "add" || r.kind === "settings" ? `#/${r.kind}${r.page ? `/${r.page}` : ""}` : "#/";
+}
+
+/** Where an alert opens: the column of the first of its stations this page has, else the live
+ * columns (a station gone since, or one another machine may not see). */
+export function alertHash(stations: string[], known: (id: string) => boolean): string {
+  const st = stations.find(known);
+  return st ? `#/s/${st}` : "#/";
 }
 
 const sub = (l: () => void) => {

@@ -78,7 +78,7 @@ Utterance fields:
   "context": [{"id": 4180, "time": "…", "station": "antena1", "text": "…", "translations": {}}],
   "segment_id": 4181,
   "audio_url": "…/api/segments/4181/audio.wav", "cap_url": "…/api/alerts/77.cap",
-  "change": "new"
+  "page_url": "…/#/alert/77", "change": "new"
 }
 ```
 
@@ -128,6 +128,11 @@ Alert fields:
   again with its new status; only the feed sends those (`change`: `update`).
 - `cap_url`: the same alert as a CAP 1.2 document. On the Wavescribe machine,
   `uv run wavescribe alerts cap <id>` prints it, with the number `wavescribe alerts` shows.
+- `page_url`: the page, open at this alert: the alerts show it, open, and its station's column
+  scrolls to what was said (on a phone the alert sits above the column). An alert no longer
+  kept opens the page with a note saying so. `GET /api/alerts/<id>` gives the alert as the
+  page reads it.
+  `cap_url` and `page_url`, like `audio_url`, appear only when the machine's address is known.
 
 A batch, used by pushes that batch utterances, is
 `{"type": "batch", "version": 1, "node": {…}, "events": [ … ]}`.
