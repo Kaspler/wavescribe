@@ -11,6 +11,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from wavescribe.home import holds
 from wavescribe.radio.bandplan import POLICIES, lookup, mhz_text
 from wavescribe.radio.watch import (
     CATCHES,
@@ -212,6 +213,7 @@ def tunable_mhz(text: str) -> float:
     return tunable_hz(text) / 1e6
 
 
+@holds("radio watch")
 def cmd_watch(args: argparse.Namespace) -> int:
     """Watch every channel of a band (or a range) and transcribe whatever is said on any."""
     from wavescribe.cli import cmd_listen

@@ -391,6 +391,9 @@ def preflight(ns: argparse.Namespace, workdir: Path,
     except (ConfigError, ValueError) as e:
         raise ServiceError(f"serve would stop at start: {e}") from e
     if port_probe is not None:
+        holder = home.running()  # a serve on this home would stop the service at every start
+        if holder is not None:
+            raise ServiceError(home.in_use(holder, installing=True))
         from wavescribe.doctor import port_taken
         from wavescribe.web.server import PortInUseError
 

@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """The home: --home, then WAVESCRIBE_HOME, then the folder a command starts in; the paths given
-made absolute before the change into it; and the examples that come with Wavescribe for a home
-with no config/."""
+made absolute before the change into it; the examples that come with Wavescribe for a home
+with no config/; and one station runner per home, under data/wavescribe.lock."""
 
 import argparse
+import json
 import os
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from wavescribe import home
+from wavescribe import cli, home
 from wavescribe.cli import build_parser, main
 
 ALERTS = '[[rule]]\nid = "bridge"\nseverity = "high"\n[rule.terms]\nes = ["puente cerrado"]\n'
@@ -176,3 +179,97 @@ def test_the_wheel_carries_every_tracked_example() -> None:
     assert sorted(mapped) == sorted(tracked)
     for source, target in mapped.items():
         assert target == "wavescribe/examples/" + source.removeprefix("config/")
+
+
+# -- one station runner per home ---------------------------------------------------------------
+
+
+def lock_file(folder: Path) -> Path:
+    return folder / "data" / "wavescribe.lock"
+
+
+def test_a_second_serve_on_the_same_home_stops_at_once_with_code_3(
+    start: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    h = start.parent / "h"
+    h.mkdir()
+    os.chdir(h)
+    held = home.hold("serve")  # a descriptor of its own: as another process would hold it
+    held.note(url="http://localhost:8791/")
+    os.chdir(start)
+    argv = ["serve", "--home", str(h), "--port", "8792", "--no-store", "--no-alerts"]
+    assert main(argv) == 3
+    assert capsys.readouterr().err == (
+        f"wavescribe: Wavescribe is already running with this home (pid {os.getpid()}, at "
+        "http://localhost:8791/); use its page, stop it first, or give this one another --home\n"
+    )
+    assert not (h / "data" / "logs").exists()  # it stopped before anything else
+    del held.info["url"]  # a listen holds it: no page
+    held.note(command="listen")
+    os.chdir(start)
+    assert main(["radio", "tune", "a", "99.0", "--language", "es", "--home", str(h)]) == 3
+    assert capsys.readouterr().err == (
+        f"wavescribe: Wavescribe is already running with this home (pid {os.getpid()}, "
+        "listen); stop it first, or give this one another --home\n"
+    )
+    held.release()
+    assert lock_file(h).read_text() == ""
+
+
+def test_the_lock_is_held_while_serve_runs_and_let_go_when_it_returns(
+    start: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = []
+
+    @home.holds("serve")
+    def serve(args: argparse.Namespace) -> int:
+        home.note_page("http://localhost:8793/")
+        seen.append(home.running())
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_serve", serve)
+    h = start.parent / "h"
+    assert main(["serve", "--home", str(h)]) == 0
+    assert seen == [{"pid": os.getpid(), "command": "serve", "home": str(h.resolve()),
+                     "url": "http://localhost:8793/"}]  # fmt: skip
+    assert home.running() is None and lock_file(h).read_text() == ""
+
+
+def test_short_commands_work_while_the_home_is_held(start: Path, capsys) -> None:
+    (start / "config").mkdir()
+    (start / "config" / "alerts.toml").write_text(ALERTS, encoding="utf-8")
+    held = home.hold("serve")
+    try:
+        assert main(["alerts", "check", "--language", "es", "el puente cerrado"]) == 0
+        assert main(["search", "x"]) == 1  # nothing stored here: not refused
+        assert main(["radio", "bands"]) == 0
+        err = capsys.readouterr().err
+        assert "already running" not in err and "nothing stored yet" in err
+    finally:
+        held.release()
+
+
+def test_a_lock_left_by_a_killed_process_blocks_nothing(start: Path, capsys) -> None:
+    h = start.parent / "h"
+    h.mkdir()
+    code = ("import os, sys, time\nfrom wavescribe import home\nos.chdir(sys.argv[1])\n"
+            "home.hold('serve').note(url='http://localhost:8794/')\nprint('held', flush=True)\n"
+            "time.sleep(60)\n")  # fmt: skip
+    child = subprocess.Popen([sys.executable, "-c", code, str(h)], stdout=subprocess.PIPE,
+                             text=True)  # fmt: skip
+    try:
+        assert child.stdout is not None and child.stdout.readline() == "held\n"
+        assert main(["serve", "--home", str(h), "--port", "8795"]) == 3
+        assert f"(pid {child.pid}, at http://localhost:8794/)" in capsys.readouterr().err
+        assert home.running() == {
+            "pid": child.pid,
+            "command": "serve",
+            "home": str(h.resolve()),
+            "url": "http://localhost:8794/",
+        }
+    finally:
+        child.send_signal(signal.SIGKILL)  # a crash: no clean-up runs
+        child.wait()
+    assert json.loads(lock_file(h).read_text())["pid"] == child.pid  # the file is still there
+    assert home.running() is None
+    home.hold("serve").release()  # and the next one takes it

@@ -717,6 +717,9 @@ export WAVESCRIBE_HOME=~/Documents/radio-home   # the same for every command aft
   example it uses).
 - Files named on the command line, such as `--config my-stations.toml`, are found from the
   folder you are in, as usual.
+- One `serve` (or `listen`, `radio tune`, `radio watch`) runs in a home at a time. A second one
+  on the same home stops straight away and says which is running, with its page's address; give
+  it another `--home` to run both. The other commands work while it runs.
 - Models from Hugging Face stay in `~/.cache/huggingface`, shared by every home; the speech
   detector and the music filter are downloaded into each home's `models` folder.
 

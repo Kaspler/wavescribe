@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from wavescribe import __version__
 from wavescribe.events import local_time  # standard library only: cheap at start
-from wavescribe.home import given_path  # likewise
+from wavescribe.home import given_path, holds  # likewise
 from wavescribe.invocation import typed  # likewise
 
 if TYPE_CHECKING:
@@ -226,6 +226,7 @@ def warn_noncommercial(plan: Plan) -> list[str]:
     return nc
 
 
+@holds("listen")
 def cmd_listen(args: argparse.Namespace) -> int:
     from wavescribe.config import load_stations, resolve_stations_path
     from wavescribe.log import setup_logging
@@ -361,6 +362,7 @@ def port_number(value: str) -> int:
     return port
 
 
+@holds("serve")
 def cmd_serve(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -408,6 +410,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"# alerts: {rule_counts(app.alerter.config.rules)}", file=sys.stderr)
 
     def ready(url: str) -> None:
+        from wavescribe.home import note_page
+
+        note_page(url)  # in the home's lock file, for whoever finds the home taken
         print(f"Wavescribe is running at {url}  (Ctrl-C to stop)", file=sys.stderr)
         if host not in ("127.0.0.1", "::1", "localhost"):
             for lan in lan_urls(args.port):
@@ -1151,10 +1156,20 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "network", False):
         # Offline at runtime: only explicit setup commands may reach the network.
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    lock = None
     try:
+        command = getattr(args.func, "holds_home", None)
+        if command:  # a command that runs stations: one at a time in a home
+            lock = home.hold(command)
         return args.func(args)
+    except home.HomeInUse as e:
+        print(f"wavescribe: {e}", file=sys.stderr)
+        return 3
     except KeyboardInterrupt:
         return 130
     except (RuntimeError, ValueError) as e:
         print(f"wavescribe: {e}", file=sys.stderr)
         return 1
+    finally:
+        if lock is not None:
+            lock.release()

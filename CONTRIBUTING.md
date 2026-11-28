@@ -98,7 +98,7 @@ three made-up receivers, from a scratch directory.
   `config/ui.toml`
 - **The home:** `home.py` (the folder with `config/` and `data/`: `--home`, `WAVESCRIBE_HOME`
   or the folder a command starts in, which `cli.main` changes into first; the examples that
-  come with Wavescribe). A command-line option that takes a
+  come with Wavescribe; the lock one station runner holds). A command-line option that takes a
   path uses `home.given_path` as its type, so it counts from the folder it was typed in
 - **Models and system:** `models.toml` (the model registry, with pinned revisions and licences)
   read by `registry.py`; `catalog/` (station and model catalogues), `admin.py`, `downloads.py`,

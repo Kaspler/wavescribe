@@ -3,6 +3,7 @@
 fake launchd and a temporary home. No test loads a real LaunchAgent or runs launchctl."""
 
 import json
+import os
 import plistlib
 import subprocess
 import sys
@@ -318,6 +319,28 @@ def test_the_service_runs_in_the_home_it_was_installed_with(
         "serve", "--config", str(start / "s.toml"), "--port", "8796"]  # fmt: skip
     assert "--home" not in printed["ProgramArguments"]
     assert not (no_real_launchd / "Library").exists()
+
+
+def test_install_refuses_a_home_another_serve_is_running_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from wavescribe import home
+
+    monkeypatch.chdir(write_folder(tmp_path / "ws"))
+    launchd = FakeLaunchd()
+    monkeypatch.setattr(service, "default_launchd", lambda: launchd)
+    monkeypatch.setattr(service, "port_probe", lambda h, p: None)  # its port is another
+    held = home.hold("serve")
+    held.note(url="http://localhost:8797/")
+    try:
+        assert main(["service", "install", "--port", "8798"]) == 1
+    finally:
+        held.release()
+    assert capsys.readouterr().err == (
+        f"wavescribe: Wavescribe is already running with this home (pid {os.getpid()}, at "
+        "http://localhost:8797/); stop it first, or install with another --home\n"
+    )
+    assert "bootstrap" not in launchd.names()
 
 
 def test_install_needs_the_wavescribe_folder_and_a_dry_run_loads_nothing(

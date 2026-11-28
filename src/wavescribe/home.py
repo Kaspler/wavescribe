@@ -13,16 +13,31 @@ home's, and ``WAVESCRIBE_HOME`` names it for the programs Wavescribe starts.
 The examples that come with Wavescribe (``example``) are read from the home's ``config/`` first,
 then from the package's copy: ``wavescribe/examples/`` in an installed package, ``config/`` in a
 Wavescribe folder.
+
+The commands that run stations hold the home's lock (``hold``), ``data/wavescribe.lock``, while
+they run: an exclusive ``flock`` that the system lets go of when the process ends, however it
+ends, so a crash leaves nothing to clean up. The file says, as JSON, which process holds it,
+the home, and the page's address once there is one. A second such command on the same home
+stops at once (``HomeInUse``).
 """
 
 from __future__ import annotations
 
+import errno
+import json
 import os
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeVar
+
+try:
+    import fcntl
+except ImportError:  # no flock (Windows): commands run without the lock
+    fcntl = None  # type: ignore[assignment]
 
 ENV = "WAVESCRIBE_HOME"
+LOCK_PATH = Path("data") / "wavescribe.lock"
 EXAMPLES = "examples"  # the package's folder of examples, in an installed package
 # Paths in the environment that Wavescribe, or a library it runs, reads: Wavescribe's model
 # folder, the Hugging Face cache, certificate files, Python's temporary folder.
@@ -125,3 +140,139 @@ def example(name: str) -> Path | None:
     """The home's ``config/<name>``, else the copy that comes with Wavescribe, else None."""
     own = Path("config") / name
     return own if own.exists() else packaged(name)
+
+
+# -- the lock ------------------------------------------------------------------------------
+
+
+class HomeInUse(RuntimeError):
+    """Another long-running command holds the home's lock. ``holder`` is what its lock file
+    says (pid, command, home, url), or {} when it says nothing yet."""
+
+    def __init__(self, holder: dict[str, Any], *, installing: bool = False) -> None:
+        self.holder = holder
+        super().__init__(in_use(holder, installing=installing))
+
+
+def in_use(holder: dict[str, Any], *, installing: bool = False) -> str:
+    """What a long-running command says when ``holder`` has the home."""
+    pid, url, command = holder.get("pid"), holder.get("url"), holder.get("command")
+    said = []
+    if isinstance(pid, int):
+        said.append(f"pid {pid}")
+    if isinstance(url, str) and url:
+        said.append(f"at {url}")
+    elif isinstance(command, str) and command and said:
+        said.append(command)
+    who = f" ({', '.join(said)})" if said else ""
+    if installing:
+        then = "stop it first, or install with another --home"
+    elif isinstance(url, str) and url:
+        then = "use its page, stop it first, or give this one another --home"
+    else:
+        then = "stop it first, or give this one another --home"
+    return f"Wavescribe is already running with this home{who}; {then}"
+
+
+def _read(fd: int) -> dict[str, Any]:
+    try:
+        data = json.loads(os.pread(fd, 65536, 0) or b"{}")
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+class Lock:
+    """The home's lock, held: ``note`` adds to what its file says, ``release`` lets it go."""
+
+    def __init__(self, fd: int, path: Path, info: dict[str, Any]) -> None:
+        self.fd: int | None = fd
+        self.path = path
+        self.info = info
+        self._write()
+
+    def _write(self) -> None:
+        if self.fd is None:
+            return
+        data = (json.dumps(self.info, ensure_ascii=False) + "\n").encode()
+        os.ftruncate(self.fd, 0)
+        os.pwrite(self.fd, data, 0)
+
+    def note(self, **fields: Any) -> None:
+        self.info.update(fields)
+        self._write()
+
+    def release(self) -> None:
+        global _held
+        if self.fd is None:
+            return
+        try:
+            os.ftruncate(self.fd, 0)  # nobody holds it now: say nothing about anyone
+        finally:
+            os.close(self.fd)  # closing lets go of the flock
+            self.fd = None
+            if _held is self:
+                _held = None
+
+
+_held: Lock | None = None
+
+
+def hold(command: str) -> Lock:
+    """Takes the home's lock for ``command`` (``serve``, ``listen``…), or raises HomeInUse."""
+    global _held
+    path = LOCK_PATH.absolute()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)  # not inherited by the programs it starts
+    if fcntl is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            holder = _read(fd)
+            os.close(fd)
+            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                raise HomeInUse(holder) from None
+            raise
+    info = {"pid": os.getpid(), "command": command, "home": str(current().path)}
+    _held = Lock(fd, path, info)
+    return _held
+
+
+def note_page(url: str) -> None:
+    """The page's address, written into the lock file of the command that holds it."""
+    if _held is not None:
+        _held.note(url=url)
+
+
+def running() -> dict[str, Any] | None:
+    """What the lock file of the command that holds the home says ({} when nothing yet), or
+    None when no command holds it. It doesn't keep the lock."""
+    if fcntl is None:
+        return None
+    try:
+        fd = os.open(LOCK_PATH, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except OSError:
+            return _read(fd)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def holds(command: str) -> Callable[[F], F]:
+    """Marks a command's function as one that runs stations: ``cli.main`` holds the home's
+    lock while it runs."""
+
+    def mark(func: F) -> F:
+        func.holds_home = command  # type: ignore[attr-defined]
+        return func
+
+    return mark

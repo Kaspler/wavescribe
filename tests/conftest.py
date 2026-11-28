@@ -21,6 +21,7 @@ def _the_folder_the_tests_started_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(home.ENV, "")  # so that what was there before comes back
     monkeypatch.delenv(home.ENV)
     monkeypatch.setattr(home, "_current", None)
+    monkeypatch.setattr(home, "_held", None)
 
 
 @pytest.fixture(autouse=True)

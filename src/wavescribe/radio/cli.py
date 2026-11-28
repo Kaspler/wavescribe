@@ -8,7 +8,7 @@ import sys
 import time
 from typing import Any, NamedTuple
 
-from wavescribe.home import given_path
+from wavescribe.home import given_path, holds
 from wavescribe.invocation import typed
 from wavescribe.radio.bandplan import (
     AUTO,
@@ -413,6 +413,7 @@ def cmd_rds(args: argparse.Namespace) -> int:
     return 0
 
 
+@holds("radio tune")
 def cmd_tune(args: argparse.Namespace) -> int:
     """Listen to and transcribe one frequency: the listen pipeline on a station made here."""
     from wavescribe.cli import cmd_listen

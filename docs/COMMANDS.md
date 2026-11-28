@@ -35,7 +35,9 @@ models that aren't in the Hugging Face cache in `models/`), inside its home: the
 command line, and relative paths in the environment, count from the folder the command is
 started in; relative paths inside the home's own files count from the home. A home without its
 own `config/stations.toml`, `config/alerts.toml` or `config/keywords/` uses the examples that
-come with Wavescribe.
+come with Wavescribe. `serve`, `listen`, `radio tune` and `radio watch` run one at a time in a
+home: another started on the same home stops at once with exit code 3, saying which process
+has it and its page's address. The other commands work beside them.
 
 ## `wavescribe models`
 
@@ -399,7 +401,7 @@ sleep while it runs. It takes [`serve`'s options](#wavescribe-serve) and
 [the options for what runs](#options-for-what-runs), and runs `serve` with them in this home:
 the LaunchAgent's file names the home, absolute, as its working folder and as
 `WAVESCRIBE_HOME`. Run it again to change them, from the Wavescribe folder or with the same
-`--home`.
+`--home`. Another `serve` running with this home stops the install, as a taken port does.
 
 | Option | What it does |
 |---|---|
@@ -537,5 +539,5 @@ the `<clip>.ref-template.txt` it writes, save it as `<clip>.ref.txt` and run it 
 | 0 | done |
 | 1 | it couldn't be done, with the reason after `wavescribe:`; also `search` and `alerts check` with no match, and `doctor` with something broken |
 | 2 | a command or an option it doesn't take, or a value it refuses; also a `--home` that can't be made or isn't a folder |
-| 3 | `service status`: the service isn't running |
+| 3 | `serve`, `listen`, `radio tune` and `radio watch`: another of them is running with this home (the message names its pid, and its page's address when it has one); `service status`: the service isn't running |
 | 130 | stopped with Ctrl-C |

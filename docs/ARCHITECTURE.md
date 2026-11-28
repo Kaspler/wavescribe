@@ -80,6 +80,14 @@ no relative path (a mesh output's `command` is a program's name or an absolute p
 the keyword packs come from the home's `config/` example, else from the package's copy
 (`home.example`, `home.packaged`; in a Wavescribe folder the package's copy is its `config/`).
 
+**One runner per home.** `serve`, `listen`, `radio tune` and `radio watch` (marked
+`@home.holds`) hold an exclusive `flock` on `data/wavescribe.lock` while they run. The file holds
+JSON: `pid`, `command`, `home` (absolute, resolved) and, once the page answers, `url`. A second
+one on the same home reads it and exits with code 3 before loading anything; the lock goes with
+the process, however it ends, and a clean stop empties the file. The other commands take no lock
+and run beside it; `service install` refuses a home another `serve` holds, since the service
+would stop at every start.
+
 ## Process model
 
 One process with threads. Each station has a source thread (an ffmpeg subprocess, or a channel
@@ -1348,7 +1356,7 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Speak only checked translations, else a fixed phrase** | A translator that answers in the wrong language, or invents content (MADLAD into Ukrainian), must never be read aloud | — |
 | **A fixed reply for "can't translate"; a remark is never stored as a translation** | Given garbled recognition, the LLM can write about the text instead, which would read as if the station had said it | A real translation is left out (the flag counts them per reason) |
 | **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout | — |
-| **One home per process, entered with a change of folder at start** | Every module's relative `config/` and `data/` path then works in any folder, with nothing passed around | — |
+| **One home per process, entered with a change of folder at start; one station runner per home, under a `flock`** | Every module's relative `config/` and `data/` path then works in any folder, with nothing passed around; two runners on one home would share one store and the same receivers | Two runners on one home are needed |
 | **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams | — |
 | **The feed is text and metadata only; audio stays where it was recorded** | Broadcast audio is copyrighted, and text is ~1,000× smaller over a constrained uplink | — |
 | **LLM rules batch per station every ~45 s, on source text** | One prompt per batch keeps the LLM's share of the GPU small (not measured on a long run) | Missed or late events |
