@@ -23,7 +23,9 @@ next.
 A known line is still listened to. One that was still and starts to move as a voice does was
 a carrier all along (a key pressed before the first word, a repeater idling) or has a
 transmission on top of it now: a track from that moment. It is a line again once it has been
-still for ``LINE_S``.
+still for ``LINE_S``. A line that was there when the floors were learnt needn't have been
+still first: one that moves as a voice does from the start is a transmission that was already
+on the air when the window landed.
 
 Where a carrier is the signal (``OpenBand.carrier``: an AM band), nothing has to move, and no
 line is kept: a candidate that lasts two frames is a transmission, as on a channel.
@@ -157,6 +159,7 @@ class _Line:
     # this frame, as a track's; None: not listened to
     move: tuple[float, bool, float, bool] | None = None
     ranged: deque = field(default_factory=lambda: deque(maxlen=RANGED_OF[1]))
+    landed: bool = False  # there when the floors were learnt: maybe a voice already talking
 
 
 class OpenWatch:
@@ -834,7 +837,7 @@ class OpenWatch:
                 ln.fine = ln.pos + _between_bins(power[ln.pos - 1 : ln.pos + 2])
             elif not moved:
                 ln.calm = max(ln.calm - 1, 0)
-            spoken = sum(ln.moved) >= MOVED_OF[0] and ln.calm >= self._calm
+            spoken = sum(ln.moved) >= MOVED_OF[0] and (ln.calm >= self._calm or ln.landed)
             if spoken and not any(ln.ranged) and self._deaf_since is None:
                 self._lines.remove(ln)
                 changed = True
@@ -889,7 +892,7 @@ class OpenWatch:
         for pk in sorted(peaks, key=lambda k: -floor[k])[:MAX_LINES]:
             if any(abs(ln.pos - pk) <= self._guard for ln in self._lines):
                 continue
-            self._lines.append(_Line(int(pk), start))
+            self._lines.append(_Line(int(pk), start, rest=float(pk), landed=True))
             floor[max(0, pk - self._guard) : pk + self._guard + 1] = around[pk]
         self._remask()
 

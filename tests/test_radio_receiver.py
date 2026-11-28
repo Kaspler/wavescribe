@@ -190,3 +190,54 @@ def test_a_voice_between_channels_is_caught_and_a_raised_floor_hides_it() -> Non
     caught = caught_talking()
     assert caught and all(abs(f - 446_057_100) < 1_500 for f in caught)
     assert caught_talking(noise=0.08) == []
+
+
+LANDED = 446.0571
+
+
+def landing_on(transmitters: list[dict], seconds: float) -> list:
+    """What the session saw of ``transmitters``, all on the air before its window landed."""
+    tuned = World({"transmitters": transmitters}).tune(446_100_000, RATE)
+    session = ReceiverSession(Dongle(446_100_000), region="cept")  # type: ignore[arg-type]
+    for i in range(round(seconds / 0.256)):
+        session._feed(iq_from_u8(tuned.u8()), 1000.0 + 0.256 * (i + 1), i == 0)
+    return [e for e in session.events if e.kind in ("start", "short")]
+
+
+@pytest.mark.parametrize(("level", "snr_db"), [(0.0026, 8), (0.0057, 15), (0.032, 30)])
+def test_a_voice_already_talking_when_the_window_lands_is_caught(level: float, snr_db: int) -> None:
+    talking = {"kind": "nfm", "mhz": LANDED, "voice": 3, "voice_s": 20.0, "level": level}
+    (caught,) = landing_on([talking], 3.0)
+    assert caught.kind == "start" and abs(caught.freq_hz - LANDED * 1e6) < 1_500
+    assert caught.t_start < 1000.0 + 1.5
+    assert caught.snr_db == pytest.approx(snr_db, abs=2.5)
+
+
+@pytest.mark.parametrize(
+    "transmitters",
+    [
+        [{"kind": "line", "mhz": LANDED, "level": 0.003}],
+        [{"kind": "line", "mhz": LANDED, "level": 0.1}],
+        [
+            {"kind": "line", "mhz": LANDED, "level": 0.02},
+            {"kind": "line", "mhz": LANDED + 0.0006, "level": 0.015},
+        ],
+        [{"kind": "nfm", "mhz": LANDED, "tone_hz": 1, "deviation_hz": 1, "level": 0.02}],
+        [{"kind": "nfm", "mhz": LANDED, "tone_hz": 100, "deviation_hz": 300, "level": 0.02}],
+        [{"kind": "nfm", "mhz": LANDED, "tone_hz": 1000, "level": 0.02}],
+        [{"kind": "am", "mhz": LANDED, "level": 0.02}],
+    ],
+    ids=[
+        "weak line",
+        "strong line",
+        "two lines beating",
+        "silent key",
+        "sub-audible tone",
+        "steady tone",
+        "am tone",
+    ],
+)
+def test_what_was_there_when_the_window_landed_and_doesnt_talk_starts_nothing(
+    transmitters: list[dict],
+) -> None:
+    assert landing_on(transmitters, 6.0) == []
