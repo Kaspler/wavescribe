@@ -351,15 +351,21 @@ def source_arg(text: str) -> str:
     return str(given_path(text))
 
 
-def port_number(value: str) -> int:
-    """A TCP port for ``--port``: 1 to 65535."""
-    try:
-        port = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} isn't a port number") from None
-    if not 1 <= port <= 65535:
-        raise argparse.ArgumentTypeError(f"{port} isn't a port: ports are 1 to 65535")
-    return port
+PORT_TAKEN = 4  # serve's exit code when its fixed --port is taken
+
+
+def _port_taken(port: int, host: str) -> int:
+    """Says who has ``port`` (``doctor.port_taken``) and gives serve's exit code for it."""
+    from wavescribe.doctor import port_taken
+
+    print(f"wavescribe: {port_taken(port, host)}", file=sys.stderr)
+    return PORT_TAKEN
+
+
+def _no_port(e: OSError) -> int:
+    """``--port auto`` found no free port at all, even one the system picked."""
+    print(f"wavescribe: {e}", file=sys.stderr)
+    return 1
 
 
 @holds("serve")
@@ -372,7 +378,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.log import setup_logging
     from wavescribe.registry import ModelRegistry
     from wavescribe.settings import Settings
-    from wavescribe.web.server import PortInUseError, access_line, check_port, lan_urls, serve
+    from wavescribe.web.ports import AutoPort, PortInUseError, choose
+    from wavescribe.web.server import access_line, check_port, lan_urls, serve
 
     setup_logging(
         DATA_DIR / "logs", console_level=logging.INFO if args.verbose else logging.WARNING
@@ -384,20 +391,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"wavescribe: {e}", file=sys.stderr)
         return 1
     host = "0.0.0.0" if args.lan else args.host
-    try:
-        check_port(host, args.port)  # before loading anything
-    except PortInUseError:
-        from wavescribe.doctor import port_taken
-
-        print(f"wavescribe: {port_taken(args.port, host)}", file=sys.stderr)
-        return 1
+    auto = args.port if isinstance(args.port, AutoPort) else None
+    try:  # before loading anything
+        if auto is None:
+            check_port(host, args.port)
+        port = args.port if auto is None else choose(host, auto)
+    except PortInUseError as e:
+        return _port_taken(args.port, host) if auto is None else _no_port(e)
     store = open_store(args)
     app = App(
         base, settings, ModelRegistry.load(),
         translate=not args.no_translate, asr_model=args.asr, mt_model=args.translator,
         use_gate=not args.no_gate, store=store, alerts_path=args.alerts,
         alerts_enabled=not args.no_alerts and resolve_alerts_path(args.alerts) is not None,
-        host=host, port=args.port, start=args.stations or None,
+        host=host, port=port, start=args.stations or None,
     )  # fmt: skip
     for sid in args.stations:
         app.config.get(sid)  # fail early on a typo
@@ -415,7 +422,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         note_page(url)  # in the home's lock file, for whoever finds the home taken
         print(f"Wavescribe is running at {url}  (Ctrl-C to stop)", file=sys.stderr)
         if host not in ("127.0.0.1", "::1", "localhost"):
-            for lan in lan_urls(args.port):
+            for lan in lan_urls(app.port):
                 print(f"  on the LAN (read-only): {lan}", file=sys.stderr)
         print(access_line(host, behind_proxy=args.behind_proxy, public_read=args.public_read,
                           remote_ask=args.allow_remote_ask), file=sys.stderr)  # fmt: skip
@@ -425,14 +432,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.control import load_key
 
     try:
-        serve(app, host=host, port=args.port, on_ready=ready, behind_proxy=args.behind_proxy,
+        serve(app, host=host, port=port, on_ready=ready, behind_proxy=args.behind_proxy,
               public_read=args.public_read, remote_ask=args.allow_remote_ask,
-              control_key=load_key(DATA_DIR, create=True))  # fmt: skip
-    except PortInUseError:  # taken while the stations loaded
-        from wavescribe.doctor import port_taken
-
-        print(f"wavescribe: {port_taken(args.port, host)}", file=sys.stderr)
-        return 1
+              control_key=load_key(DATA_DIR, create=True), auto=auto)  # fmt: skip
+    except PortInUseError as e:  # taken while the stations loaded
+        return _port_taken(port, host) if auto is None else _no_port(e)
     finally:
         if app.alerter is not None:
             app.alerter.close()
@@ -983,8 +987,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--lan", action="store_true", help="let other devices on the LAN read along (read-only)"
     )
-    p.add_argument("--port", type=port_number, default=8765, help="port for the page (default "
-                   "8765)")  # fmt: skip
+    from wavescribe.web.ports import port_spec
+
+    p.add_argument(
+        "--port", type=port_spec, default=8765, metavar="PORT",
+        help="port for the page (default 8765); auto: the first free one of 8765 to 8784, "
+        "auto:N of N to N+19, else one the system picks",
+    )  # fmt: skip
     p.add_argument(
         "--behind-proxy", action="store_true",
         help="a reverse proxy or tunnel forwards to this server: treat every request as another "

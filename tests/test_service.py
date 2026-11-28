@@ -256,6 +256,7 @@ def test_the_command_installs_reports_and_removes(
     ("args", "stations", "expect"),
     [
         (["--open"], None, "--open doesn't apply"),
+        (["--port", "auto:8790"], None, "--port auto:8790 doesn't apply to a background service"),
         ([], '[[station]]\nid = "uno"\nlanguage = [', "serve would stop at start"),
         (["nope"], None, "unknown station 'nope'"),
         (["--alerts", "config/missing.toml"], None, "missing.toml: not found"),

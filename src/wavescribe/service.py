@@ -376,6 +376,9 @@ def preflight(ns: argparse.Namespace, workdir: Path,
         raise ServiceError(f"{workdir} isn't a Wavescribe folder (no config/): run "
                            f"`{typed('service install')}` in the folder you run it in, or give "
                            "that folder with --home")  # fmt: skip
+    if not isinstance(ns.port, int):
+        raise ServiceError(f"--port {ns.port} doesn't apply to a background service: give it a "
+                           "fixed --port, so its page keeps one address")  # fmt: skip
     if ns.open:
         raise ServiceError("--open doesn't apply to a background service: open the page "
                            f"yourself at http://localhost:{ns.port}")  # fmt: skip

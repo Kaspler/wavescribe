@@ -16,6 +16,7 @@ proxy (``--behind-proxy``) the page's reads need a feed token (``feed.page_grant
 from __future__ import annotations
 
 import contextlib
+import errno
 import functools
 import hmac
 import io
@@ -41,8 +42,9 @@ from wavescribe.control import KEY_HEADER
 from wavescribe.events import to_json
 from wavescribe.invocation import typed
 from wavescribe.pipeline import Pipeline, Plan, Result
-from wavescribe.web import digest, feed
+from wavescribe.web import digest, feed, ports
 from wavescribe.web.audio import AudioTap
+from wavescribe.web.ports import AutoPort, PortInUseError
 
 if TYPE_CHECKING:
     from wavescribe.app import App
@@ -1292,29 +1294,12 @@ def _own_names() -> frozenset[str]:
     return frozenset({name, short, f"{short}.local"})
 
 
-class PortInUseError(OSError):
-    """Something already listens on the port: another program, or a Wavescribe already running
-    (``doctor.port_taken`` tells which)."""
-
-
 def check_port(host: str, port: int) -> None:
-    """Fail early if something else owns the port on this machine.
-
-    On macOS a wildcard bind (``--lan``) succeeds even when another program holds
-    127.0.0.1:<port>, and then "localhost" reaches that program instead of us. A probe bind to
-    127.0.0.1 catches it; SO_REUSEADDR keeps our own recent TIME_WAIT sockets from tripping it.
-    """
-    probes = [host] if host not in ("0.0.0.0", "::") else [host, "127.0.0.1"]
-    for addr in probes:
-        family = socket.AF_INET6 if ":" in addr else socket.AF_INET
-        with socket.socket(family, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind((addr, port))
-            except OSError as e:
-                raise PortInUseError(
-                    f"port {port} is already in use on {addr}; choose another with --port"
-                ) from e
+    """Fail early if another program listens where a page on ``host``:``port`` would share its
+    connections (``ports.listened``): on macOS a socket with SO_REUSEADDR binds beside one that
+    listens on the wildcard address, or on 127.0.0.1 when it binds the wildcard itself, and
+    then one of the two takes the other's local connections. Probes bind; nothing connects."""
+    ports.check(host, port)
 
 
 class WebServer(ThreadingHTTPServer):
@@ -1329,7 +1314,11 @@ class WebServer(ThreadingHTTPServer):
         public_read: bool = False,
         remote_ask: bool = False,
         control_key: str | None = None,
+        reuse_address: bool = False,
     ) -> None:
+        # Without SO_REUSEADDR unless asked: with it, the socket would bind beside another
+        # program listening on the wildcard address (web/ports.py).
+        self.allow_reuse_address = reuse_address
         super().__init__(address, Handler)
         self.hub = hub
         self.behind_proxy = behind_proxy
@@ -1384,11 +1373,19 @@ def serve(
     public_read: bool = False,
     remote_ask: bool = False,
     control_key: str | None = None,
+    auto: AutoPort | None = None,
 ) -> None:
-    """Run ``app`` (``wavescribe.app.App``) with its page until Ctrl-C."""
-    check_port(host, port)
-    server = WebServer((host, port), app.hub, behind_proxy, public_read=public_read,
-                       remote_ask=remote_ask, control_key=control_key)  # fmt: skip
+    """Run ``app`` (``wavescribe.app.App``) with its page until Ctrl-C. With ``auto``, ``port``
+    is the one ``--port auto`` chose: if it was taken meanwhile, the next free one is used.
+    ``app.port`` is the page's port once it listens."""
+
+    def make(at: int, reuse: bool) -> WebServer:
+        return WebServer((host, at), app.hub, behind_proxy, public_read=public_read,
+                         remote_ask=remote_ask, control_key=control_key,
+                         reuse_address=reuse)  # fmt: skip
+
+    server = bind(make, host, port, auto)
+    app.port = port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True, name="web").start()
     app.start_sampling()
     if on_ready is not None:
@@ -1399,6 +1396,38 @@ def serve(
     finally:
         server.shutdown()
         time.sleep(0.1)
+
+
+def bind(make: Any, host: str, port: int, auto: AutoPort | None = None) -> WebServer:
+    """The page's socket, bound and listening; ``make(port, reuse)`` builds the server.
+
+    A fixed port is refused (PortInUseError) when another program listens where it would
+    share its connections (``ports.listened``). It binds with SO_REUSEADDR, so connections of a
+    run that just stopped don't hold it, and the wildcard is checked again once it is bound.
+    Under ``--port auto`` it binds without, on a port ``ports.free`` finds free; one taken
+    meanwhile is skipped for the next."""
+    if auto is None:
+        ports.check(host, port)
+        try:
+            server = make(port, True)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                raise PortInUseError(f"port {port} is already in use on {host}") from e
+            raise
+        if ports.wildcard_taken(host, port):  # another program took it meanwhile
+            server.server_close()
+            raise PortInUseError(f"port {port} is already in use on 0.0.0.0")
+        return server
+    tried: set[int] = set()
+    while True:
+        if port not in tried and ports.free(host, port):
+            try:
+                return make(port, False)
+            except OSError as e:
+                if e.errno != errno.EADDRINUSE:
+                    raise
+        tried.add(port)
+        port = ports.choose(host, auto, frozenset(tried))
 
 
 def access_line(

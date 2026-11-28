@@ -195,7 +195,7 @@ def folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def run(root: Path, *serve: str, host=None, reg=None, launchd=None, probe=None,
+def run(root: Path, *serve: str, host=None, reg=None, launchd=None, probe=None, choice=None,
         free_gb: float = 500.0) -> dict[str, list[doctor.Check]]:  # fmt: skip
     checks = Doctor(
         service.check_serve_args(list(serve)),
@@ -204,6 +204,7 @@ def run(root: Path, *serve: str, host=None, reg=None, launchd=None, probe=None,
         launchd=launchd or FakeLaunchd(),
         home=root / "home",
         port_probe=probe or (lambda _h, _p: None),
+        port_choice=choice,
         disk_usage=lambda _p: SimpleNamespace(free=free_gb * GB, total=1000 * GB),
         workdir=root,
     ).run()
@@ -368,6 +369,24 @@ def test_a_port_held_where_lsof_cant_see_is_found_by_serves_own_probe(folder: Pa
     assert "on 0.0.0.0" in found["port"][0].summary and "--port" in found["port"][0].fix
 
 
+def test_port_auto_says_which_port_serve_would_take(folder: Path) -> None:
+    asked = []
+
+    def choose(host: str, auto) -> int:
+        asked.append((host, str(auto)))
+        return 8791
+
+    found = run(folder, "--port", "auto:8790", choice=choose)
+    assert status(found, "port") == OK and asked == [("127.0.0.1", "auto:8790")]
+    assert found["port"][0].summary == "--port auto:8790: serve would take 8791 (8790 is taken)"
+
+    def none(host: str, auto) -> int:
+        raise PortInUseError(f"no free port for the page on {host}")
+
+    found = run(folder, "--lan", "--port", "auto:8790", choice=none)
+    assert status(found, "port") == FAIL and "on 0.0.0.0" in found["port"][0].summary
+
+
 SERVE_8793 = "/ws/.venv/bin/python /ws/.venv/bin/wavescribe serve --port 8793"
 OTHER_THAN = "port 8793 is already in use on 127.0.0.1 by another program"
 
@@ -418,13 +437,13 @@ def test_serve_says_wavescribe_is_already_running_on_its_port(
         holder = doctor.PortHolder(4000, 3999, f"/ws/.venv/bin/wavescribe serve --port {port}",
                                    f"127.0.0.1:{port}")  # fmt: skip
         monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: holder)
-        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 1
+        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 4
         assert capsys.readouterr().err == (
             f"wavescribe: Wavescribe is already running at http://localhost:{port}/ (pid 4000); "
             "use its page, stop it first, or start this one with another --port\n"
         )
         monkeypatch.setattr(doctor, "port_holder", lambda *_a, **_k: None)
-        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 1
+        assert main(["serve", "--port", str(port), "--no-store", "--no-alerts"]) == 4
         assert capsys.readouterr().err == (
             f"wavescribe: port {port} is already in use on 127.0.0.1; choose another with --port\n"
         )

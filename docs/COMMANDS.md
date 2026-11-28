@@ -132,7 +132,7 @@ here start right away; with none, the ones that ran last time do. It also takes
 | `--config FILE` | the stations file (default `config/stations.toml`, else the example) |
 | `--settings FILE` | where the page keeps its changes (default `config/ui.toml`) |
 | `--open` | open the page in the default browser |
-| `--port PORT` | the page's port (default 8765) |
+| `--port PORT` | the page's port (default 8765). Another program listening on it, on this machine's address or on every address, stops `serve` at once with exit code 4. `auto` takes the first free port of 8765 to 8784, `auto:N` of N to N+19, and after those one the system picks; the port taken is in the startup line, never saved |
 | `--host ADDRESS` | the address to listen on (default `127.0.0.1`: this machine only). Another machine that reaches it reads only, as with `--lan` |
 | `--lan` | listen on every address, so other devices on the network read along (read-only); `--host` is then ignored |
 | `--behind-proxy` | a reverse proxy or tunnel forwards to this server: every request counts as another machine's (read-only, feed tokens required) |
@@ -402,6 +402,7 @@ sleep while it runs. It takes [`serve`'s options](#wavescribe-serve) and
 the LaunchAgent's file names the home, absolute, as its working folder and as
 `WAVESCRIBE_HOME`. Run it again to change them, from the Wavescribe folder or with the same
 `--home`. Another `serve` running with this home stops the install, as a taken port does.
+It needs a fixed `--port`: `auto` doesn't apply to a background service.
 
 | Option | What it does |
 |---|---|
@@ -540,4 +541,5 @@ the `<clip>.ref-template.txt` it writes, save it as `<clip>.ref.txt` and run it 
 | 1 | it couldn't be done, with the reason after `wavescribe:`; also `search` and `alerts check` with no match, and `doctor` with something broken |
 | 2 | a command or an option it doesn't take, or a value it refuses; also a `--home` that can't be made or isn't a folder |
 | 3 | `serve`, `listen`, `radio tune` and `radio watch`: another of them is running with this home (the message names its pid, and its page's address when it has one); `service status`: the service isn't running |
+| 4 | `serve`: another program listens on its `--port` (the message names it when it can) |
 | 130 | stopped with Ctrl-C |

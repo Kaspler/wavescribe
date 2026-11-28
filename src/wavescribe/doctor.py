@@ -326,11 +326,13 @@ class Doctor:
         launchd: Launchd | None = None,
         home: Path | None = None,
         port_probe: Callable[[str, int], None] | None = None,
+        port_choice: Callable[[str, Any], int] | None = None,
         disk_usage: Callable[[Path], Any] = shutil.disk_usage,
         workdir: Path | None = None,
     ) -> None:
         from wavescribe import service
         from wavescribe.registry import ModelRegistry
+        from wavescribe.web import ports
 
         self.serve = serve
         self.host = host or LocalHost()
@@ -338,6 +340,7 @@ class Doctor:
         self._launchd = launchd
         self.home = home
         self.port_probe = port_probe or (lambda h, p: service.port_probe(h, p))
+        self.port_choice = port_choice or ports.choose  # --port auto: the port serve would take
         self.disk_usage = disk_usage
         self.workdir = workdir or Path.cwd()
         self.data_dir = self.workdir / "data"
@@ -874,6 +877,16 @@ class Doctor:
         g = "page"
         host = "0.0.0.0" if self.serve.lan else self.serve.host
         port = self.serve.port
+        if not isinstance(port, int):  # --port auto
+            try:
+                chosen = self.port_choice(host, port)
+            except OSError as e:
+                self.add(g, "port", FAIL, f"--port {port}: no free port on {host} ({e})",
+                         "give a fixed --port")  # fmt: skip
+            else:
+                taken = "" if chosen == port.start else f" ({port.start} is taken)"
+                self.add(g, "port", OK, f"--port {port}: serve would take {chosen}{taken}")
+            return
         owner = port_holder(port, self.host)
         if owner is not None:
             pid, command = owner.pid, owner.command
