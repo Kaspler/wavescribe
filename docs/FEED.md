@@ -249,7 +249,8 @@ an EventSource on such a page.
   - `push`: `/feed/v1/ingest`.
 
   Behind a proxy the page's controls are off, even on the Wavescribe machine, so there the
-  command is the way. Run it in the folder Wavescribe runs in, while it runs:
+  command is the way. Run it with the home Wavescribe runs with (its folder, or the same
+  `--home`), while it runs:
 
   ```sh
   uv run wavescribe token make --label "kitchen screen"   # prints the token once

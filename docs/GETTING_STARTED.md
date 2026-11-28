@@ -700,6 +700,26 @@ To delete everything heard, stop Wavescribe and delete the `data` folder. Models
 `models` folder and in `~/.cache/huggingface`; [Uninstalling](#uninstalling) says how to remove
 them.
 
+**Settings and data in another folder.** The folder that holds `config`, `data` and `models` is
+Wavescribe's *home*. It is the folder you start Wavescribe in, unless `--home` or the
+`WAVESCRIBE_HOME` variable names another; a home that doesn't exist yet is made:
+
+```sh
+uv run wavescribe serve --home ~/Documents/radio-home --open
+export WAVESCRIBE_HOME=~/Documents/radio-home   # the same for every command after it
+```
+
+- Give every command the same home: `search`, `alerts`, `doctor` and the rest read that
+  home's settings and what it keeps. `doctor` shows the home it uses, as a full path.
+- A new home has no `config` yet: it starts with the example stations and alert rules that come
+  with Wavescribe, and keeps your changes from the page in its own `config/ui.toml`. To write
+  your own files, make a `config` folder in it and copy the examples there (`doctor` names the
+  example it uses).
+- Files named on the command line, such as `--config my-stations.toml`, are found from the
+  folder you are in, as usual.
+- Models from Hugging Face stay in `~/.cache/huggingface`, shared by every home; the speech
+  detector and the music filter are downloaded into each home's `models` folder.
+
 ## 11. Keep it running
 
 **In the background.** To run Wavescribe without a Terminal window, start it when you log in
@@ -714,7 +734,8 @@ uv run wavescribe service uninstall        # stop it and remove it
 
 - It runs `serve` in this folder with this folder's Python, so starting needs neither the
   Terminal nor the internet. It keeps the Mac from going to sleep while it runs, and after a
-  crash it starts again within 30 seconds.
+  crash it starts again within 30 seconds. With `--home`, or `WAVESCRIBE_HOME` set, it runs in
+  that home instead, and `service status` shows which.
 - Before installing, it checks your settings and that the port is free, so a mistake shows
   straight away rather than as a service that keeps stopping. `--dry-run` shows what it would
   install.

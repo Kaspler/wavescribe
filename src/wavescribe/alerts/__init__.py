@@ -50,6 +50,7 @@ from typing import Any
 from wavescribe.alerts.actions import ActionError, Actions, platform_actions
 from wavescribe.asr.checks import wrong_language
 from wavescribe.config import ConfigError
+from wavescribe.home import example, packaged
 from wavescribe.languages import same_language
 from wavescribe.log import event
 from wavescribe.rules import SEVERITIES, STATION_KINDS, Hit, RuleSet
@@ -110,12 +111,13 @@ class AlertConfig:
 
 
 def resolve_alerts_path(explicit: Path | None = None) -> Path | None:
+    """An explicit path, else config/alerts.toml, else the example (the home's, else the one
+    that comes with Wavescribe), else None."""
     if explicit is not None:
         return explicit
-    for path in (DEFAULT_ALERTS_PATH, EXAMPLE_ALERTS_PATH):
-        if path.exists():
-            return path
-    return None
+    if DEFAULT_ALERTS_PATH.exists():
+        return DEFAULT_ALERTS_PATH
+    return example(EXAMPLE_ALERTS_PATH.name)
 
 
 DELIVERY_KEYS = {
@@ -155,13 +157,20 @@ _SAID_MISSING: set[tuple[str, str, str]] = set()  # missing-pack warnings alread
 
 def _packs_dirs(path: Path | None, keywords_dir: Path) -> list[Path]:
     """Where keyword packs are looked for, in order: keywords/ beside the alerts file, so a
-    config folder kept elsewhere (``--alerts``) brings its own, then config/keywords. A folder
-    given on purpose is the only one."""
-    if path is None or keywords_dir != DEFAULT_KEYWORDS_DIR:
+    config folder kept elsewhere (``--alerts``) brings its own, then config/keywords, then the
+    packs that come with Wavescribe. A folder given on purpose is the only one."""
+    if keywords_dir != DEFAULT_KEYWORDS_DIR:
         return [keywords_dir]
-    beside = Path(path).parent / "keywords"
-    same = beside.absolute() == keywords_dir.absolute()
-    return [keywords_dir] if same else [beside, keywords_dir]
+    looked = [] if path is None else [Path(path).parent / "keywords"]
+    looked.append(keywords_dir)
+    shipped = packaged(DEFAULT_KEYWORDS_DIR.name)
+    if shipped is not None:
+        looked.append(shipped)
+    out: list[Path] = []
+    for d in looked:
+        if all(d.absolute() != o.absolute() for o in out):
+            out.append(d)
+    return out
 
 
 def load_alerts(path: Path, keywords_dir: Path = DEFAULT_KEYWORDS_DIR) -> AlertConfig:

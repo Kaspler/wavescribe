@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import signal
 import sys
 import threading
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from wavescribe import __version__
 from wavescribe.events import local_time  # standard library only: cheap at start
+from wavescribe.home import given_path  # likewise
 from wavescribe.invocation import typed  # likewise
 
 if TYPE_CHECKING:
@@ -338,6 +340,14 @@ def cmd_listen(args: argparse.Namespace) -> int:
         if store is not None:
             store.close()
     return 0
+
+
+def source_arg(text: str) -> str:
+    """``listen --source``: an address (``https://…``, ``sdr:…``) as given; a file absolute
+    against the folder the command was started in, as every path given is."""
+    if re.match(r"[A-Za-z][A-Za-z0-9+.-]+:", text):
+        return text
+    return str(given_path(text))
 
 
 def port_number(value: str) -> int:
@@ -871,7 +881,7 @@ def add_names_arg(p: argparse.ArgumentParser, default: Any = None) -> None:
     """--config for the commands that print stored lines with ``--json``: the stations file
     whose names, languages and classes they carry."""
     p.add_argument(
-        "--config", type=Path, default=default,
+        "--config", type=given_path, default=default,
         help="stations TOML that --json names stations from, as serve's --config (default: the "
         "one serve reads; a station not in it goes by the name it was stored with)",
     )  # fmt: skip
@@ -879,7 +889,7 @@ def add_names_arg(p: argparse.ArgumentParser, default: Any = None) -> None:
 
 def add_settings_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--settings", type=Path, default=DEFAULT_SETTINGS,
+        "--settings", type=given_path, default=DEFAULT_SETTINGS,
         help=f"where the page keeps its changes, as serve's --settings (default: "
         f"{DEFAULT_SETTINGS})",
     )  # fmt: skip
@@ -897,7 +907,9 @@ def at_least_one(text: str) -> int:
 
 
 def add_alert_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
+    p.add_argument(
+        "--alerts", type=given_path, help="alert rules TOML (default: config/alerts.toml)"
+    )
     p.add_argument("--no-alerts", action="store_true", help="no keyword alerts")
 
 
@@ -937,13 +949,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("listen", help="live transcript (and translation) of one or more stations")
     p.add_argument("stations", nargs="+", metavar="STATION", help="station ids from the config")
-    p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
+    p.add_argument(
+        "--config", type=given_path, help="stations TOML (default: config/stations.toml)"
+    )
     p.add_argument("--no-translate", action="store_true", help="transcribe only")
     p.add_argument("--asr", metavar="MODEL", help="ASR model id (default: first in the chain)")
     p.add_argument("--translator", metavar="MODEL", help="translation model id")
     p.add_argument("--duration", type=float, help="stop after this many seconds")
     p.add_argument(
         "--source",
+        type=source_arg,
         help="override the station's source (one station only): a stream URL, a file, or "
         "sdr:SERIAL/MHZ[?gain=20&center=MHZ] for an RTL-SDR",
     )
@@ -956,7 +971,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("serve", help="local web page: pick stations, read and listen live")
     p.add_argument("stations", nargs="*", metavar="STATION", help="stations to start right away")
-    p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
+    p.add_argument(
+        "--config", type=given_path, help="stations TOML (default: config/stations.toml)"
+    )
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default: this machine)")
     p.add_argument(
         "--lan", action="store_true", help="let other devices on the LAN read along (read-only)"
@@ -1008,18 +1025,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = alerts_sub.add_parser("check", help="which rules a sentence would trigger (dry run)")
     p.add_argument("text", nargs="+", help="the sentence, as it would be said on the radio")
     p.add_argument("--language", required=True, help="BCP-47 tag of the text, e.g. pt-PT")
-    p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
+    p.add_argument(
+        "--alerts", type=given_path, help="alert rules TOML (default: config/alerts.toml)"
+    )
     add_settings_arg(p)
     p = alerts_sub.add_parser(
         "replay", help="run stored transcripts through the rules: what would have been announced"
     )
-    p.add_argument("--alerts", type=Path, help="alert rules TOML (try a draft before using it)")
+    p.add_argument(
+        "--alerts", type=given_path, help="alert rules TOML (try a draft before using it)"
+    )
     add_settings_arg(p)
     p.add_argument("--hours", type=float, help="only the last HOURS (default: everything)")
     p.add_argument("--examples", type=int, default=0, help="also show the last N announcements")
     p = alerts_sub.add_parser("test", help="send a test notification and speak each voice")
     p.add_argument("--language", help="only this voice's language")
-    p.add_argument("--alerts", type=Path, help="alert rules TOML (default: config/alerts.toml)")
+    p.add_argument(
+        "--alerts", type=given_path, help="alert rules TOML (default: config/alerts.toml)"
+    )
     add_settings_arg(p)
 
     from wavescribe.radio.cli import add_parser as add_radio_parser
@@ -1048,12 +1071,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("record", help="save a station's stream to a local WAV clip")
     p.add_argument("station", help="station id from the config")
     p.add_argument("--minutes", type=float, default=15.0, help="how long to record (15)")
-    p.add_argument("--out", type=Path, help="default: data/bakeoff/<station>-<time>.wav")
-    p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
+    p.add_argument("--out", type=given_path, help="default: data/bakeoff/<station>-<time>.wav")
+    p.add_argument(
+        "--config", type=given_path, help="stations TOML (default: config/stations.toml)"
+    )
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("bakeoff", help="compare ASR models on recorded clips")
-    p.add_argument("clips", nargs="+", type=Path, help="16 kHz mono WAVs from `record`")
+    p.add_argument("clips", nargs="+", type=given_path, help="16 kHz mono WAVs from `record`")
     p.add_argument("--models", required=True, help="comma-separated model ids")
     p.add_argument("--language", required=True, help="BCP-47 language of the clips, e.g. pt-PT")
     p.set_defaults(func=cmd_bakeoff)
@@ -1064,7 +1089,24 @@ def build_parser() -> argparse.ArgumentParser:
     add_agent_parser(sub)
     add_token_parser(sub)
     _describe(parser)
+    add_home_arg(parser)
     return parser
+
+
+HOME_HELP = ("the folder that keeps Wavescribe's settings (config/) and data (data/), made when "
+             "missing (default: $WAVESCRIBE_HOME, else the current folder)")  # fmt: skip
+
+
+def add_home_arg(parser: argparse.ArgumentParser, *, top: bool = True) -> None:
+    """``--home`` on the program and on every command under it, so it goes before or after
+    the command's name. Under the top it has no default, so it doesn't undo one given before."""
+    if "--home" not in parser._option_string_actions:
+        parser.add_argument("--home", type=given_path, metavar="DIR", help=HOME_HELP,
+                            default=None if top else argparse.SUPPRESS)  # fmt: skip
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                add_home_arg(child, top=False)
 
 
 def _describe(parser: argparse.ArgumentParser) -> None:
@@ -1093,11 +1135,18 @@ def install_stop_signals() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from wavescribe import home
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv)  # every path given is absolute from here (given_path)
     if args.command is None:
         parser.print_help()
         return 0
+    try:
+        home.enter(args.home)  # before anything reads or writes a file, or starts a thread
+    except home.HomeError as e:
+        print(f"wavescribe: {e}", file=sys.stderr)
+        return 2
     install_stop_signals()
     if not getattr(args, "network", False):
         # Offline at runtime: only explicit setup commands may reach the network.

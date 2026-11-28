@@ -58,14 +58,17 @@ def named(section: str) -> set[str]:
 def test_the_command_reference_names_every_command_and_every_option() -> None:
     doc = sections(DOC.read_text(encoding="utf-8"))
     missing = []
-    for path, parser in commands(build_parser()):
+    every = list(commands(build_parser()))
+    # An option every command takes (--home) is told once, before the first command.
+    shared = set.intersection(*(options(p) for _, p in every)) & named(doc["wavescribe"])
+    for path, parser in every:
         own = doc.get(slug(path))
         if own is None:
             missing.append(f"no section for `{path}`")
             continue
         # A command that takes another's options says so with a link to that section.
         linked = [doc.get(anchor, "") for anchor in re.findall(r"\]\(#([\w-]+)\)", own)]
-        told = named(own).union(*map(named, linked))
+        told = named(own).union(shared, *map(named, linked))
         missing += [f"`{path}`: {o}" for o in sorted(options(parser) - told)]
     assert not missing, f"{DOC} leaves out: " + "; ".join(missing)
 

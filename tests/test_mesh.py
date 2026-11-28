@@ -270,6 +270,7 @@ def test_stopping_while_it_waits_for_an_acknowledgement_keeps_the_alert(
         ({"min_gap_s": 5}, "min_gap_s is 30 to 3600"),
         ({"daily_cap": 0}, "daily_cap is a whole number from 1 to 200"),
         ({"daily_cap": 2.5}, "daily_cap is a whole number"),
+        ({"command": "bin/meshtastic"}, "a path relative to the home isn't taken"),
     ],
 )
 def test_a_mesh_output_that_cant_work_is_refused(change: dict, why: str) -> None:
@@ -282,6 +283,8 @@ def test_a_mesh_output_has_stated_defaults_and_a_webhook_none_of_its_fields() ->
     assert (config.node, config.format, config.max_bytes, config.url) == (POCKET, "line", 200, "")
     assert (config.min_gap_s, config.daily_cap, config.timeout_s) == (120, 20, 120)
     assert config.to_dict()["command"] == "meshtastic"
+    full = {"id": "pocket", "kind": "mesh", "node": POCKET, "command": "/opt/bin/meshtastic"}
+    assert OutputConfig.from_dict(full).command == "/opt/bin/meshtastic"  # a full path is taken
     hook = OutputConfig.from_dict({"id": "h", "url": "http://h"}).to_dict()
     assert not {"node", "device", "command", "min_gap_s", "daily_cap"} & set(hook)
 

@@ -304,6 +304,8 @@ is less tried.
 - [A model of your own](docs/MODELS.md#bring-your-own-model), through `config/models.local.toml`.
 - [A background service](docs/GETTING_STARTED.md#11-keep-it-running) on macOS (launchd) that starts
   at login and restarts after a crash: `wavescribe service`.
+- [Run from any folder](docs/GETTING_STARTED.md#10-what-wavescribe-keeps-and-why): `--home` or
+  `WAVESCRIBE_HOME` names the folder that keeps settings and data.
 - [A self-check](docs/GETTING_STARTED.md#troubleshooting) of tools, models, receivers, disk,
   settings and voices: `wavescribe doctor`.
 - [A Health page](docs/GETTING_STARTED.md#11-keep-it-running): memory, processor, battery and disk,

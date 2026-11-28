@@ -27,6 +27,16 @@ here.
 
 Only `models fetch` downloads anything. Every other command runs offline.
 
+**The home.** Every command keeps its settings in `config/` and what it keeps in `data/` (and
+models that aren't in the Hugging Face cache in `models/`), inside its home: the folder
+`--home DIR` names, else the one in `$WAVESCRIBE_HOME`, else the folder it is started in.
+`--home` goes before or after the command's name (`wavescribe --home DIR serve` or
+`wavescribe serve --home DIR`); a home that doesn't exist yet is made. Paths given on the
+command line, and relative paths in the environment, count from the folder the command is
+started in; relative paths inside the home's own files count from the home. A home without its
+own `config/stations.toml`, `config/alerts.toml` or `config/keywords/` uses the examples that
+come with Wavescribe.
+
 ## `wavescribe models`
 
 List, download and remove models ([MODELS.md](MODELS.md), [LICENSING.md](LICENSING.md)).
@@ -80,7 +90,7 @@ whose weights are already on disk.
 
 ### `wavescribe models credits`
 
-Prints the attribution for the installed models, as Markdown. No options.
+Prints the attribution for the installed models, as Markdown. No options of its own.
 
 ### `wavescribe models remove`
 
@@ -208,7 +218,7 @@ as above.
 
 `alerts cap ID` prints one alert as a CAP 1.2 (Common Alerting Protocol) XML document, for
 programs that take CAP. `ID` is the alert's number, as `alerts list` shows it (`#12` is `12`).
-No options.
+No options of its own.
 
 ### `wavescribe alerts check`
 
@@ -386,8 +396,10 @@ Runs `serve` in the background on macOS
 
 Starts `serve` now and at every login, restarted after a crash, and keeps the Mac from idle
 sleep while it runs. It takes [`serve`'s options](#wavescribe-serve) and
-[the options for what runs](#options-for-what-runs), and runs `serve` with them; run it again
-to change them, from the Wavescribe folder.
+[the options for what runs](#options-for-what-runs), and runs `serve` with them in this home:
+the LaunchAgent's file names the home, absolute, as its working folder and as
+`WAVESCRIBE_HOME`. Run it again to change them, from the Wavescribe folder or with the same
+`--home`.
 
 | Option | What it does |
 |---|---|
@@ -395,7 +407,7 @@ to change them, from the Wavescribe folder.
 
 ### `wavescribe service uninstall`
 
-Stops the background service and removes it. No options.
+Stops the background service and removes it. No options of its own.
 
 ### `wavescribe service status`
 
@@ -412,8 +424,9 @@ Checks tools, Python, models, receivers, disk, configuration, the page's port, v
 background service, and says what to fix. It works offline and opens no receiver. It takes
 [`serve`'s options](#wavescribe-serve) and
 [the options for what runs](#options-for-what-runs), to check what `serve` with them needs;
-with none, it checks the options of the installed background service. Exit code 1 when
-something is broken.
+with none, it checks the options of the installed background service when it runs in this
+home. It names the home as an absolute path, first in its text and as `folder` in the summary
+line of `--json`. Exit code 1 when something is broken.
 
 | Option | What it does |
 |---|---|
@@ -468,8 +481,8 @@ Wavescribe on this machine (experimental; [AGENT_TOOLS.md](AGENT_TOOLS.md)).
 ## `wavescribe token`
 
 Makes, lists and revokes the feed tokens other machines and programs read with
-([FEED.md](FEED.md#who-can-read-what)). Run it on the Wavescribe machine, in the folder Wavescribe runs
-in, while it runs.
+([FEED.md](FEED.md#who-can-read-what)). Run it on the Wavescribe machine, with the home Wavescribe
+runs with (its folder, or the same `--home`), while it runs.
 
 | Option | What it does |
 |---|---|
@@ -523,6 +536,6 @@ the `<clip>.ref-template.txt` it writes, save it as `<clip>.ref.txt` and run it 
 |---|---|
 | 0 | done |
 | 1 | it couldn't be done, with the reason after `wavescribe:`; also `search` and `alerts check` with no match, and `doctor` with something broken |
-| 2 | a command or an option it doesn't take, or a value it refuses |
+| 2 | a command or an option it doesn't take, or a value it refuses; also a `--home` that can't be made or isn't a folder |
 | 3 | `service status`: the service isn't running |
 | 130 | stopped with Ctrl-C |

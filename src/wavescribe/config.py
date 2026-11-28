@@ -169,16 +169,18 @@ class StationsConfig:
 
 
 def resolve_stations_path(explicit: Path | None = None) -> Path:
-    """Pick the stations file: an explicit path, else config/stations.toml, else the example."""
+    """Pick the stations file: an explicit path, else config/stations.toml, else the example
+    (the home's, else the one that comes with Wavescribe)."""
     if explicit is not None:
         return explicit
     if DEFAULT_STATIONS_PATH.exists():
         return DEFAULT_STATIONS_PATH
-    if EXAMPLE_STATIONS_PATH.exists():
-        log.info(
-            "using %s; copy it to %s to customise", EXAMPLE_STATIONS_PATH, DEFAULT_STATIONS_PATH
-        )
-        return EXAMPLE_STATIONS_PATH
+    from wavescribe.home import example
+
+    found = example(EXAMPLE_STATIONS_PATH.name)
+    if found is not None:
+        log.info("using %s; copy it to %s to customise", found, DEFAULT_STATIONS_PATH)
+        return found
     raise ConfigError(f"no stations file: create {DEFAULT_STATIONS_PATH}")
 
 

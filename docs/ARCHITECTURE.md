@@ -50,6 +50,36 @@ Each interface is a Python protocol with one or more implementations:
 | `ModelRegistry` | Merges the tracked `models.toml` (default, opt-in and restricted tiers) with the private `config/models.local.toml` (bring-your-own). Downloads only through `models fetch`, with licence acceptance. **Licence gate:** chains skip an opt-in or restricted model with no acceptance record in `data/licenses-accepted.json` (licence id, URL, tier, revision, non-commercial acknowledgement, timestamp), and naming one explicitly (`--asr`, `--translator`) fails with the command that accepts it. A licence change upstream voids the record. Restricted models in use are announced at start and on the page. `models fetch` writes `data/THIRD_PARTY_MODELS.md`. Around each download (`modelfetch.py`): the total and a free-disk check first; the download in a thread of its own, so Ctrl-C and SIGTERM stop the command at once (the library's worker threads can't be interrupted, so the process leaves without them and removes the part-files they were writing); a failure as one sentence. A Hugging Face file of 100 MB or more, and a model from a URL with a checksum, download into a part-file of Wavescribe's own (`partfiles.py`, locked while it is written) that the next run continues with an HTTP range request and checks against its sha256 before installing it; a part-file nobody continues (unwritten for a week, or of a file the pinned revision doesn't have) is removed, and `models remove` removes a model's. The downloads Wavescribe makes itself check certificates against the system trust store (`httpclient.trust_store`, the truststore package), as the Hugging Face library's client does. `models remove` (`modelremove.py`) deletes what a model put on disk through the library's own cache code (`scan_cache_dir` and its deletion plans), so a file in the cache-wide shared store goes only when nothing else links to it; it touches only the repository and revision the registry pins, and of that revision only the files the registry asks for when another program added others; a model from a URL goes with its folder under `models/`, and a `local:` model is never removed | `ModelRegistry` (`registry.py`) |
 | Languages | A station's BCP-47 code picks its ASR model (the registry's chain), keyword pack (`config/keywords/<lang>.toml`), voice and translation targets; LLM prompts name languages from CLDR (`language_name()` in `languages.py`), never bare codes, which are ambiguous | — |
 
+## Where files live: the home
+
+Everything a Wavescribe reads and writes, except the Hugging Face cache, is in its **home**:
+`config/` (the stations file, `alerts.toml`, `keywords/`, `ui.toml`, `models.local.toml`,
+`models.catalog.toml`), `data/` (the store, the audio kept, logs, the radio catalogue, the
+licences accepted, the control key) and `models/` (models from a URL). The home is `--home DIR`,
+else `$WAVESCRIBE_HOME`, else the folder the command was started in (`home.py`). `cli.main`
+settles it once, before anything reads or writes a file or starts a thread:
+
+1. every path option on the command line is already absolute against the folder the command
+   was started in (`home.given_path`, the parser's type for each of them; `listen --source`
+   keeps an address as it is);
+2. relative paths in the environment that Wavescribe or its libraries read (`home.PATH_VARS`:
+   `WAVESCRIBE_MODELS_DIR`, the Hugging Face cache variables, certificate files, `TMPDIR`) are
+   made absolute the same way;
+3. the home is made when it is missing, the process changes into it, and `WAVESCRIBE_HOME` is set
+   to it, resolved, for the programs Wavescribe starts (a model download from the page).
+
+The modules keep their relative paths (`config/…`, `data/…`), which then point into the home,
+and nothing passes the home around; `invocation.typed()` tells a Wavescribe folder from an
+installed package by the package's own location, so the change of folder doesn't touch it.
+Relative paths inside the home's files (a `local:` model) count from the home; the page takes
+no relative path (a mesh output's `command` is a program's name or an absolute path).
+
+**Examples.** `config/*.example.toml` and `config/keywords/pt.example.toml` are tracked once, in
+`config/`, and the wheel carries them in `wavescribe/examples/` (`force-include` in
+`pyproject.toml`). Where a home has no file of its own, the stations file, the alert rules and
+the keyword packs come from the home's `config/` example, else from the package's copy
+(`home.example`, `home.packaged`; in a Wavescribe folder the package's copy is its `config/`).
+
 ## Process model
 
 One process with threads. Each station has a source thread (an ffmpeg subprocess, or a channel
@@ -745,11 +775,13 @@ from the page but not deleted.
 
 **Running unattended** (`service.py`, `wavescribe service install|uninstall|status`). A
 per-user launchd LaunchAgent, `~/Library/LaunchAgents/io.github.kaspler.wavescribe.plist`, runs
-`caffeinate -i <the environment's python> -m wavescribe serve <options>` in the Wavescribe
-folder, at login and at install:
+`caffeinate -i <the environment's python> -m wavescribe serve <options>` in the home it was
+installed with, at login and at install:
 
 - The project environment's Python runs directly, not `uv run`, so a restart never syncs or
   reaches the network.
+- The home, absolute and resolved, is the plist's `WorkingDirectory` and its
+  `WAVESCRIBE_HOME`; `--home` itself is left out of the serve options it records.
 - `caffeinate -i` holds an idle-sleep assertion while serve runs. It passes SIGTERM on to serve
   and exits with serve's exit code (checked), so launchd stops it cleanly and still sees a
   crash. It doesn't prevent clamshell sleep.
@@ -1316,6 +1348,7 @@ kept with their quote (at most one per rule per cooldown, so they stay small). M
 | **Speak only checked translations, else a fixed phrase** | A translator that answers in the wrong language, or invents content (MADLAD into Ukrainian), must never be read aloud | — |
 | **A fixed reply for "can't translate"; a remark is never stored as a translation** | Given garbled recognition, the LLM can write about the text instead, which would read as if the station had said it | A real translation is left out (the flag counts them per reason) |
 | **Page changes in a separate, machine-written `config/ui.toml`** | Rewriting the hand-edited TOML would drop its comments and layout | — |
+| **One home per process, entered with a change of folder at start** | Every module's relative `config/` and `data/` path then works in any folder, with nothing passed around | — |
 | **Network only on a click on this machine, or to destinations the user entered** | Keeps the offline promise while letting the page download models, search catalogues and check streams | — |
 | **The feed is text and metadata only; audio stays where it was recorded** | Broadcast audio is copyrighted, and text is ~1,000× smaller over a constrained uplink | — |
 | **LLM rules batch per station every ~45 s, on source text** | One prompt per batch keeps the LLM's share of the GPU small (not measured on a long run) | Missed or late events |

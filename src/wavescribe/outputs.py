@@ -190,6 +190,10 @@ class OutputConfig:
             device = str(raw.get("device", "")).strip()
             if wrong := mesh.device_error(device):
                 raise OutputError(f"{who}: {wrong}")
+            command = str(raw.get("command") or "")
+            if "/" in command and not command.startswith("/"):
+                raise OutputError(f"{who}: command is the program's name, or its full path "
+                                  "(/…): a path relative to the home isn't taken")  # fmt: skip
             if events != ("alert",):
                 raise OutputError(f"{who}: a mesh node gets alerts only")
             if fmt != "line":

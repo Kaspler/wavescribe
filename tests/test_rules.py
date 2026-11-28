@@ -271,6 +271,7 @@ def test_topics_in_no_pack_are_said_once_with_where_the_packs_were_looked_for(
 ) -> None:
     shutil.copy("config/alerts.example.toml", tmp_path / "alerts.toml")
     monkeypatch.chdir(tmp_path)  # no config/keywords here either
+    monkeypatch.setattr("wavescribe.alerts.packaged", lambda _name: None)  # nor shipped ones
     monkeypatch.setattr("wavescribe.alerts._SAID_MISSING", set())
     with caplog.at_level("WARNING", logger="wavescribe.alerts"):
         alerts = load_alerts(tmp_path / "alerts.toml")

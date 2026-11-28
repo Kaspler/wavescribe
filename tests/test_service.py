@@ -95,7 +95,8 @@ def test_the_plist_runs_serve_from_the_project_environment_and_keeps_it_going(
     assert p["ProcessType"] == "Interactive"  # no background CPU and I/O limits
     log = str(tmp_path / "data" / "logs" / "service.log")
     assert p["StandardOutPath"] == p["StandardErrorPath"] == log
-    assert p["EnvironmentVariables"] == {"PYTHONUNBUFFERED": "1", "PATH": "/usr/bin"}
+    assert p["EnvironmentVariables"] == {"PYTHONUNBUFFERED": "1", "PATH": "/usr/bin",
+                                         "WAVESCRIBE_HOME": str(tmp_path)}  # fmt: skip
     assert plistlib.loads(plistlib.dumps(p)) == p
     no_caffeinate = service.Job(tmp_path, PY, (), {}, keep_awake=False)
     assert service.build_plist(no_caffeinate)["ProgramArguments"][0] == PY
@@ -296,6 +297,27 @@ def test_install_says_when_the_port_is_a_wavescribe_already_running(
         "first (Ctrl-C in its Terminal), or install with another --port\n"
     )
     assert "bootstrap" not in launchd.names()
+
+
+def test_the_service_runs_in_the_home_it_was_installed_with(
+    tmp_path: Path, no_real_launchd: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    start, h = tmp_path / "start", tmp_path / "radio home"
+    start.mkdir()
+    monkeypatch.chdir(start)  # no config/ here, nor in the new home: --home names it anyway
+    monkeypatch.setattr(service, "default_launchd", lambda: pytest.fail("reached launchd"))
+    argv = ["service", "install", "--port", "8796", "--dry-run", "--config", "s.toml"]
+    (start / "s.toml").write_text('[[station]]\nid = "uno"\nlanguage = "es"\n'
+                                  'stream = "https://radio.test/uno"\n')  # fmt: skip
+    assert main([*argv, "--home", str(h)]) == 0
+    printed = plistlib.loads(capsys.readouterr().out.encode())
+    assert printed["WorkingDirectory"] == str(h.resolve())
+    assert printed["EnvironmentVariables"]["WAVESCRIBE_HOME"] == str(h.resolve())
+    assert printed["StandardErrorPath"] == str(h.resolve() / "data" / "logs" / "service.log")
+    assert printed["ProgramArguments"][-5:] == [  # the stations file absolute, from start/
+        "serve", "--config", str(start / "s.toml"), "--port", "8796"]  # fmt: skip
+    assert "--home" not in printed["ProgramArguments"]
+    assert not (no_real_launchd / "Library").exists()
 
 
 def test_install_needs_the_wavescribe_folder_and_a_dry_run_loads_nothing(

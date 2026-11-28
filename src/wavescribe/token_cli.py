@@ -33,7 +33,8 @@ def _client(args: argparse.Namespace) -> tuple[Any, dict[str, str]] | str:
     key = load_key(DATA_DIR)
     if key is None:
         return (f"no control key in {DATA_DIR}/: run this in the folder Wavescribe runs in "
-                f"(where `{typed('serve')}` was started), with Wavescribe running")  # fmt: skip
+                f"(where `{typed('serve')}` was started, or the --home it was given), with "
+                "Wavescribe running")  # fmt: skip
     return Client(args.url), {KEY_HEADER: key}
 
 
@@ -55,8 +56,9 @@ def _call(args: argparse.Namespace, method: str, path: str, body: Any = None) ->
     except Refused as e:
         why = e.message
         if e.status == 403:
-            why += (": the control key didn't match. Run this in the folder that Wavescribe "
-                    "runs in, against the Wavescribe started there")  # fmt: skip
+            why += (": the control key didn't match. Run this with the home that Wavescribe "
+                    "runs with (its folder, or its --home), against the Wavescribe started "
+                    "there")  # fmt: skip
         raise SystemExit(f"wavescribe token: {why}") from None
 
 

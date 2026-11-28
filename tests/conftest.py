@@ -6,9 +6,21 @@ from collections.abc import Iterator
 
 import pytest
 
+from wavescribe import home
 from wavescribe.radio import bandplan
 
 _DEFAULT_REGION = bandplan.default_region  # tests may swap it; its cache is this one's
+
+
+@pytest.fixture(autouse=True)
+def _the_folder_the_tests_started_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`main` changes into the home and names it in WAVESCRIBE_HOME for the programs it starts:
+    each test starts again in the folder and environment the run started with, with no home
+    named, whatever the machine's environment says."""
+    monkeypatch.chdir(os.getcwd())  # given back after the test
+    monkeypatch.setenv(home.ENV, "")  # so that what was there before comes back
+    monkeypatch.delenv(home.ENV)
+    monkeypatch.setattr(home, "_current", None)
 
 
 @pytest.fixture(autouse=True)

@@ -9,10 +9,10 @@ import logging
 import os
 import sys
 import urllib.parse
-from pathlib import Path
 from typing import Any
 
 from wavescribe.agent import DEFAULT_URL, TOKEN_ENV
+from wavescribe.home import given_path
 
 
 def _client(args: argparse.Namespace) -> Any:
@@ -162,7 +162,7 @@ def add_parser(sub: Any) -> None:
     )
     p.add_argument(
         "--resume",
-        type=Path,
+        type=given_path,
         metavar="FILE",
         help="keep the resume point in FILE after each line printed, and start from it: a "
         "restart, even after a kill, loses no line (one may come twice). --since-id and --since "

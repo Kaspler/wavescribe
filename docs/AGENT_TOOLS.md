@@ -35,7 +35,8 @@ themselves.
 Wavescribe has to be running: `uv run wavescribe serve` in the Wavescribe folder
 ([GETTING_STARTED.md](GETTING_STARTED.md)). The MCP tools, `follow` and `digest` talk to it at
 `http://localhost:8765`, and when nothing answers there they say so and tell you to start it.
-The other `--json` commands read Wavescribe's files and work without it.
+The other `--json` commands read Wavescribe's files and work without it, from its home: the
+Wavescribe folder, or the folder `--home` or `WAVESCRIBE_HOME` names ([COMMANDS.md](COMMANDS.md)).
 
 ### Privacy: the agent reads everything
 
@@ -88,8 +89,8 @@ failing on each), and `--token` gives the feed
 token a Wavescribe asks for once it has tokens ([FEED.md](FEED.md), *Who can read what*);
 `WAVESCRIBE_TOKEN` in the environment does the same without showing in the list of running
 processes. The control tools work only with the Wavescribe on the same Mac. Behind a proxy
-(`serve --behind-proxy`) they work too when `wavescribe mcp` runs in Wavescribe's folder, as
-the `--directory` above does: it sends the key in `data/control.key` to a Wavescribe on this
+(`serve --behind-proxy`) they work too when `wavescribe mcp` runs with Wavescribe's home, as
+the `--directory` above does for a Wavescribe folder (else add `"--home", "/path/to/its/home"`): it sends the key in `data/control.key` to a Wavescribe on this
 Mac, and to no other ([FEED.md](FEED.md), *Who can read what*).
 
 Every tool returns one JSON object. A tool that can't do its job returns Wavescribe's reason as
@@ -148,8 +149,8 @@ non-zero:
 | `wavescribe models list --json` | a model: `id`, `capability` (`asr`, `translate`, `vad` or `gate`), `license`, `license_url`, `tier` (`default`, `opt-in`, `restricted` or `byo`), `size_gb` (null when unknown), `languages` (BCP-47 tags, or `*` for any), `accepted` (its licence, where it needs accepting) and `installed` |
 | `wavescribe radio heard --json` | a frequency the scans found, as kept in `data/radio/heard.json`: `freq_hz`, `mhz`, `band`, `label`, `mode`, `privacy`, `level_db`, `snr_db`, `first_heard`, `last_heard`, `times`, `seen`, `passes`, and when known `name`, `user_name`, `rds` and `missing` (not heard on the last scan of its range); with `device`, the id of the receiver that heard it, in place of the dongle's serial |
 | `wavescribe radio catches --json` | a transmission a watch caught and kept, newest first: `id`, `station`, `freq_hz`, `mhz`, `t_start`, `t_end`, `duration`, `mode`, `band`, `label`, `channel` (null when the band has no channel list), `snr_db`, `peak_db`, `voice` (null when not checked), `reason`, `privacy`, `utterances` (`id`, `t`, `language`, `text`, `translations`), and the `name`, `note` and `tags` noted for its frequency |
-| `wavescribe doctor --json` | a check (`type` `check`: `group`, `check`, `status` `ok`, `warn`, `fail` or `skip`, `summary`, `fix` (null when there is nothing to do), `details`), then one with `type` `summary`: `status`, `problems`, `warnings`, `version`, `folder`, `options` and `from_service` (whether those are the background service's options); exits 1 when something is broken |
-| `wavescribe service status --json` | one line: `label`, `plist`, `installed`, `loaded`, `running`, `pid`, `state`, `runs`, `last_exit`, `last_signal`, `workdir`, `serve_args`, `keep_awake`, `log`, `log_bytes`, `full_log`; exits 3 when it isn't running |
+| `wavescribe doctor --json` | a check (`type` `check`: `group`, `check`, `status` `ok`, `warn`, `fail` or `skip`, `summary`, `fix` (null when there is nothing to do), `details`), then one with `type` `summary`: `status`, `problems`, `warnings`, `version`, `folder` (the home it checked, as an absolute path), `options` and `from_service` (whether those are the background service's options); exits 1 when something is broken |
+| `wavescribe service status --json` | one line: `label`, `plist`, `installed`, `loaded`, `running`, `pid`, `state`, `runs`, `last_exit`, `last_signal`, `workdir` (the home it runs in), `serve_args`, `keep_awake`, `log`, `log_bytes`, `full_log`; exits 3 when it isn't running |
 | `wavescribe follow` | a live utterance, with `resume` (where to go on after it; see *Stopping and going on*), or alert, until you stop it |
 | `wavescribe digest --json` | one line: what the `digest` tool returns (with `--now`, the `now` tool); it asks the running Wavescribe, like `follow` |
 

@@ -442,12 +442,20 @@ class Doctor:
             else:
                 self.add(g, "libraries", OK, f"all {len(found)} installed", installed=found)
 
+        from wavescribe.home import current
+
+        where = self.workdir.resolve()
         if (self.workdir / "config").is_dir():
-            self.add(g, "folder", OK, f"{short(self.workdir)}: config/ and data/ are here")
+            self.add(g, "folder", OK, f"home {where}: config/ and data/ are here", home=str(where))
+        elif current().named:  # a new home, named by --home or WAVESCRIBE_HOME
+            self.add(g, "folder", OK, f"home {where}: no config/ yet, so the examples that come "
+                     "with Wavescribe apply", home=str(where))  # fmt: skip
         else:
-            self.add(g, "folder", WARN, f"no config/ folder in {short(self.workdir)}: Wavescribe "
-                     "reads config/ and writes data/ in the folder it runs in",
-                     "cd into the Wavescribe folder, then run it again")  # fmt: skip
+            self.add(g, "folder", WARN, f"no config/ folder in {where}: Wavescribe keeps its "
+                     "settings and data in its home, the folder it is started in unless --home "
+                     "or WAVESCRIBE_HOME names another",
+                     "cd into the Wavescribe folder, or give it with --home",
+                     home=str(where))  # fmt: skip
 
     # -- configuration -------------------------------------------------------------------
 
@@ -473,13 +481,16 @@ class Doctor:
             path = resolve_stations_path(self.serve.config)
             base = load_stations(path)
         except ConfigError as e:
+            from wavescribe.home import example
+
+            copy = example(EXAMPLE_STATIONS_PATH.name) or EXAMPLE_STATIONS_PATH
             self.add(g, "stations", FAIL, str(e), "correct it (serve stops with this message), "
-                     f"or start again from a copy of {EXAMPLE_STATIONS_PATH}")  # fmt: skip
+                     f"or start again from a copy of {copy}")  # fmt: skip
         else:
             n, d = len(base.stations), len(base.devices)
             summary = f"{path}: {n} station{'s' * (n != 1)}"
             summary += f", {d} receiver{'s' * (d != 1)}" if d else ""
-            if path == EXAMPLE_STATIONS_PATH:
+            if path.name == EXAMPLE_STATIONS_PATH.name:  # the home's, or the one shipped
                 summary += " (the example list: copy it to config/stations.toml to make your own)"
             self.add(g, "stations", OK, summary, path=str(path))
 
@@ -1054,7 +1065,7 @@ def render(checks: Sequence[Check], *, tty: bool = False) -> list[str]:
 def options_to_check(args: argparse.Namespace, home: Path | None = None
                      ) -> tuple[list[str], bool]:  # fmt: skip
     """The serve options to check: those given, else the installed service's (when it runs in
-    this folder), else serve's defaults. Returns (options, whether they are the service's)."""
+    this home), else serve's defaults. Returns (options, whether they are the service's)."""
     from wavescribe import service
 
     given = service.serve_argv(args.serve_parser, args)
@@ -1080,15 +1091,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
               file=sys.stderr)  # fmt: skip
         options, from_service = [], False
         serve = service.check_serve_args([])
+    from wavescribe.home import current
+
     checks = Doctor(serve).run()
     summary = verdict(checks)
+    home = current().path  # absolute and resolved, for people and other programs alike
     if args.json:
         for c in checks:
             print(to_json(c.to_dict()))
-        print(to_json({**summary, "version": __version__, "folder": str(Path.cwd()),
+        print(to_json({**summary, "version": __version__, "folder": str(home),
                        "options": options, "from_service": from_service}))  # fmt: skip
     else:
-        print(f"Wavescribe {__version__} doctor, in {short(Path.cwd())}")
+        print(f"Wavescribe {__version__} doctor, home {home}")
         if from_service:
             print(f"Checking the background service's options: serve {' '.join(options)}"
                   .rstrip())  # fmt: skip

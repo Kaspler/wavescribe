@@ -52,6 +52,16 @@ dev = ["pytest>=8", "ruff>=0.15"]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+# The tracked examples, in the package too: a home without its own config/ reads them there
+# (wavescribe/home.py). Named one by one, so a real config file never goes into a wheel.
+[tool.hatch.build.targets.wheel.force-include]
+"config/alerts.example.toml" = "wavescribe/examples/alerts.example.toml"
+"config/keywords/pt.example.toml" = "wavescribe/examples/keywords/pt.example.toml"
+"config/models.local.example.toml" = "wavescribe/examples/models.local.example.toml"
+"config/stations.example.toml" = "wavescribe/examples/stations.example.toml"
+"config/stations.es.example.toml" = "wavescribe/examples/stations.es.example.toml"
+"config/stations.world.example.toml" = "wavescribe/examples/stations.world.example.toml"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

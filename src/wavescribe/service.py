@@ -9,8 +9,9 @@ installed, and restarts after a crash. What it runs:
 - **The project's own environment.** The Python that ran ``service install`` (``sys.executable``,
   e.g. ``.venv/bin/python``) runs ``-m wavescribe`` directly, so a restart needs neither uv nor
   the network.
-- **The working directory is the Wavescribe folder**, where ``config/`` and ``data/`` are, as
-  for every other command.
+- **It runs in the home** it was installed with (``wavescribe/home.py``), where ``config/`` and
+  ``data/`` are: the plist's ``WorkingDirectory``, also named by ``WAVESCRIBE_HOME`` in its
+  environment, so the service uses that home whatever launchd's own environment holds.
 - **Kept awake.** ``caffeinate -i`` holds an idle-sleep assertion while serve runs. It passes
   SIGTERM on to serve and exits with serve's exit code, so launchd stops it cleanly and sees a
   crash as one. It doesn't stop clamshell sleep: a MacBook with its lid closed still sleeps
@@ -43,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from wavescribe.home import ENV as HOME_ENV
 from wavescribe.invocation import typed
 
 LABEL = "io.github.kaspler.wavescribe"
@@ -167,7 +169,7 @@ def build_plist(job: Job, label: str = LABEL) -> dict[str, Any]:
         "Label": label,
         "ProgramArguments": job.command,
         "WorkingDirectory": str(job.workdir),
-        "EnvironmentVariables": {"PYTHONUNBUFFERED": "1", **job.env},
+        "EnvironmentVariables": {"PYTHONUNBUFFERED": "1", **job.env, HOME_ENV: str(job.workdir)},
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": THROTTLE_S,
@@ -325,8 +327,8 @@ def serve_argv(serve: argparse.ArgumentParser, ns: argparse.Namespace) -> list[s
     out: list[str] = []
     positionals: list[str] = []
     for action in serve._actions:
-        if isinstance(action, argparse._HelpAction) or action.dest == argparse.SUPPRESS:
-            continue
+        if isinstance(action, argparse._HelpAction) or action.dest in (argparse.SUPPRESS, "home"):
+            continue  # the home goes in the plist by itself (build_plist)
         value = getattr(ns, action.dest, action.default)
         if not action.option_strings:
             positionals += [str(v) for v in value or []]
@@ -354,6 +356,7 @@ def check_serve_args(args: Sequence[str]) -> argparse.Namespace:
 def preflight(ns: argparse.Namespace, workdir: Path,
               port_probe: Callable[[str, int], None] | None) -> None:  # fmt: skip
     """What would stop serve straight away, checked before anything is installed."""
+    from wavescribe import home
     from wavescribe.alerts import (
         DEFAULT_KEYWORDS_DIR,
         merge_page,
@@ -364,9 +367,15 @@ def preflight(ns: argparse.Namespace, workdir: Path,
     from wavescribe.config import ConfigError, load_stations, resolve_stations_path
     from wavescribe.settings import Settings
 
-    if not (workdir / "config").is_dir() and not (workdir / "pyproject.toml").is_file():
+    named = home.current().named  # by --home or WAVESCRIBE_HOME: a new home is a home too
+    if (
+        not named
+        and not (workdir / "config").is_dir()
+        and not (workdir / "pyproject.toml").is_file()
+    ):
         raise ServiceError(f"{workdir} isn't a Wavescribe folder (no config/): run "
-                           f"`{typed('service install')}` in the folder you run it in")  # fmt: skip
+                           f"`{typed('service install')}` in the folder you run it in, or give "
+                           "that folder with --home")  # fmt: skip
     if ns.open:
         raise ServiceError("--open doesn't apply to a background service: open the page "
                            f"yourself at http://localhost:{ns.port}")  # fmt: skip
@@ -428,7 +437,7 @@ def describe(st: dict[str, Any], home: Path | None = None) -> list[str]:
         lines.append(f"  last exit: {exit_}{sig}")
     if st["serve_args"] is not None:
         lines.append(f"  runs:      serve {' '.join(st['serve_args'])}".rstrip())
-        lines.append(f"  in:        {_short(st['workdir'], home)}")
+        lines.append(f"  home:      {_short(st['workdir'], home)}")
         if st["keep_awake"]:
             lines.append("  awake:     caffeinate -i keeps the Mac from idle sleep while it "
                          "runs (a closed lid still sleeps a MacBook)")  # fmt: skip
@@ -447,7 +456,9 @@ def port_probe(host: str, port: int) -> None:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    workdir = Path.cwd()
+    from wavescribe import home
+
+    workdir = home.current().path
     serve_args = serve_argv(args.serve_parser, args)
     try:
         ns = check_serve_args(serve_args)
@@ -520,9 +531,9 @@ def add_parser(sub: Any) -> None:
     p = ssub.add_parser(
         "install", parents=[serve], conflict_handler="resolve",
         help="start `serve` now and at every login, restarted after a crash; takes serve's "
-        "options (run it from the Wavescribe folder)",
+        "options (run it from the Wavescribe folder, or give its home with --home)",
         description="Install a launchd LaunchAgent that runs `wavescribe serve` with these "
-        "options from this folder, keeps the Mac from idle sleep while it runs, restarts it "
+        "options in this home, keeps the Mac from idle sleep while it runs, restarts it "
         "after a crash and starts it at login. Run it again to change the options.",
     )  # fmt: skip
     p.add_argument("--dry-run", action="store_true",

@@ -6,9 +6,9 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from pathlib import Path
 from typing import Any, NamedTuple
 
+from wavescribe.home import given_path
 from wavescribe.invocation import typed
 from wavescribe.radio.bandplan import (
     AUTO,
@@ -471,7 +471,9 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
         p.add_argument("--gain", type=float, help="tuner gain in dB (default: the receiver's)")
 
     def common(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
+        p.add_argument(
+            "--config", type=given_path, help="stations TOML (default: config/stations.toml)"
+        )
         p.add_argument("--region", choices=REGIONS, help="band plan region (default: from the "
                        "config's [radio] region, else this machine's locale)")  # fmt: skip
 
@@ -507,7 +509,9 @@ def add_parser(sub: Any, add_store_args: Any, add_alert_args: Any) -> None:
     p.set_defaults(func=cmd_spurs)
 
     p = rsub.add_parser("heard", help="everything scans have found here")
-    p.add_argument("--config", type=Path, help="stations TOML (default: config/stations.toml)")
+    p.add_argument(
+        "--config", type=given_path, help="stations TOML (default: config/stations.toml)"
+    )
     p.add_argument("--json", action="store_true", help="one JSON object per line (experimental)")
     p.set_defaults(func=cmd_heard)
 
