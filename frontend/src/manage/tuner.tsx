@@ -13,8 +13,9 @@ import { type LiveReceiver, type Span, TUNER_MHZ, hears, usable } from "./dial";
 import { rxName } from "./Receivers";
 import { type Step, defaultStep, hasChannels, keyStep, rasterKhz, snap, stepChoices, stepFrom, stepLabel } from "./tuning";
 
-/** The gains an RTL-SDR's tuner offers, in dB. */
-export const GAINS = [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
+/** The gains an RTL-SDR's R820T-family tuner offers, in dB. Never 0: rtl_sdr takes 0 as automatic
+ * gain, which moves the noise floor under the detector and the scale. */
+export const GAINS = [0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4, 28, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48, 49.6];
 /** A few gains named by what they are for, low to high: the rest are under "More". The tuner
  * has no automatic gain (a receiver's own gain is set under Settings → Receivers). */
 const GAIN_WORDS: [number, string][] = [[20.7, "Low"], [29.7, "Medium"], [38.6, "High"], [49.6, "Highest"]];

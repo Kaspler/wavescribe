@@ -424,6 +424,8 @@ class LiveService:
                 want_gain = float(gain) if gain not in (None, "") else dev_cfg.gain_db
             except (TypeError, ValueError) as e:
                 raise LiveError("The gain is a number in dB, e.g. 30.") from e
+            if not 0 < want_gain <= 60:  # rtl_sdr takes 0 as automatic gain: never wanted here
+                raise LiveError("The gain is a number of dB above 0, e.g. 30.")
             fits = in_band(freq, dev_cfg.center_hz, dev_cfg.sample_rate, mode) and off_centre(
                 freq, dev_cfg.center_hz, mode, channel_hz
             )

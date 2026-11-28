@@ -72,7 +72,7 @@ d87253568dc6410ab26389503de840af73a8705d frontend/src/manage/refusals.ts
 9cbae73fc1619778dcbe924a5c479b659ea1c609 frontend/src/manage/schedule.ts
 e6ed73dd60af45d78a3329145f07162df9edcd94 frontend/src/manage/spokenLang.ts
 622e1a26d4c8455827b8dc42cfaea291c3f717f2 frontend/src/manage/suggest.ts
-0c26a75c597d4ccc8fe6bffa2302ecc43e4c2fcd frontend/src/manage/tuner.tsx
+da1de3f9f1e83e98c542dedd186fcc420bf8d358 frontend/src/manage/tuner.tsx
 170792a2429d8508c2cd2980ae13ae792f829530 frontend/src/manage/tuning.ts
 8fa01b779d53d5aae36fb95e0cf6319158d77e34 frontend/src/manage/wordLists.ts
 befd121584a0fe920f214314188db3e7e750e13f frontend/src/reading/Alerts.tsx

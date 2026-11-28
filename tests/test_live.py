@@ -306,6 +306,19 @@ def test_a_channel_on_the_dongles_centre_moves_the_dongle(node: Running, fake_rt
     assert [round(f, 3) for f in st["scan"]["freqs_mhz"]] == [445.7, 445.8]
 
 
+def test_a_gain_of_zero_is_refused_rtl_sdr_would_take_it_as_automatic_gain(node: Running) -> None:
+    for bad in (0, -5, 300, "loud"):
+        status, err = node.call(
+            "POST", "/api/manage/live/x", {"mhz": 446.1, "acknowledge": True, "gain_db": bad}
+        )
+        assert status == 400 and "The gain is a number" in err["error"]
+    assert not node.app.live.is_open("x")
+    status, _ = node.call(
+        "POST", "/api/manage/live/x", {"mhz": 446.1, "acknowledge": True, "gain_db": 0.9}
+    )
+    assert status == 200
+
+
 def test_a_frequency_in_the_wrong_unit_is_refused_with_the_right_one(node: Running) -> None:
     for mhz, message in (
         (446_006_250, "looks like Hz; frequencies are in MHz: 446.00625"),
