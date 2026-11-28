@@ -220,7 +220,7 @@ class ReceiverSession:
         began = time.perf_counter()
         config = self.device.config
         rate = config.sample_rate
-        if first or self._detector is None or self._detector.center_hz != config.center_hz:
+        if first or self._detector is None:  # a move starts rtl_sdr again: ``first``
             self._land(config, t_end - len(iq) / rate)
         self.health.connected = True
         self.health.last_data_at = t_end

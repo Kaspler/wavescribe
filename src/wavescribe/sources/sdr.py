@@ -92,6 +92,7 @@ class RtlSdrDevice:
         # The share of a block's length spent handing it to everything on the dongle,
         # smoothed: near 1, the thread is falling behind the dongle.
         self.load = 0.0
+        self._moving = False  # rtl_sdr was stopped to start again elsewhere: no reconnect
         # The spectrum is computed only while someone looks at it (the receivers panel asks
         # again every half second), so a dongle nobody watches costs nothing extra.
         self.spectrum_wanted_until = 0.0
@@ -136,12 +137,31 @@ class RtlSdrDevice:
         if proc is not None and proc.poll() is None:
             proc.kill()
 
+    def move(self, config: SdrDevice) -> None:
+        """Tune the dongle to another place or gain without letting it go: rtl_sdr starts again
+        at once with ``config``, with no wait and no reconnect counted. The channels on it go
+        on from the first block there (``first``); point each at its place in the new window
+        (``SdrChannelSource.repoint``) before moving, so that block finds it there."""
+        if config.serial != self.config.serial:
+            raise ValueError(f"a move keeps the dongle: {config.serial} isn't {self.config.serial}")
+        with self._lock:
+            self.config = config
+            self._moving = True
+            proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+
     def _loop(self, stop: threading.Event) -> None:
         failures = 0  # consecutive runs that ended without data
         while not stop.is_set():
             if self._run_once(stop):
                 failures = 0
             self.connected = False
+            if self._moving and not stop.is_set():
+                self._moving = False
+                for ch in self._snapshot():
+                    ch._disconnected(self.reconnects)  # a gap: the audio after it starts afresh
+                continue
             if not stop.is_set():  # counted before the channels hear of it: a first drop is one
                 self.reconnects += 1
             for ch in self._snapshot():
@@ -175,9 +195,12 @@ class RtlSdrDevice:
 
     def _run_once(self, stop: threading.Event) -> bool:
         """One rtl_sdr lifetime: spawn, read until EOF/stall/stop, then reap. True if data came."""
+        with self._lock:
+            command = self.command()
+            self._moving = False
         try:
             proc = subprocess.Popen(
-                self.command(),
+                command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -187,6 +210,9 @@ class RtlSdrDevice:
             return False
         with self._lock:
             self._proc = proc
+            if self.command() != command:  # moved while it was starting: start it again there
+                self._moving = True
+                proc.kill()
         assert proc.stdout is not None and proc.stderr is not None
         self.said.clear()
         drain = threading.Thread(
@@ -257,6 +283,8 @@ class RtlSdrDevice:
         finally:
             if stop.is_set():
                 reason = "closed"
+            elif self._moving:
+                reason = "moved"
             if proc.poll() is None:
                 proc.kill()
             proc.wait()
@@ -498,6 +526,15 @@ class SdrChannelSource:
     @property
     def health(self) -> SourceHealth:
         return self._health
+
+    def repoint(self, tuning: SdrTuning) -> None:
+        """Hear this channel through its dongle at the dongle's next place
+        (``RtlSdrDevice.move``), or another channel there: the demodulator is made afresh for
+        the new offset at the first block from there, while the station's queue and pipeline
+        carry on. The RDS name is kept when the frequency is the same."""
+        if tuning.freq_hz != self.tuning.freq_hz:
+            self._rds = None
+        self.tuning = tuning
 
     def __iter__(self) -> Iterator[AudioChunk]:
         if not self._device.available:
