@@ -793,7 +793,7 @@ class OpenWatch:
             lo = max(0, ln.pos - 1)
             near = power[lo : ln.pos + 2]
             j = int(np.argmax(near))
-            around = float(np.median(floor[max(0, ln.pos - 24) : ln.pos + 25]))
+            around = _median(floor[max(0, ln.pos - 24) : ln.pos + 25])
             if near[j] < LINE_OVER * around:
                 ln.moved.append(False)
                 if end - ln.last >= self._line_gone:
@@ -1010,6 +1010,15 @@ class OpenWatch:
         out = [self._end(t, "stopped") for t in self._tracks if t.state == "busy"]
         self._tracks = []
         return out
+
+
+def _median(some: np.ndarray) -> float:
+    """The median of a handful of numbers, each line's every frame: a sort and no more."""
+    ordered = np.sort(some)
+    n = len(ordered)
+    if n % 2:
+        return float(ordered[n // 2])
+    return 0.5 * float(ordered[n // 2 - 1] + ordered[n // 2])
 
 
 def _between_bins(three: np.ndarray) -> float:
