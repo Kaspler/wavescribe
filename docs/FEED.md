@@ -293,7 +293,7 @@ refused (400), so it never replaces that one and its secret or headers:
 
 | Field | Meaning |
 |---|---|
-| `kind` | `webhook` (any program that takes a POST, the default) or `ntfy` (below) |
+| `kind` | `webhook` (any program that takes a POST, the default), `ntfy` or `mesh` (below) |
 | `events` | `alert`, `utterance`, or both |
 | `rules`, `min_severity`, `stations` | which alerts go out (all rules, medium and up, all stations, by default) |
 | `languages` | translations to include (all, by default) |
@@ -421,6 +421,74 @@ kind = "ntfy"
 url = "https://ntfy.example.org/alerts-k3q9x"
 min_severity = "high"
 headers = { Authorization = "Bearer tk_…" }
+```
+
+**Mesh (experimental).** *Not yet verified on real nodes.* An output of the kind `mesh` sends
+each alert as a direct message to one node of a [Meshtastic](https://meshtastic.org) LoRa mesh,
+so that it can reach a node someone carries with no internet and no mobile network on the way.
+It needs a Meshtastic node attached to this machine (by USB, or on the network) and the
+`meshtastic` command-line program, which you install yourself (`pipx install "meshtastic[cli]"`;
+it is GPL-3.0 and runs as a separate program, [LICENSING.md](LICENSING.md#external-programs)).
+For each alert Wavescribe runs:
+
+```sh
+meshtastic [--port <serial port> | --host <address>] --dest '!1a2b3c4d' --sendtext '<message>' --ack
+```
+
+- **One node, never a channel.** `--dest` names the node, and that node acknowledges a direct
+  message when it gets it. Wavescribe never sends to a channel or to every node (`!ffffffff` is
+  refused). Which channels and keys the nodes hold is up to you.
+- **The message** is one line of at most `max_bytes` bytes of UTF-8 (200 by default and at
+  most; a packet carries 239 bytes, everything included): the time the alert was last heard
+  (hours and minutes, by this machine's clock) and the station first, then the severity (with
+  "not checked" when the model couldn't check the match), the rule and the words as heard,
+  never the translation, cut on a word with "…":
+
+  ```text
+  15:03 Radio Example [HIGH] water: Corte de água amanhã entre as 9h e as 17h na zona norte.
+  ```
+
+- **Acknowledged, or not.** Wavescribe reads what the program prints. A line with `ACK` and a
+  clean exit is the node's acknowledgement: the delivery log says *acknowledged*. A `NAK`, or
+  no answer within `timeout_s`, is *not acknowledged*: `sent to !1a2b3c4d, not acknowledged
+  within 120 s: it may or may not have arrived`. That alert stays in the outbox and goes again,
+  after the floor below, then at waits that double up to half an hour, until the node
+  acknowledges it or it is older than `alert_max_age_hours`. A relay heard without the node's
+  acknowledgement is reported as `relayed by another node, not acknowledged by !1a2b3c4d: it
+  may or may not have arrived` and isn't sent again: the message is out on the mesh. When
+  nothing was sent (no node attached, the program missing), the log says *not sent* and the
+  alert waits. The program's documentation doesn't describe what it prints, so this reading is
+  not yet verified on real nodes. An acknowledgement says that the node got the message, not
+  that anyone read it, and an alert can fail to arrive at all.
+- **The band's share.** A mesh is shared and slow, and in Europe's 868 MHz band a node may
+  transmit 10% of any hour (the node itself stops at that). Wavescribe sends at most one
+  message every `min_gap_s` and `daily_cap` messages in any 24 hours through each node attached
+  to it, a message sent again included; outputs through the same node share them. Past the
+  cap, alerts wait in the outbox until the oldest message is a day old, and are given up when
+  older than `alert_max_age_hours`. The count goes on through a restart. Under *Settings →
+  Connections* and *Health*, each mesh output says how many messages went in the last 24 hours
+  and, once the cap is reached, `Daily cap reached: 20 of 20 messages in the last 24 h. Alerts
+  wait; the next can go at 14:05.` The *Test* button keeps to the floor and the cap too.
+
+| Field | Meaning |
+|---|---|
+| `node` | the node that gets the alerts: `!` and 8 hexadecimal digits, as the Meshtastic app shows it |
+| `device` | the node attached to this machine: a serial port (`/dev/cu.usbserial-…`), a host name or address on the network, or empty to let the program find one on USB |
+| `min_gap_s` | the floor between two messages: 120 s by default, 30 to 3600 |
+| `daily_cap` | the most messages in any 24 hours: 20 by default, 1 to 200 |
+| `timeout_s` | how long to wait for the acknowledgement: 120 s by default, 10 to 600 |
+| `command` | the program: `meshtastic` on the `PATH` by default, else in `~/.local/bin`, where pipx puts it; or a full path |
+
+```toml
+[[output]]
+id = "pocket"
+name = "pocket"
+kind = "mesh"
+node = "!1a2b3c4d"
+device = "/dev/cu.usbserial-0001"
+min_severity = "high"
+min_gap_s = 120
+daily_cap = 20
 ```
 
 **Headers.** Each request is a `POST` with `Content-Type` (`application/json`,

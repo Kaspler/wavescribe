@@ -2,7 +2,7 @@
 // each delivery without the store's row id.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { alertsLine, deliveryKey, maxAge } from "../src/manage/deliveries.ts";
+import { alertsLine, deliveryKey, maxAge, meshLine } from "../src/manage/deliveries.ts";
 
 const st = { sent: 3, failed: 1, dropped: 0, queued: 2, alerts_waiting: 0, alerts_oldest_age_s: null, alerts_expired: 0, alerts_dropped: 0 };
 
@@ -44,4 +44,14 @@ test("a delivery is keyed by its row in the store, else by what it was", () => {
   assert.notEqual(deliveryKey(a), deliveryKey(c));
   assert.equal(deliveryKey(a), deliveryKey({ ...a }), "the same entry keeps its key from one poll to the next");
   assert.equal(deliveryKey({ output: "hub", t: 2, event: "test", ref: null }).includes("undefined"), false);
+});
+
+test("a mesh node's share of the band, and the cap when it is reached", () => {
+  const at = (t) => `@${t}`;
+  assert.equal(meshLine({ sent_24h: 3, daily_cap: 20, cap_reached: false, next_at: 99 }, at), "3 of 20 messages in the last 24 h");
+  assert.equal(meshLine({ sent_24h: 0, daily_cap: 1, cap_reached: false, next_at: null }, at), "0 of 1 message in the last 24 h");
+  assert.equal(meshLine({ sent_24h: 20, daily_cap: 20, cap_reached: true, next_at: 1800 }, at),
+    "Daily cap reached: 20 of 20 messages in the last 24 h. Alerts wait; the next can go at @1800.");
+  assert.equal(meshLine({ sent_24h: 20, daily_cap: 20, cap_reached: true }, at), "Daily cap reached: 20 of 20 messages in the last 24 h. Alerts wait.");
+  for (const none of [undefined, null, {}, { sent_24h: 3 }]) assert.equal(meshLine(none, at), null);
 });

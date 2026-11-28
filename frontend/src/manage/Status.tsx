@@ -10,7 +10,7 @@ import { ActButton, Advanced, Field, Input, Lamp, LinkButton, Section, Table, Ta
 import { T } from "../reading/strings";
 import { type Any, bytes, get, mb, num, post, secs, useEvery, useLoad } from "./api";
 import { checksLine } from "./checks";
-import { alertsLine } from "./deliveries";
+import { alertsLine, meshLine } from "./deliveries";
 
 const kept = (v: string, old: number | null) => (v.trim() === "" ? old : +v);
 
@@ -234,8 +234,9 @@ function OutputHealth({ outs }: { outs: Record<string, Any> }) {
         {Object.entries(outs).map(([id, o]) => (
           <tr key={id}>
             <td>
-              {id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}
+              {id}{o.waiting && <> <Tag tone="warn">waiting</Tag></>}{o.mesh?.cap_reached && <> <Tag tone="warn">daily cap reached</Tag></>}
               {alertsLine(o) && <span className="m-cell-note is-wide">{alertsLine(o)}</span>}
+              {meshLine(o.mesh, hm) && <span className="m-cell-note is-wide">{meshLine(o.mesh, hm)}</span>}
             </td><td className="num">{o.sent}</td><td className="num">{o.failed}</td><td className="num">{o.dropped}</td><td className="num">{o.queued}</td>
             <td className={o.last_error ? "is-trouble" : "m-muted"}>{o.last_error || "–"}</td>
           </tr>

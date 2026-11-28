@@ -338,3 +338,18 @@ def as_line(ev: Mapping[str, Any], max_bytes: int = LINE_BYTES) -> str:
     head = _alert_head(ev) + (f" · {station}" if station else "")
     words = _plain(ev.get("text"))
     return fit_bytes(f"{head}: {words}" if words else head, max_bytes)
+
+
+def as_mesh_line(ev: Mapping[str, Any], max_bytes: int = LINE_BYTES) -> str:
+    """An alert as one line for a radio mesh, where a message is small and slow: the time it was
+    last heard (this machine's clock, hours and minutes) and the station first, then the
+    severity, the rule and the words as heard, cut on a word."""
+    at = ev.get("last_at") or ev.get("first_at")
+    when = local_time(at, "%H:%M") if at else ""
+    station = _plain((ev.get("station") or {}).get("name"))
+    lead = " ".join(p for p in (when if when != "?" else "", station) if p)
+    head = f"{lead} {_alert_head(ev)}".strip()
+    words = _plain(ev.get("text"))
+    if not words:
+        return fit_bytes(head, max_bytes)
+    return fit_bytes(f"{head}: {words}", max_bytes, on_word=True, keep=len(head) + 2)

@@ -24,6 +24,19 @@ export function alertsLine(status: unknown): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
+/** A mesh node's share of the band (outputs.py): "3 of 20 messages in the last 24 h", or, with
+ * the cap reached, "Daily cap reached: 20 of 20 messages in the last 24 h. Alerts wait; the next
+ * can go at 14:05." (``at`` writes the time). Null for any other output. */
+export function meshLine(mesh: unknown, at: (t: number) => string): string | null {
+  const m = mesh && typeof mesh === "object" ? (mesh as Fields) : null;
+  const cap = count(m?.daily_cap);
+  if (!m || !cap) return null;
+  const used = `${count(m.sent_24h)} of ${cap} ${cap === 1 ? "message" : "messages"} in the last 24 h`;
+  if (!m.cap_reached) return used;
+  const next = typeof m.next_at === "number" && Number.isFinite(m.next_at) ? `; the next can go at ${at(m.next_at)}` : "";
+  return `Daily cap reached: ${used}. Alerts wait${next}.`;
+}
+
 /** "24 h", "30 min", "7 days": an output's alert_max_age_hours; null when it isn't a number. */
 export function maxAge(hours: unknown): string | null {
   if (typeof hours !== "number" || !Number.isFinite(hours) || hours <= 0) return null;

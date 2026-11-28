@@ -202,14 +202,15 @@ To list every installed package with its licence:
 ## External programs
 
 Wavescribe runs these as separate programs, through pipes and files; it doesn't import, link or
-ship them. The user installs them. ffmpeg and the rtl-sdr programs are the external GPL tools:
-each is optional and detected at runtime.
+ship them. The user installs them. ffmpeg, the rtl-sdr programs and `meshtastic` are the
+external GPL tools: each is optional and detected at runtime.
 
 | Program | What it is | Licence | How Wavescribe uses it |
 |---|---|---|---|
 | ffmpeg, ffprobe (Homebrew `ffmpeg`) | Audio and video converter | GPL-3.0-or-later (Homebrew builds it with `--enable-gpl --enable-version3`) | Run as a separate program: decodes internet streams (`sources/stream.py`), writes and cuts the speech archive (`store.py`), checks a pasted stream address (`catalog/stations.py`). Without it, internet stations, the speech archive and replay don't work |
 | libopus (inside ffmpeg) | Opus audio codec | BSD-3-Clause | Encodes the speech archive, inside the ffmpeg process |
 | `rtl_sdr`, `rtl_power`, `rtl_test` (Homebrew `librtlsdr`, Osmocom rtl-sdr) | RTL-SDR driver library and its tools | GPL-2.0-or-later | Run as separate programs: `rtl_sdr` streams samples to the demodulators over a pipe, `rtl_power` sweeps bands for scans (`radio/scan.py`, read as CSV), `rtl_test` lists the dongles. The library itself is never loaded by Wavescribe. Without it, radio receivers don't work |
+| `meshtastic` (the Meshtastic Python command-line program, installed by the user, e.g. `pipx install "meshtastic[cli]"`) | Command-line client for Meshtastic LoRa mesh nodes | GPL-3.0 | Run as a separate program, only for a mesh output (`mesh.py`): `meshtastic [--port … \| --host …] --dest !<node> --sendtext <message> --ack` sends one direct message to one node and waits for its acknowledgement. Never imported; Wavescribe doesn't ship, bundle or install it. Without it, a mesh output reports "not sent" |
 | macOS `say` | macOS text to speech | Apple's macOS Software License Agreement (section 2F in macOS Tahoe's covers the system voices) | Run as a separate program: spoken alerts on the Mac's own speakers. The voices are for local personal playback only |
 | macOS tools: `osascript`, `ioreg`, `sysctl`, `system_profiler`, `pmset`, `vm_stat`, `defaults`, `launchctl`, `lsof`, `ps` | Part of macOS | Apple's macOS Software License Agreement | Run as separate programs: notifications, USB devices and battery, memory, the locale, the background service, `wavescribe doctor` |
 

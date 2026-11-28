@@ -5,7 +5,9 @@ An output is a URL plus filters: which events (alerts, every utterance), which r
 stations, from which severity, which translations to include, and in which format (our JSON,
 CAP 1.2 XML for alerts, plain text for chat-style hooks, or an alert as one short line for
 channels that take small messages). An output of the kind ``ntfy`` is a webhook to an ntfy
-server, with each alert's title, priority and tags in the headers ntfy reads. Alerts go out at
+server, with each alert's title, priority and tags in the headers ntfy reads. One of the kind
+``mesh`` (experimental) hands each alert to the ``meshtastic`` program, as a direct message to one
+node of a LoRa mesh (``mesh.py``), no more often than its floor and cap allow. Alerts go out at
 once, with retries and backoff; utterances can be batched (``batch_s``) to keep a live text feed
 to another server cheap. Each output has its own thread and a bounded queue, so a dead endpoint
 never slows the pipeline or the other outputs; what overflows is dropped and counted.
@@ -41,13 +43,14 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-from wavescribe import __version__, httpclient
+from wavescribe import __version__, httpclient, mesh
 from wavescribe.events import (
     CHANGE_NOTE,
     LINE_BYTES,
     LINE_BYTES_MIN,
     alert_event,
     as_line,
+    as_mesh_line,
     as_text,
     to_json,
     utterance_event,
@@ -61,9 +64,11 @@ log = logging.getLogger(__name__)
 EVENTS = ("alert", "utterance")
 FORMATS = ("json", "cap", "text", "line")
 LINE_BYTES_MAX = 4096
-# What an output is: a webhook (any program that takes a POST), or an ntfy topic, which is a
-# webhook whose headers carry each alert's title, priority and tags (docs/FEED.md).
-KINDS = ("webhook", "ntfy")
+# What an output is: a webhook (any program that takes a POST), an ntfy topic, which is a
+# webhook whose headers carry each alert's title, priority and tags, or one node of a LoRa mesh,
+# reached through the meshtastic program (docs/FEED.md).
+KINDS = ("webhook", "ntfy", "mesh")
+MESH_FIELDS = ("node", "device", "command", "min_gap_s", "daily_cap")
 NTFY_FORMATS = ("line", "text")  # ntfy shows the body as the message: plain text only
 NTFY_PRIORITY = {"low": "2", "medium": "3", "high": "4", "critical": "5"}  # 1 min … 5 max
 NTFY_TAGS = {"low": "information_source", "medium": "loudspeaker", "high": "warning",
@@ -87,6 +92,7 @@ ALERT_MAX_AGE_HOURS = 24.0
 ALERT_MAX_AGE_LIMIT_HOURS = 168.0
 DELIVERY_HEADER = "X-Wavescribe-Delivery"
 CLOSE_WAIT_S = 2.0  # closing waits this long for the requests on their way to finish
+PACE_CHECK_S = 30.0  # alerts held back by a mesh node's floor or cap look again this often
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 
 # transport(url, body, headers, timeout) -> HTTP status; raises OSError when nothing came back,
@@ -104,7 +110,7 @@ class OutputConfig:
     id: str
     url: str
     name: str = ""
-    kind: str = "webhook"  # webhook or ntfy
+    kind: str = "webhook"  # webhook, ntfy or mesh
     events: tuple[str, ...] = ("alert",)
     rules: tuple[str, ...] = ()  # alert rules; empty means every rule
     min_severity: str = "medium"  # alerts below this aren't sent ("low" sends everything)
@@ -119,6 +125,13 @@ class OutputConfig:
     timeout_s: float = 10.0
     alert_max_age_hours: float = ALERT_MAX_AGE_HOURS  # a waiting alert older than this is given up
     max_bytes: int = LINE_BYTES  # the one-line form's longest message, in bytes of UTF-8
+    # A mesh output: the node it sends to, the node attached to this machine that sends, the
+    # program that talks to it, and the band's share it takes (mesh.py)
+    node: str = ""
+    device: str = ""
+    command: str = mesh.COMMAND
+    min_gap_s: float = mesh.MIN_GAP_S
+    daily_cap: int = mesh.DAILY_CAP
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> OutputConfig:
@@ -143,15 +156,17 @@ class OutputConfig:
         # Named as the page names it: by its name, else by its id (an [[output]] in a file).
         who = repr(str(raw["name"]).strip()) if str(raw.get("name") or "").strip() else oid
         url = str(raw.get("url", "")).strip()
-        if not re.match(r"^https?://[^\s/]+", url):
-            raise OutputError(f"{who}: the URL must start with http:// or https://")
         kind = raw.get("kind", "webhook")
         if kind not in KINDS:
             raise OutputError(f"{who}: kind is one of {', '.join(KINDS)}")
+        if kind == "mesh":
+            url = ""  # it reaches its node through the program, not a URL
+        elif not re.match(r"^https?://[^\s/]+", url):
+            raise OutputError(f"{who}: the URL must start with http:// or https://")
         events = tuple(raw.get("events", ("alert",)))
         if not events or any(e not in EVENTS for e in events):
             raise OutputError(f"{who}: events are any of {', '.join(EVENTS)}")
-        fmt = raw.get("format", "line" if kind == "ntfy" else "json")
+        fmt = raw.get("format", "json" if kind == "webhook" else "line")
         if fmt not in FORMATS:
             raise OutputError(f"{who}: format is one of {', '.join(FORMATS)}")
         if kind == "ntfy":
@@ -164,6 +179,21 @@ class OutputConfig:
                 raise OutputError(f"{who}: ntfy carries alerts only")
             if fmt not in NTFY_FORMATS:
                 raise OutputError(f"{who}: an ntfy message is one line (line) or text (text)")
+        node, device = "", ""
+        if kind == "mesh":
+            node = mesh.node_id(str(raw.get("node", ""))) or ""
+            if not node:
+                raise OutputError(
+                    f"{who}: node is the id of the one node that gets the alerts, !1a2b3c4d "
+                    "(never !ffffffff, which is every node)"
+                )
+            device = str(raw.get("device", "")).strip()
+            if wrong := mesh.device_error(device):
+                raise OutputError(f"{who}: {wrong}")
+            if events != ("alert",):
+                raise OutputError(f"{who}: a mesh node gets alerts only")
+            if fmt != "line":
+                raise OutputError(f"{who}: a mesh message is the one-line form (line)")
         if fmt == "cap" and events != ("alert",):
             raise OutputError(f"{who}: CAP carries alerts only")
         if fmt == "line" and events != ("alert",):
@@ -186,10 +216,22 @@ class OutputConfig:
 
         batch_s = number("batch_s", 0)
         max_bytes = number("max_bytes", LINE_BYTES)
-        if not LINE_BYTES_MIN <= max_bytes <= LINE_BYTES_MAX or max_bytes != int(max_bytes):
-            raise OutputError(
-                f"{who}: max_bytes is a whole number from {LINE_BYTES_MIN} to {LINE_BYTES_MAX}"
-            )
+        most = mesh.MESSAGE_BYTES if kind == "mesh" else LINE_BYTES_MAX
+        if not LINE_BYTES_MIN <= max_bytes <= most or max_bytes != int(max_bytes):
+            raise OutputError(f"{who}: max_bytes is a whole number from {LINE_BYTES_MIN} to {most}")
+        min_gap_s = number("min_gap_s", mesh.MIN_GAP_S)
+        daily_cap = number("daily_cap", mesh.DAILY_CAP)
+        timeout_s = number("timeout_s", mesh.ACK_TIMEOUT_S if kind == "mesh" else 10)
+        if kind == "mesh":
+            low, high = mesh.MIN_GAP_LIMITS
+            if not low <= min_gap_s <= high:
+                raise OutputError(f"{who}: min_gap_s is {low:g} to {high:g} seconds")
+            low, high = mesh.DAILY_CAP_LIMITS
+            if not low <= daily_cap <= high or daily_cap != int(daily_cap):
+                raise OutputError(f"{who}: daily_cap is a whole number from {low} to {high}")
+            timeout_s = max(mesh.ACK_TIMEOUT_LIMITS[0], min(mesh.ACK_TIMEOUT_LIMITS[1], timeout_s))
+        else:
+            timeout_s = max(1.0, min(60.0, timeout_s))
         if not 0 <= batch_s <= 3600:
             raise OutputError(f"{who}: batch_s is 0 to 3600 seconds")
         try:
@@ -217,9 +259,14 @@ class OutputConfig:
             secret=str(raw.get("secret", "")),
             context=max(0, min(10, int(number("context", 2)))),
             enabled=bool(raw.get("enabled", True)),
-            timeout_s=max(1.0, min(60.0, number("timeout_s", 10))),
+            timeout_s=timeout_s,
             alert_max_age_hours=max_age,
             max_bytes=int(max_bytes),
+            node=node,
+            device=device,
+            command=str(raw.get("command") or mesh.COMMAND),
+            min_gap_s=min_gap_s,
+            daily_cap=int(daily_cap),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -229,6 +276,9 @@ class OutputConfig:
         d["headers"] = dict(self.headers)
         if self.format != "line":
             del d["max_bytes"]  # only the one-line form has a length
+        if self.kind != "mesh":
+            for k in MESH_FIELDS:
+                del d[k]
         return d
 
     def public(self) -> dict[str, Any]:
@@ -296,6 +346,17 @@ def urllib_transport(url: str, body: bytes, headers: dict[str, str], timeout: fl
 def _retryable(status: int | None) -> bool:
     """Whether a failure may pass: nothing came back, or the other end asked to wait."""
     return status is None or status in (408, 425, 429) or status >= 500
+
+
+def _span(seconds: float) -> str:
+    """How long until something may happen: "40 s", "3 min", "2 h 5 min"."""
+    s = max(1, round(seconds))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{round(s / 60)} min"
+    h, m = divmod(round(s / 60), 60)
+    return f"{h} h {m} min" if m else f"{h} h"
 
 
 def sign(secret: str, timestamp: str, body: bytes) -> str:
@@ -394,6 +455,7 @@ class _Worker:
         self._not_before = not_before
         self._cv = threading.Condition()
         self._closed = False
+        self._capped = False  # a mesh output's alerts wait for its daily cap
         for ev, waiting in alerts:
             self._q.append(ev)
             self._alerts[ev["delivery_id"]] = waiting
@@ -535,6 +597,17 @@ class _Worker:
                 old = self._old()
                 if not old:
                     if self._q and self.config.enabled:
+                        hold, why = self.outputs.pace(self.config)
+                        if hold > 0:  # a mesh node's floor or cap: the alerts wait
+                            if why == "cap" and not self._capped:
+                                event(log, "output_mesh_cap", level=logging.WARNING,
+                                      output=self.config.id, cap=self.config.daily_cap,
+                                      waiting=len(self._alerts), next_in_s=round(hold))  # fmt: skip
+                            self._capped = why == "cap"
+                            # Again at least this often: the clock may be set meanwhile.
+                            self._cv.wait(min(hold, PACE_CHECK_S, self._next_check() or hold))
+                            continue
+                        self._capped = False
                         self._flying = self._pick()
                         return self._flying
                     self._cv.wait(self._next_check())
@@ -566,12 +639,20 @@ class _Worker:
             self._cv.wait(left)
         return batch
 
+    def _holds(self) -> tuple[float, float]:
+        """How long events wait after a round of tries failed, at first and at most. A mesh
+        node's start at its floor and grow to half an hour: each try takes the band."""
+        if self.config.kind == "mesh":
+            return self.config.min_gap_s, mesh.HOLD_MAX_S
+        return HOLD_MIN_S, HOLD_MAX_S
+
     def _run(self) -> None:
-        wait = HOLD_MIN_S
+        hold_min, hold_max = self._holds()
+        wait = hold_min
         # Alerts an earlier run left go no sooner than their next try was planned (at most
-        # HOLD_MAX_S away): a service that restarts in a loop doesn't try a struggling end at
+        # hold_max away): a service that restarts in a loop doesn't try a struggling end at
         # every start.
-        pause = min(HOLD_MAX_S, self._not_before - self.outputs.clock())
+        pause = min(hold_max, self._not_before - self.outputs.clock())
         if self._alerts and self.config.enabled and pause > 0:
             self.stats.waiting = True
             with self._cv:
@@ -579,7 +660,7 @@ class _Worker:
         while (events := self._take()) is not None:
             waiting = self._alerts.get(events[0].get("delivery_id", ""))
             try:
-                entry = self.outputs.send(
+                entry, again = self.outputs.deliver(
                     self.config, events, stats=self.stats, closed=lambda: self._closed,
                     after_restart=bool(waiting and waiting.after_restart),
                 )  # fmt: skip
@@ -597,7 +678,7 @@ class _Worker:
                 # after the change, or for the next run.
                 self._tried(events, entry["attempts"], wait)
                 return
-            elif not _retryable(entry["status"]):
+            elif not again:
                 self._over(events)  # refused for good: not tried again
             else:
                 self.stats.waiting = True
@@ -605,9 +686,9 @@ class _Worker:
                 self._hold(events)
                 with self._cv:  # closing ends the wait
                     self._cv.wait_for(lambda: self._closed, timeout=wait)
-                wait = min(HOLD_MAX_S, wait * 2)
+                wait = min(hold_max, wait * 2)
                 continue
-            self.stats.waiting, wait = False, HOLD_MIN_S
+            self.stats.waiting, wait = False, hold_min
             with self._cv:
                 self._flying = []
 
@@ -626,6 +707,7 @@ class Outputs:
         sleep: Callable[[float], None] = time.sleep,
         via: Callable[[str], list[str]] = lambda _station: [],
         clock: Callable[[], float] = time.time,
+        mesh_send: Callable[..., mesh.Sent] = mesh.send,
     ) -> None:
         self.store = store
         self.clock = clock  # the time alerts are raised at and aged by
@@ -633,6 +715,9 @@ class Outputs:
         self._node = node
         self._via = via  # where a station's lines from another machine have been
         self._transport = transport
+        self._mesh_send = mesh_send
+        self._pacers: dict[str, mesh.Pacer] = {}  # by the node attached to this machine
+        self._pacers_lock = threading.Lock()
         self._sleep = sleep
         self._lock = threading.Lock()
         self._workers: dict[str, _Worker] = {}
@@ -883,7 +968,73 @@ class Outputs:
 
     # -- delivery ---------------------------------------------------------------------------
 
+    # -- a mesh node's share of the band -------------------------------------------------------
+
+    def _pacer(self, config: OutputConfig) -> mesh.Pacer:
+        """The messages sent through the node this mesh output uses, in the last 24 hours,
+        those of earlier runs included (the store's delivery log), so a restart doesn't start the
+        cap over. Outputs that use the same node share it: the band's limit is the node's."""
+        with self._pacers_lock:
+            pacer = self._pacers.setdefault(config.device or "usb", mesh.Pacer())
+            if config.id in pacer.seeded:
+                return pacer
+            pacer.seeded.add(config.id)
+        if self.store is not None:
+            since = self.clock() - mesh.DAY_S
+            try:
+                rows = self.store.deliveries(config.id, limit=4 * mesh.DAILY_CAP_LIMITS[1])
+            except Exception:
+                log.exception("could not read the earlier messages of %s", config.id)
+                rows = []
+            pacer.add(r["t"] for r in rows if r["t"] > since and r["attempts"] > 0)
+        return pacer
+
+    def pace(self, config: OutputConfig) -> tuple[float, str | None]:
+        """How long a mesh output's next message must wait, and why ("gap" or "cap"); 0 for
+        any other output."""
+        if config.kind != "mesh":
+            return 0.0, None
+        return self._pacer(config).wait(self.clock(), config.min_gap_s, config.daily_cap)
+
+    def _mesh_status(self, config: OutputConfig) -> dict[str, Any]:
+        """For the page: how many messages went through this output's node in the last 24
+        hours, against its cap, and when the next may go if it has to wait."""
+        now = self.clock()
+        hold, why = self.pace(config)
+        return {"sent_24h": self._pacer(config).count(now), "daily_cap": config.daily_cap,
+                "min_gap_s": config.min_gap_s, "cap_reached": why == "cap",
+                "next_at": now + hold if hold > 0 else None}  # fmt: skip
+
+    def _to_mesh(
+        self, config: OutputConfig, text: str, closed: Callable[[], bool]
+    ) -> tuple[str | None, int, bool]:
+        """Hand one message to the mesh program: (what went wrong, 1 when it went on air else
+        0, whether to try again later)."""
+        pacer = self._pacer(config)
+        if not pacer.busy.acquire(blocking=False):
+            return "not sent: the node is sending another message; it goes again later", 0, True
+        try:
+            now = self.clock()
+            hold, why = pacer.wait(now, config.min_gap_s, config.daily_cap)
+            if why == "cap":
+                return (f"not sent: the daily cap of {config.daily_cap} messages through this "
+                        f"node is reached; the next can go in {_span(hold)}"), 0, True  # fmt: skip
+            if why == "gap":
+                return (f"not sent: one message every {config.min_gap_s:g} s through this node; "
+                        f"the next can go in {_span(hold)}"), 0, True  # fmt: skip
+            pacer.note(now)  # at once: another output on this node waits for it
+            sent = self._mesh_send(text, config.node, device=config.device,
+                                   command=config.command, timeout_s=config.timeout_s,
+                                   closed=closed)  # fmt: skip
+            if not sent.on_air:
+                pacer.undo(now)
+            return sent.error, int(sent.on_air), sent.retry
+        finally:
+            pacer.busy.release()
+
     def body(self, config: OutputConfig, events: list[dict[str, Any]]) -> tuple[bytes, str]:
+        if config.kind == "mesh":
+            return as_mesh_line(events[0], config.max_bytes).encode(), "text/plain; charset=utf-8"
         if config.format == "cap":
             from wavescribe.alerts.cap import to_cap
 
@@ -925,6 +1076,21 @@ class Outputs:
     ) -> dict[str, Any]:
         """POST one request with retries; returns its log entry. ``after_restart``: the alert
         was raised by an earlier run and waited in the outbox."""
+        return self.deliver(config, events, stats=stats, closed=closed, attempts=attempts,
+                            after_restart=after_restart)[0]  # fmt: skip
+
+    def deliver(
+        self,
+        config: OutputConfig,
+        events: list[dict[str, Any]],
+        *,
+        stats: _Stats | None = None,
+        closed: Callable[[], bool] = lambda: False,
+        attempts: int | None = None,
+        after_restart: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        """``send``, and whether what didn't get there is worth sending again later: a webhook
+        that couldn't be reached or asked to wait, a mesh node that didn't acknowledge."""
         body, ctype = self.body(config, events)
         kind = events[0]["type"] if len(events) == 1 else "batch"
         ref = ",".join(str(e.get("id")) for e in events[:20] if e.get("id") is not None) or None
@@ -947,6 +1113,9 @@ class Outputs:
         error: str | None = None
         n = 0
         t0 = time.perf_counter()
+        if config.kind == "mesh":  # one try: the node itself sends a message again a few times
+            tries = 0
+            error, n, retry = self._to_mesh(config, body.decode("utf-8"), closed)
         for n in range(1, tries + 1):
             try:
                 status = self._transport(config.url, body, headers, config.timeout_s)
@@ -965,6 +1134,8 @@ class Outputs:
             if closed():  # stopped while it waited: nothing more goes to this URL
                 break
         ok = error is None
+        if config.kind != "mesh":
+            retry = _retryable(status)
         ms = round((time.perf_counter() - t0) * 1000, 1)
         entry = {"t": time.time(), "output": config.id, "event": kind, "ref": ref, "ok": ok,
                  "status": status, "error": error, "attempts": n, "ms": ms,
@@ -981,7 +1152,7 @@ class Outputs:
         level = logging.INFO if ok else logging.WARNING
         event(log, "output", level=level, output=config.id, kind=kind, n=len(events), ok=ok,
               status=status, error=error, attempts=n, ms=ms)  # fmt: skip
-        return entry
+        return entry, not ok and retry
 
     def _record(self, entry: dict[str, Any]) -> None:
         """Put a delivery into the log the page shows (and the store's ``deliveries``)."""
@@ -1027,8 +1198,12 @@ class Outputs:
         with self._lock:
             workers = list(self._workers.values())
         now = self.clock()
-        return {w.config.id: {**asdict(w.stats), "queued": w.queued(), **w.alerts(now)}
-                for w in workers}  # fmt: skip
+        out = {w.config.id: {**asdict(w.stats), "queued": w.queued(), **w.alerts(now)}
+               for w in workers}  # fmt: skip
+        for w in workers:
+            if w.config.kind == "mesh":
+                out[w.config.id]["mesh"] = self._mesh_status(w.config)
+        return out
 
     def recent(self, output_id: str | None = None) -> list[dict[str, Any]]:
         if self.store is not None:

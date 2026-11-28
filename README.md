@@ -62,6 +62,8 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
 - **When the power and the networks go down.** Broadcast radio keeps working. During the power
   cut of 28 April 2025 in Spain and Portugal, radio was how people learned what was going on, in
   Spanish and Portuguese only.
+- **When the internet and the mobile network are down.** An alert can go over a LoRa mesh to a
+  Meshtastic node someone carries (experimental).
 
 ## Quick start
 
@@ -198,6 +200,8 @@ is less tried.
   alert that hasn't got there waits through a restart), signatures and a delivery log.
 - [Phone notifications through ntfy](docs/GETTING_STARTED.md#7-get-alerts) on a server you name,
   and alerts as one short line for SMS gateways and pagers.
+- [Alerts over a LoRa mesh](docs/GETTING_STARTED.md#7-get-alerts) (experimental, not yet verified
+  on real nodes): a direct message to one Meshtastic node, with no internet on the way.
 - [A test of the notification and of each voice](docs/GETTING_STARTED.md#7-get-alerts):
   `wavescribe alerts test`.
 - [Rules tried on a sentence](docs/GETTING_STARTED.md#7-get-alerts) (`alerts check`) or on
@@ -237,8 +241,8 @@ is less tried.
   isn't broadcast or amateur: aircraft, ships, walkie-talkies.
 - [What is kept of each kind of radio](docs/RADIO.md#you-decide-what-is-kept) is yours to set; by
   default, radio that isn't broadcast is kept for a few days or not at all.
-- [Receive only](docs/RADIO.md#what-wavescribe-does-with-each-kind-of-radio): no transmitting, no
-  digital decoder, no decryption.
+- [Receive only](docs/RADIO.md#what-wavescribe-does-with-each-kind-of-radio) on the receivers:
+  no transmitting, no digital decoder, no decryption.
 
 **Search, Ask and summaries**
 

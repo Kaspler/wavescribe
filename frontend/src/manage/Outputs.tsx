@@ -1,12 +1,12 @@
 // Outputs: webhooks and pushes that send alerts, and optionally every utterance, to other programs.
 import { useEffect, useRef, useState } from "react";
-import { hms } from "../lib/time";
+import { hm, hms } from "../lib/time";
 import {
   ActButton, Advanced, Button, Check, ChoiceChips, ConfirmButton, Field, Input, LangChips, Section, Segmented, Select, Table, Tag, act, toast,
 } from "../components/ui";
 import { type Any, ApiError, SEVERITIES, SEV_WORD, del, get, knownLangs, post, useEvery, useLoad } from "./api";
-import { type Kind, bearer, goodTopic, newTopic, ntfyParts, ntfyUrl } from "./connections";
-import { alertsLine, deliveryKey, maxAge } from "./deliveries";
+import { type Kind, bearer, goodTopic, newTopic, nodeId, ntfyParts, ntfyUrl, resultWord } from "./connections";
+import { alertsLine, deliveryKey, maxAge, meshLine } from "./deliveries";
 
 const SECRET_HEADER = /auth|token|key|secret|cookie|password/i; // values shown as dots
 
@@ -23,7 +23,7 @@ export function Outputs() {
   return (
     <>
       <Section id="out-h" title="Webhooks and live pushes"
-               description="Send alerts, and optionally every utterance, to other programs: Home Assistant, Node-RED, n8n, a chat bot, ntfy, or a central Wavescribe. Text and metadata only; audio stays here."
+               description="Send alerts, and optionally every utterance, to other programs: Home Assistant, Node-RED, n8n, a chat bot, ntfy, a mesh node, or a central Wavescribe. Text and metadata only; audio stays here."
                actions={!editing && <>
                  <Button variant="primary" icon="plus" onClick={() => setEditing({})}>New connection</Button>
                  <Button icon="bell" onClick={() => setEditing({ kind: "ntfy", name: "phone", format: "line" })}>Notify a phone (ntfy)</Button>
@@ -45,7 +45,9 @@ export function Outputs() {
                                    options={[{ value: "failed", label: "Failures" }, { value: "all", label: "All" }]} />}>
         <Table caption="Deliveries" empty={log === "failed" ? "No failed deliveries." : "Nothing delivered yet."}
                cols={[{ label: "Time" }, { label: "Connection" }, { label: "Event" }, { label: "Result" }, { label: "Tries", num: true }, { label: "ms", num: true }, { label: "Error" }]}>
-          {rows.map((d) => (
+          {rows.map((d) => {
+            const mesh = v.outputs.find((o: Any) => o.id === (d.output_id ?? d.output))?.kind === "mesh";
+            return (
             <tr key={deliveryKey(d)}>
               <td className="num">{hms(d.t)}</td>
               <td>{v.outputs.find((o: Any) => o.id === (d.output_id ?? d.output))?.name || d.output_id || d.output}</td>
@@ -53,12 +55,13 @@ export function Outputs() {
                 {d.event}{d.ref ? ` ${d.ref}` : ""}
                 {d.after_restart && <span className="m-cell-note is-one">after a restart</span>}
               </td>
-              <td>{d.ok ? <Tag tone="good">{d.status ?? "ok"}</Tag> : <Tag tone="warn">{d.status ?? "failed"}</Tag>}</td>
+              <td><Tag tone={d.ok ? "good" : "warn"}>{resultWord(d, mesh)}</Tag></td>
               <td className="num">{d.attempts}</td>
               <td className="num">{d.ms ?? "–"}</td>
               <td className="m-muted">{d.error || ""}</td>
             </tr>
-          ))}
+            );
+          })}
         </Table>
       </Section>
     </>
@@ -68,13 +71,16 @@ export function Outputs() {
 function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: () => Promise<void> }) {
   const st = o.status || {};
   const waiting = alertsLine(st);
+  const mesh = o.kind === "mesh";
+  const share = meshLine(st.mesh, hm);
   return (
     <li className={`m-item${o.enabled ? "" : " is-off"}`}>
       <div className="m-item-head">
         <strong>{o.name || o.id}</strong>
         {o.enabled ? <Tag tone="good">on</Tag> : <Tag tone="muted">off</Tag>}
         {o.enabled && st.waiting && <Tag tone="warn">waiting</Tag>}
-        {o.kind === "ntfy" ? <Tag>ntfy</Tag> : <Tag>{o.events.join(" + ")}</Tag>}
+        {o.enabled && st.mesh?.cap_reached && <Tag tone="warn">daily cap reached</Tag>}
+        {o.kind === "ntfy" || mesh ? <Tag>{mesh ? "mesh, experimental" : "ntfy"}</Tag> : <Tag>{o.events.join(" + ")}</Tag>}
         <Tag>{o.format === "line" ? `one line, ${o.max_bytes} bytes` : o.format}</Tag>
         {o.secret && <Tag>signed</Tag>}
         <span className="m-spacer" />
@@ -88,16 +94,22 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
         </ConfirmButton>
       </div>
       <p className="m-item-sub">
-        <span className="mono">{o.url}</span> · alerts {SEV_WORD[o.min_severity]?.toLowerCase()} and up{o.rules?.length ? ` (${o.rules.join(", ")})` : ""}
+        {mesh ? <><span className="mono">{o.node}</span> through {o.device ? <span className="mono">{o.device}</span> : "the node on USB"}</> : <span className="mono">{o.url}</span>} · alerts {SEV_WORD[o.min_severity]?.toLowerCase()} and up{o.rules?.length ? ` (${o.rules.join(", ")})` : ""}
         {o.stations?.length ? ` · ${o.stations.join(", ")}` : ""}{o.batch_s ? ` · batches of ${o.batch_s} s` : ""}
       </p>
       <p className="m-item-sub num">
         {st.sent ?? 0} sent · {st.failed ?? 0} failed · {st.dropped ?? 0} dropped · {st.queued ?? 0} queued
         {waiting && ` · ${waiting}`}
+        {share && !st.mesh?.cap_reached && ` · ${share}`}
         {st.last_error && <span className="is-trouble"> · last error: {st.last_error}</span>}
       </p>
+      {o.enabled && st.mesh?.cap_reached && <p className="m-item-sub is-trouble">{share}</p>}
       {o.enabled && st.waiting && (
-        <p className="m-item-sub">The other end doesn't answer: events wait for it and go once it is back, the oldest lines dropped first if too many pile up.</p>
+        <p className="m-item-sub">
+          {mesh
+            ? "Not acknowledged yet: the alert waits and goes again, never sooner than the floor allows, until the node acknowledges it or it is too old."
+            : "The other end doesn't answer: events wait for it and go once it is back, the oldest lines dropped first if too many pile up."}
+        </p>
       )}
     </li>
   );
@@ -106,12 +118,17 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
 const KIND_HINT: Record<Kind, string> = {
   webhook: "Any program that takes a POST: home automation, a chat bot, your own script, a central Wavescribe.",
   ntfy: "Alerts as notifications on a phone, through an ntfy server: one you run, or a public one. The ntfy app on the phone subscribes to the topic.",
+  mesh: "Experimental, not yet tried on real nodes. Alerts as direct messages to one Meshtastic node, through a node attached to this Mac and the meshtastic program: no internet or mobile network on the way. The node acknowledges what it gets; an alert can still fail to arrive.",
 };
 
 function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () => Promise<void>; onCancel: () => void }) {
-  const [kind, setKind] = useState<Kind>(o.kind === "ntfy" ? "ntfy" : "webhook");
+  const [kind, setKind] = useState<Kind>(o.kind === "ntfy" || o.kind === "mesh" ? o.kind : "webhook");
   const [name, setName] = useState(o.name || "");
-  const [url, setUrl] = useState(o.kind === "ntfy" ? "" : o.url || "");
+  const [url, setUrl] = useState(o.kind === "ntfy" || o.kind === "mesh" ? "" : o.url || "");
+  const [node, setNode] = useState(o.node || "");
+  const [device, setDevice] = useState(o.device || "");
+  const [gap, setGap] = useState(String(o.min_gap_s ?? 120));
+  const [cap, setCap] = useState(String(o.daily_cap ?? 20));
   const parts = o.kind === "ntfy" ? ntfyParts(o.url) : null;
   const [server, setServer] = useState(parts?.server || "");
   const [topic, setTopic] = useState(() => parts?.topic || newTopic());
@@ -136,26 +153,31 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   );
   const [why, setWhy] = useState<string | null>(null);
   const ntfy = kind === "ntfy";
+  const mesh = kind === "mesh";
+  const hook = kind === "webhook";
   // A central Wavescribe's ingest takes utterances only: it runs its own rules (docs/FEED.md).
-  const central = !ntfy && /\/feed\/v1\/ingest\/?$/.test(url.trim());
-  const alertsOnly = ntfy || fmt === "line" || fmt === "cap";
+  const central = hook && /\/feed\/v1\/ingest\/?$/.test(url.trim());
+  const alertsOnly = !hook || fmt === "line" || fmt === "cap";
+  const line = mesh || fmt === "line";
   const maxAgeText = maxAge(o.alert_max_age_hours);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, []);
   const choose = (k: Kind) => {
     setKind(k);
-    if (k === "ntfy" && fmt !== "text") setFmt("line");
+    if ((k === "ntfy" && fmt !== "text") || k === "mesh") setFmt("line");
+    if (k === "mesh" && +maxBytes > 200) setMaxBytes("200");
   };
-  const ready = ntfy ? server.trim() !== "" && goodTopic(topic) : url.trim() !== "";
+  const ready = ntfy ? server.trim() !== "" && goodTopic(topic) : mesh ? nodeId(node) !== null : url.trim() !== "";
   const save = async () => {
     const extra: Record<string, string> = Object.fromEntries(headers.filter(([k]) => k.trim()).map(([k, x]) => [k.trim(), x]));
     if (ntfy && token.trim()) extra.Authorization = bearer(token);
     else if (ntfy && hadToken && !dropToken) extra.Authorization = "•••"; // the server keeps the one it has
     const raw: Any = {
-      id: o.id, name: name.trim(), kind, url: ntfy ? ntfyUrl(server, topic) : url.trim(), events: ntfy ? ["alert"] : events,
-      min_severity: sev, rules, stations, languages: langs, format: fmt,
-      batch_s: +batch, context: +ctx, ...(fmt === "line" ? { max_bytes: +maxBytes } : {}), headers: extra, enabled,
+      id: o.id, name: name.trim(), kind, url: ntfy ? ntfyUrl(server, topic) : mesh ? "" : url.trim(), events: hook ? events : ["alert"],
+      min_severity: sev, rules, stations, languages: langs, format: mesh ? "line" : fmt,
+      batch_s: +batch, context: +ctx, ...(line ? { max_bytes: +maxBytes } : {}), headers: extra, enabled,
       secret: dropSecret ? "" : secret || (o.secret ? true : ""),
+      ...(mesh ? { node: nodeId(node), device: device.trim(), min_gap_s: +gap, daily_cap: +cap } : {}),
     };
     if (!raw.id) delete raw.id;
     try {
@@ -180,12 +202,22 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
         <Segmented label="Kind of connection" value={kind} onChange={choose} options={[
           { value: "webhook", label: "Webhook" },
           { value: "ntfy", label: "ntfy" },
+          { value: "mesh", label: "Mesh node" },
         ]} />
         <p className="m-hint">{KIND_HINT[kind]}</p>
       </div>
       <div className="m-form">
-        <Field id="o-name" label="Name" hint="Yours for it, shown in the delivery log."><Input id="o-name" value={name} placeholder={ntfy ? "phone" : "home-assistant"} onChange={(e) => setName(e.target.value)} /></Field>
-        {ntfy ? (
+        <Field id="o-name" label="Name" hint="Yours for it, shown in the delivery log."><Input id="o-name" value={name} placeholder={ntfy ? "phone" : mesh ? "pocket-node" : "home-assistant"} onChange={(e) => setName(e.target.value)} /></Field>
+        {mesh ? (
+          <>
+            <Field id="o-node" label="Node" hint={node.trim() && !nodeId(node) ? "A node's id is ! and 8 hexadecimal digits; !ffffffff is every node, never sent to." : "The node that gets the alerts, by its id (the Meshtastic app shows it). Each alert is a direct message to that node alone, never to a channel."}>
+              <Input id="o-node" value={node} placeholder="!1a2b3c4d" spellCheck={false} className="mono" onChange={(e) => setNode(e.target.value)} />
+            </Field>
+            <Field id="o-device" label="Sent through" hint="The node attached to this Mac: empty finds it on USB; or its serial port (/dev/cu.…), or its address on your network. The meshtastic program must be installed (docs/FEED.md).">
+              <Input id="o-device" value={device} placeholder="The node on USB" spellCheck={false} className="mono" onChange={(e) => setDevice(e.target.value)} />
+            </Field>
+          </>
+        ) : ntfy ? (
           <>
             <Field id="o-server" label="Server" hint="Alerts go to the server you name. A public server is run by a third party, who sees them; one on your own network keeps them there.">
               <Input id="o-server" type="url" value={server} placeholder="https://ntfy.example.org" className="mono" onChange={(e) => setServer(e.target.value)} />
@@ -218,7 +250,16 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
             <Field label="Only these stations" hint="None selected: every station." wide>
               <ChoiceChips label="Stations" options={v.stations.map((s: Any) => [s.id, s.name] as [string, string])} value={stations} onChange={setStations} />
             </Field>
-            {ntfy ? (
+            {mesh ? (
+              <>
+                <Field id="o-gap" label="At most one message every (s)" hint="The band is shared: in Europe's 868 MHz band a node may send 10% of any hour. 30 s at the least.">
+                  <Input id="o-gap" type="number" min={30} max={3600} value={gap} onChange={(e) => setGap(e.target.value)} className="input-short" />
+                </Field>
+                <Field id="o-cap" label="At most per 24 hours" hint="Past it, alerts wait for the oldest message to be a day old; a retry counts too.">
+                  <Input id="o-cap" type="number" min={1} max={200} value={cap} onChange={(e) => setCap(e.target.value)} className="input-short" />
+                </Field>
+              </>
+            ) : ntfy ? (
               <Field id="o-fmt" label="Message" hint={fmt === "line" ? "The alert in one line: severity, rule, station, then the words as heard." : "The translation, then the words as heard."}>
                 <Select id="o-fmt" value={fmt} onChange={(e) => setFmt(e.target.value)} options={[["line", "One line"], ["text", "Short text"]]} />
               </Field>
@@ -227,12 +268,12 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
                 <Select id="o-fmt" value={fmt} onChange={(e) => setFmt(e.target.value)} options={[["json", "JSON events"], ["text", "Plain text"], ["line", "One line (alerts)"], ["cap", "CAP 1.2 XML (alerts)"]]} />
               </Field>
             )}
-            {fmt === "line" && (
-              <Field id="o-bytes" label="Longest line (bytes)" hint="In UTF-8: 200 bytes hold about 200 Latin letters, 100 Cyrillic, 66 Chinese. A longer alert is cut between characters, with … at the end.">
-                <Input id="o-bytes" type="number" min={40} max={4096} value={maxBytes} onChange={(e) => setMaxBytes(e.target.value)} className="input-short" />
+            {line && (
+              <Field id="o-bytes" label={mesh ? "Longest message (bytes)" : "Longest line (bytes)"} hint={mesh ? "200 at most: the time and station first, then severity, rule and the words as heard, cut on a word." : "In UTF-8: 200 bytes hold about 200 Latin letters, 100 Cyrillic, 66 Chinese. A longer alert is cut between characters, with … at the end."}>
+                <Input id="o-bytes" type="number" min={40} max={mesh ? 200 : 4096} value={maxBytes} onChange={(e) => setMaxBytes(e.target.value)} className="input-short" />
               </Field>
             )}
-            {fmt !== "line" && (
+            {!line && (
               <Field label="Translations to include" hint="Empty: all of them.">
                 <LangChips value={langs} onChange={setLangs} known={knownLangs(v.stations)} label="Add a language" />
               </Field>
@@ -242,24 +283,24 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
                 <Input id="o-batch" type="number" min={0} max={3600} value={batch} onChange={(e) => setBatch(e.target.value)} className="input-short" />
               </Field>
             )}
-            {!ntfy && fmt !== "line" && (
+            {hook && fmt !== "line" && (
               <Field id="o-ctx" label="Context before an alert" hint="Utterances before the alert's, from the same station.">
                 <Input id="o-ctx" type="number" min={0} max={10} value={ctx} onChange={(e) => setCtx(e.target.value)} className="input-short" />
               </Field>
             )}
-            {maxAgeText && (ntfy || events.includes("alert")) && (
+            {maxAgeText && (!hook || events.includes("alert")) && (
               <p className="m-hint field-wide">
                 Alerts older than {maxAgeText} aren't sent: one that hasn't got there by then is given up, not sent late.
                 It is <code>alert_max_age_hours</code> in this output's <code>[[output]]</code> in config/ui.toml.
               </p>
             )}
-            {!ntfy && (
+            {hook && (
               <Field id="o-secret" label="Signing secret" hint="Each request then carries X-Wavescribe-Signature: an HMAC-SHA256 of timestamp.body (docs/FEED.md).">
                 <Input id="o-secret" type="password" value={secret} autoComplete="new-password" placeholder={o.secret ? "Set; leave empty to keep it" : "Optional"} onChange={(e) => setSecret(e.target.value)} />
                 {o.secret && <Check checked={dropSecret} onChange={setDropSecret}>Remove the secret</Check>}
               </Field>
             )}
-            <div className="field field-wide">
+            {!mesh && <div className="field field-wide">
               <span className="field-label">Extra headers</span>
               {headers.map(([k, x], i) => (
                 <div key={i} className="m-row">
@@ -270,7 +311,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
               ))}
               <div><Button size="sm" variant="ghost" icon="plus" onClick={() => setHeaders([...headers, ["", ""]])}>Header</Button></div>
               <p className="field-hint">{ntfy ? "Any other header ntfy reads. " : ""}Stored values show as •••.</p>
-            </div>
+            </div>}
         </div>
       </Advanced>
       <div className="m-actions">

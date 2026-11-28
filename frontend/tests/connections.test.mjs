@@ -2,7 +2,7 @@
 // and the token as the Authorization header carries it.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bearer, goodTopic, newTopic, ntfyParts, ntfyUrl } from "../src/manage/connections.ts";
+import { bearer, goodTopic, newTopic, nodeId, ntfyParts, ntfyUrl, resultWord } from "../src/manage/connections.ts";
 
 test("an ntfy URL is the server and the topic, and back", () => {
   assert.deepEqual(ntfyParts("https://ntfy.example.org/alerts-k3q9x"), { server: "https://ntfy.example.org", topic: "alerts-k3q9x" });
@@ -30,4 +30,18 @@ test("a token goes as a bearer token, once", () => {
   assert.equal(bearer(" tk_abc "), "Bearer tk_abc");
   assert.equal(bearer("Bearer tk_abc"), "Bearer tk_abc");
   assert.equal(bearer("bearer  tk_abc"), "Bearer tk_abc");
+});
+
+test("a mesh node is one node, never every node", () => {
+  assert.equal(nodeId(" !1A2B3C4D "), "!1a2b3c4d");
+  for (const bad of ["!ffffffff", "1a2b3c4d", "!1a2b3c4", "!1a2b3c4dd", "^all", ""]) assert.equal(nodeId(bad), null, bad);
+});
+
+test("the log says acknowledged, not acknowledged or not sent for a mesh node, the status for a webhook", () => {
+  assert.equal(resultWord({ ok: true, status: null, attempts: 1 }, true), "acknowledged");
+  assert.equal(resultWord({ ok: false, status: null, attempts: 1 }, true), "not acknowledged");
+  assert.equal(resultWord({ ok: false, status: null, attempts: 0 }, true), "not sent");
+  assert.equal(resultWord({ ok: true, status: 200, attempts: 1 }, false), "200");
+  assert.equal(resultWord({ ok: false, status: null, attempts: 6 }, false), "failed");
+  assert.equal(resultWord({ ok: true, status: null, attempts: 1 }, false), "ok");
 });

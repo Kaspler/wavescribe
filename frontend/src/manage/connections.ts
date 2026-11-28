@@ -1,8 +1,8 @@
-// The kinds of connection the page sets up (outputs.py): a webhook, or an ntfy topic, which is a
-// webhook whose headers carry each alert's title and priority. Plain functions, so they can be
-// tested without a page.
+// The kinds of connection the page sets up (outputs.py): a webhook, an ntfy topic, which is a
+// webhook whose headers carry each alert's title and priority, or one node of a LoRa mesh
+// (mesh.py). Plain functions, so they can be tested without a page.
 
-export type Kind = "webhook" | "ntfy";
+export type Kind = "webhook" | "ntfy" | "mesh";
 
 /** A topic is the last part of an ntfy URL: letters, digits, - and _, at most 64 (outputs.py). */
 const TOPIC = /^[A-Za-z0-9_-]{1,64}$/;
@@ -28,6 +28,20 @@ export const goodTopic = (topic: string) => TOPIC.test(topic.trim());
 export function newTopic(random: (n: number) => Uint8Array = (n) => crypto.getRandomValues(new Uint8Array(n))): string {
   const letters = "abcdefghijkmnpqrstuvwxyz23456789"; // no 0/o or 1/l to misread
   return "alerts-" + Array.from(random(14), (b) => letters[b % letters.length]).join("");
+}
+
+/** A mesh node's id as the server takes it, "!1a2b3c4d"; null for anything else, every node's
+ * address (!ffffffff, a broadcast) included. */
+export function nodeId(text: string): string | null {
+  const id = text.trim().toLowerCase();
+  return /^![0-9a-f]{8}$/.test(id) && id !== "!ffffffff" ? id : null;
+}
+
+/** The result of a delivery as the log says it: a mesh node's acknowledgement, or a webhook's
+ * HTTP status. */
+export function resultWord(d: { ok?: unknown; status?: unknown; attempts?: unknown }, mesh: boolean): string {
+  if (mesh) return d.ok ? "acknowledged" : d.attempts ? "not acknowledged" : "not sent";
+  return d.status != null ? String(d.status) : d.ok ? "ok" : "failed";
 }
 
 /** The token as the Authorization header carries it, whether or not "Bearer" was pasted too. */

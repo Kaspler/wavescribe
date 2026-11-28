@@ -1477,9 +1477,12 @@ class App:
             headers = raw.get("headers") or {}
             raw["headers"] = {k: (existing.get("headers", {}).get(k, "") if v == "•••" else v)
                               for k, v in headers.items()}  # fmt: skip
-            # The page's form has no field for these: what the file says stays.
-            for key in ("timeout_s", "alert_max_age_hours"):
-                if key not in raw and key in existing:
+            # The page's form has no field for these: what the file says stays. A timeout and a
+            # program are a kind's own (a webhook waits seconds for an answer, a mesh node
+            # minutes for an acknowledgement): they stay only while the kind does.
+            same = existing.get("kind", "webhook") == raw.get("kind", "webhook")
+            for key in ("timeout_s", "alert_max_age_hours", "command"):
+                if key not in raw and key in existing and (same or key == "alert_max_age_hours"):
                     raw[key] = existing[key]
         try:
             config = OutputConfig.from_dict(raw)

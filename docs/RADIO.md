@@ -471,7 +471,9 @@ defaults:
   implemented; protected ones (digital emergency networks such as TETRA, mobile networks) are
   never decoded or decrypted. Tuning any of them with the analogue demodulators gives noise. You
   can still tune them, because a band plan can be wrong where you are.
-- Wavescribe only receives. It has no transmit code.
+- Wavescribe's receivers only receive: it has no code that transmits with them. A mesh
+  output is apart from them: it hands an alert to a Meshtastic node, which sends it
+  ([FEED.md](FEED.md#push-outputs)).
 
 ### You decide what is kept
 

@@ -593,6 +593,16 @@ station as its title and the words as heard as its text, and is louder the more 
 alert. Alerts go to the server you name: a public one is run by a third party, who sees them;
 one you run on your own network keeps them there ([FEED.md](FEED.md#push-outputs)).
 
+**Over a LoRa mesh (experimental):** with two [Meshtastic](https://meshtastic.org) nodes, one
+attached to this Mac and one someone carries, an alert can reach the second with no internet
+and no mobile network on the way. This is not yet verified on real nodes. Install the
+`meshtastic` program (`pipx install "meshtastic[cli]"`) and attach the first node by USB. Then
+Settings → **Connections** → **New connection** → **Mesh node**: give the carried node's id
+(`!1a2b3c4d`, shown in the Meshtastic app), choose from which severity (*high* keeps the band
+quiet), then **Save connection** and **Test**. Each alert is a direct message to that node,
+no more than one every two minutes and 20 a day by default, and the delivery log says whether
+the node acknowledged it. An alert can still fail to arrive ([FEED.md](FEED.md#push-outputs)).
+
 **Short messages:** for an SMS gateway, a pager or another program that takes a short text, set
 a connection's **Format** (under *Advanced*) to **One line**: each alert is one line of at most
 200 bytes, the words as heard cut with "…" when they don't fit.
