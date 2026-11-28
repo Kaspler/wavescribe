@@ -3,7 +3,8 @@
 
 An output is a URL plus filters: which events (alerts, every utterance), which rules and
 stations, from which severity, which translations to include, and in which format (our JSON,
-CAP 1.2 XML for alerts, or plain text for chat-style hooks). Alerts go out at once, with
+CAP 1.2 XML for alerts, plain text for chat-style hooks, or an alert as one short line for
+channels that take small messages). Alerts go out at once, with
 retries and backoff; utterances can be batched (``batch_s``) to keep a live text feed to
 another server cheap. Each output has its own thread and a bounded queue, so a dead endpoint
 never slows the pipeline or the other outputs; what overflows is dropped and counted.
@@ -39,7 +40,15 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from wavescribe import __version__, httpclient
-from wavescribe.events import alert_event, as_text, to_json, utterance_event
+from wavescribe.events import (
+    LINE_BYTES,
+    LINE_BYTES_MIN,
+    alert_event,
+    as_line,
+    as_text,
+    to_json,
+    utterance_event,
+)
 from wavescribe.httpclient import Redirected
 from wavescribe.log import event
 from wavescribe.rules import SEVERITIES
@@ -47,7 +56,8 @@ from wavescribe.rules import SEVERITIES
 log = logging.getLogger(__name__)
 
 EVENTS = ("alert", "utterance")
-FORMATS = ("json", "cap", "text")
+FORMATS = ("json", "cap", "text", "line")
+LINE_BYTES_MAX = 4096
 QUEUE_MAX = 2000  # events waiting per output; the oldest utterances go first when full
 BATCH_MAX = 200
 ALERT_ATTEMPTS = 6  # five waits between them, 2, 4, 8, 16 and 32 s: about a minute
@@ -94,6 +104,7 @@ class OutputConfig:
     enabled: bool = True
     timeout_s: float = 10.0
     alert_max_age_hours: float = ALERT_MAX_AGE_HOURS  # a waiting alert older than this is given up
+    max_bytes: int = LINE_BYTES  # the one-line form's longest message, in bytes of UTF-8
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> OutputConfig:
@@ -128,6 +139,8 @@ class OutputConfig:
             raise OutputError(f"{who}: format is one of {', '.join(FORMATS)}")
         if fmt == "cap" and events != ("alert",):
             raise OutputError(f"{who}: CAP carries alerts only")
+        if fmt == "line" and events != ("alert",):
+            raise OutputError(f"{who}: the one-line form carries alerts only")
         severity = raw.get("min_severity", "medium")
         if severity not in SEVERITIES:
             raise OutputError(f"{who}: min_severity is one of {', '.join(SEVERITIES)}")
@@ -145,6 +158,11 @@ class OutputConfig:
             return float(value)
 
         batch_s = number("batch_s", 0)
+        max_bytes = number("max_bytes", LINE_BYTES)
+        if not LINE_BYTES_MIN <= max_bytes <= LINE_BYTES_MAX or max_bytes != int(max_bytes):
+            raise OutputError(
+                f"{who}: max_bytes is a whole number from {LINE_BYTES_MIN} to {LINE_BYTES_MAX}"
+            )
         if not 0 <= batch_s <= 3600:
             raise OutputError(f"{who}: batch_s is 0 to 3600 seconds")
         try:
@@ -173,6 +191,7 @@ class OutputConfig:
             enabled=bool(raw.get("enabled", True)),
             timeout_s=max(1.0, min(60.0, number("timeout_s", 10))),
             alert_max_age_hours=max_age,
+            max_bytes=int(max_bytes),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -180,6 +199,8 @@ class OutputConfig:
         for k in ("events", "rules", "stations", "languages"):
             d[k] = list(d[k])
         d["headers"] = dict(self.headers)
+        if self.format != "line":
+            del d["max_bytes"]  # only the one-line form has a length
         return d
 
     def public(self) -> dict[str, Any]:
@@ -825,6 +846,8 @@ class Outputs:
             }  # fmt: skip
             names = {s["id"]: s["name"] for s in ev["stations"]}
             return to_cap(alert, station_names=names).encode(), "application/xml; charset=utf-8"
+        if config.format == "line":  # alerts only: one per request
+            return as_line(events[0], config.max_bytes).encode(), "text/plain; charset=utf-8"
         single = len(events) == 1 and (config.batch_s <= 0 or events[0]["type"] == "alert")
         payload = events[0] if single else {
             "type": "batch", "version": 1, "node": events[0]["node"], "events": events,

@@ -23,6 +23,7 @@ import datetime as dt
 import json
 import math
 import re
+import unicodedata
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -243,17 +244,30 @@ def alert_event(
     return out
 
 
+CHANGE_NOTE = {"escalated": " (more serious now)", "reminder": " (still being mentioned)",
+               "ended": " (over)"}  # fmt: skip
+LINE_BYTES = 200  # the one-line form's default length, in bytes of UTF-8
+LINE_BYTES_MIN = 40
+ELLIPSIS = "…"
+WORD_BACK = 30  # a cut on a word goes back at most this many characters to a space
+
+
+def _severity(ev: Mapping[str, Any]) -> str:
+    """The severity as a word in capitals, with "not checked" when the model couldn't check
+    the match: "HIGH", "HIGH, not checked"."""
+    unchecked = ", not checked" if ev.get("checked") is False else ""
+    return f"{str(ev.get('severity') or '').upper()}{unchecked}"
+
+
 def as_text(ev: Mapping[str, Any], languages: Iterable[str] = ()) -> str:
-    """One readable line or two, for chat-style webhooks (ntfy, a bot) that take plain text."""
+    """One readable line or two, for chat-style webhooks (a bot) that take plain text."""
     langs = list(languages)
     tr = ev.get("translations") or {}
     shown = next((tr[lang] for lang in langs if lang in tr), None) or next(iter(tr.values()), "")
     station = (ev.get("station") or {}).get("name") or "?"
     if ev["type"] == "alert":
-        unchecked = ", not checked" if ev.get("checked") is False else ""
-        head = f"[{str(ev.get('severity', '')).upper()}{unchecked}] {ev.get('rule')} · {station}"
-        head += {"escalated": " (more serious now)", "reminder": " (still being mentioned)",
-                 "ended": " (over)"}.get(ev.get("change") or "", "")  # fmt: skip
+        head = f"[{_severity(ev)}] {ev.get('rule')} · {station}"
+        head += CHANGE_NOTE.get(ev.get("change") or "", "")
         body = shown or ev.get("text", "")
         if shown and ev.get("text"):
             body += f"\n({ev['text']})"
@@ -262,3 +276,65 @@ def as_text(ev: Mapping[str, Any], languages: Iterable[str] = ()) -> str:
         return "\n".join(as_text(e, langs) for e in ev.get("events", []))
     line = f"{station} {ev.get('time', '')}: {ev.get('text', '')}"
     return line + (f"\n  → {shown}" if shown else "")
+
+
+def _plain(value: Any) -> str:
+    """Text for one line: every run of white space (a new line too) as one space, and what UTF-8
+    can't carry (a lone surrogate) as "?"."""
+    text = " ".join(str(value or "").split())
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def _joined(text: str, i: int) -> bool:
+    """Whether a cut just before ``text[i]`` would split what is shown as one character: a
+    letter from its accent, an emoji from its skin tone or from the parts a joiner holds
+    together, a flag in two."""
+    c, before = text[i], text[i - 1]
+    code = ord(c)
+    if unicodedata.category(c) in ("Mn", "Mc", "Me") or "‍" in (c, before):
+        return True  # marks and variation selectors, and the zero-width joiner
+    if 0x1F3FB <= code <= 0x1F3FF or 0xE0020 <= code <= 0xE007F:
+        return True  # an emoji's skin tone, a flag's tag letters
+    if 0x1F1E6 <= code <= 0x1F1FF:  # regional indicators make flags two by two
+        n = 0
+        while i - n - 1 >= 0 and 0x1F1E6 <= ord(text[i - n - 1]) <= 0x1F1FF:
+            n += 1
+        return n % 2 == 1
+    return False
+
+
+def fit_bytes(text: str, max_bytes: int, *, on_word: bool = False, keep: int = 0) -> str:
+    """``text`` in at most ``max_bytes`` bytes of UTF-8: as it is when it fits, otherwise cut,
+    never inside a character or between a character and the marks that go with it, and ended
+    with "…". ``on_word``: the cut goes back to the last space when there is one within
+    ``WORD_BACK`` characters and after ``keep`` (where the words start), so a word isn't split;
+    a text without spaces (Chinese, Japanese) is cut between characters."""
+    data = text.encode("utf-8")
+    if len(data) <= max_bytes:
+        return text
+    room = max_bytes - len(ELLIPSIS.encode("utf-8"))
+    i = len(data[: max(0, room)].decode("utf-8", "ignore"))  # whole characters only
+    while 0 < i < len(text) and _joined(text, i):
+        i -= 1
+    if on_word and i < len(text) and not text[i].isspace():
+        space = text.rfind(" ", keep, i)
+        if space > keep and i - space <= WORD_BACK:
+            i = space
+    return text[:i].rstrip(" ,;:·") + ELLIPSIS
+
+
+def _alert_head(ev: Mapping[str, Any]) -> str:
+    """The severity, the rule and what changed: "[HIGH, not checked] water (over)"."""
+    change = CHANGE_NOTE.get(ev.get("change") or "", "")
+    return f"[{_severity(ev)}] {_plain(ev.get('rule'))}{change}"
+
+
+def as_line(ev: Mapping[str, Any], max_bytes: int = LINE_BYTES) -> str:
+    """An alert as one line of at most ``max_bytes`` bytes of UTF-8, for channels that take small
+    messages (an SMS gateway, a pager): the severity, "not checked" when the model couldn't
+    check the match, the rule and the station, then the words as heard, in the station's
+    language. Never the translation: the words the rule matched are the alert."""
+    station = _plain((ev.get("station") or {}).get("name"))
+    head = _alert_head(ev) + (f" · {station}" if station else "")
+    words = _plain(ev.get("text"))
+    return fit_bytes(f"{head}: {words}" if words else head, max_bytes)

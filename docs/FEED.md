@@ -296,7 +296,8 @@ refused (400), so it never replaces that one and its secret or headers:
 | `events` | `alert`, `utterance`, or both |
 | `rules`, `min_severity`, `stations` | which alerts go out (all rules, medium and up, all stations, by default) |
 | `languages` | translations to include (all, by default) |
-| `format` | `json` (the events above), `cap` (CAP 1.2 XML, alerts only), `text` (a readable line or two, for chat bots and ntfy) |
+| `format` | `json` (the events above), `cap` (CAP 1.2 XML, alerts only), `text` (a readable line or two, for chat bots), `line` (an alert as one short line, alerts only; below) |
+| `max_bytes` | `line` format: the longest line, in bytes of UTF-8: 200 by default, 40 to 4096 |
 | `batch_s` | utterances: 0 sends each one; more sends one batch per window. Alerts are never batched: each goes when it is announced, which waits up to `translation_wait_s` (10 s by default, `[delivery]` in `alerts.toml`) for its translations: up to about 12 s after it was heard when the translator is busy |
 | `headers` | extra headers, e.g. `Authorization` for the receiving end |
 | `secret` | signs each request, see below |
@@ -309,9 +310,9 @@ refused (400), so it never replaces that one and its secret or headers:
   serious (`escalated`), is still being mentioned an hour later (`reminder`) or, for a station
   alert, is over (`ended`); never for each mention. In `cap` format the first is a CAP `Alert`
   and the others are an `Update` with an identifier of their own, all in the same `incidents`.
-  In `text` format the first line says "(more serious now)", "(still being mentioned)" or
-  "(over)", and "not checked" after the severity when the model couldn't check the match; in
-  `cap` format that is the parameter `checked`.
+  In `text` and `line` format the first line says "(more serious now)", "(still being
+  mentioned)" or "(over)", and "not checked" after the severity when the model couldn't check
+  the match; in `cap` format that is the parameter `checked`.
 - On a network error, 408, 425, 429 or 5xx, an alert gets six tries, 2, 4, 8, 16 and 32 s
   apart (about a minute), and utterances three (2 and 4 s apart).
 - If the other end is still away after those, nothing is dropped: the events wait at the head
@@ -371,8 +372,27 @@ refused (400), so it never replaces that one and its secret or headers:
   `<scope>Restricted</scope>` with a `<restriction>` saying it is a test, so a CAP consumer
   never shows it to the public.
 
+**One line.** The `line` format is for channels that take small messages: an SMS gateway, a
+pager, a radio. An alert is one line of text, at most `max_bytes` bytes of UTF-8 (200 by
+default): the severity in brackets, with "not checked" when the model couldn't check the match,
+the rule, the station, then the words as heard, in the station's language. It never carries the
+translation: the rule matched those words, and they are the alert. Line breaks become spaces.
+A longer line is cut, between whole characters (never inside a character's bytes, or between
+a letter and its accent, or inside an emoji or a flag), and ends with "…":
+
+```text
+[HIGH] water · Radio Example: Corte de água amanhã entre as 9h e as 17h na zona norte.
+[CRITICAL, not checked] fire (more serious now) · Радіо Приклад: Пожежа біля промислової зони, дим іде на північ; мешканців просят…
+[MEDIUM] roads · 示例电台: 下午三点起桥附近道路封闭，请绕行市中心，并留意救援部门的最新通知。谢谢合作，祝大家平安，请转告家人和邻居，保持…
+```
+
+The last two are cut at 200 bytes.
+
+200 bytes hold about 200 letters of a Latin script, 100 of Cyrillic or Greek, and 66 of
+Chinese or Japanese.
+
 **Headers.** Each request is a `POST` with `Content-Type` (`application/json`,
-`application/xml; charset=utf-8` for CAP, `text/plain; charset=utf-8` for text),
+`application/xml; charset=utf-8` for CAP, `text/plain; charset=utf-8` for text and one line),
 `User-Agent: wavescribe/<version>`, `X-Wavescribe-Event` (`alert`, `utterance` or `batch`),
 the output's own `headers` (which can replace the three before), `X-Wavescribe-Delivery` on
 an alert, and the signature headers below when a secret is set.
@@ -393,8 +413,8 @@ after a restart, is signed again with the time it is sent at.
 
 The signature covers the body, not the headers. In `json` format an alert's delivery id is
 in the body (`delivery_id`), so it is signed: dedupe on that one. In `cap` format the body's
-`<identifier>` is the same on every try and signed too. In `text` format the id is in the
-`X-Wavescribe-Delivery` header only, which the signature doesn't cover.
+`<identifier>` is the same on every try and signed too. In `text` and `line` format the id is
+in the `X-Wavescribe-Delivery` header only, which the signature doesn't cover.
 
 ## Many places, one central server
 

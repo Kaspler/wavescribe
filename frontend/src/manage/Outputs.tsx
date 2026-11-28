@@ -73,7 +73,7 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
         {o.enabled ? <Tag tone="good">on</Tag> : <Tag tone="muted">off</Tag>}
         {o.enabled && st.waiting && <Tag tone="warn">waiting</Tag>}
         <Tag>{o.events.join(" + ")}</Tag>
-        <Tag>{o.format}</Tag>
+        <Tag>{o.format === "line" ? `one line, ${o.max_bytes} bytes` : o.format}</Tag>
         {o.secret && <Tag>signed</Tag>}
         <span className="m-spacer" />
         <ActButton size="sm" icon="send" run={async () => {
@@ -111,6 +111,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   const [langs, setLangs] = useState<string[]>(o.languages || []);
   const [fmt, setFmt] = useState(o.format || "json");
   const [batch, setBatch] = useState(String(o.batch_s ?? 0));
+  const [maxBytes, setMaxBytes] = useState(String(o.max_bytes ?? 200));
   const [ctx, setCtx] = useState(String(o.context ?? 2));
   const [secret, setSecret] = useState("");
   const [dropSecret, setDropSecret] = useState(false);
@@ -125,7 +126,7 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
   const save = async () => {
     const raw: Any = {
       id: o.id, name: name.trim(), url: url.trim(), events, min_severity: sev, rules, stations, languages: langs, format: fmt,
-      batch_s: +batch, context: +ctx, headers: Object.fromEntries(headers.filter(([k]) => k.trim()).map(([k, x]) => [k.trim(), x])), enabled,
+      batch_s: +batch, context: +ctx, ...(fmt === "line" ? { max_bytes: +maxBytes } : {}), headers: Object.fromEntries(headers.filter(([k]) => k.trim()).map(([k, x]) => [k.trim(), x])), enabled,
       secret: dropSecret ? "" : secret || (o.secret ? true : ""),
     };
     if (!raw.id) delete raw.id;
@@ -168,9 +169,14 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
             <Field label="Translations to include" hint="Empty: all of them.">
               <LangChips value={langs} onChange={setLangs} known={knownLangs(v.stations)} label="Add a language" />
             </Field>
-            <Field id="o-fmt" label="Format" hint="Plain text suits chat bots and ntfy.">
-              <Select id="o-fmt" value={fmt} onChange={(e) => setFmt(e.target.value)} options={[["json", "JSON events"], ["text", "Plain text"], ["cap", "CAP 1.2 XML (alerts)"]]} />
+            <Field id="o-fmt" label="Format" hint="Plain text suits chat bots. One line suits channels that take small messages: an SMS gateway, a pager.">
+              <Select id="o-fmt" value={fmt} onChange={(e) => setFmt(e.target.value)} options={[["json", "JSON events"], ["text", "Plain text"], ["line", "One line (alerts)"], ["cap", "CAP 1.2 XML (alerts)"]]} />
             </Field>
+            {fmt === "line" && (
+              <Field id="o-bytes" label="Longest line (bytes)" hint="In UTF-8: 200 bytes hold about 200 Latin letters, 100 Cyrillic, 66 Chinese. A longer alert is cut between characters, with … at the end.">
+                <Input id="o-bytes" type="number" min={40} max={4096} value={maxBytes} onChange={(e) => setMaxBytes(e.target.value)} className="input-short" />
+              </Field>
+            )}
             <Field id="o-batch" label="Send utterances every (s)" hint="0 sends each one as it comes. Alerts don't wait for this: one goes once its translations are ready, about 12 s, and later mentions of the same incident fold into it.">
               <Input id="o-batch" type="number" min={0} max={3600} value={batch} onChange={(e) => setBatch(e.target.value)} className="input-short" />
             </Field>
