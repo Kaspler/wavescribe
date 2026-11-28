@@ -349,6 +349,17 @@ words are shown while `radio watch` runs and never written down, so `radio catch
 A 2 m watch keeps both for 7 days, on this machine only. Notes on frequencies (`radio note`) stay
 on this machine and are its heard list's names too.
 
+**Reading it.** In Read a watch is a station: a row in the list with its own column, each
+stretch of talk headed by the channel it was heard on (*446.03125 MHz · Walkie-talkies, channel
+3*), live as it is caught and, for a kind of radio that keeps text, after a reload too. What a
+watch that isn't kept caught (one run with `radio watch`, or one deleted since) is read in
+**Caught on the air**: one column for all of it, each stretch with its frequency and band, its
+row in the list once something is in it. It holds open radio only: broadcast, amateur and
+utility. Private and digital catches never enter it, even where you keep their text: those words
+are reached through search and Ask on this Mac. Caught on the air stays on this machine, since
+what no configured station heard doesn't leave it (the page on a phone or another computer, and
+the feed, don't show it). A time in it plays the moment where its kind of radio keeps audio.
+
 **Alerts.** Alert rules read a watch's words like any station's. A silence alert
 (`kind = "silence"`) on a watch goes off only when the receiver stops sending: a quiet band is
 what a watch hears most of the time.

@@ -157,6 +157,9 @@ is less tried.
 - [Skips most music](docs/MODELS.md#speech-vs-music), so most songs aren't written down.
 - [Plays any station live](docs/GETTING_STARTED.md#5-read-along-listen-translate), and any line
   again from its time.
+- [What a band watch catches reads like any station](docs/GETTING_STARTED.md#5-read-along-listen-translate),
+  each line with its channel, and one feed, Caught on the air, holds the open radio caught without
+  being kept (experimental).
 - [Text size, light or dark theme](docs/GETTING_STARTED.md#5-read-along-listen-translate) and which
   stations are shown, per device.
 - [Keyboard shortcuts](docs/GETTING_STARTED.md#5-read-along-listen-translate) on the page; `?` lists

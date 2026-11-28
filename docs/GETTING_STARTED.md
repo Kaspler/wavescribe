@@ -203,6 +203,15 @@ rewritten.
   the stream's own error and when the next try is. *Waiting for speech…* appears only while
   the station is being heard.
 - **Click a time** to hear that moment again.
+- **Radio that talks now and then** reads the same way. A band you watch (walkie-talkies, an
+  amateur band; [RADIO.md](RADIO.md#catching-radio-that-only-talks-now-and-then)) is a row in the
+  list with its own column, and each stretch of talk in it starts with the channel it was heard
+  on, such as *446.03125 MHz · Walkie-talkies, channel 3*. **Caught on the air**, a row below
+  the running stations, is one column for what was caught without being kept as a station (a
+  watch run in the Terminal, or one deleted since), each stretch with its frequency and band. It
+  holds open radio only (broadcast, amateur, aircraft and ships), never walkie-talkies or other
+  private or digital radio, whatever you keep of those. Its row appears once something is in it,
+  and only on this Mac: phones and other computers don't see it.
 - **The Aa button** (Display) sets the text size, light or dark theme, which language you
   **read in**, and whether the original is shown beside the translation. These are yours alone:
   another person reading the same Wavescribe can choose differently.
