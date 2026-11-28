@@ -190,6 +190,11 @@ class App:
         self.keywords_dir = keywords_dir or DEFAULT_KEYWORDS_DIR
         self._lock = threading.RLock()
         self.started_at = time.time()
+        # Paused (POST /api/pause): since when, and what resume starts again. Never saved.
+        self.paused_since: float | None = None
+        self._held: dict[str, Any] = {}
+        self._pause_lock = threading.RLock()  # one pause or resume at a time
+        self._held_lock = threading.Lock()  # paused_since and _held, for a moment each
         self._node_id = self._make_node_id()  # written once, at the first start
 
         for cap, ids in (settings.get("models") or {}).items():
@@ -718,6 +723,12 @@ class App:
             why = self.unavailable[sid]
             code = {SWITCHED_OFF: "switched_off", UNCONFIRMED: "unconfirmed"}.get(why)
             raise ChangeError(why, code)  # the page offers to switch it on, or to confirm
+        if station.remote and listen_only:
+            raise ChangeError(f"{station.name} is text from another Wavescribe: no audio")
+        if self._hold([sid]):  # paused: saved now, started on resume
+            (self.listen_only_run.add if listen_only else self.listen_only_run.discard)(sid)
+            self._remember_running(sid, True)
+            return
         held = station.sdr and getattr(self, "_live", None) and self._live.holds(
             station.sdr.device.id)  # fmt: skip
         if held:
@@ -744,11 +755,144 @@ class App:
         if sid not in set_up and sid not in self.running():
             self.config.get(sid)  # no station by that id: says so, as start does
         self.listen_only_run.discard(sid)
+        with self._held_lock:
+            if self.paused_since is not None and sid in self._held["stations"]:
+                self._held["stations"].remove(sid)  # not started again on resume
         follower = self.followers.pop(sid, None)
         if follower is not None:
             follower.close()
         self.hub.stop_station(sid)
         self._remember_running(sid, False)
+
+    # -- pausing -----------------------------------------------------------------------------
+
+    def pause_view(self) -> dict[str, Any]:
+        return {"paused": self.paused_since is not None, "since": self.paused_since}
+
+    def pause(self) -> dict[str, Any]:
+        """Stop all listening (POST /api/pause): every station, band watch and remote station,
+        the Listen tab's receivers and the receivers' spectrum watches, and a scan. Every
+        receiver is let go; the models stay loaded, and the page, history, search and Ask keep
+        working. Nothing of it is saved: what was set to run is still what the next serve
+        starts. Pausing again changes nothing."""
+        with self._pause_lock:
+            if self.paused_since is None:
+                t0 = time.monotonic()
+                self.pipeline.keep_models = True
+                with self._held_lock:
+                    self.paused_since = time.time()
+                    self._held = {"stations": [], "monitors": [], "live": []}
+                self._let_go()
+                event(log, "paused", stations=len(self._held["stations"]),
+                      ms=round((time.monotonic() - t0) * 1000))  # fmt: skip
+        self.hub.publish("status", self.hub.status())
+        return self.pause_view()
+
+    def resume(self) -> dict[str, Any]:
+        """Start again what pause stopped, with the page's changes made meanwhile (POST
+        /api/resume). Resuming when not paused changes nothing."""
+        with self._pause_lock:
+            if self.paused_since is not None:
+                t0 = time.monotonic()
+                with self._held_lock:
+                    held = self._held
+                    self.paused_since, self._held = None, {}
+                self.pipeline.keep_models = False
+                self._take_up(held)
+                event(log, "resumed", stations=len(held["stations"]),
+                      ms=round((time.monotonic() - t0) * 1000))  # fmt: skip
+        self.hub.publish("status", self.hub.status())
+        return self.pause_view()
+
+    def _hold(self, stations: Iterable[str] = (), monitor: str | None = None, *,
+              on: bool = True) -> bool:  # fmt: skip
+        """While paused, what would start now waits for resume (``on``; else it no longer
+        does). False when not paused: the caller starts or stops it itself."""
+        with self._held_lock:
+            if self.paused_since is None:
+                return False
+            for sid in stations:
+                if sid not in self._held["stations"]:
+                    self._held["stations"].append(sid)
+            monitors = self._held["monitors"]
+            if monitor is not None and on and monitor not in monitors:
+                monitors.append(monitor)
+            elif monitor is not None and not on and monitor in monitors:
+                monitors.remove(monitor)
+            return True
+
+    def hold_for_resume(self, paused: dict[str, Any]) -> bool:
+        """What a scan or the Listen tab stopped on a receiver, to start again when it ends
+        (``RadioService._pause``): while paused, it waits for resume instead (True)."""
+        monitor = paused.get("device") if paused.get("monitor") else None
+        return self._hold(paused.get("stations", []), monitor)
+
+    def hold_monitor(self, device_id: str, on: bool) -> bool:
+        """A receiver's spectrum watch switched on or off: while paused, from resume on."""
+        return self._hold(monitor=device_id, on=on)
+
+    def _let_go(self) -> None:
+        from wavescribe.admin import _monitors, monitor
+        from wavescribe.sources import sdr
+
+        radio = getattr(self, "_radio", None)
+        if radio is not None:  # what it paused for itself comes back through hold_for_resume
+            radio.cancel_scan()
+            radio.wait_scan(10.0)
+        live = getattr(self, "_live", None)
+        if live is not None:
+            for device_id in live.open_ids():
+                tuned = live.tuned(device_id)
+                carried = live.close(device_id, resume=False) or {}
+                self._held["live"].append({"device": device_id, "tune": tuned,
+                                           "carried": carried})  # fmt: skip
+        for device_id in list(_monitors):
+            monitor(self, device_id, False, force=True)
+            self._hold(monitor=device_id)
+        running = list(self.pipeline.status()["stations"])
+        followed = [sid for sid, f in self.followers.items() if not f.closed]
+        for sid in followed:
+            self.followers.pop(sid).close()
+        for sid in running:
+            self.hub.stop_station(sid)
+        self.pipeline.join_sources(running, 10.0)
+        deadline = time.time() + 5
+        for d in self.config.devices:
+            while not sdr.forget_device(d.serial) and time.time() < deadline:
+                time.sleep(0.05)
+        self._hold([*running, *followed])
+
+    def _take_up(self, held: dict[str, Any]) -> None:
+        from wavescribe.admin import AdminError, monitor
+
+        live = getattr(self, "_live", None)
+        for entry in held["live"]:
+            try:
+                live.tune(entry["device"], entry["tune"])
+            except (Refusal, ValueError, OSError) as e:
+                log.warning("resume: receiver %s not tuned by hand again: %s", entry["device"], e)
+                carried = entry["carried"]
+                held["stations"] += [s for s in carried.get("stations", [])
+                                     if s not in held["stations"]]  # fmt: skip
+                if carried.get("monitor") and entry["device"] not in held["monitors"]:
+                    held["monitors"].append(entry["device"])
+            else:
+                if entry["carried"]:
+                    live.carry(entry["device"], entry["carried"])  # back when listening ends
+        for device_id in held["monitors"]:
+            with contextlib.suppress(AdminError):
+                monitor(self, device_id, True)
+        here = {s.id for s in self.config.stations}
+        for sid in held["stations"]:
+            if sid not in here or sid in self.running():
+                continue
+            if sid in self.unavailable:  # switched off meanwhile, or no longer heard
+                self.stop_station(sid)
+                continue
+            try:
+                self.start_station(sid, listen_only=sid in self.listen_only_run)
+            except (Refusal, ValueError) as e:
+                log.warning("resume: %s not started again: %s", sid, e)
 
     def _remember_running(self, sid: str, on: bool) -> None:
         def mutate(d: dict[str, Any]) -> None:

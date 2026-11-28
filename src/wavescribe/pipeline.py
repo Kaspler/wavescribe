@@ -603,6 +603,8 @@ class Pipeline:
         self._mt_model: str | None = None  # the translator's id once it is loaded
         self._mt_started = False
         self._lag: dict[str, deque[tuple[float, float, float | None]]] = {}
+        # While listening is paused (App.pause): no station runs, and no model is let go.
+        self.keep_models = False
 
     # -- lifecycle ----------------------------------------------------------------------------
 
@@ -674,6 +676,13 @@ class Pipeline:
         for t in list(self._threads):
             if t.name == f"source-{station_id}":
                 t.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def join_sources(self, station_ids: Iterable[str], timeout: float) -> None:
+        """Wait, ``timeout`` seconds in all, for these stopped stations' sources to end: their
+        receivers and streams are let go then."""
+        deadline = time.monotonic() + timeout
+        for sid in station_ids:
+            self._join_source(sid, max(0.0, deadline - time.monotonic()), only_stopping=True)
 
     def update_station(self, station: Station, asr: tuple[ModelEntry, Path] | None = None) -> None:
         """Apply a changed station. Name, language, priority and translation languages change
@@ -1386,6 +1395,8 @@ class Pipeline:
 
     def _unload_idle(self, loaded: dict[str, Transcriber]) -> None:
         """Free ASR models no running station uses (Whisper alone holds ~1.6 GB)."""
+        if self.keep_models:
+            return
         with self._lock:
             running = [live.station for live in self._live.values()]
         wanted = {entry.id for s in running for entry, _ in self._models_for(s)}
@@ -1587,6 +1598,8 @@ class Pipeline:
             return t
 
         def unload_idle() -> None:
+            if self.keep_models:
+                return
             shared = self._plan.mt[0].id if self._plan.mt else None
             for mid in [m for m, t in last_used.items() if m != shared]:
                 if time.time() - last_used[mid] > MT_IDLE_UNLOAD_S:

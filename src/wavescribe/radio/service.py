@@ -46,6 +46,9 @@ HELD_TTL_S = 3.0  # how long a reading of which programs hold the dongles is reu
 REGION_COUNTRY = {"jp": "JP"}
 
 
+PAUSED_SCAN = "Listening is paused: resume it to scan."
+
+
 class RadioError(Refusal):
     """Something the page asked for can't be done; the message says why, and ``code`` (with
     the fields in ``extra``) what the page needs to ask or show (wavescribe/refusal.py)."""
@@ -268,6 +271,8 @@ class RadioService:
         return d
 
     def start_scan(self, raw: dict[str, Any]) -> dict[str, Any]:
+        if self.app.paused_since is not None:
+            raise RadioError(PAUSED_SCAN, "paused")
         d = self._device(str(raw.get("device") or ""))
         rx = next(r for r in self.receivers() if r["id"] == d.id)
         if rx["busy"] and not raw.get("pause"):
@@ -344,7 +349,7 @@ class RadioService:
     def _resume(self, paused: dict[str, Any] | None) -> None:
         from wavescribe.admin import AdminError, monitor
 
-        if not paused:
+        if not paused or self.app.hold_for_resume(paused):  # paused: they wait for resume
             return
         here = {s.id for s in self.app.config.stations}
         running = set(self.app.running())
@@ -399,6 +404,18 @@ class RadioService:
     def cancel_scan(self) -> None:
         if self._cancel is not None:
             self._cancel.set()
+
+    def wait_scan(self, timeout: float) -> None:
+        """Wait up to ``timeout`` seconds for a scan to end, and its receiver to be let go."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = self._job
+            if job is None or job["phase"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        for t in threading.enumerate():
+            if t.name == "radio-scan":
+                t.join(max(0.0, deadline - time.monotonic()))
 
     def adopt_rds_names(self) -> list[str]:
         """FM stations made from a bare frequency ("98.6 MHz") take the name the station sends

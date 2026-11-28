@@ -378,13 +378,16 @@ def spectrum(app: App, device_id: str) -> dict[str, Any] | None:
     return dev.spectrum
 
 
-def monitor(app: App, device_id: str, on: bool) -> None:
-    """Keep a dongle running with no station, to watch its spectrum (antenna and gain)."""
+def monitor(app: App, device_id: str, on: bool, *, force: bool = False) -> None:
+    """Keep a dongle running with no station, to watch its spectrum (antenna and gain). While
+    listening is paused it starts or stops with resume, unless ``force`` (pause itself)."""
     from wavescribe.sources import sdr
 
     d = next((x for x in app.config.devices if x.id == device_id), None)
     if d is None:
         raise AdminError(f"no dongle called {device_id!r}")
+    if not force and app.hold_monitor(device_id, on):
+        return
     if on:
         if device_id in _monitors:
             return

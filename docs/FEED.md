@@ -147,6 +147,7 @@ checks it like a real one and keeps nothing.
 | `GET /feed/v1/stations` | Stations: language, translation languages, running, connected, last heard, lag. |
 | `GET /feed/v1/node` | This machine: `name`, `url`, `id`, `version`, `feed_version`, `stations` (how many it shows you), `translation_languages`, `store` (whether history is kept) and `ask` (whether Ask works). |
 | `GET /healthz` | `{"ok": true}` once models are loaded (503 before). It needs no token. |
+| `GET /api/hello` | Where this Wavescribe is and how it stands: the [ready file](#starting-wavescribe-from-another-program)'s fields with `paused`, `listening` (how many stations run now), `ready` (as `/healthz`), `state` and `problem` (as in the status event). It needs no token and no header; another machine gets it without `pid` and `home`. |
 | `GET /metrics` | Prometheus text: stations running and connected, utterances, queues, drops, lag, outputs, memory footprint, free disk, power draw. |
 
 **Resuming.** Utterances finish out of order: one whose translation waited behind a busier
@@ -170,7 +171,19 @@ finish while an old one waits only on a very busy machine), and a replay cut at 
 rest on the next resume. **Skip an utterance whose `id` you already have** (with the same
 text); `wavescribe follow` and remote stations do. Alerts carry no `id:` and aren't replayed:
 ask `/feed/v1/alerts?since=` for those raised meanwhile. After a restart, a client that kept no
-id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s.
+id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s:
+
+```json
+{"type": "status", "stations": [{"id": "news", "running": true, "connected": true, "…": "…"}],
+ "time": 1777882502.1, "paused": false, "state": "problem",
+ "problem": "Harbour Talk: down: no audio for 30 s (and 1 more)"}
+```
+
+`stations` is what `/feed/v1/stations` gives. `state` is one of `loading` (the models aren't
+loaded yet), `paused` (listening is [paused](#starting-wavescribe-from-another-program)),
+`problem` (a running station is down or reconnecting, as the page's Health tab shows it; a
+station still making its first connection isn't one) and `listening`. `problem` says which, in
+a few words, while `state` is `problem`, and is null otherwise.
 
 ```sh
 curl -N "http://kitchen-mac.local:8765/feed/v1/events?stations=tsf"
@@ -202,7 +215,8 @@ an EventSource on such a page.
 | The LAN (`serve --lan`) | yes, no token | no token until the first feed token is made; then a `read` token | only with `serve --allow-remote-ask` | never |
 | Through a proxy (`serve --behind-proxy`, or a request carrying a proxy's header) | a `read` token, unless `serve --public-read` | always a `read` token | only with `--allow-remote-ask`, and a `read` token unless `--public-read` | never |
 
-- **Everyone:** the page itself (its HTML, scripts and icons) and `/healthz` need nothing.
+- **Everyone:** the page itself (its HTML, scripts and icons), `/healthz` and `/api/hello` need
+  nothing.
   Pushing to `/feed/v1/ingest` always needs a `push` token, even from this machine, as JSON
   (`Content-Type: application/json`): otherwise any web page open on the machine could post
   events and set off alerts.
@@ -614,6 +628,24 @@ a file), readable only by its owner:
 
 `url` is this machine's address, also under `--lan`. The file is removed when `serve` stops; one
 left behind by a crash names a pid that no longer runs.
+
+**Follow it** with `GET /api/hello` (no token, no header): the ready file's fields, and
+`paused`, `listening`, `ready`, `state` and `problem` as they are now. `/feed/v1/events?events=status`
+sends `paused`, `state` and `problem` every 10 s.
+
+**Pause and resume it** with `POST /api/pause` and `POST /api/resume`, from this machine and with
+the header `X-Wavescribe: 1`, as every change the page makes; the body is ignored. Both answer
+`{"paused": true, "since": 1777882502.1}` (`since` is null when not paused), and asking twice
+changes nothing. Pausing stops every station, band watch and remote station, listening by hand
+on the Listen tab, a receiver's spectrum watch and a scan, and lets go of every receiver; the
+models stay loaded, and the page, history, search and Ask keep working. Stations started or
+stopped meanwhile are saved and take effect on resume, which starts again what was running.
+A pause isn't kept: the next `serve` starts as if there had been none. `/api/state` carries
+`paused` and `paused_since`.
+
+```sh
+curl -X POST -H 'X-Wavescribe: 1' http://127.0.0.1:8766/api/pause
+```
 
 **Stop it** with SIGTERM (exit code 143), or end the parent (exit code 0). Exit codes 2, 3 and 4
 mean it didn't start: a file or an option it can't use, another Wavescribe on the same home, a

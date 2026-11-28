@@ -95,7 +95,18 @@ version, the pid, the address, the home and when it started. It is written to a 
 serve's cleanup removes it once the page no longer listens, and only while it still names this
 process. `--parent-pid` follows a process (kqueue's `NOTE_EXIT` on macOS, a check once a second
 elsewhere): when it ends, serve sends itself SIGTERM and runs the same cleanup, with exit code 0.
-One that has ended already stops serve before the home is entered.
+One that has ended already stops serve before the home is entered. `GET /api/hello` gives the
+ready file's fields and how things stand: `state` is `paused`, `loading` (models not loaded),
+`problem` (a running station down or reconnecting, by the Health tab's rule,
+`server.trouble`) or `listening`.
+
+**Pausing** (`App.pause`, `POST /api/pause`) stops every local station, band watch and remote
+station, closes the Listen tab's receivers, the spectrum watches and a scan, and waits for the
+receivers to be let go; the pipeline keeps its models (`Pipeline.keep_models`). What was running
+is held in memory, and starts and stops from the page while paused change that list and the
+saved run list, not the pipeline; a scan or the Listen tab letting go of a receiver hands what
+it had stopped to the same list (`App.hold_for_resume`). `App.resume` starts the list again:
+the Listen tab's receivers at their tuning, the spectrum watches, then the stations.
 
 ## Process model
 

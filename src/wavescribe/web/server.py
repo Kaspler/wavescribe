@@ -477,7 +477,55 @@ class WebHub:
             "status": status,
             "node": self.app.node() if self.app else None,
             "manage": can_control and self.app is not None,
+            "paused": status["paused"],
+            "paused_since": status["paused_since"],
         }
+
+    def condition(self, exports: Exports | None = None, status: dict[str, Any] | None = None
+                  ) -> tuple[str, str | None]:  # fmt: skip
+        """How listening stands, in one word, with a short text for ``problem``: ``paused``;
+        ``loading`` until the models are loaded (``/healthz``); ``problem`` while a station
+        that runs is down or reconnecting, as the Health tab shows it (``trouble``); else
+        ``listening``. For another machine (``exports``), only the stations that may leave."""
+        status = status or self.status()
+        if status.get("paused"):
+            return "paused", None
+        if not status.get("ready"):
+            return "loading", None
+        names = {s.id: s.name for s in self.config.stations}
+        troubles = [
+            f"{names.get(sid, sid)}: {why}"
+            for sid, st in status.get("stations", {}).items()
+            if (exports is None or sid in exports.stations) and (why := trouble(st))
+        ]
+        if not troubles:
+            return "listening", None
+        more = f" (and {len(troubles) - 1} more)" if len(troubles) > 1 else ""
+        return "problem", troubles[0] + more
+
+    def hello(self, exports: Exports | None, address: tuple[Any, ...]) -> dict[str, Any]:
+        """``GET /api/hello``: the ready file's fields and how things stand; for another
+        machine (``exports``), without the process id and the home."""
+        from wavescribe import ready
+        from wavescribe.home import current
+
+        app = self.app
+        host, port = (app.host, app.port) if app is not None else address[:2]
+        started = app.started_at if app is not None else time.time()
+        out: dict[str, Any] = ready.fields(host=host, port=port, started=started,
+                                           home=current().path)  # fmt: skip
+        status = self.status()
+        state, problem = self.condition(exports, status)
+        running = [
+            sid
+            for sid, st in status.get("stations", {}).items()
+            if not st.get("pushed") and (exports is None or sid in exports.stations)
+        ]
+        out.update(paused=status["paused"], listening=len(running),
+                   ready=bool(status.get("ready")), state=state, problem=problem)  # fmt: skip
+        if exports is not None:
+            del out["pid"], out["home"]
+        return out
 
     def ask_unavailable(self) -> str | None:
         """Why questions can't be asked in this run, or None when they can."""
@@ -526,6 +574,8 @@ class WebHub:
         status = self.pipeline.status() if self.pipeline else {"ready": False, "stations": {}}
         if self.app is not None:
             status["stations"].update(self.app.remote_status())
+        since = getattr(self.app, "paused_since", None)
+        status["paused"], status["paused_since"] = since is not None, since
         status["listeners"] = {sid: t.listeners for sid, t in list(self._taps.items())}
         # The digests asked for and not made yet, and where each stands (Digester.status).
         status["digests"] = self.digester.status() if self.digester is not None else []
@@ -559,6 +609,21 @@ class WebHub:
     def _status_loop(self) -> None:
         while not self._closed.wait(STATUS_INTERVAL_S):
             self.publish("status", self.status())
+
+
+def trouble(st: dict[str, Any]) -> str | None:
+    """What is wrong with a running station, from its status, as the Health tab says it
+    (frontend manage/Status.tsx ``stationLamp``); None while it is fine, stopping, or still
+    making its first connection (the station list's "connecting", lib/station.ts). A station
+    another Wavescribe pushes here is that one's to run."""
+    if st.get("pushed") or st.get("stopping") or st.get("connected"):
+        return None
+    error = st.get("error")
+    if not error and not st.get("reconnects"):
+        return None
+    if st.get("remote"):
+        return f"reconnecting: {error}" if error else "reconnecting"
+    return f"down: {error}" if error else "reconnecting"
 
 
 def _radio_fields(s: Station, stations: Any = (), running: Any = ()) -> dict[str, Any]:
@@ -733,6 +798,8 @@ class Handler(BaseHTTPRequestHandler):
             self._page(path[1:])
         elif path.startswith("/api/manage/"):
             self._manage("GET", path, query)
+        elif path == "/api/hello":  # like /healthz: no header, no token
+            self._json(self.server.hub.hello(self._exports(), self.server.server_address))
         elif feed.handle_get(self, path, query) or self._refused_read(path, query):
             pass
         elif path.startswith("/api/segments/") and path.endswith("/audio.wav"):
@@ -841,6 +908,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == digest.STOP_PATH:
             digest.stop_speech(self)
+            return
+        if url.path in ("/api/pause", "/api/resume"):  # the body is ignored
+            app = self.server.hub.app
+            if app is None:
+                self._json({"error": "nothing to pause here"}, HTTPStatus.CONFLICT)
+                return
+            self._json(app.pause() if url.path == "/api/pause" else app.resume())
             return
         parts = self.path.strip("/").split("/")
         if len(parts) == 4 and parts[:2] == ["api", "stations"] and parts[3] in ("start", "stop"):

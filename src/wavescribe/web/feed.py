@@ -593,8 +593,11 @@ def events(h: Handler, query: dict[str, str]) -> None:
             now = time.monotonic()
             if "status" in want and now >= next_status:
                 next_status = now + 10
+                now_status = hub.status()
+                state, problem = hub.condition(leaving, now_status)
                 _write(h, "status", {"type": "status", "stations": stations(h),
-                                     "time": time.time()})  # fmt: skip
+                                     "time": time.time(), "paused": now_status["paused"],
+                                     "state": state, "problem": problem})  # fmt: skip
                 h.wfile.flush()
                 wrote = now
             # Timed from the last write to this client: events its filter drops don't count,

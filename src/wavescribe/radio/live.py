@@ -344,6 +344,24 @@ class LiveService:
     def is_open(self, device_id: str) -> bool:
         return device_id in self._rx
 
+    def open_ids(self) -> list[str]:
+        return list(self._rx)
+
+    def tuned(self, device_id: str) -> dict[str, Any]:
+        """How the receiver is tuned, as ``tune`` takes it: to tune it so again on resume."""
+        rx = self._rx[device_id]
+        t = rx.tuning
+        return {"mhz": t.freq_hz / 1e6, "mode": t.mode, "squelch_db": t.squelch_db,
+                "channel_khz": t.channel_hz / 1e3 if t.channel_hz else None,
+                "gain_db": rx.device.config.gain_db, "from": self._views.get(device_id),
+                "acknowledge": True}  # fmt: skip
+
+    def carry(self, device_id: str, paused: dict[str, Any]) -> None:
+        """What the receiver had stopped when it was tuned by hand, to start again when
+        listening there ends (after resume tunes it again)."""
+        with self._lock:
+            self._paused[device_id] = paused
+
     def centre(self, device_id: str) -> int | None:
         """Where the dongle is tuned for its hand-tuned receiver, if one is open."""
         rx = self._rx.get(device_id)
@@ -373,6 +391,8 @@ class LiveService:
     def tune(self, device_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         """Open the dongle's live receiver, or retune it. ``from`` says which page view tunes
         it ("find" or "listen"), for messages that tell the user where to let it go."""
+        if self.app.paused_since is not None:
+            raise LiveError("Listening is paused: resume it to listen here.", "paused")
         d = self._config(device_id)
         view = raw.get("from")
         if view not in (None, "find", "listen"):

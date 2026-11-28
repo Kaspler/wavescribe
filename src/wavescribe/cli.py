@@ -394,7 +394,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.web.ports import AutoPort, PortInUseError, choose
     from wavescribe.web.server import access_line, check_port, lan_urls, serve
 
-    started = time.time()
     if args.parent_pid is not None:
         ready_file.watch_parent(args.parent_pid, stop_by_itself)
     setup_logging(
@@ -445,7 +444,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         note_page(url)  # in the home's lock file, for whoever finds the home taken
         try:
             ready_file.write(ready_path, ready_file.fields(
-                host=host, port=app.port, started=started, home=Path.cwd()))  # fmt: skip
+                host=host, port=app.port, started=app.started_at, home=Path.cwd()))  # fmt: skip
         except OSError as e:
             raise RuntimeError(f"can't write the ready file {ready_path}: {e.strerror or e}"
                                ) from e  # fmt: skip
