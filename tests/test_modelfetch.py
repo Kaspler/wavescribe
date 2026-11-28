@@ -1,30 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 """``wavescribe models fetch`` around its downloads: what it says first, when a download fails,
-when it is stopped, and at the end. No network: the URL opener and the hub's download function
-are stand-ins."""
+when it is stopped, and at the end; which part-files it keeps, continues and cleans. No network:
+the URL opener and the hub library's functions are stand-ins."""
 
 from __future__ import annotations
 
+import dataclasses
 import errno
+import hashlib
 import http.client
 import io
 import logging
+import os
 import signal
 import ssl
 import subprocess
 import sys
 import threading
 import time
+import types
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 
 import huggingface_hub
+import huggingface_hub.file_download
+import huggingface_hub.utils
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from wavescribe import invocation, modelfetch
+from wavescribe import invocation, modelfetch, partfiles, registry
 from wavescribe.cli import main
 from wavescribe.registry import Licenses, ModelEntry, ModelRegistry
 
@@ -35,6 +41,10 @@ NOTICE = (
 )
 AGAIN = "run the same command again and it downloads only what is missing"
 KEPT = "nothing is broken and the files that finished are kept"
+CONTINUES = (
+    "nothing is broken and what was downloaded is kept: run the same command again and it "
+    "continues where it stopped"
+)
 
 
 def model(mid: str, capability: str, source: str, size_gb: float | None) -> ModelEntry:
@@ -61,34 +71,70 @@ def because(outer: BaseException, inner: BaseException) -> BaseException:
     return outer
 
 
+def sha(body: bytes) -> str:
+    return hashlib.sha256(body).hexdigest()
+
+
+class Answer(io.BytesIO):
+    """An answer from the web: its status, and a body that breaks off after ``cut_after``."""
+
+    def __init__(self, body: bytes, status: int = 200, cut_after: int | None = None) -> None:
+        super().__init__(body)
+        self.status, self.cut_after = status, cut_after
+
+    def read(self, n: int | None = -1) -> bytes:
+        if self.cut_after is None:
+            return super().read(n)
+        if self.tell() >= self.cut_after:
+            raise http.client.IncompleteRead(b"", 0)
+        return super().read(min(n if n and n > 0 else self.cut_after, self.cut_after - self.tell()))
+
+
 class FakeWeb:
-    """Stands in for urllib.request.urlopen."""
+    """Stands in for urllib.request.urlopen. With ``body`` set it serves that file and honours a
+    Range header (unless ``ranges`` is off), as a web server does."""
 
     def __init__(self) -> None:
         self.error: BaseException | None = None
         self.answer: io.BytesIO | None = None
+        self.body: bytes | None = None
+        self.ranges = True
+        self.cut_after: int | None = None  # the answer breaks off after this many bytes
         self.opened: list[str] = []
+        self.asked: list[str] = []  # each request's Range header ("" for none)
         self.contexts: list[object] = []
 
-    def __call__(self, url: str, timeout: float | None = None, context: object = None):
-        self.opened.append(url)
+    def __call__(self, url, timeout: float | None = None, context: object = None):
+        request = url if isinstance(url, urllib.request.Request) else None
+        full = request.get_full_url() if request else url
+        self.opened.append(full)
         self.contexts.append(context)
         if self.error is not None:
             raise self.error
-        return self.answer or io.BytesIO(b"small model")
+        if self.body is None:
+            return self.answer or io.BytesIO(b"small model")
+        asked = request.get_header("Range", "") if request else ""
+        self.asked.append(asked)
+        start = int(asked.removeprefix("bytes=").rstrip("-")) if asked and self.ranges else 0
+        if start and start >= len(self.body):
+            raise urllib.error.HTTPError(full, 416, "Range Not Satisfiable", None, None)  # type: ignore[arg-type]
+        return Answer(self.body[start:], 206 if start else 200, self.cut_after)
 
 
 class FakeHub:
-    """Stands in for huggingface_hub.snapshot_download. Files land in the cache the way the
-    library lays them out: each first as a part-file among the blobs, then the whole blob and
-    a link to it in the snapshot folder. A file that is there already isn't transferred again.
+    """Stands in for the hub library: ``snapshot_download``, and what Wavescribe downloads a
+    large file with itself (``list_repo_tree``, ``get_hf_file_metadata``, ``http_get``). Files
+    land in the cache the way the library lays them out: each first as a part-file among the
+    blobs, then the whole blob, named by its sha256, and a link to it in the snapshot folder. A
+    blob that is there already isn't transferred again.
     """
 
     FILES = {"config.json": b"c" * 2_000_000, "weights.bin": b"w" * 4096}  # noqa: RUF012
 
     def __init__(self, cache: Path) -> None:
         self.cache = cache
-        self.transferred: list[str] = []
+        self.transferred: list[str] = []  # what snapshot_download transferred
+        self.ranges: list[tuple[str, int]] = []  # what http_get was asked for: file, first byte
         self.fail: dict[str, BaseException] = {}  # "repo/file" -> what its download raises
         self.stall = ""  # "repo/file" whose download hangs, its part-file on disk
         self.stalled = threading.Event()
@@ -113,21 +159,52 @@ class FakeHub:
         for name, body in self.FILES.items():
             if (snapshot / name).exists():
                 continue
-            part = blobs / f"{name}.1a2b3c4d.incomplete"
-            part.write_bytes(body[: len(body) // 2])
-            key = f"{repo}/{name}"
-            if key == self.stall:
-                self.stalled.set()
-                self.release.wait()
-                raise RuntimeError("the test is over")
-            if key in self.fail:
-                part.unlink()  # the library removes the part of a download that failed
-                raise self.fail[key]
-            part.write_bytes(body)
-            part.rename(blobs / name)
-            (snapshot / name).symlink_to(blobs / name)
-            self.transferred.append(key)
+            blob = blobs / sha(body)
+            if not blob.exists():
+                part = blobs / f"{sha(body)}.1a2b3c4d.incomplete"
+                part.write_bytes(body[: len(body) // 2])
+                key = f"{repo}/{name}"
+                if key == self.stall:
+                    self.stalled.set()
+                    self.release.wait()
+                    raise RuntimeError("the test is over")
+                if key in self.fail:
+                    part.unlink()  # the library removes the part of a download that failed
+                    raise self.fail[key]
+                part.write_bytes(body)
+                part.rename(blob)
+                self.transferred.append(key)
+            (snapshot / name).symlink_to(blob)
         return str(snapshot)
+
+    def tree(self, repo: str, *, revision=None, recursive=False) -> Iterator[object]:
+        """``HfApi.list_repo_tree`` (a bound method on the class is called without the api)."""
+        for name, body in self.FILES.items():
+            lfs = types.SimpleNamespace(sha256=sha(body))
+            yield types.SimpleNamespace(path=name, size=len(body), lfs=lfs)
+
+    def metadata(self, url: str) -> object:
+        repo, name = url.removeprefix("https://huggingface.co/").split("/resolve/")
+        name = name.split("/", 1)[1]
+        return types.SimpleNamespace(etag=sha(self.FILES[name]), size=len(self.FILES[name]),
+                                     location=f"https://cdn.example/{repo}/{name}")  # fmt: skip
+
+    def http_get(self, url: str, out, *, resume_size: int = 0, headers=None,
+                 expected_size=None, displayed_filename=None) -> None:  # fmt: skip
+        key = url.removeprefix("https://cdn.example/")
+        name = key.rsplit("/", 1)[1]
+        assert "authorization" not in headers  # the token stays off another host
+        self.ranges.append((name, resume_size))
+        rest = self.FILES[name][resume_size:]
+        if key == self.stall or key in self.fail:
+            out.write(rest[: len(rest) // 2])
+            out.flush()
+            if key in self.fail:
+                raise self.fail[key]
+            self.stalled.set()
+            self.release.wait()
+            raise RuntimeError("the test is over")
+        out.write(rest)
 
 
 class Setup:
@@ -151,10 +228,18 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Setup]:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(urllib.request, "urlopen", s.web)
     monkeypatch.setattr(huggingface_hub, "snapshot_download", s.hub)
+    monkeypatch.setattr(huggingface_hub.HfApi, "list_repo_tree", s.hub.tree)
+    monkeypatch.setattr(huggingface_hub, "get_hf_file_metadata", s.hub.metadata)
+    monkeypatch.setattr(huggingface_hub.file_download, "http_get", s.hub.http_get)
+    monkeypatch.setattr(huggingface_hub.utils, "build_hf_headers",
+                        lambda: {"authorization": "Bearer hf_x", "user-agent": "x"})  # fmt: skip
     monkeypatch.setattr(ModelRegistry, "load", classmethod(lambda cls, *a, **k: s.registry))
     monkeypatch.setattr(modelfetch, "free_bytes", lambda _path: int(s.free))
     yield s
     s.hub.release.set()
+    for thread in threading.enumerate():  # a stopped download's thread, and the lock it holds
+        if thread.name == "model-download":
+            thread.join(5)
     huggingface_hub.utils.enable_progress_bars()  # a fetch whose output isn't a terminal
 
 
@@ -384,39 +469,51 @@ def test_an_error_answer_says_whether_trying_again_helps(status: int, expect: st
 # -- Ctrl-C ----------------------------------------------------------------------------------------
 
 
-def test_stopping_says_what_finished_and_the_next_run_downloads_the_rest(
-    setup: Setup, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def ctrl_c_while_stalled(setup: Setup, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ctrl-C while the stalled download hangs. The process doesn't end: SystemExit instead."""
+
     def leave(code: int) -> None:
         raise SystemExit(code)
 
     def ctrl_c(_progress: object) -> None:
-        if setup.hub.stalled.is_set():
+        if setup.hub.stalled.is_set() and not setup.hub.release.is_set():
             raise KeyboardInterrupt
 
     monkeypatch.setattr(modelfetch, "_exit", leave)
     monkeypatch.setattr(modelfetch._Progress, "tick", ctrl_c)
+
+
+def end_the_stopped_download(setup: Setup) -> None:
+    """What the end of the process does to a stopped download: its thread goes, and with it
+    the lock on the part-file it was writing."""
+    setup.hub.release.set()
+    for thread in threading.enumerate():
+        if thread.name == "model-download":
+            thread.join(5)
+    setup.hub.stall = ""
+
+
+def test_stopping_says_what_finished_and_the_next_run_downloads_the_rest(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ctrl_c_while_stalled(setup, monkeypatch)
     setup.hub.stall = "example-org/big/weights.bin"
     with pytest.raises(SystemExit) as stopped:
         main(["models", "fetch"])
     assert stopped.value.code == 130
     out, err = capsys.readouterr()
-    assert err == (
+    assert err == (  # the library's file that was cut off is downloaded again, and it says so
         "Stopped. Downloaded: small. Not downloaded: big (2 MB of it kept), llm. Nothing is "
         "broken and the files that finished are kept: run the same command again and it "
-        "downloads only what is missing.\n"
+        "downloads only what is missing; a file that was cut off starts again from its "
+        "beginning.\n"
     )
     assert "Done." not in out
     blobs = setup.hub.folder("example-org/big") / "blobs"
-    assert sorted(p.name for p in blobs.iterdir()) == ["config.json"]  # the part-file is gone
+    config = sha(FakeHub.FILES["config.json"])
+    assert sorted(p.name for p in blobs.iterdir()) == [config]  # the part-file is gone
 
-    monkeypatch.undo()  # no Ctrl-C this time; the stand-ins are put back below
-    monkeypatch.chdir(setup.tmp)
-    monkeypatch.setenv("HF_HUB_CACHE", str(setup.tmp / "hub"))
-    monkeypatch.setattr(urllib.request, "urlopen", setup.web)
-    monkeypatch.setattr(huggingface_hub, "snapshot_download", setup.hub)
-    monkeypatch.setattr(ModelRegistry, "load", classmethod(lambda cls, *a, **k: setup.registry))
-    setup.hub.stall = ""
+    end_the_stopped_download(setup)
     assert main(["models", "fetch"]) == 0
     out, err = capsys.readouterr()
     assert out.splitlines()[0].startswith(
@@ -437,12 +534,171 @@ def test_a_part_file_that_was_there_before_belongs_to_another_download(tmp_path:
     blobs = tmp_path / "blobs"
     blobs.mkdir()
     theirs, ours = blobs / "a.11111111.incomplete", blobs / "b.22222222.incomplete"
+    continued = blobs / ("c" * 64 + ".part")  # Wavescribe's own: the next download continues it
     theirs.write_bytes(b"x" * 10)
     ours.write_bytes(b"y" * 20)
+    continued.write_bytes(b"z" * 30)
     assert modelfetch.remove_parts(tmp_path, keep=frozenset({theirs})) == 20
-    assert theirs.exists() and not ours.exists()
+    assert theirs.exists() and not ours.exists() and continued.exists()
     assert modelfetch.remove_parts(tmp_path, older_than_s=3600) == 0  # still being written
     assert theirs.exists()
+
+
+# -- Continuing where a download stopped -----------------------------------------------------------
+
+LARGE = {"config.json": b"c" * 1000, "weights.bin": bytes(range(256)) * 16_000}  # 4.1 MB
+
+
+def test_a_large_hub_file_that_was_stopped_continues_where_it_stopped(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(FakeHub, "FILES", LARGE)
+    monkeypatch.setattr(registry, "BIG_FILE", 1_000_000)  # the weights download as a large file
+    ctrl_c_while_stalled(setup, monkeypatch)
+    setup.hub.stall = "example-org/big/weights.bin"
+    with pytest.raises(SystemExit) as stopped:
+        main(["models", "fetch", "big"])
+    assert stopped.value.code == 130
+    assert capsys.readouterr().err == (
+        "Stopped. Downloaded: nothing. Not downloaded: big (2 MB of it kept). Nothing is broken "
+        "and what was downloaded is kept: run the same command again and it continues where it "
+        "stopped.\n"
+    )
+    weights = LARGE["weights.bin"]
+    part = setup.hub.folder("example-org/big") / "blobs" / f"{sha(weights)}.part"
+    assert part.stat().st_size == len(weights) // 2  # kept, for the next download
+
+    end_the_stopped_download(setup)
+    assert main(["models", "fetch", "big"]) == 0
+    assert setup.hub.ranges == [("weights.bin", 0), ("weights.bin", len(weights) // 2)]
+    assert not part.exists() and setup.registry.local_path(BIG) is not None
+    assert (setup.registry.local_path(BIG) / "weights.bin").read_bytes() == weights
+    assert setup.hub.transferred == ["example-org/big/config.json"]  # the library, the rest only
+
+
+def test_a_large_hub_file_that_broke_off_says_the_rerun_continues(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(FakeHub, "FILES", LARGE)
+    monkeypatch.setattr(registry, "BIG_FILE", 1_000_000)
+    broke = RemoteProtocolError("peer closed connection without sending complete message body")
+    setup.hub.fail = {"example-org/big/weights.bin": broke}
+    assert main(["models", "fetch", "big"]) == 1
+    assert one_sentence(capsys.readouterr().err) == (
+        "couldn't download big: the connection to huggingface.co broke off (the other end "
+        f"closed it before the file was whole); {CONTINUES}."
+    )
+    setup.hub.fail = {}
+    assert main(["models", "fetch", "big"]) == 0
+    assert setup.hub.ranges[-1] == ("weights.bin", len(LARGE["weights.bin"]) // 2)
+
+
+def test_a_continued_file_that_isnt_the_model_starts_again(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(FakeHub, "FILES", LARGE)
+    monkeypatch.setattr(registry, "BIG_FILE", 1_000_000)
+    weights = LARGE["weights.bin"]
+    part = setup.hub.folder("example-org/big") / "blobs" / f"{sha(weights)}.part"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(b"x" * 1000)  # not how the file begins
+    assert main(["models", "fetch", "big"]) == 1
+    sentence = one_sentence(capsys.readouterr().err)
+    assert sentence.startswith("couldn't download big: what cdn.example sent isn't the model ")
+    assert sentence.endswith("nothing was installed: open a web page in a browser to check the "
+                             "connection, then run the same command again.")  # fmt: skip
+    assert not part.exists()  # so the next download starts from the beginning
+    assert main(["models", "fetch", "big"]) == 0
+    assert setup.hub.ranges == [("weights.bin", 1000), ("weights.bin", 0)]
+
+
+def checked_model(setup: Setup, body: bytes) -> tuple[ModelEntry, Path, Path]:
+    """A model from a URL with a checksum, its file, and the part-file its download writes."""
+    entry = dataclasses.replace(
+        model("checked", "vad", "url:https://models.example/checked.onnx", 0.001), sha256=sha(body)
+    )
+    setup.registry.add(entry)
+    setup.web.body = body
+    folder = setup.tmp / "models" / "checked"
+    return entry, folder / "checked.onnx", folder / f"checked.onnx.{sha(body)[:16]}.part"
+
+
+def test_a_url_model_that_broke_off_continues_where_it_stopped(
+    setup: Setup, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = bytes(range(256)) * 4000
+    _entry, target, part = checked_model(setup, body)
+    setup.web.cut_after = 300_000
+    assert main(["models", "fetch", "checked"]) == 1
+    assert one_sentence(capsys.readouterr().err) == (
+        "couldn't download checked: the connection to models.example broke off (the other end "
+        f"closed it before the file was whole); {CONTINUES}."
+    )
+    assert part.stat().st_size == 300_000 and not target.exists()
+    setup.web.cut_after = None
+    assert main(["models", "fetch", "checked"]) == 0
+    assert setup.web.asked == ["", "bytes=300000-"]  # only what was missing
+    assert target.read_bytes() == body and not part.exists()
+
+
+def test_a_server_that_sends_the_whole_file_again_has_it_written_from_the_beginning(
+    setup: Setup,
+) -> None:
+    body = bytes(range(256)) * 4000
+    _entry, target, part = checked_model(setup, body)
+    part.parent.mkdir(parents=True)
+    part.write_bytes(body[:5000])
+    setup.web.ranges = False  # answers a range request with the whole file (HTTP 200)
+    assert main(["models", "fetch", "checked"]) == 0
+    assert target.read_bytes() == body
+    part.write_bytes(body)  # a part-file that is whole: nothing after it to ask for (HTTP 416)
+    target.unlink()
+    setup.web.ranges = True
+    assert main(["models", "fetch", "checked"]) == 0
+    assert setup.web.asked[-1] == f"bytes={len(body)}-" and target.read_bytes() == body
+
+
+def test_a_file_another_download_is_writing_is_left_to_it(
+    setup: Setup, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _entry, target, part = checked_model(setup, b"model")
+    part.parent.mkdir(parents=True)
+    with partfiles.held(part):  # the page's download, say
+        assert main(["models", "fetch", "checked"]) == 1
+    assert one_sentence(capsys.readouterr().err) == (
+        "couldn't download checked: another download of it is under way (on the page or in "
+        "another window); nothing is broken: let that one finish, or stop it, then run the "
+        "same command again."
+    )
+    assert setup.web.opened == [] and not target.exists()
+
+
+def test_part_files_nobody_continues_are_cleaned_and_one_being_written_never(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    week_ago = time.time() - 8 * 86400
+    blobs = setup.hub.folder("example-org/big") / "blobs"
+    blobs.mkdir(parents=True)
+    old, recent, written = (blobs / f"{c * 64}.part" for c in "abc")
+    library = blobs / "d.1a2b3c4d.incomplete"  # the library's, which nothing continues
+    small = setup.tmp / "models" / "small" / "small.bin.0123456789abcdef.part"
+    small.parent.mkdir(parents=True)
+    for path in (old, recent, written, library, small):
+        path.write_bytes(b"x" * 10)
+    for path in (old, written, small):
+        os.utime(path, (week_ago, week_ago))
+    os.utime(library, (time.time() - 7200, time.time() - 7200))
+    with partfiles.held(written):  # a download at work, however long it has been quiet
+        modelfetch.survey(setup.registry, [BIG])
+    assert written.exists() and recent.exists()
+    assert not old.exists() and not library.exists()
+    assert not small.exists()  # of every model in the registry, not only those fetched
+
+    # Fetching a revision removes the part-files of files it doesn't have (another revision's).
+    monkeypatch.setattr(FakeHub, "FILES", LARGE)
+    monkeypatch.setattr(registry, "BIG_FILE", 1_000_000)
+    assert main(["models", "fetch", "big"]) == 0
+    assert sorted(blobs.glob("*.part")) == []
 
 
 CHILD = """
@@ -467,6 +723,7 @@ def download(repo, *, revision=None, allow_patterns=None, local_files_only=False
 
 
 huggingface_hub.snapshot_download = download
+huggingface_hub.HfApi.list_repo_tree = lambda *a, **k: iter(())  # no file of BIG_FILE bytes
 entry = ModelEntry("big", "asr", "fake", "hf:example-org/big", "u", "MIT",
                    "https://licence.example", "default", False, ("*",), "",
                    revision="0" * 40, size_gb=1.5)
@@ -480,8 +737,6 @@ raise SystemExit(cli.main(["models", "fetch", "big"]))
 def test_a_download_stops_at_once_not_when_its_file_ends(
     sig: signal.Signals, code: int, tmp_path: Path
 ) -> None:
-    import os
-
     env = {**os.environ, "HF_HUB_CACHE": str(tmp_path / "hub")}
     p = subprocess.Popen([sys.executable, "-c", CHILD], cwd=tmp_path, env=env, text=True,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # fmt: skip

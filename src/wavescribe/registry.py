@@ -10,24 +10,32 @@ The licence gate (docs/LICENSING.md): default-tier models need nothing. Opt-in m
 user's acceptance of their licence, and restricted (non-commercial) ones also an explicit
 non-commercial acknowledgement, both recorded in ``data/licenses-accepted.json``. Chains skip a
 model that isn't accepted, and naming one explicitly fails with the command that accepts it.
+
+A download that stops continues where it stopped (partfiles.py): a model from a URL with a
+checksum, and every file of a Hugging Face model of BIG_FILE bytes or more, which Wavescribe
+downloads itself over HTTP. The library downloads the rest; a file of its own that is cut off
+starts again from its beginning, because it keeps nothing of it.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import logging
 import os
 import tempfile
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
+from wavescribe import partfiles
 from wavescribe.httpclient import trust_store
 from wavescribe.invocation import typed
 
@@ -41,7 +49,10 @@ LOCAL_MODELS_PATH = Path("config/models.local.toml")
 # bring-your-own file, whose entries are all tier byo.
 CATALOG_MODELS_PATH = Path("config/models.catalog.toml")
 LEDGER_PATH = Path("data/licenses-accepted.json")
-PART_SUFFIX = ".part"  # a URL model while it downloads, next to where it will be
+PART_SUFFIX = partfiles.SUFFIX  # a download that the next one continues (partfiles.py)
+# A download that nothing continues: the library's own, and a URL model's without a checksum.
+TEMP_SUFFIX = ".incomplete"
+BIG_FILE = 100_000_000  # a Hugging Face file this large downloads so that a rerun continues it
 # What a failed download tells the person to do. The page shows the same sentences and puts its
 # own words here (downloads.py), so every such sentence uses this constant.
 RETRY = "run the same command again"
@@ -92,6 +103,21 @@ class ModelEntry:
         lang = language.lower()
         primary = lang.split("-", 1)[0]
         return any(tag.lower() in (lang, primary) for tag in self.languages)
+
+
+def hub_cache() -> Path:
+    """The Hugging Face cache, where the library puts what it downloads: read from the same
+    variables it reads, in the same order (HF_HUB_CACHE, HUGGINGFACE_HUB_CACHE, HF_HOME,
+    XDG_CACHE_HOME), as they are now."""
+    env = os.environ
+    home = env.get("HF_HOME") or str(Path(env.get("XDG_CACHE_HOME", "~/.cache")) / "huggingface")
+    hub = env.get("HF_HUB_CACHE") or env.get("HUGGINGFACE_HUB_CACHE") or str(Path(home) / "hub")
+    return Path(os.path.expandvars(os.path.expanduser(hub)))
+
+
+def repo_folder(entry: ModelEntry) -> str:
+    """A Hugging Face model's folder in the cache: models--<owner>--<name>."""
+    return "models--" + entry.location.replace("/", "--")
 
 
 def accept_command(entry: ModelEntry) -> str:
@@ -310,6 +336,7 @@ class ModelRegistry:
         if entry.kind == "hf":
             from huggingface_hub import snapshot_download
 
+            self._fetch_big_files(entry)
             return Path(
                 snapshot_download(
                     entry.location,
@@ -327,32 +354,116 @@ class ModelRegistry:
         if target.exists():
             return target
         target.parent.mkdir(parents=True, exist_ok=True)
+        if entry.sha256:  # a part-file per pinned file: another pin's is no use to anyone
+            part = target.with_name(f"{target.name}.{entry.sha256[:16]}{PART_SUFFIX}")
+            partfiles.remove(p for p in partfiles.found(target.parent) if p != part)
+            with _held(entry, part) as out:
+                _download(entry.location, out)
+                _install(entry, out, part, target, entry.sha256, entry.location)
+            return target
+        # Nothing to check a continued file against: each download starts from the beginning.
         with tempfile.NamedTemporaryFile(
-            dir=target.parent, suffix=PART_SUFFIX, delete=False
+            dir=target.parent, suffix=TEMP_SUFFIX, delete=False
         ) as tmp:
             tmp_path = Path(tmp.name)
             try:
-                digest = hashlib.sha256()
-                with urllib.request.urlopen(
-                    entry.location, timeout=60, context=trust_store()
-                ) as resp:
-                    while block := resp.read(1 << 20):
-                        digest.update(block)
-                        tmp.write(block)
+                _download(entry.location, tmp)
             except BaseException:  # a dropped connection or Ctrl-C: no partial file is left
                 tmp_path.unlink()
                 raise
-        if entry.sha256 and digest.hexdigest() != entry.sha256:
-            tmp_path.unlink()
-            host = urllib.parse.urlsplit(entry.location).hostname
-            raise ModelError(
-                f"couldn't download {entry.id}: what {host} sent isn't the model (sha256 mismatch: "
-                f"got {digest.hexdigest()}, want {entry.sha256}), as happens when a Wi-Fi sign-in "
-                "page or a proxy answers instead; nothing was installed: open a web page in a "
-                f"browser to check the connection, then {RETRY}."
-            )
         tmp_path.replace(target)
         return target
+
+    def _fetch_big_files(self, entry: ModelEntry) -> None:
+        """Download a Hugging Face model's files of BIG_FILE bytes or more into part-files that
+        the next download continues, and from there into the library's cache, where
+        ``snapshot_download`` finds them whole and only links them. The library downloads the
+        others itself. A part-file of a file this revision doesn't have (another revision's)
+        is removed."""
+        from huggingface_hub import HfApi, get_hf_file_metadata, hf_hub_url
+        from huggingface_hub.file_download import http_get
+        from huggingface_hub.utils import build_hf_headers, filter_repo_objects
+
+        tree = HfApi().list_repo_tree(entry.location, revision=entry.revision, recursive=True)
+        big = [f for f in tree if getattr(f, "lfs", None) is not None and f.size >= BIG_FILE]
+        patterns = list(entry.files) if entry.files else None
+        big = list(filter_repo_objects(big, allow_patterns=patterns, key=lambda f: f.path))
+        blobs = hub_cache() / repo_folder(entry) / "blobs"
+        wanted = {blobs / (f.lfs.sha256 + PART_SUFFIX) for f in big}
+        partfiles.remove(p for p in partfiles.found(blobs.parent) if p not in wanted)
+        for f in big:
+            if (blobs / f.lfs.sha256).exists():
+                continue
+            url = hf_hub_url(entry.location, f.path, revision=entry.revision)
+            meta = get_hf_file_metadata(url)
+            blob = blobs / (meta.etag or f.lfs.sha256)  # the name the library looks for
+            if blob.exists():
+                continue
+            headers = build_hf_headers()
+            if urllib.parse.urlsplit(meta.location).netloc != urllib.parse.urlsplit(url).netloc:
+                headers.pop("authorization", None)  # a signed address elsewhere: no token there
+            blobs.mkdir(parents=True, exist_ok=True)
+            part = blobs / (f.lfs.sha256 + PART_SUFFIX)
+            with _held(entry, part) as out:
+                have = out.seek(0, os.SEEK_END)
+                if have > f.size:  # not this file's beginning: start again
+                    out.truncate(0)
+                    have = 0
+                http_get(meta.location, out, resume_size=have, headers=headers,
+                         expected_size=f.size, displayed_filename=f.path)  # fmt: skip
+                _install(entry, out, part, blob, f.lfs.sha256, meta.location)
+
+
+@contextmanager
+def _held(entry: ModelEntry, part: Path) -> Iterator[BinaryIO]:
+    try:
+        with partfiles.held(part) as out:
+            yield out
+    except partfiles.Busy:
+        raise ModelError(
+            f"couldn't download {entry.id}: another download of it is under way (on the page or "
+            "in another window); nothing is broken: let that one finish, or stop it, then "
+            f"{RETRY}."
+        ) from None
+
+
+def _download(url: str, out: BinaryIO) -> None:
+    """Write what ``url`` holds to ``out``, after the bytes ``out`` has already: the download
+    continues where an earlier one stopped (an HTTP range request). A server that sends the
+    whole file instead has it written from the beginning."""
+    have = out.seek(0, os.SEEK_END)
+    request = urllib.request.Request(url, headers={"Range": f"bytes={have}-"}) if have else url
+    try:
+        resp = urllib.request.urlopen(request, timeout=60, context=trust_store())
+    except urllib.error.HTTPError as e:
+        if have and e.code == 416:  # nothing after what is there: the checksum says if it's whole
+            return
+        raise
+    with resp:
+        if have and resp.status != 206:
+            out.seek(0)
+            out.truncate()
+        while block := resp.read(1 << 20):
+            out.write(block)
+
+
+def _install(
+    entry: ModelEntry, out: BinaryIO, part: Path, target: Path, sha256: str, source: str
+) -> None:
+    """Put a whole part-file in its place once its checksum matches; one that doesn't is
+    removed (the next download starts from the beginning)."""
+    out.flush()
+    got = partfiles.checksum(part)
+    if got != sha256:
+        part.unlink()
+        host = urllib.parse.urlsplit(source).hostname
+        raise ModelError(
+            f"couldn't download {entry.id}: what {host} sent isn't the model (sha256 mismatch: "
+            f"got {got}, want {sha256}), as happens when a Wi-Fi sign-in page or a proxy answers "
+            "instead; nothing was installed: open a web page in a browser to check the "
+            f"connection, then {RETRY}."
+        )
+    part.replace(target)
 
 
 def _parse_local_entry(raw: dict[str, Any], path: Path) -> ModelEntry:

@@ -7,8 +7,15 @@ current file ends. A download that fails is one sentence: what failed, that noth
 and that the same command again downloads only what is missing.
 
 What "continues" means: a model is one file or several, and a file that finished is kept. A
-file that was cut off is downloaded again from its start: the Hugging Face library keeps no
-part of it, and a model from a plain URL is one small file.
+file that was cut off continues where it stopped when its part-file is Wavescribe's own (a
+Hugging Face file of 100 MB or more, a URL model with a checksum: registry.py, partfiles.py),
+and the stop and failure sentences say so; a smaller file the Hugging Face library downloads is
+fetched again from its beginning, and the sentences say that.
+
+Part-files stay bounded. The library's, which nothing continues, go when the command stops, and
+any of them nobody has written to for an hour goes before a download. Wavescribe's own go when
+nobody has written to them for a week, when the revision they belong to is no longer the one
+downloaded, and with ``models remove``; never while a download holds one.
 """
 
 from __future__ import annotations
@@ -31,18 +38,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
-from wavescribe.registry import PART_SUFFIX, RETRY, ModelEntry, ModelError, ModelRegistry
+from wavescribe import partfiles
+from wavescribe.registry import (
+    RETRY,
+    TEMP_SUFFIX,
+    ModelEntry,
+    ModelError,
+    ModelRegistry,
+    hub_cache,
+    repo_folder,
+)
 
 GB = 1e9  # sizes are decimal, as models.toml's size_gb and Finder are
 
 # The wording a failed or stopped download ends with, in one place. The page shows the same
 # sentences with RETRY_ON_PAGE where the command line says RETRY (downloads.py).
-KEPT = "nothing is broken and the files that finished are kept"
+FINISHED = "the files that finished are kept"
+KEPT = f"nothing is broken and {FINISHED}"
 AGAIN = f"{RETRY} and it downloads only what is missing"
+# When a part-file is kept, which the next download continues:
+SO_FAR = "what was downloaded is kept"
+CONTINUES = f"{RETRY} and it continues where it stopped"
+CUT_OFF = "a file that was cut off starts again from its beginning"
 RETRY_ON_PAGE = "start the download again"
 
 PROGRESS_EVERY_S = 15.0  # between progress lines when the output isn't a terminal
-STALE_PART_S = 3600.0  # a part-file nobody has written to for this long belongs to no download
+STALE_PART_S = 3600.0  # a part-file of the library's that nobody has written to for this long
 _POLL_S = 0.2  # how often the waiting main thread looks up: Ctrl-C is answered within this
 
 _exit: Callable[[int], NoReturn] = os._exit  # tests replace it
@@ -58,26 +79,11 @@ def size_text(n: float) -> str:
 # -- Where a model's bytes land, and how many are there ----------------------------------------
 
 
-def hub_cache() -> Path:
-    """The Hugging Face cache, where the library puts what it downloads: read from the same
-    variables it reads, in the same order (HF_HUB_CACHE, HUGGINGFACE_HUB_CACHE, HF_HOME,
-    XDG_CACHE_HOME), as they are now."""
-    env = os.environ
-    home = env.get("HF_HOME") or str(Path(env.get("XDG_CACHE_HOME", "~/.cache")) / "huggingface")
-    hub = env.get("HF_HUB_CACHE") or env.get("HUGGINGFACE_HUB_CACHE") or str(Path(home) / "hub")
-    return Path(os.path.expandvars(os.path.expanduser(hub)))
-
-
 def target_dir(registry: ModelRegistry, entry: ModelEntry) -> Path:
     """Where a download's bytes land (to measure progress and free space)."""
     if entry.kind == "hf":
         return hub_cache() / repo_folder(entry)
     return registry.models_dir / entry.id
-
-
-def repo_folder(entry: ModelEntry) -> str:
-    """A Hugging Face model's folder in the cache: models--<owner>--<name>."""
-    return "models--" + entry.location.replace("/", "--")
 
 
 def dir_bytes(path: Path) -> int:
@@ -95,18 +101,23 @@ def dir_bytes(path: Path) -> int:
 
 
 def _parts(folder: Path) -> list[Path]:
-    """The part-files of downloads in progress. The Hugging Face library writes each file as
-    ``blobs/<name>.incomplete`` and renames it when it is whole; a model from a URL is a
-    ``.part`` file next to where it will be."""
-    blobs = folder / "blobs"
-    hub = sorted(blobs.glob("*.incomplete")) if blobs.is_dir() else []
-    return hub + (sorted(folder.glob("*" + PART_SUFFIX)) if folder.is_dir() else [])
+    """The part-files that no download continues. The Hugging Face library writes each file as
+    ``blobs/<name>.<id>.incomplete`` and renames it when it is whole; a model from a URL with no
+    checksum is a file of the same suffix next to where it will be."""
+    return sorted((folder / "blobs").glob("*" + TEMP_SUFFIX)) + sorted(
+        folder.glob("*" + TEMP_SUFFIX)
+    )
+
+
+def kept_bytes(folder: Path) -> int:
+    """The bytes of the part-files the next download continues (partfiles.py)."""
+    return partfiles.size(partfiles.found(folder))
 
 
 def remove_parts(
     folder: Path, *, older_than_s: float = 0.0, keep: frozenset[Path] = frozenset()
 ) -> int:
-    """Delete part-files, and say how many bytes that freed. Nothing ever reuses one: a
+    """Delete the part-files that no download continues, and say how many bytes that freed: a
     download that was killed leaves its part behind for good, up to the size of the model.
     ``keep`` names the ones to leave alone (they were there before this download began, so
     they may be another download's)."""
@@ -157,7 +168,11 @@ class Item:
 def survey(registry: ModelRegistry, entries: list[ModelEntry]) -> list[Item]:
     """What is installed and how much is left to download. Part-files that a killed download
     left behind long ago are removed on the way (a recent one may be another download at work:
-    the page's, say), so they neither count as progress nor take up the room."""
+    the page's, say), so they neither count as progress nor take up the room: the library's
+    after an hour, and Wavescribe's own, of every model in the registry, after a week. Those
+    that stay count as downloaded: the next download continues them."""
+    for folder in {target_dir(registry, e) for e in registry.entries() if e.kind != "local"}:
+        partfiles.remove(partfiles.found(folder), older_than_s=partfiles.KEEP_S)
     items = []
     for entry in entries:
         folder = target_dir(registry, entry)
@@ -246,11 +261,15 @@ def _status(e: BaseException) -> int | None:
 
 
 def explain(entry: ModelEntry, exc: BaseException, *, folder: Path | None = None) -> str:
-    """Why a download failed and what to do, as one sentence (no traceback, no library text)."""
+    """Why a download failed and what to do, as one sentence (no traceback, no library text).
+    With ``folder``, it says whether the next download continues a part-file kept there."""
     chain = _chain(exc)
     host = _host(entry)
     head = f"couldn't download {entry.id}: "
-    again = f"; {KEPT}: "
+    continues = folder is not None and kept_bytes(folder) > 0
+    what, retry = (SO_FAR, CONTINUES) if continues else (FINISHED, AGAIN)
+    kept = f"nothing is broken and {what}"
+    again = f"; {kept}: "
 
     cert = next((e for e in chain if isinstance(e, ssl.SSLCertVerificationError)), None)
     if cert is None:
@@ -260,23 +279,22 @@ def explain(entry: ModelEntry, exc: BaseException, *, folder: Path | None = None
         return (
             f"{head}this computer doesn't trust the certificate that {host} presented ({why}); "
             "check the date and time, and if a proxy or a security program inspects HTTPS add "
-            f"its certificate to the system keychain, then {AGAIN} ({KEPT})."
+            f"its certificate to the system keychain, then {retry} ({kept})."
         )
 
     full = next((e for e in chain if isinstance(e, OSError) and e.errno == errno.ENOSPC), None)
     if full is not None:
         free = f" ({size_text(free_bytes(folder))} free)" if folder is not None else ""
-        return f"{head}the disk is full{free}{again}make room, then {AGAIN}."
+        return f"{head}the disk is full{free}{again}make room, then {retry}."
 
     status = next((code for e in chain if (code := _status(e)) is not None), None)
     if status is not None:
         answered = f"{head}{host} answered with an error (HTTP {status})"
         if status >= 500 or status in (408, 429):
-            return f"{answered}{again}wait a few minutes, then {AGAIN}."
+            return f"{answered}{again}wait a few minutes, then {retry}."
         return (
-            f"{answered}: nothing on this computer is broken and the files that finished are "
-            f"kept, but the same command will get the same answer until {host} offers "
-            f"{entry.location} again"
+            f"{answered}: nothing on this computer is broken and {what}, but the same command "
+            f"will get the same answer until {host} offers {entry.location} again"
             + (" or you log in there (`hf auth login`)" if status in (401, 403) else "")
             + "."
         )
@@ -292,7 +310,7 @@ def explain(entry: ModelEntry, exc: BaseException, *, folder: Path | None = None
                 why = "no answer in time"
             else:
                 why = _plain(chain[-1])
-            return f"{head}no connection to {host} ({why}){again}check the network, then {AGAIN}."
+            return f"{head}no connection to {host} ({why}){again}check the network, then {retry}."
     for e in chain:
         if _names(e) & _BROKE_OFF or isinstance(e, http.client.HTTPException):
             why = _plain(chain[-1])
@@ -300,11 +318,11 @@ def explain(entry: ModelEntry, exc: BaseException, *, folder: Path | None = None
                 why = "no answer in time"
             elif "peer closed" in why or isinstance(e, http.client.IncompleteRead):
                 why = "the other end closed it before the file was whole"
-            return f"{head}the connection to {host} broke off ({why}){again}{AGAIN}."
+            return f"{head}the connection to {host} broke off ({why}){again}{retry}."
     if "LocalEntryNotFoundError" in _names(exc):  # the library's word for "couldn't reach it"
-        return f"{head}no connection to {host}{again}check the network, then {AGAIN}."
+        return f"{head}no connection to {host}{again}check the network, then {retry}."
     inner = chain[-1]
-    return f"{head}{type(inner).__name__}: {_plain(inner)}{again}{AGAIN}."
+    return f"{head}{type(inner).__name__}: {_plain(inner)}{again}{retry}."
 
 
 # -- Quiet where the library is loud ---------------------------------------------------------------
@@ -430,8 +448,9 @@ def _stoppable(fn: Callable[[], Any], tick: Callable[[], None]) -> Any:
 
 def _leave(code: int, current: Item, not_ours: frozenset[Path]) -> NoReturn:
     """Stop now. The download threads are still running and can't be told to stop, so the
-    process ends without waiting for them; their part-files go first, because nothing would
-    ever reuse or remove them."""
+    process ends without waiting for them. Their part-files that nothing continues go first,
+    because nothing would ever reuse or remove them; Wavescribe's own stay for the next
+    download, and the lock on the one being written goes with the process."""
     remove_parts(current.folder, keep=not_ours)
     with contextlib.suppress(Exception):
         sys.stdout.flush()
@@ -439,28 +458,24 @@ def _leave(code: int, current: Item, not_ours: frozenset[Path]) -> NoReturn:
     _exit(code)
 
 
-def _part_bytes(folder: Path) -> int:
-    total = 0
-    for part in _parts(folder):
-        with contextlib.suppress(OSError):
-            total += part.stat().st_size
-    return total
-
-
-def _stopped(items: list[Item], done: list[Item], current: Item) -> str:
+def _stopped(items: list[Item], done: list[Item], current: Item, not_ours: frozenset[Path]) -> str:
+    """What Ctrl-C says: what finished, what didn't, and what the next download does with
+    the file that was cut off (continues it, or starts it again)."""
     finished = ", ".join(i.id for i in items if i.installed or i in done) or "nothing"
     waiting = [i for i in items if not i.installed and i not in done]
+    cut = [p for p in _parts(current.folder) if p not in not_ours]  # removed on the way out
     rest = []
     for item in waiting:
         note = ""
         if item is current:
-            kept = dir_bytes(item.folder) - _part_bytes(item.folder)
+            kept = dir_bytes(item.folder) - partfiles.size(cut)
             note = f" ({size_text(kept)} of it kept)" if kept >= 1e6 else ""
         rest.append(item.id + note)
-    return (
-        f"Stopped. Downloaded: {finished}. Not downloaded: {', '.join(rest)}. "
-        f"{KEPT[0].upper()}{KEPT[1:]}: {AGAIN}."
-    )
+    if kept_bytes(current.folder):
+        then = f"Nothing is broken and {SO_FAR}: {CONTINUES}."
+    else:
+        then = f"{KEPT[0].upper()}{KEPT[1:]}: {AGAIN}" + (f"; {CUT_OFF}." if cut else ".")
+    return f"Stopped. Downloaded: {finished}. Not downloaded: {', '.join(rest)}. {then}"
 
 
 def run(registry: ModelRegistry, entries: list[ModelEntry]) -> int:
@@ -499,7 +514,7 @@ def run(registry: ModelRegistry, entries: list[ModelEntry]) -> int:
         try:
             path = _stoppable(lambda entry=entry: registry.fetch(entry), progress.tick)
         except KeyboardInterrupt:
-            print(below_bars + _stopped(items, done, item), file=sys.stderr)
+            print(below_bars + _stopped(items, done, item, not_ours), file=sys.stderr)
             _leave(130, item, not_ours)
         except SystemExit as e:  # SIGTERM: `serve` stopping the download it started
             _leave(e.code if isinstance(e.code, int) else 1, item, not_ours)

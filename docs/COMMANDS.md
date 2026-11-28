@@ -52,7 +52,10 @@ id the first model of each chain (about 8 GB).
 - A download that fails (no connection, a connection that broke off, a certificate this
   computer doesn't trust, a full disk, an error answer) ends with one sentence after
   `wavescribe:` and exit code 1. Files that finished are kept, and the same command again
-  downloads only what is missing; a file that was cut off starts again from its beginning.
+  downloads only what is missing. A file that was cut off continues where it stopped when it is
+  a Hugging Face file of 100 MB or more or a model from a URL with a checksum, and the sentence
+  says so; any other starts again from its beginning. A part-file nobody has written to for a
+  week, or of a revision no longer pinned, is removed.
 - Ctrl-C stops it at once, says which models finished and which didn't, and exits with 130.
 - When everything named is installed it writes `data/THIRD_PARTY_MODELS.md` and ends with the
   command that starts Wavescribe.
