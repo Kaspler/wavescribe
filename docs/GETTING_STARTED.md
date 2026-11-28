@@ -584,6 +584,19 @@ For a language other than English, give its `[speak.<lang>]` a `summary` and an 
 sentence, as `alerts.example.toml` shows. Digests keep to the clock on the days it changes too.
 Restart Wavescribe after changing the table.
 
+**On a phone, through ntfy:** [ntfy](https://ntfy.sh) passes notifications from a server to its
+phone app. Settings → **Connections** → **Notify a phone (ntfy)**: give the server's address,
+keep the random topic the form suggests (or type your own), add an access token if your server
+asks for one, choose from which severity, then **Save connection** and **Test**. In the ntfy app,
+subscribe to that topic on that server. A notification has the alert's severity, rule and
+station as its title and the words as heard as its text, and is louder the more severe the
+alert. Alerts go to the server you name: a public one is run by a third party, who sees them;
+one you run on your own network keeps them there ([FEED.md](FEED.md#push-outputs)).
+
+**Short messages:** for an SMS gateway, a pager or another program that takes a short text, set
+a connection's **Format** (under *Advanced*) to **One line**: each alert is one line of at most
+200 bytes, the words as heard cut with "…" when they don't fit.
+
 **Elsewhere:** Settings → **Connections** → **Webhooks and live pushes** sends alerts to your
 own automations, a chat bot or a home-automation system ([FEED.md](FEED.md)).
 

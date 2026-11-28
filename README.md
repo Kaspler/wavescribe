@@ -48,7 +48,8 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
   follow several stations in several languages, search everything that was said, and ask
   questions that are answered with the quoted moments.
 - **Automations.** An alert can call a webhook, so a home-automation system or a chat bot can act
-  on it: flash a lamp, post a message.
+  on it: flash a lamp, post a message, send one short line to an SMS gateway or a pager.
+- **Alerts on your phone.** As notifications through an ntfy server, your own or a public one.
 - **Give your AI agent a radio.** An AI agent can search what was said, ask about it, and wait for
   alerts to act on, through an MCP server or JSON on the command line; experimental, see
   [Agent tools](docs/AGENT_TOOLS.md).
@@ -195,6 +196,8 @@ is less tried.
 - [Webhooks and live pushes](docs/FEED.md#push-outputs): alerts, or every line, sent to your own
   program, a chat bot or home automation as JSON, CAP 1.2 XML or text, with filters, retries (an
   alert that hasn't got there waits through a restart), signatures and a delivery log.
+- [Phone notifications through ntfy](docs/GETTING_STARTED.md#7-get-alerts) on a server you name,
+  and alerts as one short line for SMS gateways and pagers.
 - [A test of the notification and of each voice](docs/GETTING_STARTED.md#7-get-alerts):
   `wavescribe alerts test`.
 - [Rules tried on a sentence](docs/GETTING_STARTED.md#7-get-alerts) (`alerts check`) or on

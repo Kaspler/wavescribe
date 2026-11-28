@@ -47,7 +47,7 @@ b8b23db9ba8ad3d3a6867ecdca56d2474172f85c frontend/src/manage/Listen.tsx
 ac667c8c43560456d256343e1cd381d5bfe3139e frontend/src/manage/Models.tsx
 ae780925a387466be04044a25b8efa64ae2a2aa2 frontend/src/manage/MoveStation.tsx
 4386a911e5b3ed5ba6a7677268645a00132698e2 frontend/src/manage/MoveThere.tsx
-86d0c69e64750bd481635beb3fe64fd42bc9079b frontend/src/manage/Outputs.tsx
+d297259b2fb9857c96517d2eea465b971d2a9d67 frontend/src/manage/Outputs.tsx
 2581721e5ee54b0ca4dfcc5a23f624ac109eb54f frontend/src/manage/Radio.tsx
 8c2702ff90fb9a58c114505a7b5b2da6fb5372a4 frontend/src/manage/Receivers.tsx
 f3eee9e9a3853b6d02ebb7d1f95b6bf1196483e2 frontend/src/manage/Refusal.tsx
@@ -62,6 +62,7 @@ dfb79ef55facd66cf9b534a3486a0cf4ad098d84 frontend/src/manage/api.ts
 16baa601a050446286a84ab9edd1f44752f442d7 frontend/src/manage/bands.ts
 261e2ce71ba7b06f439f2708a143fee9cd56ff22 frontend/src/manage/catches.ts
 0f8b4e87a0bf15d0d9147f1eb7622150eeda1f8e frontend/src/manage/checks.ts
+561fa67ccf112930bea11dcc6e096cd33b16808c frontend/src/manage/connections.ts
 9afe6a7d1990c1b723a52793943878df2934b64f frontend/src/manage/deliveries.ts
 8462bc03da016801dfd7271eefbb09367d9cdfc9 frontend/src/manage/dial.ts
 5809d78929ef5668680544b0366c7c8ad02bb409 frontend/src/manage/drafts.ts
@@ -111,6 +112,7 @@ e92d3893e448ccf8bb74903a3d9c2ad9e0b5ca92 frontend/tests/catches.test.mjs
 b8346db81c1de59110f722a54d1476a7c987e0a9 frontend/tests/channels.test.mjs
 e11e0ac519a80d2b24f64c9ab337d6dcb8beb600 frontend/tests/checks.test.mjs
 cf67357d79e25e10e9b0e9e3299c3e3f3973c8cd frontend/tests/colNote.test.mjs
+1c5459ab48f9ebec1c2c4cb6879d1177ebd78b53 frontend/tests/connections.test.mjs
 72cf6289760ae438662923037feecef613ecf3b1 frontend/tests/deliveries.test.mjs
 ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
 25416519f29f0bc1ce9095757f1c28fa0753b57e frontend/tests/digest.test.mjs

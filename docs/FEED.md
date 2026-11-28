@@ -293,6 +293,7 @@ refused (400), so it never replaces that one and its secret or headers:
 
 | Field | Meaning |
 |---|---|
+| `kind` | `webhook` (any program that takes a POST, the default) or `ntfy` (below) |
 | `events` | `alert`, `utterance`, or both |
 | `rules`, `min_severity`, `stations` | which alerts go out (all rules, medium and up, all stations, by default) |
 | `languages` | translations to include (all, by default) |
@@ -391,11 +392,43 @@ The last two are cut at 200 bytes.
 200 bytes hold about 200 letters of a Latin script, 100 of Cyrillic or Greek, and 66 of
 Chinese or Japanese.
 
+**ntfy.** An output of the kind `ntfy` sends alerts to a topic on an [ntfy](https://ntfy.sh)
+server, for the ntfy app on a phone to show as notifications. Its `url` is the server's address
+and the topic, `https://ntfy.example.org/alerts-k3q9x`; a topic is letters, digits, `-` and
+`_`, at most 64. There is no default server: alerts go to the server you name. **A public
+server is a third party**, which sees every alert it passes on. A server on your own network
+keeps them there (and a phone gets them while it can reach that network). Each alert is one
+`POST` to that URL, as ntfy's publishing API takes it:
+
+- the body is the message: the one-line form (`format = "line"`, the default for ntfy, with
+  `max_bytes`), or the translation followed by the words as heard (`format = "text"`);
+- `Title`: the severity, the rule and the station, `HIGH · water · Radio Example`. A title that
+  isn't plain ASCII goes as an RFC 2047 encoded word (`=?UTF-8?B?…?=`), which ntfy decodes;
+- `Priority` from the severity: low 2, medium 3 (ntfy's default), high 4, critical 5;
+- `Tags`: an emoji name for the severity (`information_source`, `loudspeaker`, `warning`,
+  `rotating_light`), which ntfy shows as the emoji, and the rule's id.
+
+A server that asks for an access token gets it as `Authorization: Bearer <token>`, one of the
+output's `headers`: kept in `config/ui.toml` and shown on the page as `•••`, as any header's
+value. An ntfy output carries alerts only. Its filters, tries, outbox and age limit are a
+webhook's: a busy server's 429 is tried again, a 401 or 403 is not.
+
+```toml
+[[output]]
+id = "phone"
+name = "phone"
+kind = "ntfy"
+url = "https://ntfy.example.org/alerts-k3q9x"
+min_severity = "high"
+headers = { Authorization = "Bearer tk_…" }
+```
+
 **Headers.** Each request is a `POST` with `Content-Type` (`application/json`,
 `application/xml; charset=utf-8` for CAP, `text/plain; charset=utf-8` for text and one line),
 `User-Agent: wavescribe/<version>`, `X-Wavescribe-Event` (`alert`, `utterance` or `batch`),
-the output's own `headers` (which can replace the three before), `X-Wavescribe-Delivery` on
-an alert, and the signature headers below when a secret is set.
+ntfy's `Title`, `Priority` and `Tags` for an `ntfy` output, the output's own `headers` (which
+can replace any before), `X-Wavescribe-Delivery` on an alert, and the signature headers below
+when a secret is set.
 
 **Signatures.** With a secret, each request carries `X-Wavescribe-Timestamp` (Unix seconds)
 and `X-Wavescribe-Signature: sha256=<hex>`, the HMAC-SHA256 of `"<timestamp>.<body>"` keyed

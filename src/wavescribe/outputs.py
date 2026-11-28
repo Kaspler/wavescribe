@@ -4,9 +4,10 @@
 An output is a URL plus filters: which events (alerts, every utterance), which rules and
 stations, from which severity, which translations to include, and in which format (our JSON,
 CAP 1.2 XML for alerts, plain text for chat-style hooks, or an alert as one short line for
-channels that take small messages). Alerts go out at once, with
-retries and backoff; utterances can be batched (``batch_s``) to keep a live text feed to
-another server cheap. Each output has its own thread and a bounded queue, so a dead endpoint
+channels that take small messages). An output of the kind ``ntfy`` is a webhook to an ntfy
+server, with each alert's title, priority and tags in the headers ntfy reads. Alerts go out at
+once, with retries and backoff; utterances can be batched (``batch_s``) to keep a live text feed
+to another server cheap. Each output has its own thread and a bounded queue, so a dead endpoint
 never slows the pipeline or the other outputs; what overflows is dropped and counted.
 
 An alert that hasn't got there yet is also a row in the store's ``outbox`` table, written before
@@ -23,6 +24,7 @@ This is the only runtime network use, and only to URLs the user configured (ARCH
 
 from __future__ import annotations
 
+import base64
 import collections
 import hashlib
 import hmac
@@ -41,6 +43,7 @@ from typing import Any
 
 from wavescribe import __version__, httpclient
 from wavescribe.events import (
+    CHANGE_NOTE,
     LINE_BYTES,
     LINE_BYTES_MIN,
     alert_event,
@@ -58,6 +61,16 @@ log = logging.getLogger(__name__)
 EVENTS = ("alert", "utterance")
 FORMATS = ("json", "cap", "text", "line")
 LINE_BYTES_MAX = 4096
+# What an output is: a webhook (any program that takes a POST), or an ntfy topic, which is a
+# webhook whose headers carry each alert's title, priority and tags (docs/FEED.md).
+KINDS = ("webhook", "ntfy")
+NTFY_FORMATS = ("line", "text")  # ntfy shows the body as the message: plain text only
+NTFY_PRIORITY = {"low": "2", "medium": "3", "high": "4", "critical": "5"}  # 1 min … 5 max
+NTFY_TAGS = {"low": "information_source", "medium": "loudspeaker", "high": "warning",
+             "critical": "rotating_light"}  # fmt: skip  # tags ntfy shows as emoji
+# An ntfy topic is the last part of the URL: letters, digits, - and _, at most 64.
+_NTFY_URL = re.compile(r"^https?://[^\s/?#]+(?:/[^\s?#]*)?/[A-Za-z0-9_-]{1,64}$")
+_TAG = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 QUEUE_MAX = 2000  # events waiting per output; the oldest utterances go first when full
 BATCH_MAX = 200
 ALERT_ATTEMPTS = 6  # five waits between them, 2, 4, 8, 16 and 32 s: about a minute
@@ -91,6 +104,7 @@ class OutputConfig:
     id: str
     url: str
     name: str = ""
+    kind: str = "webhook"  # webhook or ntfy
     events: tuple[str, ...] = ("alert",)
     rules: tuple[str, ...] = ()  # alert rules; empty means every rule
     min_severity: str = "medium"  # alerts below this aren't sent ("low" sends everything)
@@ -131,12 +145,25 @@ class OutputConfig:
         url = str(raw.get("url", "")).strip()
         if not re.match(r"^https?://[^\s/]+", url):
             raise OutputError(f"{who}: the URL must start with http:// or https://")
+        kind = raw.get("kind", "webhook")
+        if kind not in KINDS:
+            raise OutputError(f"{who}: kind is one of {', '.join(KINDS)}")
         events = tuple(raw.get("events", ("alert",)))
         if not events or any(e not in EVENTS for e in events):
             raise OutputError(f"{who}: events are any of {', '.join(EVENTS)}")
-        fmt = raw.get("format", "json")
+        fmt = raw.get("format", "line" if kind == "ntfy" else "json")
         if fmt not in FORMATS:
             raise OutputError(f"{who}: format is one of {', '.join(FORMATS)}")
+        if kind == "ntfy":
+            if not _NTFY_URL.fullmatch(url):
+                raise OutputError(
+                    f"{who}: an ntfy URL is the server's address and the topic, "
+                    "https://ntfy.example.org/<topic>; a topic is letters, digits, - or _"
+                )
+            if events != ("alert",):
+                raise OutputError(f"{who}: ntfy carries alerts only")
+            if fmt not in NTFY_FORMATS:
+                raise OutputError(f"{who}: an ntfy message is one line (line) or text (text)")
         if fmt == "cap" and events != ("alert",):
             raise OutputError(f"{who}: CAP carries alerts only")
         if fmt == "line" and events != ("alert",):
@@ -178,6 +205,7 @@ class OutputConfig:
             id=oid,
             url=url,
             name=str(raw.get("name", "")),
+            kind=kind,
             events=events,
             rules=tuple(raw.get("rules", ())),
             min_severity=severity,
@@ -225,6 +253,31 @@ class OutputConfig:
             and "utterance" in self.events
             and (not self.stations or station in self.stations)
         )
+
+
+def _header_text(text: str) -> str:
+    """A header value as ntfy reads it: ASCII as it is, anything else as an RFC 2047 encoded
+    word (``=?UTF-8?B?…?=``), which ntfy decodes; an HTTP header can't carry it raw."""
+    if text.isascii():
+        return text
+    return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode("ascii") + "?="
+
+
+def ntfy_headers(ev: Mapping[str, Any]) -> dict[str, str]:
+    """The headers ntfy shows an alert by: its title (the severity, the rule and the station),
+    its priority (from the severity: low 2, medium 3, high 4, critical 5) and its tags (an emoji
+    for the severity, and the rule)."""
+    severity = str(ev.get("severity") or "")
+    unchecked = ", not checked" if ev.get("checked") is False else ""
+    rule = " ".join(str(ev.get("rule") or "").split())
+    station = " ".join(str((ev.get("station") or {}).get("name") or "").split())
+    change = CHANGE_NOTE.get(ev.get("change") or "", "")
+    title = " · ".join(p for p in (f"{severity.upper()}{unchecked}", rule + change, station) if p)
+    tags = [t for t in (NTFY_TAGS.get(severity), rule) if t and _TAG.fullmatch(t)]
+    out = {"Title": _header_text(title), "Priority": NTFY_PRIORITY.get(severity, "3")}
+    if tags:
+        out["Tags"] = ",".join(tags)
+    return out
 
 
 def urllib_transport(url: str, body: bytes, headers: dict[str, str], timeout: float) -> int:
@@ -848,6 +901,9 @@ class Outputs:
             return to_cap(alert, station_names=names).encode(), "application/xml; charset=utf-8"
         if config.format == "line":  # alerts only: one per request
             return as_line(events[0], config.max_bytes).encode(), "text/plain; charset=utf-8"
+        if config.kind == "ntfy":  # the title says what the text's first line would
+            text = as_text(events[0], config.languages).split("\n", 1)[-1]
+            return text.encode(), "text/plain; charset=utf-8"
         single = len(events) == 1 and (config.batch_s <= 0 or events[0]["type"] == "alert")
         payload = events[0] if single else {
             "type": "batch", "version": 1, "node": events[0]["node"], "events": events,
@@ -877,6 +933,7 @@ class Outputs:
             "Content-Type": ctype,
             "User-Agent": f"wavescribe/{__version__}",
             "X-Wavescribe-Event": kind,
+            **(ntfy_headers(events[0]) if config.kind == "ntfy" else {}),
             **config.headers,
         }
         if delivery:  # the same on every try of this alert to this output, also after a restart
