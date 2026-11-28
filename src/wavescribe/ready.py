@@ -153,7 +153,6 @@ def watch_parent(pid: int, on_exit: Callable[[], None], *, poll_s: float = POLL_
         except OSError:
             log.exception("watching process %s: looking once a second instead", pid)
             by_polling()
-        log.info("process %s ended: stopping", pid)
         on_exit()
 
     thread = threading.Thread(target=run, daemon=True, name=f"parent-{pid}")

@@ -395,7 +395,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from wavescribe.web.server import access_line, check_port, lan_urls, serve
 
     if args.parent_pid is not None:
-        ready_file.watch_parent(args.parent_pid, stop_by_itself)
+        ended = f"process {args.parent_pid} (--parent-pid) ended"
+        ready_file.watch_parent(args.parent_pid, lambda: stop_by_itself(ended))
     setup_logging(
         DATA_DIR / "logs", console_level=logging.INFO if args.verbose else logging.WARNING
     )
@@ -1183,18 +1184,55 @@ def install_stop_signals() -> None:
     (launchd, kill) exits through the same cleanup.
     """
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(_stop_code))
+    signal.signal(signal.SIGTERM, _on_sigterm)
 
 
 _stop_code = 143  # SIGTERM's exit code: 0 once serve stops by itself (stop_by_itself)
 
 
-def stop_by_itself() -> None:
+def _on_sigterm(*_: object) -> None:
+    quiet_console(always=False)  # whoever read the output may be gone: the stop mustn't fail
+    sys.exit(_stop_code)
+
+
+def stop_by_itself(why: str | None = None) -> None:
     """Stops as SIGTERM does, through the same cleanup, but with exit code 0: what serve was
     following (``--parent-pid``) ended. Called from any thread."""
     global _stop_code
     _stop_code = 0
+    quiet_console(always=True)  # what ended may have read the output, through pipes now broken
+    if why:
+        logging.getLogger("wavescribe").info("%s: stopping", why)
     os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _unread(fd: int) -> bool:
+    """Whether nobody reads ``fd`` any more: a pipe or socket whose reading end is closed (a
+    write would fail with BrokenPipeError), or a descriptor that isn't open."""
+    import select
+
+    try:
+        poller = select.poll()
+        poller.register(fd, select.POLLOUT)
+        gone = select.POLLHUP | select.POLLERR | select.POLLNVAL
+        return any(events & gone for _, events in poller.poll(0))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def quiet_console(*, always: bool) -> None:
+    """Points standard output and error at /dev/null, so no write while serve stops can fail:
+    ``always``, or only where nobody reads them any more. The log file keeps everything."""
+    try:
+        fds = [fd for fd in (1, 2) if always or _unread(fd)]
+        if not fds:
+            return
+        null = os.open(os.devnull, os.O_WRONLY)
+        for fd in fds:
+            os.dup2(null, fd)
+        os.close(null)
+    except OSError:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:

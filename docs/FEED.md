@@ -652,6 +652,8 @@ A pause isn't kept: the next `serve` starts as if there had been none. `/api/sta
 curl -X POST -H 'X-Wavescribe: 1' http://127.0.0.1:8766/api/pause
 ```
 
-**Stop it** with SIGTERM (exit code 143), or end the parent (exit code 0). Exit codes 2, 3 and 4
-mean it didn't start: a file or an option it can't use, another Wavescribe on the same home, a
-fixed `--port` another program has ([COMMANDS.md](COMMANDS.md#exit-codes)).
+**Stop it** with SIGTERM (exit code 143), or end the parent (exit code 0). Either works when
+nobody reads serve's output any more; the log, `data/logs/wavescribe.jsonl`, keeps everything.
+Exit codes 2, 3 and 4 mean it didn't start: a file or an option it can't use, another
+Wavescribe on the same home, a fixed `--port` another program has
+([COMMANDS.md](COMMANDS.md#exit-codes)).

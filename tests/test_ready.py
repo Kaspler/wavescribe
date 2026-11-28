@@ -202,6 +202,45 @@ def test_serve_stops_with_code_0_within_2_s_once_its_parent_ends(tmp_path: Path)
     assert not path.exists()
 
 
+@pytest.mark.parametrize("stop", ["parent", "sigterm"])
+def test_serve_stops_cleanly_when_nobody_reads_its_output_any_more(
+    tmp_path: Path, stop: str
+) -> None:
+    """The program that started serve read its output through pipes; once it is gone they are
+    broken, and a write to them fails. Serve still stops as it should, with nothing lost."""
+    parent = subprocess.Popen(["sleep", "300"])
+    path = tmp_path / "ready.json"
+    p = subprocess.Popen(
+        [sys.executable, "-m", "wavescribe", "serve", "--home", str(tmp_path / "h"), "--port",
+         "8797", "--no-store", "--no-alerts", "-v", "--ready-file", str(path),
+         "--parent-pid", str(parent.pid)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=serve_env(),
+    )  # fmt: skip
+    try:
+        deadline = time.monotonic() + 60
+        while not path.exists():
+            assert p.poll() is None and time.monotonic() < deadline, p.stderr.read().decode()
+            time.sleep(0.05)
+        p.stdout.close()  # the pipes' reading ends go with the program that held them
+        p.stderr.close()
+        t0 = time.monotonic()
+        if stop == "parent":
+            parent.kill()
+        else:
+            p.send_signal(signal.SIGTERM)
+        assert p.wait(10) == (0 if stop == "parent" else 143)
+        assert time.monotonic() - t0 < 2
+    finally:
+        parent.kill()
+        parent.wait()
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+    assert not path.exists()
+    logged = (tmp_path / "h" / "data" / "logs" / "wavescribe.jsonl").read_text()
+    assert "Traceback" not in logged and "BrokenPipeError" not in logged
+
+
 def test_serve_whose_parent_has_ended_exits_0_before_loading_anything(
     tmp_path: Path, capsys
 ) -> None:

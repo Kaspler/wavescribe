@@ -95,7 +95,10 @@ version, the pid, the address, the home and when it started. It is written to a 
 serve's cleanup removes it once the page no longer listens, and only while it still names this
 process. `--parent-pid` follows a process (kqueue's `NOTE_EXIT` on macOS, a check once a second
 elsewhere): when it ends, serve sends itself SIGTERM and runs the same cleanup, with exit code 0.
-One that has ended already stops serve before the home is entered. `GET /api/hello` gives the
+First it points its standard output and error at /dev/null (`cli.quiet_console`): that process
+may have read them through pipes that are broken now, and a write to one would fail. SIGTERM
+does the same for an output nobody reads any more; the log file keeps everything. One that has
+ended already stops serve before the home is entered. `GET /api/hello` gives the
 ready file's fields and how things stand: `state` is `paused`, `loading` (models not loaded),
 `problem` (a running station down or reconnecting, by the Health tab's rule,
 `server.trouble`) or `listening`.
