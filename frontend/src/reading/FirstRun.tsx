@@ -1,17 +1,18 @@
 // Until its speech model is downloaded, a station plays without text. The reading area says so
 // once, at its top, with the size of the download and the way to it: for every station while
 // none can be written down, else by name for the ones that wait, with the model they wait for
-// and that the others are ready.
+// and that the others are ready. While those models download it says how far they are, and a
+// download that failed with its reason and Retry.
 import { useEffect, useRef, useState } from "react";
 import { S, loadState } from "../lib/live";
 import { langNameEn } from "../lib/lang";
-import { type Need, type ModelsView, awaitedModels, neededModels, totalGb } from "../lib/models";
-import { get } from "../manage/api";
+import { type Need, type ModelsView, awaitedDownload, awaitedModels, neededModels, progressText, sentence, totalGb } from "../lib/models";
+import { get, post } from "../manage/api";
 import { go } from "../lib/router";
 import { noText } from "../lib/station";
 import { useTopics } from "../lib/store";
 import { Icon } from "../components/Icon";
-import { Button } from "../components/ui";
+import { ActButton, Button } from "../components/ui";
 import { T } from "./strings";
 
 const LOOK_MS = 5000;
@@ -24,6 +25,8 @@ export function FirstRun() {
   // Written down already: a station whose speech model is here (another machine's comes as text).
   const ready = S.stations.filter((s) => s.transcribe && !!s.asr_model && s.kind !== "remote" && s.available && !s.disabled).length;
   const [needs, setNeeds] = useState<Need[] | null>(null);
+  const [downloads, setDownloads] = useState<ModelsView["downloads"]>();
+  const [tick, setTick] = useState(0); // a Retry looks again at once
   const seen = useRef("");
   useEffect(() => {
     if (!waiting) return;
@@ -35,6 +38,7 @@ export function FirstRun() {
         if (!on) return;
         const needs = neededModels(m);
         setNeeds(needs);
+        setDownloads(m.downloads);
         // The stations learn of a download only when the page loads them again: do that when
         // what is installed or planned changes, and once at the start if nothing is missing
         // any more (the models arrived while this page showed something else).
@@ -48,24 +52,33 @@ export function FirstRun() {
     look();
     const t = setInterval(look, LOOK_MS);
     return () => { on = false; clearInterval(t); };
-  }, [waiting]);
+  }, [waiting, tick]);
   if (!waiting) return null;
   // Some stations are written down already: only the ones that wait are named.
   const some = ready > 0;
   const models = awaitedModels(without.map((s) => s.language), needs || []);
   const gb = !needs?.length ? null : some && models.length ? models.reduce((sum, m) => sum + (m.gb || 0), 0) : totalGb(needs);
+  const { running, failed } = awaitedDownload(downloads, (needs || []).map((n) => n.entry.id));
+  const title = some ? T.firstRunSome(without.map((s) => s.name)) : running ? T.downloadingTitle : T.firstRunTitle;
   return (
     <section className="firstrun" aria-labelledby="firstrun-h">
       <Icon name="download" className="firstrun-icon" />
       <div className="firstrun-text">
-        <h2 id="firstrun-h" dir="auto">{some ? T.firstRunSome(without.map((s) => s.name)) : T.firstRunTitle}</h2>
+        <h2 id="firstrun-h" dir="auto">{title}</h2>
         <p>
-          {some
-            ? T.firstRunSomeBody(without.length, models.map((m) => T.speechModelFor(m.languages.map(langNameEn), m.id)), gb, ready)
+          {running ? T.downloadingBody(running.model, ...progressText(running))
+            : some ? T.firstRunSomeBody(without.length, models.map((m) => T.speechModelFor(m.languages.map(langNameEn), m.id)), gb, ready)
             : T.firstRunBody(gb)}
         </p>
+        {running && <progress max={100} value={running.total_bytes ? (100 * (running.bytes || 0)) / running.total_bytes : undefined}
+                              aria-label={T.downloadingTitle} style={{ width: 200, height: 6, marginTop: 8, accentColor: "var(--accent)" }} />}
+        {failed && <p className="is-trouble">{sentence(failed.error || T.downloadFailed(failed.model))}</p>}
       </div>
-      <Button variant="primary" icon="right" onClick={() => go("#/settings/languages")}>{T.getModels}</Button>
+      {failed && !running ? (
+        <ActButton variant="primary" icon="download" run={async () => { await post(`/models/${failed.model}/fetch`); setTick((n) => n + 1); }}>{T.retry}</ActButton>
+      ) : (
+        <Button variant={running ? "ghost" : "primary"} icon="right" onClick={() => go("#/settings/languages")}>{running ? T.seeDownload : T.getModels}</Button>
+      )}
       <p className="firstrun-note">{T.byMachine}</p>
     </section>
   );

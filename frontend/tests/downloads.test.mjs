@@ -1,7 +1,7 @@
 // The Downloads table on the models page: a download's state in a word, and the sentence under it.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { afterRemoval, cutText, downloadState, keptText, progressText, roomForAll, roomText, sizeText, speedText, timeLeft } from "../src/lib/models.ts";
+import { afterRemoval, awaitedDownload, cutText, downloadState, keptText, progressText, roomForAll, roomText, sizeText, speedText, timeLeft } from "../src/lib/models.ts";
 
 test("a running download says nothing of its speed until it is measured", () => {
   const j = { model: "m", state: "running", bytes: 1_200_000_000, total_bytes: 5_500_000_000 };
@@ -21,6 +21,22 @@ test("a part-finished download says how much it kept, and what can't be continue
   assert.equal(cutText({ ...e, cut_bytes: 300_000_000 }),
                "300 MB of a file that was cut off can't be continued: that file downloads again from its beginning.");
   assert.equal(cutText({ ...e, cut_bytes: 0 }), null);
+});
+
+test("the reading view's notice adds up the downloads the stations wait for, or names a failure", () => {
+  const d = {
+    asr: { model: "asr", state: "running", bytes: 1e9, total_bytes: 3e9, speed: 10e6 },
+    vad: { model: "vad", state: "running", bytes: 1e6, total_bytes: 2e6, speed: 1e6 },
+    other: { model: "other", state: "running", bytes: 5e9, total_bytes: 9e9, speed: 50e6 },
+    mt: { model: "mt", state: "failed", error: "couldn't download mt: no connection" },
+  };
+  const { running, failed } = awaitedDownload(d, ["asr", "vad", "mt"]);
+  assert.equal(failed, null);
+  assert.deepEqual(progressText(running), ["1.0 of 3.0 GB", "11 MB/s · about 3 min left"]);
+  assert.equal(running.model, "asr, vad");
+  assert.equal(progressText(awaitedDownload({ asr: { ...d.asr, speed: null } }, ["asr"]).running)[1], "measuring the speed…");
+  assert.deepEqual(awaitedDownload(d, ["mt"]), { running: null, failed: d.mt });
+  assert.deepEqual(awaitedDownload(undefined, ["asr"]), { running: null, failed: null });
 });
 
 test("speeds and times left as a person says them", () => {

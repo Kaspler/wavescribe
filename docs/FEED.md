@@ -636,9 +636,27 @@ a file), readable only by its owner:
 left behind by a crash names a pid that no longer runs.
 
 **Follow it** with `GET /api/hello` (no token, no header): the ready file's fields, and
-`paused`, `listening`, `ready`, `state` and `problem` as they are now.
-`/feed/v1/events?events=status` sends `paused`, `state` and `problem` every 10 s, and at once
-when listening is paused or resumed.
+`paused`, `listening`, `ready`, `state`, `problem` and `downloads` as they are now.
+`/feed/v1/events?events=status` sends `paused`, `state`, `problem` and `downloads` every 10 s,
+every 3 s while a model downloads, and at once when listening is paused or resumed, and when a
+download starts, ends or fails.
+
+`downloads` is the model downloads started on the page (or by a program, through the page's
+routes), always there:
+
+```json
+"downloads": {"running": 2, "done_bytes": 1234, "total_bytes": 5678, "percent": 37.5,
+              "failed": [{"model": "qwen3.5-9b", "error": "couldn't download qwen3.5-9b: …"}]}
+```
+
+- `running`: the downloads under way; `done_bytes` and `total_bytes`: their bytes so far and in
+  all (what an earlier download kept counts as done).
+- `percent`: the running downloads' bytes so far over their total, to 0.1; null when none runs or
+  no size is known.
+- `failed`: the downloads that failed and haven't been started again or removed since, each with
+  the sentence the Models tab shows. Another machine is told which, not why.
+- With nothing running and nothing failed:
+  `{"running": 0, "done_bytes": 0, "total_bytes": 0, "percent": null, "failed": []}`.
 
 **Pause and resume it** with `POST /api/pause` and `POST /api/resume`, from this machine and with
 the header `X-Wavescribe: 1`, as every change the page makes; the body is ignored. Both answer

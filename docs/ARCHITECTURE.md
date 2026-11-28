@@ -101,7 +101,9 @@ does the same for an output nobody reads any more; the log file keeps everything
 ended already stops serve before the home is entered. `GET /api/hello` gives the
 ready file's fields and how things stand: `state` is `paused`, `loading` (models not loaded),
 `problem` (a running station down or reconnecting, by the Health tab's rule,
-`server.trouble`) or `listening`.
+`server.trouble`) or `listening`; `downloads` (`Downloads.summary`, in every hub status too)
+is the model downloads, which the feed's status event says at once when one starts, ends or
+fails, and every 3 s while one runs (docs/FEED.md).
 
 **Pausing** (`App.pause`, `POST /api/pause`) stops every local station, band watch and remote
 station, closes the Listen tab's receivers, the spectrum watches and a scan, and waits for the

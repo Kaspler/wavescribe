@@ -156,8 +156,11 @@ def test_hello_from_this_machine_and_from_another(node: Running, tmp_path: Path)
     port = node.server.server_address[1]
     assert status == 200 and list(here) == [
         "app", "version", "pid", "host", "port", "url", "home", "started",
-        "paused", "listening", "ready", "state", "problem",
+        "paused", "listening", "ready", "state", "problem", "downloads",
     ]  # fmt: skip
+    assert here["downloads"] == {
+        "running": 0, "done_bytes": 0, "total_bytes": 0, "percent": None, "failed": []
+    }  # fmt: skip
     assert here["app"] == "wavescribe" and here["version"] == __version__
     assert here["pid"] == os.getpid() and here["home"] == str(home.current().path)
     assert here["port"] == port and here["url"] == f"http://127.0.0.1:{port}/"

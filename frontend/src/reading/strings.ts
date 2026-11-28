@@ -118,6 +118,13 @@ export const T = {
     "under Listen.",
   // Only some stations wait: they are named (counted past three), with the model they wait for.
   firstRunSome: (names: string[]) => `No text yet for ${names.length > 3 ? `${names.length} stations` : and(names)}`,
+  // While the models download, and when a download failed (lib/models.ts awaitedDownload).
+  downloadingTitle: "No text yet: the models are downloading",
+  downloadingBody: (models: string, amount: string, pace: string) =>
+    `Downloading ${models}: ${amount}, ${pace}. Text starts once it is done; meanwhile the stations play under Listen.`,
+  downloadFailed: (id: string) => `the download of ${id} failed`, // when it doesn't say why
+  seeDownload: "See the download",
+  retry: "Retry",
   speechModelFor: (langs: string[], id: string) => `the speech model for ${and(langs)} (${id})`,
   firstRunSomeBody: (waiting: number, models: string[], gb: number | null, ready: number) =>
     `${waiting === 1 ? "It waits" : "They wait"} for ${models.length ? and(models) : waiting === 1 ? "its speech model" : "their speech models"}` +

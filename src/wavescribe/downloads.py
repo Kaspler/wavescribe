@@ -51,6 +51,11 @@ SPEED_WINDOW_S = 20.0  # a download's speed is what arrived over about this long
 SPEED_SPAN_S = 2.0  # and is said once two looks this far apart have measured it
 
 
+NO_DOWNLOADS: dict[str, Any] = {
+    "running": 0, "done_bytes": 0, "total_bytes": 0, "percent": None, "failed": []
+}  # fmt: skip
+
+
 def fetch_command(model_id: str) -> list[str]:
     return [sys.executable, "-m", "wavescribe", "models", "fetch", model_id]
 
@@ -228,6 +233,25 @@ class Downloads:
                 job["eta_s"] = round(left / speed) if left is not None and speed else None
             out[model_id] = job
         return out
+
+    def summary(self) -> dict[str, Any]:
+        """The downloads in one place, for ``/api/hello`` and the status event (docs/FEED.md):
+        how many run, their bytes so far and in all, the percent of those that have a known
+        size, and the downloads that failed and haven't been started again or removed since."""
+        jobs = self.status()
+        running = [j for j in jobs.values() if j["state"] in ("running", "stopping")]
+        sized = [j for j in running if j.get("total_bytes")]
+        total = sum(j["total_bytes"] for j in sized)
+        done = sum(min(j.get("bytes") or 0, j["total_bytes"]) for j in sized)
+        failed = [j for j in jobs.values() if j["state"] == "failed"]
+        return {
+            "running": len(running),
+            "done_bytes": sum(j.get("bytes") or 0 for j in running),
+            "total_bytes": total,
+            "percent": round(min(100.0, 100 * done / total), 1) if total else None,
+            "failed": [{"model": j["model"], "error": j["error"] or "the download failed"}
+                       for j in failed],
+        }  # fmt: skip
 
     def _done(self, entry: ModelEntry) -> int:
         """How much of a model is on disk while it downloads: what is there for good (what an

@@ -107,6 +107,7 @@ PAGE_READ_PREFIXES = ("/api/", "/audio/")
 MAX_ASKS = 3  # questions queued or being answered at once
 MAX_BODY = 16_384
 LOAD_FAILED = "could not be loaded; the log on the Wavescribe machine says why"
+DOWNLOAD_FAILED = "the download failed; the Models tab on the Wavescribe machine says why"
 
 # What other machines may hold at once. Each limit is far above what a household's phones and
 # tablets use, so only a stuck or hostile device on the LAN meets one; this machine's own
@@ -462,6 +463,8 @@ class WebHub:
             # Why a model didn't load is the exception's own text, which may name folders of
             # this machine's user: another machine learns which model, not why.
             out["models"] = {**models, "errors": dict.fromkeys(models["errors"], LOAD_FAILED)}
+        if isinstance(out.get("downloads"), dict):
+            out["downloads"] = lan_downloads(out["downloads"])
         if isinstance(out.get("stations"), dict):
             # Where a followed station's text comes from, and why that connection failed, stay
             # here: the address can carry a name or credentials of a private network.
@@ -564,8 +567,9 @@ class WebHub:
         return "problem", troubles[0] + more
 
     def hello(self, exports: Exports | None, address: tuple[Any, ...]) -> dict[str, Any]:
-        """``GET /api/hello``: the ready file's fields and how things stand; for another
-        machine (``exports``), without the process id and the home."""
+        """``GET /api/hello``: the ready file's fields and how things stand, the model downloads
+        included; for another machine (``exports``), without the process id, the home, and why
+        a download failed."""
         from wavescribe import ready
         from wavescribe.home import current
 
@@ -582,9 +586,11 @@ class WebHub:
             if not st.get("pushed") and (exports is None or sid in exports.stations)
         ]
         out.update(paused=status["paused"], listening=len(running),
-                   ready=bool(status.get("ready")), state=state, problem=problem)  # fmt: skip
+                   ready=bool(status.get("ready")), state=state, problem=problem,
+                   downloads=status["downloads"])  # fmt: skip
         if exports is not None:
             del out["pid"], out["home"]
+            out["downloads"] = lan_downloads(out["downloads"])
         return out
 
     def ask_unavailable(self) -> str | None:
@@ -641,6 +647,7 @@ class WebHub:
         since = getattr(self.app, "paused_since", None)
         status["paused"], status["paused_since"] = since is not None, since
         status["listeners"] = {sid: t.listeners for sid, t in list(self._taps.items())}
+        status["downloads"] = downloads_now(self.app)
         # The digests asked for and not made yet, and where each stands (Digester.status).
         status["digests"] = self.digester.status() if self.digester is not None else []
         return status
@@ -673,6 +680,22 @@ class WebHub:
     def _status_loop(self) -> None:
         while not self._closed.wait(STATUS_INTERVAL_S):
             self.publish("status", self.status())
+
+
+def downloads_now(app: Any) -> dict[str, Any]:
+    """The model downloads in ``/api/hello`` and the status event: ``Downloads.summary``, or
+    the shape of none when there is no app to download with (docs/FEED.md)."""
+    from wavescribe.downloads import NO_DOWNLOADS
+
+    downloads = getattr(app, "downloads", None)
+    return downloads.summary() if downloads is not None else {**NO_DOWNLOADS, "failed": []}
+
+
+def lan_downloads(downloads: dict[str, Any]) -> dict[str, Any]:
+    """The downloads as another machine sees them: which failed, not why (the sentence may name
+    this machine's folders)."""
+    failed = [{"model": f["model"], "error": DOWNLOAD_FAILED} for f in downloads["failed"]]
+    return {**downloads, "failed": failed}
 
 
 def trouble(st: dict[str, Any]) -> str | None:

@@ -66,6 +66,8 @@ ALERTS_SINCE_MAX = 500  # alerts given to a client catching up with ?since=
 CONTEXT = 2  # utterances before an alert's, in its feed event (as an output's default)
 MAX_INGEST = 2 * 1024 * 1024
 KEEPALIVE_S = 15.0  # a comment line on a live stream after this long without a write
+STATUS_S = 10.0  # between status events
+DOWNLOADING_STATUS_S = 3.0  # between status events while a model downloads
 TICKET_TTL_S = 60.0  # a ticket is for the request it was got for, made straight away
 MAX_TICKETS = 256  # unused at once; past it, the oldest goes
 URL_TOKEN_WARN_S = 3600.0  # a token sent in a URL is logged at most this often
@@ -542,7 +544,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
     except ValueError as e:
         h._json({"error": f"bad parameter: {e}"}, HTTPStatus.BAD_REQUEST)
         return
-    from wavescribe.web.server import TooManyViewers
+    from wavescribe.web.server import TooManyViewers, lan_downloads
 
     try:  # followers on other machines count towards the same cap as the page's
         q = hub.subscribe(lan=not h._is_local(), marked=True)
@@ -590,19 +592,24 @@ def events(h: Handler, query: dict[str, str]) -> None:
                    cursor.sent(row["id"], mark, then["id"] if then else None))  # fmt: skip
         h.wfile.flush()
         next_status = wrote = time.monotonic()
-        said_paused: bool | None = None  # as the last status event said
+        said: tuple[Any, ...] | None = None  # as the last status event said it (_turns)
+        local = h._is_local()
         while True:
             now = time.monotonic()
             if "status" in want and now >= next_status:
-                next_status = now + 10
                 now_status = hub.status()
                 state, problem = hub.condition(leaving, now_status)
+                downloads = now_status["downloads"]
+                if not local:
+                    downloads = lan_downloads(downloads)
                 _write(h, "status", {"type": "status", "stations": stations(h),
                                      "time": time.time(), "paused": now_status["paused"],
-                                     "state": state, "problem": problem})  # fmt: skip
+                                     "state": state, "problem": problem,
+                                     "downloads": downloads})  # fmt: skip
                 h.wfile.flush()
                 wrote = now
-                said_paused = now_status["paused"]
+                said = _turns(now_status)
+                next_status = now + (DOWNLOADING_STATUS_S if downloads["running"] else STATUS_S)
             # Timed from the last write to this client: events its filter drops don't count,
             # or a stream of one station's alerts would go quiet until the client gives up.
             if now - wrote >= KEEPALIVE_S:
@@ -643,8 +650,9 @@ def events(h: Handler, query: dict[str, str]) -> None:
                     h, "alert", alert_event(data, stations_, node_, languages=langs, context=before)
                 )
             elif name == "status" and "status" in want:
-                # Paused or resumed: said at once rather than at the next 10 s.
-                if json.loads(text).get("paused", said_paused) != said_paused:
+                # Paused or resumed, a download started, ended or failed: said at once rather
+                # than at the next 10 s.
+                if _turns(json.loads(text)) != said:
                     next_status = 0.0
                 continue
             else:
@@ -656,6 +664,14 @@ def events(h: Handler, query: dict[str, str]) -> None:
     finally:
         hub.unsubscribe(q)
         hub.let_go(token, q)
+
+
+def _turns(status: dict[str, Any]) -> tuple[Any, ...]:
+    """What in a status, once changed, is said at once: paused, how many downloads run, and
+    which failed."""
+    downloads = status.get("downloads") or {}
+    failed = tuple(f.get("model") for f in downloads.get("failed") or [])
+    return status.get("paused"), downloads.get("running"), failed
 
 
 def _write(h: Handler, name: str, data: dict[str, Any], event_id: str | None = None) -> None:
