@@ -22,6 +22,10 @@ uv run ruff check . && uv run ruff format --check .
 
 No radio hardware is needed: internet streams go through the same `AudioSource` interface as
 radio, and the radio code is tested on synthetic signals.
+A stand-in `rtl_sdr` (`tests/fake_rtl_sdr.py`) plays a made-up sky
+(`tests/fake_world.py`: transmitters at fixed frequencies, and a dongle's edges, centre spike and
+clock error if asked), and `uv run python tests/page_fixture.py --port 8771` serves the page with
+three made-up receivers, from a scratch directory.
 
 ## Ground rules
 

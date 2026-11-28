@@ -12,13 +12,21 @@ Environment:
                        or "busy" as above, "stream" to write without FAKE_RTL_MAX_BYTES' limit
     FAKE_RTL_BURSTS    "offset_hz:period_s:on_s": a walkie-talkie keyed for the last on_s of every
                        period_s (narrowband FM, a 1 kHz tone at 2 kHz deviation), from each start
+    FAKE_RTL_WORLD     a world (tests/fake_world.py), JSON or a JSON file: transmitters at absolute
+                       frequencies, heard from wherever -f tunes; FAKE_RTL_STATIONS, _BURSTS and
+                       _AUDIO are then not used
+    FAKE_RTL_PACE      if set, a world comes no faster than a dongle's samples would
 """
 
 import argparse
 import os
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # tests.fake_world, as a script
 
 BLOCK_S = 0.256  # offsets and tones are multiples of 1/BLOCK_S Hz, so the block loops seamlessly
 
@@ -66,6 +74,16 @@ def main() -> int:
         return 1
     print(f"Found 1 device(s):\n  0:  RTLSDRBlog, Blog V4L, SN: {args.d}", file=sys.stderr)
 
+    limit = int(os.environ.get("FAKE_RTL_MAX_BYTES", "0")) or (2 * args.n if args.n else None)
+    if then == "stream":
+        limit = None
+    if world := os.environ.get("FAKE_RTL_WORLD"):
+        from tests.fake_world import World
+
+        tuned = World.load(world).tune(args.f, args.s, args.d, args.p or 0)
+        write(lambda _k: tuned.u8(), limit)
+        return 0
+
     if audio := os.environ.get("FAKE_RTL_AUDIO"):
         offset = float(os.environ.get("FAKE_RTL_STATIONS", "300000:1000").split(":")[0])
         sys.stdout.buffer.write(broadcast(np.fromfile(audio, dtype=np.float32), offset, args.s))
@@ -88,21 +106,24 @@ def main() -> int:
         quiet = round((period - on) / BLOCK_S)  # first, so a receiver learns the quiet channel
         blocks = blocks * quiet + [u8(keyed)] * round(on / BLOCK_S)
 
-    limit = int(os.environ.get("FAKE_RTL_MAX_BYTES", "0")) or (2 * args.n if args.n else None)
-    if then == "stream":
-        limit = None
+    write(lambda k: blocks[k % len(blocks)], limit)
+    return 0
+
+
+def write(block: Callable[[int], bytes], limit: int | None) -> None:
+    """Blocks to stdout until ``limit`` bytes (None: until the reader goes)."""
     written, k = 0, 0
     out = sys.stdout.buffer
     try:
         while limit is None or written < limit:
-            block = blocks[k % len(blocks)]
-            data = block if limit is None else block[: limit - written]
+            data = block(k)
+            if limit is not None:
+                data = data[: limit - written]
             out.write(data)
             out.flush()
             written, k = written + len(data), k + 1
     except BrokenPipeError:
         pass
-    return 0
 
 
 def u8(x: np.ndarray) -> bytes:
