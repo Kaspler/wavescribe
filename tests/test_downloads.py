@@ -54,6 +54,27 @@ def test_a_download_that_fails_shows_the_command_lines_sentence_on_the_page(
     assert "Traceback" not in error and "command" not in error
 
 
+def test_a_part_file_the_download_continues_counts_as_done_on_the_page(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from wavescribe.registry import ModelEntry, ModelRegistry
+
+    e = ModelEntry("big", "asr", "fake", "url:https://models.example/big.bin", "u", "MIT", "u",
+                   "default", False, ("*",), "", sha256="0" * 64, size_gb=0.001)  # fmt: skip
+    folder = tmp_path / "models" / "big"
+    folder.mkdir(parents=True)
+    (folder / f"big.bin.{'0' * 16}.part").write_bytes(b"x" * 400_000)  # a stopped download's
+    endless = [sys.executable, "-c", "import time; time.sleep(60)"]
+    monkeypatch.setattr(downloads, "fetch_command", lambda _model: endless)
+    fetching = downloads.Downloads(ModelRegistry([e], {"asr": ["big"]}, tmp_path / "models"))
+    fetching.start("big")
+    try:
+        job = fetching.status()["big"]
+        assert job["bytes"] == 400_000 and job["percent"] == 40.0
+    finally:
+        fetching.close()
+
+
 def test_serve_stopping_stops_its_downloads(tmp_path: Path, monkeypatch) -> None:
     app = make_app(tmp_path)
     stopped: list[bool] = []

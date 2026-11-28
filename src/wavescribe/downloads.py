@@ -4,7 +4,9 @@
 Each download runs ``wavescribe models fetch <id>`` as a child process: the same licence check
 and the rights holder's own repository at the pinned revision, and the only place the network
 is used. The server process itself stays offline (``HF_HUB_OFFLINE=1``). Progress is the bytes
-in the model's target folder, partial files included.
+in the model's target folder, partial files included; a part-file an earlier download left,
+which this one continues, counts as done from the start. Stopping ``serve`` stops the child
+with SIGTERM, which leaves the same part-files behind as Ctrl-C on the command line.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from wavescribe.log import event
-from wavescribe.modelfetch import RETRY_ON_PAGE, dir_bytes, target_dir
+from wavescribe.modelfetch import RETRY_ON_PAGE, dir_bytes, kept_bytes, target_dir
 from wavescribe.registry import RETRY, ModelEntry, ModelRegistry
 
 log = logging.getLogger(__name__)
@@ -61,8 +63,9 @@ class Downloads:
             if job is not None and job["state"] == "running":
                 return dict(job)
             target = target_dir(self.registry, entry)
+            base = dir_bytes(target) - kept_bytes(target)  # what is continued counts as done
             job = {"model": model_id, "state": "running", "started": time.time(),
-                   "error": None, "base_bytes": dir_bytes(target),
+                   "error": None, "base_bytes": base,
                    "total_bytes": int(entry.size_gb * 1e9) if entry.size_gb else None}  # fmt: skip
             self._jobs[model_id] = job
         threading.Thread(target=self._run, args=(entry, job), daemon=True,
