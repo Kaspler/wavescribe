@@ -11,7 +11,10 @@ It holds:
   floors there;
 - the waterfall: lines cut from the detector's own frames (no FFT of its own), the strongest
   of four bins and of the frames in an eighth of a second, ten minutes of them at most, none
-  while settling and none from before a move.
+  while settling and none from before a move;
+- for whoever keeps the marks (``radio.marks``): each thing the detector reports
+  (``on_seen``), a look every ``LOOK_S`` once settled (``on_look``), and each landing
+  (``on_land``), all on the dongle's thread.
 
 It demodulates nothing: what the detector sees is drawn, never heard.
 
@@ -38,6 +41,7 @@ from wavescribe.dsp.activity import FFT, Activity, ActivityDetector
 from wavescribe.dsp.openwatch import OpenBand
 from wavescribe.log import event
 from wavescribe.radio import bandplan
+from wavescribe.radio.marks import Look
 from wavescribe.sources import SourceHealth
 
 if TYPE_CHECKING:
@@ -56,6 +60,8 @@ TIMING_LOG_S = 60.0
 EVENTS_MAX = 500
 PLACES_MAX = 50
 REFERENCE_RATE = 2_400_000  # the detector's FFT keeps its 586 Hz bins at every rate
+LOOK_S = 15.0  # a settled window looks again this often (``radio.marks``)
+FIRST_LOOK_S = 1.0  # after the floors are learnt: wide signals are said half a second later
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,7 @@ class ReceiverSession:
         behind: float = BEHIND,
         timing_log_s: float = TIMING_LOG_S,
         make_detector: Callable[[SdrDevice, str], ActivityDetector] = detector_for,
+        look_s: float = LOOK_S,
     ) -> None:
         self.device = device
         self.station_id = f"session:{device.config.id}"
@@ -161,6 +168,14 @@ class ReceiverSession:
         self._spent: list[float] = []  # seconds per block since the timing was last logged
         self._blocks = 0
         self._next_log = 0.0
+        self._look_s = look_s
+        self._first_look = 0  # samples into a landing before the first look there
+        self._next_look = 0.0
+        # Whoever keeps the marks: each thing seen (receiver id, ``Seen``) and each look, on
+        # the dongle's thread.
+        self.on_seen: Callable[[str, Seen], None] | None = None
+        self.on_look: Callable[[Look], None] | None = None
+        self.on_land: Callable[[str, float], None] | None = None  # (receiver id, when)
 
     # The place.
 
@@ -231,7 +246,14 @@ class ReceiverSession:
         else:
             self._anchor = (t_end, d.samples + len(iq))  # the block's last sample, and when
             for a in d.feed(iq):
-                self.events.append(self._seen(a))
+                seen = self._seen(a)
+                self.events.append(seen)
+                if self.on_seen is not None:
+                    self.on_seen(config.id, seen)
+            if d.samples >= self._first_look and t_end >= self._next_look:
+                self._next_look = t_end + self._look_s
+                if self.on_look is not None:
+                    self.on_look(self._look(d, config, t_end))
         self._time(time.perf_counter() - began, t_end)
 
     def _disconnected(self, reconnects: int) -> None:
@@ -245,9 +267,13 @@ class ReceiverSession:
         if p is None or p.center_hz != config.center_hz or p.gain_db != config.gain_db:
             self.places.append(Place(config.center_hz, config.gain_db, t))
             self.ring.clear()
+        if self.on_land is not None:
+            self.on_land(config.id, t)
         d = self._make(config, self.region)
         self._settle_samples = d.init_samples + 2 * d.frame_samples
         d.on_frame = self._frame
+        self._first_look = self._settle_samples + round(FIRST_LOOK_S * config.sample_rate)
+        self._next_look = 0.0
         self._detector = d
         self._slot = None
         self._gathered = None
@@ -270,6 +296,13 @@ class ReceiverSession:
             steps = np.clip((db - LINE_DB_LO) / LINE_DB_STEP, 0, 255)
             self.ring.add(t, steps.astype(np.uint8))
             self._slot = None
+
+    def _look(self, d: ActivityDetector, config: SdrDevice, t: float) -> Look:
+        half = config.sample_rate / 2 - NARROW_MARGIN_HZ
+        noted = d.open.noted if d.open is not None else []
+        wide = tuple((float(f), float(w)) for f, w in noted)
+        return Look(config.id, config.center_hz - half, config.center_hz + half, t, wide,
+                    d.deaf_s is not None)  # fmt: skip
 
     def _when(self, index: int) -> float:
         """The wall time of the detector's sample ``index``."""
