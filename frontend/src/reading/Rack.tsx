@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
 import { pick, shownLang } from "../lib/lang";
 import { placeRows } from "../lib/hold";
-import { S, post, running, startStation, startThere } from "../lib/live";
+import { S, paused, post, running, startStation, startThere } from "../lib/live";
 import { P, setPrefs, visible } from "../lib/prefs";
 import { MAX_COLS, go, parse, setCols, useHash } from "../lib/router";
 import { levelOf, noText, stateOf } from "../lib/station";
@@ -43,6 +43,7 @@ export function showHere(id: string, show: boolean) {
 
 /** What the station list says when no station is running. */
 export function NoneRunning({ off }: { off: number }) {
+  if (paused() && S.stations.length) return <>{T.pausedShort}</>;
   if (!S.stations.length) {
     return S.manage
       ? <>{T.noStationsYet} <a href="#/add">{T.findStations}</a> {T.findStationsWhere}</>

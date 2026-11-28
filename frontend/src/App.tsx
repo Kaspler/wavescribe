@@ -1,9 +1,10 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { wanted } from "./lib/auth";
-import { S, loadState, running, setNotice, switchOnAndStart } from "./lib/live";
+import { S, loadState, paused, running, setNotice, switchOnAndStart } from "./lib/live";
 import { visible } from "./lib/prefs";
 import { MAX_COLS, go, movedHash, parse, setCols, useHash } from "./lib/router";
 import { useTopics } from "./lib/store";
+import { hm } from "./lib/time";
 import { V, railShown, toggleRail } from "./lib/view";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Icon } from "./components/Icon";
@@ -52,6 +53,7 @@ export function App() {
       <ErrorBoundary what="header">
         <Header area={area?.kind ?? null} />
       </ErrorBoundary>
+      {!wanted() && <Paused />}
       {wanted() ? <TokenGate /> : <Notice />}
       {wanted() ? null : area ? (
         <ErrorBoundary what={area.kind === "listen" ? "Listen page" : area.kind === "add" ? "Find stations page" : "settings"}>
@@ -81,6 +83,19 @@ export function App() {
 function skipToMain(e: React.MouseEvent) {
   e.preventDefault();
   document.getElementById("main")?.focus();
+}
+
+/** While all listening is paused: said once, plainly, under the header on every page. */
+function Paused() {
+  useTopics("status");
+  if (!paused()) return null;
+  const since = S.status?.paused_since;
+  return (
+    <div className="notice is-paused" role="status">
+      <Icon name="pause" />
+      <span>{T.paused(since ? hm(since) : null)}</span>
+    </div>
+  );
 }
 
 function Notice() {

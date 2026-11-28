@@ -80,6 +80,13 @@ export const T = {
   partlyDelivered: "partly delivered",
   listen: "Listen",
   stopListening: "Stop listening",
+  pause: "Pause listening",
+  resume: "Resume",
+  pauseHint: "Stop every station and receiver until you resume; the models stay loaded",
+  resumeHint: "Start again what was running",
+  paused: (since: string | null) =>
+    `Listening is paused${since ? ` since ${since}` : ""}: no station or receiver runs, and nothing is written down until it resumes.`,
+  pausedShort: "Listening is paused.",
   playingNow: "Playing now",
   loadEarlier: "Load earlier",
   nothingEarlier: "Nothing earlier",

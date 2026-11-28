@@ -4,7 +4,7 @@ import type { LucideIcon, LucideProps } from "lucide-react";
 import {
   ALargeSmall, Activity, ArrowDown, ArrowLeft, ArrowUp, Bell, Box, Check, ChevronDown, ChevronLeft,
   ChevronRight, ChevronUp, Code, Columns3, Copy, Download, Ellipsis, ExternalLink, Eye, EyeOff, Globe, HardDrive, History, Info,
-  Keyboard, Languages, MessageCircleQuestionMark, PanelRight, Pencil, Play, Plus, Minus, Power, Radio,
+  Keyboard, Languages, MessageCircleQuestionMark, PanelRight, Pause, Pencil, Play, Plus, Minus, Power, Radio,
   RadioTower, RefreshCw, ScanSearch, ScrollText, Search, Send, Settings, ShieldCheck, Square, Trash2, TriangleAlert, Volume2, VolumeX, X,
 } from "lucide-react";
 
@@ -12,6 +12,7 @@ const I = {
   search: Search,
   ask: MessageCircleQuestionMark,
   play: Play,
+  pause: Pause,
   stop: Square,
   close: X,
   plus: Plus,

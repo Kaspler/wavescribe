@@ -48,6 +48,8 @@ export async function openAlert(id: number) {
     a = r?.ok ? ((await r.json()) as Alert) : undefined;
   }
   if (!a) {
+    V.alert = null;
+    emit("focus");
     setNotice(T.alertGone);
     location.replace("#/");
     return;

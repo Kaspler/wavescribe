@@ -67,6 +67,8 @@ export function setNotice(text: string, switchOn: string | null = null) {
   emit("notice");
 }
 
+const STARTS_ON_RESUME = "Saved: it starts when listening resumes.";
+
 /** POSTs a station action; shows the server's reason when it refuses. True when it was done. */
 export async function post(url: string, body?: unknown): Promise<boolean> {
   try {
@@ -78,7 +80,7 @@ export async function post(url: string, body?: unknown): Promise<boolean> {
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
       setNotice(data.error || r.statusText, switchOnFor(url, data));
-    }
+    } else if (paused() && /\/stations\/[^/]+\/start$/.test(url)) setNotice(STARTS_ON_RESUME);
     return r.ok;
   } catch {
     setNotice("Couldn't reach Wavescribe: is it still running?");
@@ -166,6 +168,7 @@ function applyStatus(status: Status) {
     if (!status.ready) setNotice(LOADING);
     else if (S.notice === LOADING) setNotice("");
   }
+  if (!status.paused && S.notice === STARTS_ON_RESUME) setNotice(""); // resumed, here or elsewhere
   emit("status");
 }
 
@@ -352,6 +355,19 @@ export function connect() {
 /** Starts a station in its own mode: one started only to play is written down from now on. */
 export async function startStation(id: string) {
   if (await post(`/api/stations/${id}/start`)) await stationsChanged().catch(() => {});
+}
+
+/** Whether all listening is paused on this Wavescribe. */
+export const paused = () => !!S.status?.paused;
+
+/** Pauses all listening on this machine, or resumes it (POST /api/pause, /api/resume). The
+ * status that follows says so too; this shows it at once. */
+export async function setPaused(on: boolean) {
+  if (!(await post(on ? "/api/pause" : "/api/resume")) || !S.status) return;
+  S.status = { ...S.status, paused: on, paused_since: on ? S.status.paused_since ?? Date.now() / 1000 : null };
+  if (on) S.live = {};
+  else if (S.notice === STARTS_ON_RESUME) setNotice("");
+  emit("status");
 }
 
 /** "Switch it on", where Start was refused because the station is switched off on the page: on,

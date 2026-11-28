@@ -164,6 +164,9 @@ export interface Status {
   /** Changes whenever a station is added, changed or removed. */
   stations_rev?: number | string;
   stations: Record<string, Live>;
+  /** All listening paused on this machine (POST /api/pause), and since when (epoch s). */
+  paused?: boolean;
+  paused_since?: number | null;
 }
 
 export interface PageState {

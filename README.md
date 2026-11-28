@@ -285,6 +285,9 @@ is less tried.
 - [Every alert as a CAP 1.2 document](docs/FEED.md#event-format-version-1) (Common Alerting
   Protocol): `wavescribe alerts cap`.
 - [Monitoring](docs/FEED.md#pull-feedv1): `/healthz` and Prometheus `/metrics`.
+- [Started by another program](docs/FEED.md#starting-wavescribe-from-another-program):
+  `serve --port auto` takes a free port and writes where it listens to a ready file;
+  `--parent-pid` stops it with that program.
 - [Agent tools](docs/AGENT_TOOLS.md#1-mcp-tools-your-agent-can-call) (experimental): an MCP server,
   `wavescribe mcp`, to search, ask, summarise and wait for an alert; it adds, starts and stops
   stations only with `--allow-control`.
@@ -312,6 +315,9 @@ is less tried.
   settings and voices: `wavescribe doctor`.
 - [A Health page](docs/GETTING_STARTED.md#11-keep-it-running): memory, processor, battery and disk,
   and how far behind each station is.
+- [Pause listening](docs/GETTING_STARTED.md#11-keep-it-running) on the page: every station and
+  receiver stops until Resume starts them again; the models stay loaded, and reading and search
+  go on.
 - [Reconnects by itself](docs/GETTING_STARTED.md#troubleshooting) when an internet stream comes
   back, and [starts a receiver's stations again](docs/HARDWARE.md#limits-today) when it is plugged
   back in.

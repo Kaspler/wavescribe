@@ -164,6 +164,9 @@ a.playing-label:hover { text-decoration: underline; }
 .notice span { flex: 1; }
 .notice.is-lost { background: color-mix(in oklab, var(--lamp-trouble) 14%, var(--body)); color: var(--trouble-ink); }
 .notice.is-lost svg { color: var(--trouble-ink); animation: spin 2.4s linear infinite; }
+/* All listening paused: the whole strip in ink, so it can't be missed on any page. */
+.notice.is-paused { background: var(--ink); border-bottom-color: var(--ink); color: var(--ink-inverse); font-weight: 600; }
+.notice.is-paused svg { color: var(--ink-inverse); }
 
 /* -- the station rack ----------------------------------------------------------------------- */
 /* Dark in both themes, like a receiver's printed scale: lamps, lettering, and a fine tick scale
@@ -656,6 +659,8 @@ mark.found { color: inherit; background: var(--accent-tint); border-radius: 2px;
 .alert-meta { font-size: var(--t-sm); color: var(--ink-3); }
 .alert.is-fresh { animation: alert-in 2.4s var(--ease); }
 @keyframes alert-in { from { background: var(--accent-tint); } }
+/* The alert a link opened (#/alert/<id>): the pointer's wash, until another is opened. */
+.alert[aria-current="true"] { margin: 0 calc(-1 * var(--s4)); padding: 0 var(--s4); background: var(--accent-wash); }
 .alert-more { display: grid; gap: 10px; padding: 0 0 14px; animation: pop-in var(--med) var(--ease); }
 .alert-label { display: block; margin-bottom: 2px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-3); }
 .alert-quote { font-size: var(--t-ui); color: var(--ink-2); }

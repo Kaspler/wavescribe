@@ -762,6 +762,12 @@ doesn't keep the Mac awake: start it with `caffeinate -i uv run wavescribe serve
 Started from a script rather than a Terminal window, stop it with `kill <pid>` (SIGTERM): `uv run`
 passes that on to Wavescribe, but not the SIGINT that Ctrl-C sends in a Terminal.
 
+**Pause listening,** in the page's header, stops every station, every band watch and listening
+by hand, and lets go of every receiver, until you press **Resume**: what was running starts
+again. The models stay loaded, so resuming is quick, and reading, search and Ask go on. A strip
+under the header says it is paused, on every page. A station started or changed meanwhile is
+saved and starts on resume. A restart doesn't keep the pause.
+
 - Settings → **Health** shows memory, processor and graphics load, battery, disk, and how far
   behind each station is. If the Mac struggles, translate fewer stations: translation is the
   heaviest part. Under *Models and queues*, while a rule has *Let the model confirm* on (or

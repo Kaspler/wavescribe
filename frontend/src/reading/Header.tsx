@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { A, stopAudio } from "../lib/audio";
 import { wanted } from "../lib/auth";
 import { headerLag } from "../lib/behind";
-import { S } from "../lib/live";
+import { S, paused, setPaused } from "../lib/live";
 import { type Area, go, isReading, parse, useHash } from "../lib/router";
 import { useTopics } from "../lib/store";
 import { V, railShown, toggleRail } from "../lib/view";
@@ -48,6 +48,7 @@ export function Header({ area }: { area: Area | null }) {
         {!area && !gated && S.hasStore && <SummaryButton />}
         {!area && !V.narrow && !gated && <AlertsToggle />}
         {!area && <DisplayButton />}
+        {S.manage && !gated && <PauseButton />}
         {S.manage && (
           <a className={cx("btn btn-ghost btn-md btn-icon hdr-gear", area === "settings" && "is-on")} href="#/settings"
              aria-current={here("settings")} aria-label={T.settings} title={T.settingsHint}>
@@ -105,6 +106,25 @@ function NowPlaying() {
         : <span className="playing-label" dir="auto">{A.replay ? `Replay · ${A.label}` : A.label}</span>}
       <Button size="sm" variant="ghost" icon="stop" aria-label={T.stopListening} title={T.stopListening} onClick={stopAudio} />
     </span>
+  );
+}
+
+/** Pause listening, or Resume: the one control for it, on this machine only. */
+function PauseButton() {
+  useTopics("status", "narrow");
+  const [busy, setBusy] = useState(false);
+  const on = paused();
+  const label = on ? T.resume : T.pause;
+  const press = async () => {
+    setBusy(true);
+    await setPaused(!on);
+    setBusy(false);
+  };
+  return (
+    <Button variant="ghost" icon={on ? "play" : "pause"} busy={busy} onClick={press} className="hdr-pause"
+            title={on ? T.resumeHint : T.pauseHint} aria-label={V.narrow ? label : undefined}>
+      {V.narrow ? null : label}
+    </Button>
   );
 }
 
