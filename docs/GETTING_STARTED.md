@@ -279,8 +279,8 @@ From the command line, with Wavescribe running, in another Terminal window:
 
 ```sh
 uv run wavescribe digest                                    # stations heard in the last hour
-uv run wavescribe digest --stations tsf,antena1 --since 14:30 --language en
-uv run wavescribe digest --now --stations tsf               # what is TSF on about right now?
+uv run wavescribe digest --stations radio-example,example-fm --since 14:30 --language en
+uv run wavescribe digest --now --stations example-fm        # what is Example FM on about right now?
 uv run wavescribe digest --url http://localhost:8790        # serve was started with --port 8790
 ```
 
@@ -289,15 +289,15 @@ started with `--port`, give that address with `--url`; without it the command sa
 Wavescribe answers.
 
 ```
-TSF Rádio Notícias, RTP Antena 1, 14:30-16:00
+Radio Example, Example FM, 14:30-16:00
 Written by the local model from 140 of 512 lines, spread evenly between 14:30 and 16:00; it can miss things or get them wrong.
 
-! high 15:12 TSF Rádio Notícias: Water cut tomorrow between nine and one o'clock
+! high 15:12 Radio Example: Water cut tomorrow between nine and one o'clock
 
-- TSF Rádio Notícias: Water will be cut tomorrow morning in the town centre for repairs. [1, 2]
-- RTP Antena 1: The bus drivers' strike goes ahead on Thursday. [3, 4]
+- Radio Example: Water will be cut tomorrow morning in the town centre for repairs. [1, 2]
+- Example FM: The bus drivers' strike goes ahead on Thursday. [3, 4]
 
-[1] TSF Rádio Notícias 15:12  Water cut tomorrow between nine and one o'clock.
+[1] Radio Example 15:12  Water cut tomorrow between nine and one o'clock.
 …
 ```
 
@@ -563,7 +563,7 @@ The same schedule can be written in the file, as a `[digest]` table:
 [digest]
 every_minutes = 60                # 30 is on the hour and half past; any number from 5 to 1440
                                   # that divides a day evenly (10, 15, 45, 90, 120, 180...)
-stations = ["tsf", "antena1"]     # leave out for every station
+stations = ["radio-example", "example-fm"]  # leave out for every station
 language = "en"                   # default: notify_language
 speak = true                      # also read its points aloud, in the [speak.en] voice
 quiet_hours = ["22:00", "07:00"]

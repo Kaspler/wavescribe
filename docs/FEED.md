@@ -18,10 +18,10 @@ The pull feed and the pushes carry the same JSON objects.
 {
   "type": "utterance", "version": 1, "id": 4182,
   "node": {"name": "kitchen-mac", "url": "http://kitchen-mac.local:8765"},
-  "station": {"id": "tsf", "name": "TSF", "language": "pt-PT", "privacy": "broadcast"},
+  "station": {"id": "radio-example", "name": "Radio Example", "language": "es", "privacy": "broadcast"},
   "time": "2026-11-26T14:03:12Z", "t_start": 1795701792.1, "duration": 6.2,
-  "language": "pt-PT",
-  "text": "A circulação na ponte está cortada nos dois sentidos.",
+  "language": "es",
+  "text": "El tráfico en el puente está cortado en los dos sentidos.",
   "translations": {"en": "Traffic on the bridge is closed in both directions."},
   "flags": [], "rules": ["roads"],
   "audio_url": "http://kitchen-mac.local:8765/api/segments/4182/audio.wav"
@@ -71,11 +71,11 @@ Utterance fields:
   "type": "alert", "version": 1, "id": 77, "node": {"name": "kitchen-mac", "url": "…"},
   "rule": "water", "kind": "keyword", "severity": "high", "status": "delivered",
   "time": "2026-11-26T14:05:40Z", "first_at": 1795701740.0, "last_at": 1795701940.2,
-  "mentions": 3, "terms": ["corte de água"], "reason": null, "checked": null,
-  "station": {"id": "antena1", "name": "Antena 1", "language": "pt-PT", "privacy": "broadcast"},
-  "stations": [{"id": "antena1", "name": "Antena 1", "language": "pt-PT", "privacy": "broadcast"}],
-  "language": "pt-PT", "text": "…what was said…", "translations": {"en": "…"},
-  "context": [{"id": 4180, "time": "…", "station": "antena1", "text": "…", "translations": {}}],
+  "mentions": 3, "terms": ["Wasser abgestellt"], "reason": null, "checked": null,
+  "station": {"id": "example-fm", "name": "Example FM", "language": "de", "privacy": "broadcast"},
+  "stations": [{"id": "example-fm", "name": "Example FM", "language": "de", "privacy": "broadcast"}],
+  "language": "de", "text": "…what was said…", "translations": {"en": "…"},
+  "context": [{"id": 4180, "time": "…", "station": "example-fm", "text": "…", "translations": {}}],
   "segment_id": 4181,
   "audio_url": "…/api/segments/4181/audio.wav", "cap_url": "…/api/alerts/77.cap",
   "page_url": "…/#/alert/77", "change": "new"
@@ -192,7 +192,7 @@ station still making its first connection isn't one) and `listening`. `problem` 
 a few words, while `state` is `problem`, and is null otherwise.
 
 ```sh
-curl -N "http://kitchen-mac.local:8765/feed/v1/events?stations=tsf"
+curl -N "http://kitchen-mac.local:8765/feed/v1/events?stations=radio-example"
 curl "http://kitchen-mac.local:8765/feed/v1/utterances?since=$(date -v-1H +%s)&format=csv" > hour.csv
 ```
 
@@ -549,12 +549,12 @@ ways to add → From another Wavescribe*, or in its `stations.toml`:
 
 ```toml
 [[station]]
-id = "north-tsf"
-name = "TSF (north node)"
-language = "pt-PT"
-translate_to = ["en", "es"]
+id = "north-example"
+name = "Radio Example (north node)"
+language = "es"
+translate_to = ["en", "fr"]
 remote = "http://north-node.local:8765"
-remote_station = "tsf"
+remote_station = "radio-example"
 remote_token = "wst_…"      # if that node has feed tokens
 privacy = "amateur"         # optional: handle its text at least this strictly
 ```

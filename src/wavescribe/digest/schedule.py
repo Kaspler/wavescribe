@@ -3,7 +3,7 @@
 
     [digest]
     every_minutes = 60            # on the hour; 30 is on the hour and half past
-    stations = ["tsf", "antena1"] # leave out for every station
+    stations = ["radio-example", "example-fm"]  # leave out for every station
     language = "en"               # default: [delivery] notify_language
     speak = true                  # also read the points aloud, in the [speak.<language>] voice
     quiet_hours = ["22:00", "07:00"]

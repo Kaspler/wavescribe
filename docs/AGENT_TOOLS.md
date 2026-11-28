@@ -172,8 +172,8 @@ ends it now). `follow` prints the feed's events as they come, each utterance wit
 one field more, `resume`.
 
 ```sh
-$ uv run wavescribe search água --json | jq -r '.time + "  " + .station.name + "  " + .translations.en'
-2026-11-26T20:10:58Z  TSF  Water cut tomorrow between nine and one o'clock.
+$ uv run wavescribe search agua --json | jq -r '.time + "  " + .station.name + "  " + .translations.en'
+2026-11-26T20:10:58Z  Radio Example  Water cut tomorrow between nine and one o'clock.
 ```
 
 `follow` prints the live feed (`/feed/v1/events`). Like `tail -f`, it runs until you stop it or
@@ -243,7 +243,7 @@ uv run wavescribe follow --alerts-only | jq --unbuffered -c 'select(.change != "
 Here `./notify` stands for your program. With one that prints a line per alert:
 
 ```
-high water on Antena 1: Previsão de chuva forte para a tarde.
+high water on Example FM: Morgen wird zwischen 9 und 13 Uhr das Wasser abgestellt.
 ```
 
 With nothing running, `follow` says so on one line and exits 1:
