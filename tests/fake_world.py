@@ -21,13 +21,14 @@ A world is JSON, a file or the text itself::
 
 Every transmitter takes ``level`` (amplitude, 0.2 by default; full scale is 1; a block's is
 what it would have filling the whole window), ``from_s`` and ``until_s`` (on the air between
-those world times), and ``period_s``/``on_s``/``start_s``: keyed
-for the last ``on_s`` of every ``period_s`` counted from ``start_s``, as a walkie-talkie is.
-A sound is ``tone_hz`` (default 1 kHz) or ``audio``, a float32 16 kHz mono file, sent again
-``gap_s`` after it ends. ``wfm`` is broadcast FM: 75 kHz deviation, 50 µs pre-emphasis on
-audio, a 19 kHz pilot, and RDS when it has ``ps`` or ``rt``. ``nfm`` takes ``deviation_hz``
-(2.5 kHz), ``am`` ``depth`` (0.5). ``line`` is a bare carrier and ``block`` a flat-topped
-spread of noise with steep sides, as a digital multiplex looks.
+those world times), and ``period_s``/``on_s``/``start_s``: keyed for the last ``on_s`` of
+every ``period_s`` counted from ``start_s``, as a walkie-talkie is. A sound is ``tone_hz``
+(default 1 kHz), ``audio`` (a float32 16 kHz mono file) or ``voice`` (a made-up voice from
+tests/synthetic_iq.py, from that seed, ``voice_s`` long; on ``nfm`` through a walkie-talkie's
+filters and limiter), sent again ``gap_s`` after it ends. ``wfm`` is broadcast FM: 75 kHz
+deviation, 50 µs pre-emphasis on audio, a 19 kHz pilot, and RDS when it has ``ps`` or ``rt``.
+``nfm`` takes ``deviation_hz`` (2.5 kHz), ``am`` ``depth`` (0.5). ``line`` is a bare carrier
+and ``block`` a flat-topped spread of noise with steep sides, as a digital multiplex looks.
 
 The dongle's own untruths, all off by default:
 
@@ -222,10 +223,26 @@ class _Sound:
         self.rate = rate
         self.tone = float(spec.get("tone_hz", 1000))
         self.loop: np.ndarray | None = None
-        if audio := spec.get("audio"):
+        if "voice" in spec and not preemphasis:  # as a walkie-talkie sends it
+            from scipy.signal import resample_poly
+
+            from tests import synthetic_iq
+
+            x = synthetic_iq.radio_audio(float(spec.get("voice_s", 8.0)), int(spec["voice"]))
+            ratio = Fraction(rate).limit_denominator(1000) / synthetic_iq.MOD
+            x = resample_poly(x, ratio.numerator, ratio.denominator) if ratio != 1 else x
+            gap = np.zeros(round(float(spec.get("gap_s", 1.0)) * rate))
+            self.loop = np.concatenate([x, gap])
+        elif "voice" in spec or spec.get("audio"):
             from scipy.signal import lfilter, resample_poly
 
-            x = np.fromfile(base / audio, dtype=np.float32).astype(np.float64)
+            if "voice" in spec:
+                from tests import synthetic_iq
+
+                seconds = float(spec.get("voice_s", 8.0))
+                x = synthetic_iq.voice(seconds, int(spec["voice"])).astype(np.float64)
+            else:
+                x = np.fromfile(base / spec["audio"], dtype=np.float32).astype(np.float64)
             if preemphasis:  # the inverse of the receiver's 50 µs de-emphasis
                 a = np.exp(-1 / (16_000 * 50e-6))
                 x = lfilter([1, -a], [1 - a], x)
