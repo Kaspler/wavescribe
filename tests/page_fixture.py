@@ -141,7 +141,8 @@ def running(
         log = (where / "serve.log").open("wb")
         process = subprocess.Popen(
             [sys.executable, "-m", "wavescribe", "serve", "--config", "stations.toml",
-             "--settings", "ui.toml", "--port", str(port), "--no-alerts", *start],
+             "--settings", "ui.toml", "--port", str(port), "--no-alerts",
+             "--parent-pid", str(os.getpid()), *start],  # it stops when this script does
             cwd=where, env=env, stdout=log, stderr=subprocess.STDOUT,
         )  # fmt: skip
         url = f"http://127.0.0.1:{port}/"
