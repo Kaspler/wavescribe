@@ -86,7 +86,9 @@ function OutputRow({ o, onEdit, reload }: { o: Any; onEdit: () => void; reload: 
         <span className="m-spacer" />
         <ActButton size="sm" icon="send" run={async () => {
           const r = await post(`/outputs/${o.id}/test`);
-          toast(r.ok ? `Test delivered (${r.status})` : `Test failed: ${r.error || r.status}`, !r.ok);
+          // A mesh node answers with an acknowledgement or not, never an HTTP status.
+          if (mesh) toast(r.ok ? `Test acknowledged by ${o.node}` : `Test ${r.error || "not acknowledged"}`, !r.ok);
+          else toast(r.ok ? `Test delivered (${r.status})` : `Test failed: ${r.error || r.status}`, !r.ok);
         }}>Test</ActButton>
         <Button size="sm" variant="ghost" icon="edit" onClick={onEdit}>Edit</Button>
         <ConfirmButton size="sm" icon="trash" confirm={`Delete ${o.name || o.id}`} onConfirm={() => act(async () => { await del(`/outputs/${o.id}`); await reload(); }, "Deleted")}>
@@ -166,6 +168,8 @@ function OutputEditor({ o, v, onDone, onCancel }: { o: Any; v: Any; onDone: () =
     setKind(k);
     if ((k === "ntfy" && fmt !== "text") || k === "mesh") setFmt("line");
     if (k === "mesh" && +maxBytes > 200) setMaxBytes("200");
+    // A mesh is shared and slow: a new one starts with the serious alerts only.
+    if (k === "mesh" && !o.id && sev === "medium") setSev("high");
   };
   const ready = ntfy ? server.trim() !== "" && goodTopic(topic) : mesh ? nodeId(node) !== null : url.trim() !== "";
   const save = async () => {
