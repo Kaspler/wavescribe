@@ -221,15 +221,15 @@ def test_fair_shares_give_the_quiet_all_they_said_and_split_the_rest() -> None:
 def test_only_points_that_cite_what_was_given_are_kept() -> None:
     reply = (
         "Here is the digest:\n"
-        "- TSF reported a water cut [1, 3].\n"
-        "- Antena 1 discussed the bridge [7].\n"  # it was given 4 excerpts
+        "- Valley FM reported a water cut [1, 3].\n"
+        "- Harbour Talk discussed the bridge [7].\n"  # it was given 4 excerpts
         "- A point with no source at all.\n"
         "* Rain is forecast [2][4]\n"
         "1. The mayor resigned [ 2 ; 3 ].\n"
     )
     parsed = parse_points(reply, 4)
     assert parsed.points == [
-        ("TSF reported a water cut.", [1, 3]),
+        ("Valley FM reported a water cut.", [1, 3]),
         ("Rain is forecast", [2, 4]),
         ("The mayor resigned.", [2, 3]),
     ]

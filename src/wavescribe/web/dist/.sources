@@ -115,7 +115,7 @@ cf67357d79e25e10e9b0e9e3299c3e3f3973c8cd frontend/tests/colNote.test.mjs
 d80a9581f2ba188ea09447797e9fbed11c909ab4 frontend/tests/connections.test.mjs
 d499272afb45561c18fff3c1febb5800eceb2111 frontend/tests/deliveries.test.mjs
 ea996599b090b7458c6ed8da0c12e42af1d5e7b4 frontend/tests/dial.test.mjs
-25416519f29f0bc1ce9095757f1c28fa0753b57e frontend/tests/digest.test.mjs
+a4322002c88d2d13afc60ea1db9d5e5380e4192f frontend/tests/digest.test.mjs
 1529aca37ae80e84524f10c0d33f06e2c49c2b05 frontend/tests/drafts.test.mjs
 f90386f09031abe55cdcecd38f0e7c87bbb4835d frontend/tests/fixtures/alerts.json
 d551a2df95c0a9ebd58fde325d160571d4b19bc1 frontend/tests/hold.test.mjs
