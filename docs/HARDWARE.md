@@ -50,9 +50,19 @@ The three-dongle box is described [below](#the-reference-kit-in-detail).
 **Which dongle.** The **RTL-SDR Blog V4** family: the V4 and the V4L ("Lite", the one used
 here). They have a good tuner, a stable crystal, an aluminium case and a built-in bias tee.
 Buy from the official reseller list on rtl-sdr.com: **many marketplace "RTL-SDR Blog" dongles
-are fakes.** Other dongles built on the RTL2832U chip should work through the same driver but
-haven't been tried. An **Airspy R2** handles strong nearby stations better and hears a wider
-window, but it isn't supported.
+are fakes.** Wavescribe is tested with the RTL-SDR Blog V4 family.
+
+Other dongles with the RTL2832U chip work through the same driver; what differs is the tuner
+chip beside it, which `rtl_test` names ("Found … tuner"):
+
+| Tuner | What happens |
+|---|---|
+| R820T, R820T2 (most RTL-SDR dongles) | The same as the V4 family: the same range and gain steps. |
+| E4000 (about 52–2200 MHz, with a gap around 1100–1250 MHz) | It runs, but the page shows the R820T range (24–1766 MHz) and gain steps for it: it offers 24–52 MHz, which the stick can't tune, doesn't offer 1766–2200 MHz, and its gain words land on the stick's nearest step, at most 42 dB. |
+| FC0012, FC0013 (about 22–948 and 22–1100 MHz) | It runs, but the page shows the R820T range and gain steps for it: bands above the stick's top look tunable, and every gain word lands on its top step, about 19 dB. |
+
+An **Airspy R2** handles strong nearby stations better and hears a wider window, but it isn't
+supported; nor are HackRF, SDRplay or receivers reached over the network (`rtl_tcp`).
 
 ## Antennas
 
@@ -116,7 +126,8 @@ an **SMA-male to F-male pigtail** for each dongle and an adapter for the antenna
 ## Limits today
 
 - **Macs with Apple Silicon only.** Not Linux, Intel Macs or Windows.
-- **RTL-SDR dongles only.** Airspy, HackRF and SoapySDR devices aren't supported.
+- **RTL-SDR dongles only,** tested with the RTL-SDR Blog V4 family ([which dongle](#what-to-buy)).
+  Airspy, HackRF, SDRplay, SoapySDR devices and receivers over the network aren't supported.
 - **A window of about 2.2 MHz per dongle.** At 2.4 million samples a second (above that, RTL-SDR
   dongles tend to drop samples) a dongle takes in 2.4 MHz, and its filter fades the edges.
   Wavescribe follows FM stations up to 1.08 MHz either side of the dongle's centre (2.16 MHz)

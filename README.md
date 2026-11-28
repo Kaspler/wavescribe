@@ -106,7 +106,9 @@ receiver step by step.
 
 - **None:** internet radio needs only the Mac.
 - **Starter:** one RTL-SDR Blog V4 receiver and its antenna (about €40–60): a few FM stations
-  that sit close together, station finding, and listening to any frequency.
+  that sit close together, station finding, and listening to any frequency. Wavescribe is
+  tested with the RTL-SDR Blog V4 family; [HARDWARE.md](docs/HARDWARE.md#what-to-buy) says
+  which other dongles work.
 - **More stations:** three receivers behind one antenna and a splitter (about €150–250).
 
 [docs/HARDWARE.md](docs/HARDWARE.md) says which Mac, what to buy, which antenna and how to
