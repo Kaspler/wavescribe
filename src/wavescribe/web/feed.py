@@ -2,7 +2,8 @@
 """``/feed/v1``: Wavescribe as a component of something else. Text and metadata only.
 
     GET  /feed/v1/events      live Server-Sent Events: utterance, alert (and status every 10 s
-                              with events=status); resumes after Last-Event-ID or ?since_id=,
+                              and on pause or resume, with events=status); resumes after
+                              Last-Event-ID or ?since_id=,
                               or from ?since=<epoch> after a restart
     GET  /feed/v1/utterances  what was said, as JSON, NDJSON or CSV (?since_id=, ?since=,
                               ?until=, ?stations=, ?langs=, ?limit=, ?format=), in the order
@@ -589,6 +590,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
                    cursor.sent(row["id"], mark, then["id"] if then else None))  # fmt: skip
         h.wfile.flush()
         next_status = wrote = time.monotonic()
+        said_paused: bool | None = None  # as the last status event said
         while True:
             now = time.monotonic()
             if "status" in want and now >= next_status:
@@ -600,6 +602,7 @@ def events(h: Handler, query: dict[str, str]) -> None:
                                      "state": state, "problem": problem})  # fmt: skip
                 h.wfile.flush()
                 wrote = now
+                said_paused = now_status["paused"]
             # Timed from the last write to this client: events its filter drops don't count,
             # or a stream of one station's alerts would go quiet until the client gives up.
             if now - wrote >= KEEPALIVE_S:
@@ -639,6 +642,11 @@ def events(h: Handler, query: dict[str, str]) -> None:
                 _write(
                     h, "alert", alert_event(data, stations_, node_, languages=langs, context=before)
                 )
+            elif name == "status" and "status" in want:
+                # Paused or resumed: said at once rather than at the next 10 s.
+                if json.loads(text).get("paused", said_paused) != said_paused:
+                    next_status = 0.0
+                continue
             else:
                 continue
             h.wfile.flush()

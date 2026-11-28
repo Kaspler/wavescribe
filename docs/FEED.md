@@ -176,7 +176,8 @@ finish while an old one waits only on a very busy machine), and a replay cut at 
 rest on the next resume. **Skip an utterance whose `id` you already have** (with the same
 text); `wavescribe follow` and remote stations do. Alerts carry no `id:` and aren't replayed:
 ask `/feed/v1/alerts?since=` for those raised meanwhile. After a restart, a client that kept no
-id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s:
+id can ask for `?since=<epoch>`. Pass `?events=status` to get a status event every 10 s, and at
+once when listening is paused or resumed:
 
 ```json
 {"type": "status", "stations": [{"id": "news", "running": true, "connected": true, "…": "…"}],
@@ -635,8 +636,9 @@ a file), readable only by its owner:
 left behind by a crash names a pid that no longer runs.
 
 **Follow it** with `GET /api/hello` (no token, no header): the ready file's fields, and
-`paused`, `listening`, `ready`, `state` and `problem` as they are now. `/feed/v1/events?events=status`
-sends `paused`, `state` and `problem` every 10 s.
+`paused`, `listening`, `ready`, `state` and `problem` as they are now.
+`/feed/v1/events?events=status` sends `paused`, `state` and `problem` every 10 s, and at once
+when listening is paused or resumed.
 
 **Pause and resume it** with `POST /api/pause` and `POST /api/resume`, from this machine and with
 the header `X-Wavescribe: 1`, as every change the page makes; the body is ignored. Both answer

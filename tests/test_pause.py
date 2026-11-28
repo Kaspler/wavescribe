@@ -187,10 +187,16 @@ def test_the_feed_status_event_says_how_things_stand(node: Running, monkeypatch)
     while not (line := resp.readline().decode()).startswith("data:"):
         pass
     event = json.loads(line[5:])
-    conn.close()
     assert event["type"] == "status" and event["paused"] is True
     assert (event["state"], event["problem"]) == ("paused", None)
-    node.call("POST", "/api/resume")
+    t0 = time.monotonic()
+    node.call("POST", "/api/resume")  # said at once, not at the next 10 s
+    while not (line := resp.readline().decode()).startswith("data:"):
+        pass
+    conn.close()
+    event = json.loads(line[5:])
+    assert event["paused"] is False and event["state"] != "paused"
+    assert time.monotonic() - t0 < 5
 
 
 def test_state_is_loading_then_problem_from_what_the_health_tab_shows(node: Running) -> None:
