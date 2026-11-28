@@ -472,7 +472,7 @@ defaults:
   never decoded or decrypted. Tuning any of them with the analogue demodulators gives noise. You
   can still tune them, because a band plan can be wrong where you are.
 - Wavescribe's receivers only receive: it has no code that transmits with them. A mesh
-  output is apart from them: it hands an alert to a Meshtastic node, which sends it
+  output is apart from them: it hands an alert to a Meshtastic® node, which sends it
   ([FEED.md](FEED.md#push-outputs)).
 
 ### You decide what is kept

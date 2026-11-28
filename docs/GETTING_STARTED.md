@@ -593,7 +593,7 @@ station as its title and the words as heard as its text, and is louder the more 
 alert. Alerts go to the server you name: a public one is run by a third party, who sees them;
 one you run on your own network keeps them there ([FEED.md](FEED.md#push-outputs)).
 
-**Over a LoRa mesh (experimental):** with two [Meshtastic](https://meshtastic.org) nodes, one
+**Over a LoRa mesh (experimental):** with two [Meshtastic®](https://meshtastic.org) nodes, one
 attached to this Mac and one someone carries, an alert can reach the second with no internet
 and no mobile network on the way. This is not yet verified on real nodes. Install the
 `meshtastic` program (`pipx install "meshtastic[cli]"`) and attach the first node by USB. Then
@@ -721,7 +721,9 @@ export WAVESCRIBE_HOME=~/Documents/radio-home   # the same for every command aft
   on the same home stops straight away and says which is running, with its page's address; give
   it another `--home` to run both. The other commands work while it runs.
 - Models from Hugging Face stay in `~/.cache/huggingface`, shared by every home; the speech
-  detector and the music filter are downloaded into each home's `models` folder.
+  detector and the music filter are downloaded into each home's `models` folder, so a new home
+  needs `models fetch` for them again, or `WAVESCRIBE_MODELS_DIR` naming a `models` folder that
+  has them.
 
 ## 11. Keep it running
 

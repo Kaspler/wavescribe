@@ -425,7 +425,7 @@ headers = { Authorization = "Bearer tk_…" }
 ```
 
 **Mesh (experimental).** *Not yet verified on real nodes.* An output of the kind `mesh` sends
-each alert as a direct message to one node of a [Meshtastic](https://meshtastic.org) LoRa mesh,
+each alert as a direct message to one node of a [Meshtastic®](https://meshtastic.org) LoRa mesh,
 so that it can reach a node someone carries with no internet and no mobile network on the way.
 It needs a Meshtastic node attached to this machine (by USB, or on the network) and the
 `meshtastic` command-line program, which you install yourself (`pipx install "meshtastic[cli]"`;

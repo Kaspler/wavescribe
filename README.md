@@ -63,7 +63,7 @@ writes it down, translates it and keeps it, so it can be read, searched and acte
   cut of 28 April 2025 in Spain and Portugal, radio was how people learned what was going on, in
   Spanish and Portuguese only.
 - **When the internet and the mobile network are down.** An alert can go over a LoRa mesh to a
-  Meshtastic node someone carries (experimental).
+  Meshtastic® node someone carries (experimental).
 
 ## Quick start
 
@@ -381,7 +381,7 @@ Copyright 2026 Vitali Kaspler. Licensed under the [Apache License 2.0](LICENSE).
 
 The licence covers the code and documentation, not the Wavescribe name or logo (`assets/` and
 the page's icons). A modified version you distribute needs its own name and logo; saying it is
-based on Wavescribe is fine.
+based on Wavescribe is fine. Meshtastic® is a registered trademark of Meshtastic LLC.
 
 Models aren't part of Wavescribe and are never shipped with it: you download each one from its
 publisher, under its own licence ([docs/LICENSING.md](docs/LICENSING.md)). The built web page
