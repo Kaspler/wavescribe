@@ -2,28 +2,30 @@
 """The page's port: a fixed ``--port N``, or the first free one of a range (``--port auto``,
 ``--port auto:N``). Standard library only: ``cli`` reads the option with it.
 
-A port is only ever tried by binding a socket to it, never by connecting to it, so no program
-that listens there sees a request. Binding alone isn't enough on macOS: a socket with
-SO_REUSEADDR binds 127.0.0.1:P beside another program that listens on 0.0.0.0:P, and then
-takes that program's connections to 127.0.0.1. So:
+A port is taken when some socket listens on it, on any address, as the system's own table of
+sockets says: ``netstat`` on macOS (every user's sockets), else ``lsof`` (this user's), and
+``/proc/net/tcp`` on Linux. One reading answers for every port tried, and nothing connects to a
+port to find out, so no program that listens there sees a request. Connections still closing
+(TIME_WAIT, after a run stopped) don't listen, so a port they hold is free: the page's socket
+binds with SO_REUSEADDR as servers usually do. Where no table can be read (a sandbox may hide
+it), sockets with SO_REUSEADDR stand in for it: one that binds where another listens fails, on
+the IPv4 and IPv6 wildcard and loopback addresses and the bind host.
 
-- ``free`` (``--port auto``): a socket without SO_REUSEADDR or SO_REUSEPORT binds on the
-  wildcard address and on the bind host, and an IPv6-only one on IPv6's wildcard where the
-  machine has IPv6. A port where connections are still closing (TIME_WAIT, up to 30 s on macOS
-  after a server let go of it) doesn't bind that way, so it counts as taken and the next is
-  tried.
-- ``listened`` (a fixed ``--port``): another program listens where this one would share its
-  connections: on the wildcard address, on the bind host (and 127.0.0.1 when the bind host is
-  the wildcard), or on IPv6. These probes use SO_REUSEADDR, which connections still closing
-  don't stop, so a fixed port binds again at once after a restart; the page's socket then binds
-  with it too, and the wildcard is checked once more after that bind.
+The table is what catches a program on the wildcard address: on macOS a socket with
+SO_REUSEADDR binds 127.0.0.1:P beside another that listens on 0.0.0.0:P, and then takes that
+program's connections to 127.0.0.1. Once the page listens, the table is read once more, for a
+program that started listening on the port meanwhile.
 """
 
 from __future__ import annotations
 
 import errno
 import socket
+import subprocess
+import sys
+from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
 AUTO_FROM = 8765  # where --port auto starts
 AUTO_TRIES = 20  # ports tried in turn before the system picks one
@@ -85,64 +87,133 @@ def port_spec(value: str) -> int | AutoPort:
         ) from None
 
 
-def _family(addr: str) -> socket.AddressFamily:
-    return socket.AF_INET6 if ":" in addr else socket.AF_INET
+def parse_netstat(text: str) -> Counter[int] | None:
+    """The LISTEN rows of ``netstat -an -p tcp`` (macOS, the BSDs), IPv4 and IPv6, by port; a
+    row's local address ends in ``.<port>`` (``*.8765``, ``127.0.0.1.8765``, ``::1.8765``). None
+    without the table's heading: netstat couldn't read the table."""
+    if "Active Internet connections" not in text:
+        return None
+    found: Counter[int] = Counter()
+    for line in text.splitlines():
+        cols = line.split()
+        if len(cols) >= 6 and cols[0].startswith("tcp") and cols[5] == "LISTEN":
+            port = cols[3].rpartition(".")[2]
+            if port.isdigit():
+                found[int(port)] += 1
+    return found
 
 
-def _binds(addr: str, port: int, *, reuse: bool, v6only: bool = False) -> bool:
-    """Whether a socket binds ``addr``:``port`` (and lets go of it at once). Without ``reuse``
-    it has neither SO_REUSEADDR nor SO_REUSEPORT."""
-    with socket.socket(_family(addr), socket.SOCK_STREAM) as s:
-        if reuse:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if v6only:
-            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+def parse_lsof(text: str) -> Counter[int] | None:
+    """The listening sockets of ``lsof -nP -iTCP -sTCP:LISTEN -Ftn``, by port: its ``t`` (IPv4,
+    IPv6) and ``n`` (``*:8765``, ``127.0.0.1:8765``, ``[::1]:8765``) fields. A socket that more
+    than one process holds is listed under each and counted once. None when nothing is listed:
+    lsof may not have been able to read anything."""
+    seen: set[tuple[str, str]] = set()
+    kind = ""
+    for line in text.splitlines():
+        if line.startswith("t"):
+            kind = line[1:]
+        elif line.startswith("n"):
+            seen.add((kind, line[1:]))
+    found: Counter[int] = Counter()
+    for _, name in seen:
+        port = name.rpartition(":")[2]
+        if port.isdigit():
+            found[int(port)] += 1
+    return found or None
+
+
+def parse_proc_net(text: str) -> Counter[int]:
+    """The sockets in LISTEN (state 0A) of Linux's ``/proc/net/tcp`` or ``tcp6``, by port."""
+    found: Counter[int] = Counter()
+    for line in text.splitlines()[1:]:
+        cols = line.split()
+        if len(cols) > 3 and cols[3] == "0A":
+            found[int(cols[1].rpartition(":")[2], 16)] += 1
+    return found
+
+
+def _netstat() -> Counter[int] | None:
+    try:
+        out = subprocess.run(["netstat", "-an", "-p", "tcp"], capture_output=True, text=True,
+                             timeout=10, check=True).stdout  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_netstat(out)
+
+
+def _lsof() -> Counter[int] | None:
+    try:
+        out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Ftn"],
+                             capture_output=True, text=True, timeout=10).stdout  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_lsof(out)
+
+
+def _proc_net() -> Counter[int] | None:
+    found: Counter[int] = Counter()
+    read = False
+    for name in ("tcp", "tcp6"):
         try:
-            s.bind((addr, port))
+            found += parse_proc_net(Path("/proc/net", name).read_text())
         except OSError:
-            return False
+            continue
+        read = True
+    return found if read else None
+
+
+def listening() -> Counter[int] | None:
+    """How many sockets listen on each TCP port of this machine, on any address, by the
+    system's table; None where it can't be read."""
+    if sys.platform.startswith("linux"):
+        return _proc_net()
+    table = _netstat()
+    return _lsof() if table is None else table
+
+
+def _binds(addr: str, port: int) -> bool:
+    """Where the table can't be read: whether a socket with SO_REUSEADDR binds ``addr``:``port``
+    (and lets go of it at once). Connections still closing don't stop it; a listener on the
+    same address does. False only for EADDRINUSE: an address this machine doesn't have
+    (IPv6 switched off) holds nothing."""
+    family = socket.AF_INET6 if ":" in addr else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s.bind((addr, port))
+    except OSError as e:
+        return e.errno != errno.EADDRINUSE
     return True
 
 
-def _ipv6_taken(port: int) -> bool:
-    """Whether an IPv6 socket holds ``port`` (on ::1, ::, or any other IPv6 address); False
-    where the machine has no IPv6."""
-    if not socket.has_ipv6:
-        return False
-    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
-        try:
-            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-            s.bind(("::", port))
-        except OSError as e:
-            return e.errno == errno.EADDRINUSE
-    return False
-
-
-def free(host: str, port: int) -> bool:
-    """``--port auto``'s rule: sockets without SO_REUSEADDR or SO_REUSEPORT bind ``port`` on the
-    wildcard address and on ``host``, and nothing holds it on IPv6."""
-    places = ["0.0.0.0"] + ([host] if host not in WILDCARD else [])
-    return all(_binds(addr, port, reuse=False) for addr in places) and not _ipv6_taken(port)
-
-
-def listened(host: str, port: int) -> bool:
-    """A fixed ``--port``'s rule: whether another program listens where a page on ``host`` would
-    share its connections. Connections still closing don't count."""
-    places = ["0.0.0.0"]
-    places += ["127.0.0.1"] if host in WILDCARD else [host]
-    return not all(_binds(addr, port, reuse=True) for addr in places) or _ipv6_taken(port)
+def taken(host: str, port: int, table: Counter[int] | None = None) -> bool:
+    """Whether some socket listens on ``port``, on any address (``table``: one reading of
+    ``listening()``, else it is read now)."""
+    table = listening() if table is None else table
+    if table is not None:
+        return table[port] > 0
+    places = {"0.0.0.0", "127.0.0.1", *(["::", "::1"] if socket.has_ipv6 else [])}
+    places |= set() if host in WILDCARD or host == "localhost" else {host}
+    return not all(_binds(addr, port) for addr in sorted(places))
 
 
 def check(host: str, port: int) -> None:
-    """Raise PortInUseError when a fixed ``port`` is taken on ``host`` (``listened``)."""
-    if listened(host, port):
+    """Raise PortInUseError when something listens on a fixed ``port`` (``taken``)."""
+    if taken(host, port):
         raise PortInUseError(f"port {port} is already in use on {host}; choose another with --port")
 
 
-def wildcard_taken(host: str, port: int) -> bool:
-    """After the page's own socket bound a specific ``host`` with SO_REUSEADDR: whether another
-    program listens on the wildcard address beside it (it may have started meanwhile)."""
-    return host not in WILDCARD and not _binds("0.0.0.0", port, reuse=True)
+def shared(host: str, port: int) -> bool:
+    """Once the page listens on ``host``:``port``: whether another socket listens there too (a
+    program that started meanwhile). Where the table can't be read, only a program on the
+    wildcard address beside a page on one address is seen."""
+    table = listening()
+    if table is not None:
+        return table[port] > 1
+    return host not in WILDCARD and not _binds("0.0.0.0", port)
 
 
 def system_port() -> int:
@@ -153,14 +224,16 @@ def system_port() -> int:
 
 
 def choose(host: str, auto: AutoPort, skip: frozenset[int] = frozenset()) -> int:
-    """``--port auto``: the first port of ``auto``'s range that is ``free`` (and not in
-    ``skip``), else one the system picks that is free too."""
+    """``--port auto``: the first port of ``auto``'s range that nothing listens on (and not in
+    ``skip``), else one the system picks that nothing listens on either. One reading of the
+    table answers for the whole range."""
+    table = listening()
     for port in auto.candidates():
-        if port not in skip and free(host, port):
+        if port not in skip and not taken(host, port, table):
             return port
     for _ in range(SYSTEM_TRIES):
         port = system_port()
-        if port not in skip and free(host, port):
+        if port not in skip and not taken(host, port):
             return port
     raise PortInUseError(f"no free port for the page on {host}")
 

@@ -1388,10 +1388,9 @@ def _own_names() -> frozenset[str]:
 
 
 def check_port(host: str, port: int) -> None:
-    """Fail early if another program listens where a page on ``host``:``port`` would share its
-    connections (``ports.listened``): on macOS a socket with SO_REUSEADDR binds beside one that
-    listens on the wildcard address, or on 127.0.0.1 when it binds the wildcard itself, and
-    then one of the two takes the other's local connections. Probes bind; nothing connects."""
+    """Fail early if some socket listens on ``port``, on any address (``ports.taken``): on macOS
+    the page's socket would bind beside one on the wildcard address and take its local
+    connections. The system's table of sockets says; nothing connects."""
     ports.check(host, port)
 
 
@@ -1407,11 +1406,7 @@ class WebServer(ThreadingHTTPServer):
         public_read: bool = False,
         remote_ask: bool = False,
         control_key: str | None = None,
-        reuse_address: bool = False,
     ) -> None:
-        # Without SO_REUSEADDR unless asked: with it, the socket would bind beside another
-        # program listening on the wildcard address (web/ports.py).
-        self.allow_reuse_address = reuse_address
         super().__init__(address, Handler)
         self.hub = hub
         self.behind_proxy = behind_proxy
@@ -1472,10 +1467,9 @@ def serve(
     is the one ``--port auto`` chose: if it was taken meanwhile, the next free one is used.
     ``app.port`` is the page's port once it listens."""
 
-    def make(at: int, reuse: bool) -> WebServer:
+    def make(at: int) -> WebServer:
         return WebServer((host, at), app.hub, behind_proxy, public_read=public_read,
-                         remote_ask=remote_ask, control_key=control_key,
-                         reuse_address=reuse)  # fmt: skip
+                         remote_ask=remote_ask, control_key=control_key)  # fmt: skip
 
     server = bind(make, host, port, auto)
     app.port = port = server.server_address[1]
@@ -1493,33 +1487,32 @@ def serve(
 
 
 def bind(make: Any, host: str, port: int, auto: AutoPort | None = None) -> WebServer:
-    """The page's socket, bound and listening; ``make(port, reuse)`` builds the server.
+    """The page's socket, bound and listening; ``make(port)`` builds the server, with
+    SO_REUSEADDR as servers usually bind, so connections of a run that just stopped don't hold
+    the port.
 
-    A fixed port is refused (PortInUseError) when another program listens where it would
-    share its connections (``ports.listened``). It binds with SO_REUSEADDR, so connections of a
-    run that just stopped don't hold it, and the wildcard is checked again once it is bound.
-    Under ``--port auto`` it binds without, on a port ``ports.free`` finds free; one taken
-    meanwhile is skipped for the next."""
-    if auto is None:
-        ports.check(host, port)
-        try:
-            server = make(port, True)
-        except OSError as e:
-            if e.errno == errno.EADDRINUSE:
-                raise PortInUseError(f"port {port} is already in use on {host}") from e
-            raise
-        if ports.wildcard_taken(host, port):  # another program took it meanwhile
-            server.server_close()
-            raise PortInUseError(f"port {port} is already in use on 0.0.0.0")
-        return server
+    A fixed port is refused (PortInUseError) when some socket listens on it (``ports.check``),
+    or when another one listens there too once the page's socket does (``ports.shared``: a
+    program that started meanwhile). Under ``--port auto`` such a port is skipped for the next
+    free one (``ports.choose``)."""
     tried: set[int] = set()
     while True:
-        if port not in tried and ports.free(host, port):
+        if auto is None:
+            ports.check(host, port)
+        if port not in tried and (auto is None or not ports.taken(host, port)):
             try:
-                return make(port, False)
+                server = make(port)
             except OSError as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
+                if auto is None:
+                    raise PortInUseError(f"port {port} is already in use on {host}") from e
+            else:
+                if not ports.shared(host, port):
+                    return server
+                server.server_close()
+                if auto is None:
+                    raise PortInUseError(f"port {port} is already in use on {host}")
         tried.add(port)
         port = ports.choose(host, auto, frozenset(tried))
 

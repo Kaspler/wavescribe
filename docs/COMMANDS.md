@@ -134,7 +134,7 @@ here start right away; with none, the ones that ran last time do. It also takes
 | `--open` | open the page in the default browser |
 | `--ready-file PATH` | where to write the ready file (default `data/serve.json` in the home): written once the page listens, removed when `serve` stops ([FEED.md](FEED.md#starting-wavescribe-from-another-program)) |
 | `--parent-pid PID` | follow that process: when it ends, `serve` stops as with SIGTERM, with exit code 0; if it has ended already, `serve` doesn't start |
-| `--port PORT` | the page's port (default 8765). Another program listening on it, on this machine's address or on every address, stops `serve` at once with exit code 4. `auto` takes the first free port of 8765 to 8784, `auto:N` of N to N+19, and after those one the system picks; the port taken is in the startup line, never saved |
+| `--port PORT` | the page's port (default 8765). Another program listening on it, on any address, stops `serve` at once with exit code 4. `auto` takes the first port of 8765 to 8784 that nothing listens on, `auto:N` of N to N+19, and after those one the system picks; the port taken is in the startup line, never saved |
 | `--host ADDRESS` | the address to listen on (default `127.0.0.1`: this machine only). Another machine that reaches it reads only, as with `--lan` |
 | `--lan` | listen on every address, so other devices on the network read along (read-only); `--host` is then ignored |
 | `--behind-proxy` | a reverse proxy or tunnel forwards to this server: every request counts as another machine's (read-only, feed tokens required) |

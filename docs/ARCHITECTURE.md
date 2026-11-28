@@ -333,14 +333,16 @@ it spends the one LLM everything else waits for. `serve` prints one line at star
 of these holds (`server.access_line`). Every response carries a
 Content-Security-Policy (`default-src 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`
 and `Referrer-Policy: no-referrer`.
-**The page's port** (`web/ports.py`) is tried only by binding, never by connecting. A fixed
-`--port` is refused before models load (exit code 4) when another program listens on the
-wildcard address, the bind host or IPv6: on macOS a socket with SO_REUSEADDR binds 127.0.0.1
-beside a program on 0.0.0.0 and then takes its local connections. The page's socket binds with
-SO_REUSEADDR, so connections of a run that just stopped don't hold the port, and the wildcard is
-checked once more after the bind. `--port auto` takes the first port where sockets without
-SO_REUSEADDR or SO_REUSEPORT bind on the wildcard address and on the bind host; connections
-still closing count as taken there, so a quick restart may take the next port.
+**The page's port** (`web/ports.py`) is taken when some socket listens on it, on any address,
+as the system's table of sockets says: `netstat` on macOS, else `lsof`, and `/proc/net/tcp` on
+Linux, read once for every port tried. Nothing connects to it. A fixed `--port` something
+listens on is refused before models load (exit code 4): on macOS a socket with SO_REUSEADDR
+binds 127.0.0.1 beside a program on 0.0.0.0 and then takes its local connections. `--port auto`
+takes the first port nothing listens on. Connections still closing (TIME_WAIT) after a run
+stopped don't listen, and the page's socket binds with SO_REUSEADDR, so a restart takes the same
+port at once. Once the page listens, the table is read again for a program that started
+listening meanwhile. Where no table can be read, sockets with SO_REUSEADDR bound on the IPv4
+and IPv6 wildcard and loopback addresses and on the bind host stand in for it.
 
 **History, search and replay.** With the store on (the default), the page opens with the last
 300 utterances per station from SQLite, so a restart loses nothing, and each transcript has a
