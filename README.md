@@ -292,7 +292,8 @@ is less tried.
 - [Monitoring](docs/FEED.md#pull-feedv1): `/healthz` and Prometheus `/metrics`.
 - [Started by another program](docs/FEED.md#starting-wavescribe-from-another-program):
   `serve --port auto` takes a free port and writes where it listens to a ready file;
-  `--parent-pid` stops it with that program.
+  `--parent-pid` stops it with that program; `/api/hello` and the status event also say how
+  model downloads are going.
 - [Agent tools](docs/AGENT_TOOLS.md#1-mcp-tools-your-agent-can-call) (experimental): an MCP server,
   `wavescribe mcp`, to search, ask, summarise and wait for an alert; it adds, starts and stops
   stations only with `--allow-control`.
@@ -303,8 +304,12 @@ is less tried.
 
 - [Models downloaded once](docs/GETTING_STARTED.md#3-download-the-models) from their publishers,
   with `wavescribe models fetch` or on the page.
-- [Models removed again](docs/GETTING_STARTED.md#uninstalling) to free the disk:
-  `wavescribe models remove` deletes what a model downloaded and says how much that freed.
+- [Downloads you can follow and stop](docs/GETTING_STARTED.md#3-download-the-models) on the page:
+  size and free space before you start, then progress, speed and time left; Stop keeps what came,
+  and Continue goes on from there, also after a restart.
+- [Models removed again](docs/GETTING_STARTED.md#uninstalling) to free the disk, on the page or
+  with `wavescribe models remove`: it asks first with the room it frees, and refuses a model a
+  running station uses.
 - [Each model's licence, size and fit](docs/MODELS.md#will-it-fit-settings--languages-and-models)
   for this Mac, listed on the page, which can search for more online.
 - [Models and their attribution](docs/LICENSING.md#disclosure-to-users) in the Terminal:

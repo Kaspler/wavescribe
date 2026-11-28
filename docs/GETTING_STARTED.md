@@ -83,6 +83,21 @@ their publishers. Wavescribe never ships or uploads them.
 models** page lists every model with its licence, its size, and whether it fits this Mac.
 **Recommended for your stations** shows what your stations' languages need; download those.
 
+- **Before you click,** each model that isn't downloaded shows its size and the free space on its
+  disk. When it won't fit, the page says how much there is to download and how much is free, and
+  its Download button stays off until you make room.
+- **While it downloads,** its row and **Downloads** show how much has come, the speed, and about
+  how long is left once the speed is measured. Reading's notice shows the same, and a download
+  that failed there with its reason and **Retry**.
+- **Stop** ends a download and keeps what came. The model's row says how much, as "2.1 of 5.5 GB
+  downloaded", also after Wavescribe was quit or the Mac lost power, and **Continue** goes on
+  from there; its size is what's left. A file that was cut off and can't be continued is named
+  in the row, and downloads again from its beginning.
+- **Remove…** deletes a downloaded model, or what a stopped download kept. It asks first, in the
+  row, with the room it frees. A model that a running station uses, or that the translator has
+  loaded, can't be removed: the page names the stations; stop them first. In the Terminal it is
+  `uv run wavescribe models remove` with the model's name ([Uninstalling](#uninstalling)).
+
 **Or in the Terminal:**
 
 ```sh
@@ -843,7 +858,9 @@ To see how much room a folder takes, use `du -sh` with its path, e.g. `du -sh ~/
    use too: only what Wavescribe downloaded goes, and a file another program also uses stays.
    The others are in the `models` folder. To remove one model, name it, as
    `uv run wavescribe models list` shows it:
-   `uv run wavescribe models remove whisper-large-v3-turbo`.
+   `uv run wavescribe models remove whisper-large-v3-turbo`, or **Remove…** on its row under
+   Settings → **Languages and models**. While `wavescribe serve` runs, the command goes through
+   it and refuses a model a running station uses, naming the stations.
    If no other program on this Mac uses Hugging Face models, the whole `~/.cache/huggingface`
    folder can go.
 3. **The Wavescribe folder** you unzipped or cloned holds the rest: `data` (what was heard, the
