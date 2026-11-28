@@ -5,10 +5,11 @@ without hardware:
     uv run python tests/page_fixture.py --port 8771
 
 Everything lives in a fresh directory (``--dir``, or a temporary one): the stations file, the
-page's settings, the store, the world. Only stand-ins for rtl_sdr, rtl_test and rtl_power are
-on the PATH, so no real dongle can be opened. The receivers have serials no dongle has; their
-stations are listen only, so no model is loaded. Receiver A is on the made-up FM band with two
-of its stations on; B and C are off until something sends them out.
+page's settings, the store, the world, the models and a Hugging Face cache. Only stand-ins for
+rtl_sdr, rtl_test and rtl_power are on the PATH, so no real dongle can be opened. The receivers
+have serials no dongle has; their stations are listen only, so no model is loaded. Receiver A
+is on the made-up FM band with two of its stations on; B and C are off until something sends
+them out.
 """
 
 from __future__ import annotations
@@ -121,6 +122,10 @@ def prepare(directory: Path, *, pace: bool = True) -> dict[str, str]:
         "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
         "FAKE_RTL_WORLD": str(directory / "world.json"),
         "FAKE_RTL_SERIALS": ",".join(SERIALS),
+        # A Hugging Face cache of its own: what the page downloads or removes never touches
+        # the one on this Mac.
+        "HF_HOME": str(directory / "hf"),
+        "HF_HUB_CACHE": str(directory / "hf" / "hub"),
     }
     return env
 
