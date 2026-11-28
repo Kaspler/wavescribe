@@ -181,8 +181,8 @@ Every other package in `uv.lock` has a tier-A licence. These are the ones to kno
 | Package | Pulled in by | Licence | How Wavescribe uses it |
 |---|---|---|---|
 | librosa | parakeet-mlx | ISC | Imported by parakeet-mlx for its mel filterbank |
-| soundfile (bundles libsndfile) | librosa | BSD-3-Clause; the bundled libsndfile is LGPL-2.1-or-later | Installed, never loaded (`tests/test_in_process_licences.py`) |
-| soxr (python-soxr, bundles libsoxr) | librosa | LGPL-2.1-or-later | Installed, never loaded (the same test) |
+| soundfile (bundles libsndfile) | librosa, transformers | BSD-3-Clause; the bundled libsndfile is LGPL-2.1-or-later | Loaded in-process only when a Whisper model is used (the re-check of flagged lines, or Whisper as the speech model): `transformers` imports it with Whisper's processor. Never loaded on the other paths (`tests/test_in_process_licences.py`). Installed from PyPI by the user's own `uv sync`, unmodified; not distributed with Wavescribe |
+| soxr (python-soxr, bundles libsoxr) | librosa, transformers | LGPL-2.1-or-later | As soundfile: loaded in-process only when a Whisper model is used, never on the other paths (the same test); installed from PyPI by the user's own `uv sync`, unmodified; not distributed with Wavescribe |
 | numba, llvmlite | librosa | numba: BSD-2-Clause; llvmlite: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception | Imported by librosa |
 | scikit-learn (bundles libomp), joblib, pooch | librosa | BSD-3-Clause; libomp: Apache-2.0 WITH LLVM-exception | Installed with librosa |
 | transformers | mlx-lm, mlx-audio | Apache-2.0 | Imported by mlx-lm and mlx-audio |
