@@ -1,6 +1,7 @@
 // The reading area: transcript columns, or search results, or Ask; on phones the station list.
 // A summary opens beside the columns, at their left (on phones it is a page of its own).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { readable } from "../lib/caught";
 import { S, running } from "../lib/live";
 import { P, visible } from "../lib/prefs";
 import { MAX_COLS, type Route } from "../lib/router";
@@ -54,7 +55,8 @@ export function Reading({ route }: { route: Route }) {
   const more = allLive && !V.narrow && live.length > fit;
 
   let ids: string[] = [];
-  if (route.kind === "cols") ids = route.ids.filter((id) => Object.hasOwn(S.byId, id)); // not "constructor"
+  // A station this page has (not "constructor"), or Caught on the air.
+  if (route.kind === "cols") ids = route.ids.filter((id) => readable(id, (x) => Object.hasOwn(S.byId, x), S.loaded));
   else if (allLive && !V.narrow) ids = all ? live : live.slice(0, fit);
   if (V.narrow) ids = ids.slice(0, 1);
 

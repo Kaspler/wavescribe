@@ -1,6 +1,7 @@
 // Phones: the station list with the last thing each station said, Start on the ones that are off,
 // and Edit list to choose which stations this device shows.
 import { useState } from "react";
+import { CAUGHT, caughtFeed } from "../lib/caught";
 import { pick, shownLang } from "../lib/lang";
 import { placeRows } from "../lib/hold";
 import { S, post, running, startThere } from "../lib/live";
@@ -53,6 +54,7 @@ export function PhoneList() {
             <ul>
               {on.map((st) => <Row key={st.id} st={st} />)}
               {!on.length && off.length === stopped && S.loaded && <li className="phone-empty"><NoneRunning off={off.length} /></li>}
+              <CaughtRow />
             </ul>
             {off.length > 0 && (
               <details className="phone-off">
@@ -116,11 +118,39 @@ function Row({ st }: { st: Station }) {
   );
 }
 
+/** Caught on the air (lib/caught.ts), while it has lines: its last two, as a station's row has. */
+function CaughtRow() {
+  useTopics(`utt:${CAUGHT}`, "prefs");
+  const lines = S.utts[CAUGHT] || [];
+  if (!lines.length) return null;
+  const st = caughtFeed(T.caught, P.lang);
+  const shown = shownLang(st, P.lang);
+  const last = lines.slice(-2).map((u) => pick(u, st, shown)).filter(([, , s]) => s !== "pending");
+  const ago = lastTextAgo(CAUGHT);
+  return (
+    <li className="phone-item">
+      <button type="button" className="phone-row" onClick={() => setCols([CAUGHT])}>
+        <span className="phone-row-head">
+          <Icon name="antenna" size={12} className="col-mark" />
+          <span className="phone-name">{st.name}</span>
+        </span>
+        <span className="phone-sub">{T.caughtSub}{ago ? ` · ${T.lastText(ago)}` : ""}</span>
+        {last.length > 0 && (
+          <span className="phone-cap" dir="auto">
+            {last.map(([text, lang], i) => <span key={i} lang={lang}>{withInaudible(text)} </span>)}
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 /** On a phone's transcript: the other stations, one tap away. */
 export function StationStrip({ current }: { current: string }) {
-  useTopics("state", "status", "conn", "alerts");
+  useTopics("state", "status", "conn", "alerts", `utt:${CAUGHT}`);
   const list = S.stations.filter((s) => visible(s.id) && (running(s.id) || s.id === current));
   const n = recentAlerts().length;
+  const caught = current === CAUGHT || !!S.utts[CAUGHT]?.length;
   return (
     <nav className="strip" aria-label={T.stations}>
       <button type="button" className="strip-home" onClick={() => go("#/")} aria-label={`All stations${n ? ` and ${n} recent alerts` : ""}`}>
@@ -133,6 +163,12 @@ export function StationStrip({ current }: { current: string }) {
           {st.name}
         </button>
       ))}
+      {caught && (
+        <button type="button" aria-current={current === CAUGHT ? "true" : undefined} onClick={() => setCols([CAUGHT])}>
+          <Icon name="antenna" size={12} className="col-mark" />
+          {T.caught}
+        </button>
+      )}
     </nav>
   );
 }

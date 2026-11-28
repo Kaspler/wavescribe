@@ -186,6 +186,13 @@ export const T = {
   detectedOf: (names: string) => `Detected: ${names}`,
   oneOf: (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}` : names[0] || ""),
   watching: (what: string) => `watching ${what}`,
+  // Caught on the air (lib/caught.ts): one feed of what was caught of open radio without being
+  // kept as a station.
+  caught: "Caught on the air",
+  caughtSub: "Open radio",
+  caughtAgo: (ago: string) => `${ago} ago`,
+  caughtWhat: "Open radio, not kept as a station",
+  caughtNone: "Nothing caught yet. What a watch or a scan writes down without being kept as a station comes here: open radio only, never private or digital radio.",
   outOfReach: "receiver tuned elsewhere",
   colTranslationBehind: (min: number) => `translation ${min} min behind`,
   checksSkipped: "Some alert checks were skipped in the last 10 minutes to keep up, so an alert from that time may be missing.",

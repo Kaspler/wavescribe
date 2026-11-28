@@ -2,6 +2,7 @@
 // open in this browser (tabs.ts).
 import { takeAlert } from "./alerts";
 import { fetchRead, onWanted, streamWantsToken, ticketed, wanted } from "./auth";
+import { CAUGHT, feedOf } from "./caught";
 import { sameLang } from "./lang";
 import { P, setPrefs } from "./prefs";
 import { switchOnFor } from "./startRefusal";
@@ -134,11 +135,16 @@ export async function loadState() {
     S.index.set(u.key, u);
     (S.utts[u.station] ||= []).push(u);
   }
+  // Caught on the air: one feed of what no station here heard (lib/caught.ts).
+  for (const u of state.caught || []) {
+    S.index.set(u.key, u);
+    (S.utts[CAUGHT] ||= []).push(u);
+  }
   S.loaded = true;
   heldBack = false;
   showConn();
   applyStatus(state.status);
-  emit("state", "alerts", ...state.stations.map((s) => `utt:${s.id}`));
+  emit("state", "alerts", ...state.stations.map((s) => `utt:${s.id}`), `utt:${CAUGHT}`);
 }
 
 const LOADING = "Loading models… stations start once they're ready.";
@@ -175,8 +181,10 @@ function applyStatus(status: Status) {
 function upsert(u: Utterance) {
   const prev = S.index.get(u.key);
   S.index.set(u.key, u);
-  const list = (S.utts[u.station] ||= []);
-  if (prev) list[list.indexOf(prev)] = u;
+  const feed = feedOf(u); // its station's column, or Caught on the air
+  const list = (S.utts[feed] ||= []);
+  const at = prev ? list.indexOf(prev) : -1;
+  if (at >= 0) list[at] = u;
   else list.push(u);
   // New text, and a translation that just replaced its placeholder, fade in once.
   if (!prev || prev.pending.length > u.pending.length) {
@@ -184,10 +192,10 @@ function upsert(u: Utterance) {
     setTimeout(() => S.fresh.delete(u.key), FRESH_MS);
   }
   // Trim old text only while nobody is reading it (or past a hard cap).
-  if (list.length > HARD_MAX_PER_STATION || (list.length > MAX_PER_STATION && !S.reading.has(u.station))) {
+  if (list.length > HARD_MAX_PER_STATION || (list.length > MAX_PER_STATION && !S.reading.has(feed))) {
     list.splice(0, list.length - MAX_PER_STATION + 50).forEach((old) => S.index.delete(old.key));
   }
-  emit(`utt:${u.station}`, "utt");
+  emit(`utt:${feed}`, "utt");
 }
 
 function upsertAlert(a: Alert) {

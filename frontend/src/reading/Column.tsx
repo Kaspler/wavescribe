@@ -3,6 +3,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, u
 import { createPortal } from "react-dom";
 import { A, playReplay, startAndPlay, toggleAudio } from "../lib/audio";
 import { columnLag } from "../lib/behind";
+import { CAUGHT, caughtFeed } from "../lib/caught";
 import { dirOf, langNameEn, leftOut, otherLang, pick, sameLang, shownLang } from "../lib/lang";
 import { S, linesAround, loadEarlier, post, running, setNotice, startStation, stationsChanged } from "../lib/live";
 import { P } from "../lib/prefs";
@@ -80,15 +81,46 @@ export function lastTextAgo(id: string): string | null {
 }
 
 export function Column({ id, onlyOne }: { id: string; onlyOne?: boolean }) {
-  useTopics("state");
-  const st = S.byId[id];
+  // Caught on the air reads like a station whose language is the reader's (lib/caught.ts).
+  const caught = id === CAUGHT;
+  useTopics(...(caught ? ["state", "prefs"] : ["state"]));
+  const st = caught ? caughtFeed(T.caught, P.lang) : S.byId[id];
   const [span, setSpan] = useState<string | null>(null);
   if (!st) return null;
   return (
     <section className="col" aria-labelledby={`col-${id}`} data-id={id}>
-      <ColumnHead st={st} span={span} onlyOne={onlyOne} />
+      {caught ? <CaughtHead st={st} span={span} onlyOne={onlyOne} /> : <ColumnHead st={st} span={span} onlyOne={onlyOne} />}
       <Transcript st={st} onSpan={setSpan} />
     </section>
+  );
+}
+
+/** Caught on the air's head: what it holds, the language it is read in, and how recent it is.
+ * Nothing runs, so there is nothing to start, play or stop. */
+function CaughtHead({ st, span, onlyOne }: { st: Station; span: string | null; onlyOne?: boolean }) {
+  useTopics("prefs", `utt:${st.id}`);
+  const last = lastTextAgo(st.id);
+  // Read as heard, each line's language is its chip; translated, the head says into what.
+  const translated = !sameLang(shownLang(st, P.lang), st.language);
+  return (
+    <header className="col-head">
+      <div className="col-title">
+        <Icon name="antenna" size={12} className="col-mark" />
+        <h2 id={`col-${st.id}`}>{st.name}</h2>
+        <span className="col-actions">
+          {!onlyOne && (
+            <Button size="sm" variant="ghost" icon="close" aria-label={`${T.close} ${st.name}`}
+                    onClick={() => setCols(V.shown.filter((x) => x !== st.id))} />
+          )}
+        </span>
+      </div>
+      <p className="col-meta">
+        <span>{T.caughtWhat}</span>
+        {translated && <span>{langPair(st)}</span>}
+        {last && <span className="num">{T.lastText(last)}</span>}
+        {span && <span className="col-span num" title="The time span in view">{span}</span>}
+      </p>
+    </header>
   );
 }
 
@@ -190,7 +222,8 @@ function Transcript({ st, onSpan }: { st: Station; onSpan: (s: string | null) =>
   const [around, setAround] = useState<Utterance[] | null>(null);
   const list = around || S.utts[st.id] || [];
   const paras = useMemo(() => group(list), [v, around]);
-  const heads = channelHeads(paras, st.watch != null);
+  // A watch's lines, and those caught on the air, each say their channel.
+  const heads = channelHeads(paras, st.watch != null || st.id === CAUGHT);
   const shown = shownLang(st, P.lang);
   const body = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -370,6 +403,7 @@ function ColFoot({ st, empty }: { st: Station; empty: boolean }) {
   const live = S.live[st.id];
   const list = S.utts[st.id];
   const last = list?.[list.length - 1];
+  if (st.id === CAUGHT) return empty ? <p className="col-empty">{T.caughtNone}</p> : null;
   const note = on && S.conn === "live" ? colNote(live, {
     kind: st.kind,
     writes: st.transcribe !== false && !noText(st) && !st.listen_only_run,

@@ -5,6 +5,7 @@
 // device shows.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { A } from "../lib/audio";
+import { CAUGHT, caughtFeed } from "../lib/caught";
 import { pick, shownLang } from "../lib/lang";
 import { placeRows } from "../lib/hold";
 import { S, paused, post, running, startStation, startThere } from "../lib/live";
@@ -84,6 +85,7 @@ export function Rack() {
         {on.map((st, i) => <Channel key={st.id} st={st} n={i + 1} shown={V.shown.includes(st.id)} stale={stale} />)}
         {!on.length && off.length === stopped && S.loaded && <li className="rack-empty"><NoneRunning off={off.length} /></li>}
       </ol>
+      <CaughtRow shown={V.shown.includes(CAUGHT)} />
       {off.length > 0 && <OffStations off={off} stopped={stopped} />}
       {(S.manage || canEdit) && (
         <div className="rack-foot">
@@ -186,6 +188,48 @@ function Channel({ st, n, shown, stale }: { st: Station; n: number; shown: boole
       </span>
       {peek && !shown && <Peek st={st} anchor={ref} />}
     </li>
+  );
+}
+
+/** Caught on the air (lib/caught.ts): one row, read like a station's, while it has lines or is
+ * on screen. Nothing runs there, so it has no lamp, level or menu: its mark says it is radio. */
+function CaughtRow({ shown }: { shown: boolean }) {
+  useTopics(`utt:${CAUGHT}`, "prefs");
+  const ref = useRef<HTMLButtonElement>(null);
+  const [peek, setPeek] = useState(false);
+  const timer = useRef(0);
+  const show = () => { clearTimeout(timer.current); timer.current = window.setTimeout(() => setPeek(true), 380); };
+  const hide = () => { clearTimeout(timer.current); setPeek(false); };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  if (!S.utts[CAUGHT]?.length && !shown) return null;
+  const st = caughtFeed(T.caught, P.lang);
+  const last = lastTextAgo(CAUGHT);
+  return (
+    <ul className="rack-list rack-caught">
+      <li className={cx("ch", "ch-caught", shown && "is-shown")} onPointerEnter={show} onPointerLeave={hide}>
+        <button ref={ref} type="button" className="ch-main" aria-pressed={shown} onFocus={show} onBlur={hide}
+                onClick={(e) => { hide(); read(CAUGHT, e.altKey || e.metaKey || e.shiftKey); }}
+                aria-label={`${st.name}, ${T.caughtSub}${last ? `, ${T.lastText(last)}` : ""}${shown ? ", shown" : ""}`}>
+          <span className="ch-name">
+            <Icon name="antenna" size={12} className="ch-mark" />
+            <span className="ch-title">{st.name}</span>
+          </span>
+          <span className="ch-sub">
+            <span>{T.caughtSub}</span>
+            {last && <span className="num">{T.caughtAgo(last)}</span>}
+          </span>
+        </button>
+        <span className="ch-actions">
+          {(!shown || V.shown.length > 1) && (
+            <button type="button" className="btn btn-band btn-sm btn-icon ch-btn ch-add" onClick={() => read(CAUGHT, true)}
+                    aria-label={shown ? T.closeColumn(st.name) : T.readBeside(st.name)} title={shown ? T.closeColumn(st.name) : T.readBeside(st.name)}>
+              <Icon name={shown ? "close" : "plus"} />
+            </button>
+          )}
+        </span>
+        {peek && !shown && <Peek st={st} anchor={ref} />}
+      </li>
+    </ul>
   );
 }
 

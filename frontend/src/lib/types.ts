@@ -72,6 +72,9 @@ export interface Utterance {
   band?: string | null;
   channel?: number | null;
   label?: string | null;
+  /** Caught on the air: heard of open radio by something that isn't a station here, so read in
+   * that feed rather than a station's column (lib/caught.ts). */
+  caught?: boolean;
 }
 
 export interface Alert {
@@ -184,6 +187,8 @@ export interface PageState {
   noncommercial: string[];
   audio_rate: number;
   recent: Utterance[];
+  /** Caught on the air's newest lines, oldest first; absent from servers that have no such feed. */
+  caught?: Utterance[];
   alerts: Alert[];
   /** The languages (primary subtags) in which a rule that listens for topics has a word list;
    * null when no rule that is on listens for topics, or alerts are off (reading/rulesNote.ts). */

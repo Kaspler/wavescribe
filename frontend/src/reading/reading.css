@@ -342,6 +342,13 @@ a.playing-label:hover { text-decoration: underline; }
 .ch-off.is-shown::before { top: 7px; }
 .ch-start { padding: 0 8px; }
 .rack.is-stale .ch-name, .rack.is-stale .ticks-lit { opacity: 0.55; }
+/* Caught on the air (lib/caught.ts): a feed, not a station, so a radio mark where a station's
+   lamp is, set in the lamp's 8px so the names line up, and no scale under it. */
+.ch-mark, .col-mark { flex: none; margin: 0 -2px; }
+.ch-mark { color: var(--band-ink-2); }
+.ch-caught.is-shown .ch-mark { color: var(--band-ink); }
+.ch-caught .ch-main { padding-bottom: 9px; }
+.col-mark { color: var(--ink-3); }
 
 .peek { position: fixed; width: 340px; padding: 12px 14px; pointer-events: none; transform-origin: top left; }
 .peek-text {
